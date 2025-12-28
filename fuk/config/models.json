@@ -1,0 +1,45 @@
+{
+	"models": {
+		  "qwen_image": {
+		    "dit": "/home/brad/ai/models/checkpoints/qwen_image_bf16.safetensors",
+		    "vae": "/home/brad/ai/models/vae/diffusion_pytorch_model.safetensors",
+		    "text_encoder": "/home/brad/ai/models/text_encoders/qwen_2.5_vl_7b.safetensors"
+		  },
+		  "qwen_edit": {
+		    "dit": "/home/brad/ai/models/checkpoints/qwen_image_edit_bf16.safetensors",
+		    "vae": "/home/brad/ai/models/vae/diffusion_pytorch_model.safetensors",
+		    "text_encoder": "/home/brad/ai/models/text_encoders/qwen_2.5_vl_7b.safetensors"
+		  },
+		    "qwen_image_2509_edit": {
+		    "dit": "/home/brad/ai/models/checkpoints/qwen_image_edit_2509_bf16.safetensors",
+		    "vae": "/home/brad/ai/models/vae/diffusion_pytorch_model.safetensors",
+		    "text_encoder": "/home/brad/ai/models/text_encoders/qwen_2.5_vl_7b.safetensors"
+		  }
+		},
+	"wan_models": {
+    "i2v-14B": {
+      "dit": "/home/brad/ai/models/checkpoints/wan2.1_i2v_720p_14B_bf16.safetensors",
+      "vae": "/home/brad/ai/models/vae/wan_2.1_vae.safetensors",
+      "t5": "/home/brad/ai/models/clip/models_t5_umt5-xxl-enc-bf16.pth",
+      "clip": "/home/brad/ai/models/clip/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth"
+    },
+    "i2v-14B-FC": {
+      "dit": "/home/brad/ai/models/checkpoints/wan2.1-fun_i2v_14B_bf16.safetensors",
+      "vae": "/home/brad/ai/models/vae/wan_2.1_vae.safetensors",
+      "t5": "/home/brad/ai/models/clip/models_t5_umt5-xxl-enc-bf16.pth",
+      "clip": "/home/brad/ai/models/clip/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth"
+    },
+    "flf2v-14B": {
+      "dit": "/home/brad/ai/models/checkpoints/wan2.1_flf2v_720p_14B_fp16.safetensors",
+      "vae": "/home/brad/ai/models/vae/wan_2.1_vae.safetensors",
+      "t5": "/home/brad/ai/models/clip/models_t5_umt5-xxl-enc-bf16.pth",
+      "clip": "/home/brad/ai/models/clip/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth"
+    }
+	  },
+	  "loras": {
+	    "noir_qwen": "/home/brad/ai/models/loras/noir.safetensors",
+	    "western_qwen": "/home/brad/ai/models/loras/spaghetti_western.safetensors",
+	    "italian_horror_qwen": "/home/brad/ai/models/loras/italy_horror.safetensors"
+
+	  }
+}

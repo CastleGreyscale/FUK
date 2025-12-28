@@ -1,0 +1,31 @@
+# Ignore everything by default
+*
+
+# Track specific directories
+!.gitignore
+!README.md
+!pyproject.toml
+!fuk
+!fuk/**
+!fuk/fuk/config/**
+!fuk/fuk/core/**
+!fuk/fuk/ui/**
+!fuk/fuk/utils/**
+!fuk/fuk/config/**
+
+
+# Exclude sensitive/cache data
+**/*.log
+**/*.bak
+**/*.backup
+**/cache/
+**/Cache/
+**/*password*
+**/*secret*
+fuk/vendor/
+**/outputs/
+**/venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd

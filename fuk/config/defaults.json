@@ -1,0 +1,30 @@
+{
+  "comment": "Default values for FUK generation pipeline",
+  
+  "negative_prompt": "blurry, low quality, distorted, deformed, ugly, bad anatomy, worst quality, low resolution, jpeg artifacts, watermark, signature, username, text",
+  
+  "image_size": [1024, 1024],
+  "infer_steps": 20,
+  
+  "_guidance_scale_note": "Lower values (2.5-3.5) often look more natural and less CG. Qwen uses flow matching, not traditional denoise, so guidance_scale is the main control for output 'strength'.",
+  "guidance_scale": 2.1,
+  
+  "_flow_shift_note": "Controls timestep scheduling (equivalent to ModelSamplingDiscrete in ComfyUI). Lower (2.0-2.2) = more natural/photorealistic. Higher (2.5-3.0+) = more detail/sharper. Set to null to use musubi's dynamic calculation based on resolution.",
+  "flow_shift": 2.1,
+  
+  "blocks_to_swap": 10,
+  "lora_multiplier": 1.0,
+  
+  "seed": null,
+  
+  "format": {
+    "output_format": "png",
+    "create_exr": true,
+    "exr_linear": true
+  },
+  
+  "metadata": {
+    "save_metadata": true,
+    "include_timestamp": true
+  }
+}
