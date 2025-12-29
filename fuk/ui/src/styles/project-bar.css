@@ -1,0 +1,326 @@
+/*
+ * ProjectBar Styles
+ * Horizontal project navigation component
+ */
+
+/* ============================================================================
+ * PROJECT BAR - Main Container
+ * ========================================================================== */
+
+.fuk-project-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 1rem;
+  background-color: rgba(17, 24, 39, 0.8);
+  border-bottom: 1px solid #374151;
+}
+
+.fuk-project-bar-empty {
+  justify-content: center;
+  padding: 1rem;
+  gap: 1rem;
+}
+
+.fuk-project-hint {
+  font-size: 0.75rem;
+  color: #6b7280;
+}
+
+/* ============================================================================
+ * PROJECT FOLDER BUTTON
+ * ========================================================================== */
+
+.fuk-project-folder-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.75rem;
+  background-color: rgba(55, 65, 81, 0.5);
+  border: 1px solid #374151;
+  border-radius: 0.375rem;
+  color: #d1d5db;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.fuk-project-folder-btn:hover {
+  background-color: rgba(55, 65, 81, 0.8);
+  border-color: #4b5563;
+}
+
+.fuk-project-folder-name {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ============================================================================
+ * SEPARATOR
+ * ========================================================================== */
+
+.fuk-project-separator {
+  color: #4b5563;
+  font-size: 1rem;
+  user-select: none;
+}
+
+/* ============================================================================
+ * SELECTOR GROUPS (Shot, Version)
+ * ========================================================================== */
+
+.fuk-project-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.fuk-project-label {
+  font-size: 0.625rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #6b7280;
+  padding-left: 0.25rem;
+}
+
+.fuk-project-dropdown-group {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.fuk-project-select {
+  padding: 0.375rem 1.75rem 0.375rem 0.75rem;
+  background-color: #1f2937;
+  border: 1px solid #374151;
+  border-radius: 0.375rem;
+  color: white;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%239ca3af'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.5rem center;
+  background-size: 1rem;
+  min-width: 80px;
+}
+
+.fuk-project-select:hover {
+  border-color: #4b5563;
+}
+
+.fuk-project-select:focus {
+  outline: none;
+  border-color: #a855f7;
+  box-shadow: 0 0 0 2px rgba(168, 85, 247, 0.2);
+}
+
+.fuk-project-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ============================================================================
+ * ADD BUTTON (New Shot)
+ * ========================================================================== */
+
+.fuk-project-add-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  background-color: transparent;
+  border: 1px dashed #374151;
+  border-radius: 0.375rem;
+  color: #6b7280;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.fuk-project-add-btn:hover {
+  background-color: rgba(168, 85, 247, 0.1);
+  border-color: #a855f7;
+  color: #a855f7;
+}
+
+.fuk-new-shot-form {
+  display: flex;
+}
+
+.fuk-new-shot-input {
+  width: 3rem;
+  padding: 0.25rem 0.5rem;
+  background-color: #1f2937;
+  border: 1px solid #a855f7;
+  border-radius: 0.375rem;
+  color: white;
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.fuk-new-shot-input:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(168, 85, 247, 0.2);
+}
+
+/* Remove spinners from number input */
+.fuk-new-shot-input::-webkit-outer-spin-button,
+.fuk-new-shot-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.fuk-new-shot-input {
+  -moz-appearance: textfield;
+}
+
+/* ============================================================================
+ * NEW PROJECT FORM
+ * ========================================================================== */
+
+.fuk-new-project-form {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.fuk-new-project-input {
+  width: 180px;
+  padding: 0.375rem 0.75rem;
+  background-color: #1f2937;
+  border: 1px solid #a855f7;
+  border-radius: 0.375rem;
+  color: white;
+  font-size: 0.875rem;
+}
+
+.fuk-new-project-input:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(168, 85, 247, 0.2);
+}
+
+.fuk-new-project-input::placeholder {
+  color: #6b7280;
+}
+
+.fuk-btn-new-project {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: linear-gradient(to right, #a855f7, #8b5cf6);
+  border: none;
+  border-radius: 0.375rem;
+  color: white;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.fuk-btn-new-project:hover {
+  opacity: 0.9;
+}
+
+/* ============================================================================
+ * SPACER
+ * ========================================================================== */
+
+.fuk-project-spacer {
+  flex: 1;
+}
+
+/* ============================================================================
+ * UNSAVED INDICATOR
+ * ========================================================================== */
+
+.fuk-unsaved-indicator {
+  display: flex;
+  align-items: center;
+  color: #f59e0b;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* ============================================================================
+ * ACTION BUTTONS
+ * ========================================================================== */
+
+.fuk-btn-version-up {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.5rem 0.75rem;
+  background-color: rgba(55, 65, 81, 0.5);
+  border: 1px solid #374151;
+  border-radius: 0.375rem;
+  color: #d1d5db;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.fuk-btn-version-up:hover:not(:disabled) {
+  background-color: rgba(168, 85, 247, 0.2);
+  border-color: #a855f7;
+  color: #c084fc;
+}
+
+.fuk-btn-version-up:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.fuk-btn-save {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.5rem 1rem;
+  background: linear-gradient(to right, #a855f7, #8b5cf6);
+  border: none;
+  border-radius: 0.375rem;
+  color: white;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.fuk-btn-save:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.fuk-btn-save:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  background: #374151;
+}
+
+/* ============================================================================
+ * RESPONSIVE
+ * ========================================================================== */
+
+@media (max-width: 768px) {
+  .fuk-project-bar {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    padding: 0.75rem;
+  }
+  
+  .fuk-project-folder-name {
+    max-width: 100px;
+  }
+  
+  .fuk-project-spacer {
+    display: none;
+  }
+}

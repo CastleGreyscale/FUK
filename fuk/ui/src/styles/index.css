@@ -1,0 +1,137 @@
+/*
+ * FUK UI Main Stylesheet
+ */
+
+/* Import base styles */
+@import './fuk-ui.css';
+@import './project-bar.css';
+
+/* ============================================================================
+ * GLOBAL RESETS
+ * ========================================================================== */
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ============================================================================
+ * ANIMATIONS
+ * ========================================================================== */
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+/* ============================================================================
+ * IMAGE UPLOADER COMPONENT
+ * ========================================================================== */
+
+.fuk-image-uploader {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.fuk-dropzone {
+  border: 2px dashed #374151;
+  border-radius: 0.5rem;
+  padding: 1rem;
+  text-align: center;
+  transition: all 0.2s;
+  cursor: pointer;
+}
+
+.fuk-dropzone:hover,
+.fuk-dropzone.drag-over {
+  border-color: #a855f7;
+  background-color: rgba(168, 85, 247, 0.1);
+}
+
+.fuk-dropzone-label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  color: #9ca3af;
+  font-size: 0.75rem;
+}
+
+.fuk-thumbnail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+  gap: 0.5rem;
+}
+
+.fuk-thumbnail {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: 0.25rem;
+  overflow: hidden;
+  border: 1px solid #374151;
+}
+
+.fuk-thumbnail img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.fuk-thumbnail-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  background: rgba(0, 0, 0, 0.7);
+  border: none;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  padding: 0;
+  transition: background 0.2s;
+}
+
+.fuk-thumbnail-remove:hover {
+  background: rgba(239, 68, 68, 0.9);
+}
+
+/* ============================================================================
+ * ADDITIONAL UTILITIES
+ * ========================================================================== */
+
+.fuk-icon-sm {
+  width: 1rem;
+  height: 1rem;
+}
+
+.fuk-icon-md {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+.fuk-icon-lg {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+.fuk-icon-xl {
+  width: 2rem;
+  height: 2rem;
+}
