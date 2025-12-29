@@ -9,7 +9,6 @@ Provides REST API endpoints for:
 - File serving
 - Generation history
 """
-from project_endpoints import setup_project_routes, get_cache_output_path
 from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -103,9 +102,9 @@ OUTPUT_ROOTS = [
 def find_path(paths, name):
     for p in paths:
         if p.exists():
-            print(f"âœ“ Found {name}: {p}")
+            print(f"Ã¢Å“â€œ Found {name}: {p}")
             return p
-    print(f"âœ— {name} not found in:")
+    print(f"Ã¢Å“â€” {name} not found in:")
     for p in paths:
         print(f"  - {p}")
     raise FileNotFoundError(f"{name} not found")
@@ -116,7 +115,7 @@ try:
     MUSUBI_PATH = find_path(MUSUBI_PATHS, "musubi-tuner")
     OUTPUT_ROOT = OUTPUT_ROOTS[0]  # Use first option, create if needed
     OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
-    print(f"âœ“ Output directory: {OUTPUT_ROOT}")
+    print(f"Ã¢Å“â€œ Output directory: {OUTPUT_ROOT}")
 except FileNotFoundError as e:
     print(f"\nError: {e}")
     print("\nPlease ensure your project has the following structure:")
@@ -274,12 +273,12 @@ def clear_vram():
             reserved = torch.cuda.memory_reserved() / (1024**3)    # GB
             
             print(f"  VRAM - Allocated: {allocated:.2f}GB, Reserved: {reserved:.2f}GB")
-            print(f"  âœ“ VRAM cleared")
+            print(f"  Ã¢Å“â€œ VRAM cleared")
         else:
-            print(f"  âš  CUDA not available, skipping VRAM clear")
+            print(f"  Ã¢Å¡Â  CUDA not available, skipping VRAM clear")
             
     except Exception as e:
-        print(f"  âš  VRAM clear failed: {e}")
+        print(f"  Ã¢Å¡Â  VRAM clear failed: {e}")
 
 # ============================================================================
 # File Upload
@@ -310,7 +309,7 @@ async def upload_control_image(file: UploadFile = File(...)):
         # Return relative path for client
         relative_path = f"uploads/{unique_filename}"
         
-        print(f"✓ Uploaded control image: {relative_path}")
+        print(f"âœ“ Uploaded control image: {relative_path}")
         
         return {
             "path": relative_path,
@@ -319,7 +318,7 @@ async def upload_control_image(file: UploadFile = File(...)):
         }
         
     except Exception as e:
-        print(f"✗ Upload failed: {e}")
+        print(f"âœ— Upload failed: {e}")
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 # ============================================================================
@@ -331,12 +330,12 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
     
     try:
         print("\n" + "="*80)
-        print(f"🚀 Starting Image Generation: {generation_id}")
+        print(f"ðŸš€ Starting Image Generation: {generation_id}")
         print("="*80)
         print(f"Prompt: {request.prompt}")
         print(f"Model: {request.model}")
-        print(f"Size: {request.width}x{request.height} (WÃ—H)")
-        print(f"  â†’ Musubi receives: {request.height}x{request.width} (HÃ—W)")
+        print(f"Size: {request.width}x{request.height} (WÃƒâ€”H)")
+        print(f"  Ã¢â€ â€™ Musubi receives: {request.height}x{request.width} (HÃƒâ€”W)")
         print(f"Steps: {request.steps}")
         print(f"Guidance: {request.guidance_scale}")
         print(f"Flow Shift: {request.flow_shift}")
@@ -354,7 +353,6 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
         
         # Create generation directory
         print(f"[{generation_id}] Creating generation directory...")
-        from project_endpoints import get_cache_output_path
         gen_dir = get_generation_output_dir("img_gen")
         paths = build_output_paths(gen_dir)
         print(f"[{generation_id}] Output directory: {gen_dir}")
@@ -458,7 +456,7 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
         )
         
         # Patterns to match step progress from musubi output
-        # Pattern 1: "100%|â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆ| 20/20 [00:45<00:00,  2.27s/it]"
+        # Pattern 1: "100%|Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†| 20/20 [00:45<00:00,  2.27s/it]"
         tqdm_pattern = re.compile(r'(\d+)/(\d+)\s+\[')
         # Pattern 2: "Step 5/20" or "step 5/20"
         step_pattern = re.compile(r'step\s+(\d+)/(\d+)', re.IGNORECASE)
@@ -512,7 +510,7 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
         if latest_file != paths["generated_png"]:
             latest_file.rename(paths["generated_png"])
         
-        print(f"[{generation_id}] âœ“ Generation complete!")
+        print(f"[{generation_id}] Ã¢Å“â€œ Generation complete!")
         
         outputs = {
             "png": get_project_relative_url(paths["generated_png"])
@@ -555,12 +553,13 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
             "phase": "complete",
             "progress": 1.0,
             "outputs": outputs,  # This now has the correct URL format
+            "seed_used": request.seed,  # Include the seed that was used
             "completed_at": datetime.now().isoformat()
         })
         
         
         print("\n" + "="*80)
-        print(f"✅ Generation Complete: {generation_id}")
+        print(f"âœ… Generation Complete: {generation_id}")
         print(f"   Output PNG: {outputs['png']}")
         print(f"Output directory: {gen_dir}")
         print(f"Files: {', '.join(outputs.keys())}")
@@ -576,7 +575,7 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
             "error": str(e),
             "failed_at": datetime.now().isoformat()
         })
-        print(f"❌ Generation Failed: {e}")
+        print(f"âŒ Generation Failed: {e}")
         import traceback
         traceback.print_exc()
 
@@ -778,7 +777,7 @@ async def cancel_generation(generation_id: str):
     gen["phase"] = "cancelled"
     gen["cancelled_at"] = datetime.now().isoformat()
     
-    print(f"\nâš  Generation Cancelled: {generation_id}")
+    print(f"\nÃ¢Å¡Â  Generation Cancelled: {generation_id}")
     print(f"Note: Backend process may still be running (musubi doesn't support mid-generation cancellation)")
     
     # Clear VRAM
@@ -1029,12 +1028,99 @@ async def health_check():
             "time_tracking",
             "static_file_serving",
             "realtime_step_tracking",
-            "persistent_state"
+            "persistent_state",
+            "seed_favorites"
         ],
         "active_generations": len(active_generations),
         "musubi_path": str(MUSUBI_PATH),
         "output_root": str(OUTPUT_ROOT)
     }
+
+# ============================================================================
+# Saved Seeds Storage
+# ============================================================================
+
+# Seeds are stored in data/saved_seeds.json at project root (alongside config/, core/, etc.)
+SEEDS_FILE = BASE_DIR / "data" / "saved_seeds.json"
+
+def _load_seeds() -> Dict[str, list]:
+    """Load saved seeds from file"""
+    if not SEEDS_FILE.exists():
+        return {}
+    try:
+        with open(SEEDS_FILE, 'r') as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"Warning: Could not load seeds file: {e}")
+        return {}
+
+def _save_seeds(seeds: Dict[str, list]):
+    """Save seeds to file"""
+    SEEDS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(SEEDS_FILE, 'w') as f:
+        json.dump(seeds, f, indent=2)
+
+@app.get("/api/seeds")
+async def get_all_seeds():
+    """Get all saved seeds"""
+    return _load_seeds()
+
+@app.get("/api/seeds/{model}")
+async def get_seeds_for_model(model: str):
+    """Get saved seeds for a specific model"""
+    seeds = _load_seeds()
+    return seeds.get(model, [])
+
+class SaveSeedRequest(BaseModel):
+    model: str
+    seed: int
+    note: str = ""
+
+@app.post("/api/seeds")
+async def save_seed(request: SaveSeedRequest):
+    """Save a seed for a model"""
+    seeds = _load_seeds()
+    
+    if request.model not in seeds:
+        seeds[request.model] = []
+    
+    model_seeds = seeds[request.model]
+    
+    # Check if seed already exists
+    existing = next((s for s in model_seeds if s["seed"] == request.seed), None)
+    if existing:
+        # Update note
+        existing["note"] = request.note
+        existing["updatedAt"] = datetime.now().isoformat()
+    else:
+        # Add new seed
+        model_seeds.insert(0, {
+            "seed": request.seed,
+            "note": request.note,
+            "timestamp": datetime.now().isoformat()
+        })
+        # Limit to 50 per model
+        seeds[request.model] = model_seeds[:50]
+    
+    _save_seeds(seeds)
+    return {"success": True, "seeds": seeds[request.model]}
+
+class RemoveSeedRequest(BaseModel):
+    model: str
+    seed: int
+
+@app.delete("/api/seeds")
+async def remove_seed(request: RemoveSeedRequest):
+    """Remove a saved seed"""
+    seeds = _load_seeds()
+    
+    if request.model in seeds:
+        seeds[request.model] = [s for s in seeds[request.model] if s["seed"] != request.seed]
+        if not seeds[request.model]:
+            del seeds[request.model]
+        _save_seeds(seeds)
+    
+    return {"success": True}
 
 # ============================================================================
 # Main

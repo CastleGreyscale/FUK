@@ -116,6 +116,8 @@ export function createEmptyProjectState() {
         guidance_scale: 2.1,
         flow_shift: 2.1,
         seed: null,
+        seedMode: 'random',  // 'random', 'fixed', 'increment'
+        lastUsedSeed: null,
         lora: null,
         lora_multiplier: 1.0,
         blocks_to_swap: 10,
@@ -134,6 +136,8 @@ export function createEmptyProjectState() {
         guidance_scale: 5.0,
         flow_shift: 5.0,
         seed: null,
+        seedMode: 'random',
+        lastUsedSeed: null,
         lora: null,
         lora_multiplier: 1.0,
         blocks_to_swap: 15,

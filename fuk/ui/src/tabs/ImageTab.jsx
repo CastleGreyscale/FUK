@@ -4,15 +4,23 @@
  */
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Camera, Zap, Loader2, CheckCircle, X } from '../components/Icons';
+import { Camera, Zap, Loader2, CheckCircle, X } from '../../src/components/Icons';
 import TabButton from '../components/TabButton';
 import ProgressBar from '../components/ProgressBar';
 import ImageUploader from '../components/ImageUploader';
+import SeedControl from '../components/SeedControl';
 import { useGeneration } from '../hooks/useGeneration';
-import { useLocalStorage } from '../hooks/useLocalStorage';
-import { startImageGeneration } from '../utils/api';
-import { calculateDimensions, formatTime } from '../utils/helpers';
-import { ASPECT_RATIOS, DEFAULT_IMAGE_SETTINGS, buildImageUrl } from '../utils/constants';
+import { useLocalStorage } from '../../src/hooks/useLocalStorage';
+import { useSavedSeeds } from '../hooks/useSavedSeeds';
+import { startImageGeneration } from '../../src/utils/api';
+import { calculateDimensions, formatTime } from '../utils/helpers.js';
+import { 
+  ASPECT_RATIOS, 
+  DEFAULT_IMAGE_SETTINGS, 
+  buildImageUrl, 
+  SEED_MODES, 
+  generateRandomSeed 
+} from '../../src/utils/constants';
 import Footer from '../components/Footer';
 
 export default function ImageTab({ config, activeTab, setActiveTab, project }) {
@@ -61,7 +69,32 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
     elapsedSeconds,
     startGeneration,
     cancel,
+    reset: resetGeneration,
   } = useGeneration();
+
+  // Saved seeds hook
+  const savedSeedsHook = useSavedSeeds();
+
+  // Reset generation result when switching project files
+  // This allows the saved preview to show instead of stale result
+  useEffect(() => {
+    if (project?.currentFilename) {
+      resetGeneration();
+    }
+  }, [project?.currentFilename, resetGeneration]);
+
+  // Get saved preview from project or use generation result
+  const previewImage = useMemo(() => {
+    // Current generation result takes priority
+    if (result?.outputs?.png) {
+      return result.outputs.png;
+    }
+    // Fall back to saved preview from project
+    if (project?.projectState?.lastState?.lastImagePreview) {
+      return project.projectState.lastState.lastImagePreview;
+    }
+    return null;
+  }, [result, project?.projectState?.lastState?.lastImagePreview]);
 
   // Get current dimensions
   const getCurrentDimensions = () => {
@@ -76,24 +109,59 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
     }
   }, [formData.aspectRatio, formData.width]);
 
-  // Update last state when generation completes
+  // Update last state and seed when generation completes
   useEffect(() => {
-    if (result?.outputs?.png && project?.updateLastState) {
-      project.updateLastState({
-        lastImagePreview: result.outputs.png,
-        activeTab: 'image',
-      });
+    if (result?.outputs?.png) {
+      // Update project last state
+      if (project?.updateLastState) {
+        project.updateLastState({
+          lastImagePreview: result.outputs.png,
+          activeTab: 'image',
+        });
+      }
+      
+      // If backend returned seed_used, update lastUsedSeed
+      if (result.seed_used !== undefined && result.seed_used !== null) {
+        setFormData(prev => ({
+          ...prev,
+          lastUsedSeed: result.seed_used,
+        }));
+      }
     }
   }, [result, project]);
 
+  // Determine the seed to use based on mode
+  const getEffectiveSeed = useCallback(() => {
+    const mode = formData.seedMode || SEED_MODES.RANDOM;
+    
+    switch (mode) {
+      case SEED_MODES.FIXED:
+        return formData.seed;
+      case SEED_MODES.RANDOM:
+        return generateRandomSeed();
+      case SEED_MODES.INCREMENT:
+        // If we have a last used seed, increment it; otherwise start with current seed or random
+        if (formData.lastUsedSeed !== null) {
+          return formData.lastUsedSeed + 1;
+        }
+        return formData.seed !== null ? formData.seed : generateRandomSeed();
+      default:
+        return formData.seed;
+    }
+  }, [formData.seedMode, formData.seed, formData.lastUsedSeed]);
+
   const handleGenerate = async () => {
     const dims = calculateDimensions(formData.aspectRatio, formData.width);
+    
+    // Get the effective seed based on mode
+    const effectiveSeed = getEffectiveSeed();
     
     const payload = {
       ...formData,
       width: dims.width,
       height: dims.height,
       steps: formData.stepsMode === 'custom' ? formData.steps : parseInt(formData.steps),
+      seed: effectiveSeed,  // Use the computed seed
       control_image_paths: formData.control_image_paths,
       control_image_path: formData.control_image_paths.length > 0 
         ? formData.control_image_paths[0] 
@@ -101,6 +169,15 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
     };
     
     console.log('Generation payload:', payload);
+    console.log(`Seed mode: ${formData.seedMode}, using seed: ${effectiveSeed}`);
+    
+    // Update lastUsedSeed and possibly increment the fixed seed
+    setFormData(prev => ({
+      ...prev,
+      lastUsedSeed: effectiveSeed,
+      // For increment mode, also update the seed field
+      seed: prev.seedMode === SEED_MODES.INCREMENT ? effectiveSeed : prev.seed,
+    }));
     
     try {
       const data = await startImageGeneration(payload);
@@ -120,21 +197,25 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
       {/* Preview Area */}
       <div className="fuk-preview-area">
         <div className="fuk-preview-container" style={{ position: 'relative' }}>
-          {result?.outputs?.png ? (
+          {previewImage ? (
             <>
               <img
-                src={buildImageUrl(result.outputs.png)}
+                src={buildImageUrl(previewImage)}
                 alt="Generated"
                 className="fuk-preview-image"
               />
               <div className="fuk-preview-info">
                 <div className="fuk-flex fuk-gap-4">
-                  <span>{getCurrentDimensions().width}×{getCurrentDimensions().height}</span>
-                  <span>•</span>
-                  <span className="fuk-status-complete" style={{ gap: '0.25rem' }}>
-                    <CheckCircle style={{ width: '0.875rem', height: '0.875rem' }} />
-                    {formatTime(elapsedSeconds)}
-                  </span>
+                  <span>{getCurrentDimensions().width}Ã—{getCurrentDimensions().height}</span>
+                  {result?.outputs?.png && (
+                    <>
+                      <span>â€¢</span>
+                      <span className="fuk-status-complete" style={{ gap: '0.25rem' }}>
+                        <CheckCircle style={{ width: '0.875rem', height: '0.875rem' }} />
+                        {formatTime(elapsedSeconds)}
+                      </span>
+                    </>
+                  )}
                 </div>
               </div>
             </>
@@ -149,7 +230,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
               <div className="fuk-placeholder">
                 <Camera style={{ width: '3rem', height: '3rem', margin: '0 auto 1rem', opacity: 0.3 }} />
                 <p style={{ color: '#6b7280' }}>
-                  {getCurrentDimensions().width} × {getCurrentDimensions().height}
+                  {getCurrentDimensions().width} Ã— {getCurrentDimensions().height}
                 </p>
               </div>
             </div>
@@ -227,7 +308,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                   placeholder="1024"
                 />
                 <span style={{ color: '#9ca3af', fontSize: '0.875rem', minWidth: '100px' }}>
-                  = {getCurrentDimensions().width}×{getCurrentDimensions().height}
+                  = {getCurrentDimensions().width}Ã—{getCurrentDimensions().height}
                 </span>
               </div>
             </div>
@@ -383,19 +464,26 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                 max={30}
               />
             </div>
-            
-            <div className="fuk-form-group-compact">
-              <label className="fuk-label">
-                Seed <span className="fuk-label-description">(optional)</span>
-              </label>
-              <input
-                type="number"
-                className="fuk-input"
-                value={formData.seed || ''}
-                onChange={(e) => setFormData({...formData, seed: e.target.value ? parseInt(e.target.value) : null})}
-                placeholder="Random"
-              />
-            </div>
+          </div>
+
+          {/* Seed Control Card */}
+          <div className="fuk-card">
+            <h3 className="fuk-card-title fuk-mb-3">Seed Control</h3>
+            <SeedControl
+              seed={formData.seed}
+              seedMode={formData.seedMode || SEED_MODES.RANDOM}
+              lastUsedSeed={formData.lastUsedSeed}
+              model={formData.model}
+              prompt={formData.prompt}
+              savedSeeds={savedSeedsHook.getSeedsForModel(formData.model)}
+              isSeedSaved={savedSeedsHook.isSeedSaved}
+              onSeedChange={(seed) => setFormData({...formData, seed})}
+              onSeedModeChange={(seedMode) => setFormData({...formData, seedMode})}
+              onSaveSeed={(seed, note, prompt) => savedSeedsHook.saveSeed(formData.model, seed, note, prompt)}
+              onRemoveSeed={savedSeedsHook.removeSeed}
+              onSelectSavedSeed={(seed) => setFormData({...formData, seed})}
+              disabled={generating}
+            />
           </div>
 
           {/* Image Tools Card */}

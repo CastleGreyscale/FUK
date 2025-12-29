@@ -4,7 +4,7 @@
  */
 
 import { useState } from 'react';
-import { Save, Loader2, AlertCircle } from './Icons';
+import { Save, Loader2, AlertCircle, CheckCircle } from './Icons';
 
 // Folder icon
 const Folder = ({ className, style }) => (
@@ -253,10 +253,16 @@ export default function ProjectBar({
       {/* Spacer */}
       <div className="fuk-project-spacer" />
 
-      {/* Unsaved indicator */}
-      {hasUnsavedChanges && (
-        <span className="fuk-unsaved-indicator" title="Unsaved changes">
-          <AlertCircle style={{ width: '1rem', height: '1rem' }} />
+      {/* Autosave Status Indicator */}
+      {hasUnsavedChanges ? (
+        <span className="fuk-autosave-indicator fuk-autosave-pending" title="Autosaving...">
+          <Loader2 className="animate-spin" style={{ width: '0.875rem', height: '0.875rem' }} />
+          <span>Saving...</span>
+        </span>
+      ) : currentFileInfo && (
+        <span className="fuk-autosave-indicator fuk-autosave-saved" title="All changes saved">
+          <CheckCircle style={{ width: '0.875rem', height: '0.875rem' }} />
+          <span>Saved</span>
         </span>
       )}
 

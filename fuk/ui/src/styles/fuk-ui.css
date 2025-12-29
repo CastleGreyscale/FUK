@@ -994,3 +994,181 @@
 .fuk-space-y-6 > * + * {
   margin-top: 1.5rem;
 }
+
+/* ============================================================================
+ * SEED CONTROL
+ * ========================================================================== */
+
+.fuk-seed-control {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.fuk-seed-mode-group {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.fuk-seed-mode-option {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  cursor: pointer;
+}
+
+.fuk-seed-mode-label {
+  font-size: 0.875rem;
+  color: #d1d5db;
+  cursor: pointer;
+}
+
+.fuk-seed-input-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.fuk-seed-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  background-color: #374151;
+  border: 1px solid #4b5563;
+  border-radius: 0.375rem;
+  color: #9ca3af;
+  cursor: pointer;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.fuk-seed-btn:hover:not(:disabled) {
+  background-color: #4b5563;
+  color: #d1d5db;
+}
+
+.fuk-seed-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.fuk-seed-btn-dice:hover:not(:disabled) {
+  background-color: rgba(168, 85, 247, 0.2);
+  border-color: #a855f7;
+  color: #c084fc;
+}
+
+.fuk-seed-btn-save:hover:not(:disabled) {
+  background-color: rgba(251, 191, 36, 0.2);
+  border-color: #fbbf24;
+  color: #fbbf24;
+}
+
+.fuk-seed-btn-saved {
+  background-color: rgba(251, 191, 36, 0.2);
+  border-color: #fbbf24;
+  color: #fbbf24;
+}
+
+.fuk-seed-btn-saved:hover:not(:disabled) {
+  background-color: rgba(239, 68, 68, 0.2);
+  border-color: #ef4444;
+  color: #ef4444;
+}
+
+.fuk-seed-note-input {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.5rem;
+  background-color: rgba(31, 41, 55, 0.5);
+  border-radius: 0.375rem;
+  border: 1px solid #374151;
+}
+
+.fuk-seed-note-input .fuk-input {
+  flex: 1;
+}
+
+.fuk-btn-sm {
+  padding: 0.375rem 0.75rem;
+  font-size: 0.75rem;
+}
+
+.fuk-seed-saved-container {
+  position: relative;
+}
+
+.fuk-seed-saved-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.fuk-seed-saved-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.375rem 0.5rem;
+  background-color: rgba(31, 41, 55, 0.5);
+  border-radius: 0.25rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.fuk-seed-saved-item:hover {
+  background-color: rgba(168, 85, 247, 0.2);
+}
+
+.fuk-seed-saved-value {
+  font-family: ui-monospace, monospace;
+  font-size: 0.8125rem;
+  color: #c084fc;
+}
+
+.fuk-seed-saved-note {
+  font-size: 0.75rem;
+  color: #9ca3af;
+  margin-left: 0.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 150px;
+}
+
+.fuk-seed-saved-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: #6b7280;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s, color 0.2s;
+}
+
+.fuk-seed-saved-item:hover .fuk-seed-saved-remove {
+  opacity: 1;
+}
+
+.fuk-seed-saved-remove:hover {
+  color: #ef4444;
+}
+
+.fuk-seed-description {
+  font-size: 0.7rem;
+  color: #6b7280;
+  margin: 0;
+  font-style: italic;
+}

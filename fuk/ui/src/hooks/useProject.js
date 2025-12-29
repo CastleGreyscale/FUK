@@ -3,7 +3,7 @@
  * Manages project state, loading, saving, and versioning
  */
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useLocalStorage } from './useLocalStorage';
 import {
   browseForFolder,
@@ -14,7 +14,7 @@ import {
   getProjectConfig,
   createNewProject,
   getCurrentProject,
-} from '../utils/projectApi.js';
+} from '../utils/projectApi';
 import {
   parseProjectFilename,
   generateProjectFilename,
@@ -23,8 +23,10 @@ import {
   createEmptyProjectState,
   mergeWithDefaults,
   organizeProjectFiles,
-} 
-from '../utils/projectManager.js';
+} from '../utils/projectManager';
+
+// Autosave delay in milliseconds
+const AUTOSAVE_DELAY = 2000;
 
 export function useProject() {
   // Persist last used project folder
@@ -43,6 +45,10 @@ export function useProject() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [lastSaved, setLastSaved] = useState(null);
+  
+  // Autosave timer ref
+  const autosaveTimerRef = useRef(null);
   
   // Organized files (grouped by shot/version)
   const organizedFiles = useMemo(() => {
@@ -220,6 +226,7 @@ export function useProject() {
       await saveProject(currentFilename, stateToSave);
       setProjectState(stateToSave);
       setHasUnsavedChanges(false);
+      setLastSaved(new Date());
       
       console.log('[Project] Saved:', currentFilename);
       return true;
@@ -368,7 +375,7 @@ export function useProject() {
   }, [currentFileInfo, createProject]);
 
   /**
-   * Update tab state (marks as dirty)
+   * Update tab state (marks as dirty, triggers autosave)
    */
   const updateTabState = useCallback((tabName, updates) => {
     setProjectState(prev => {
@@ -389,7 +396,7 @@ export function useProject() {
   }, []);
 
   /**
-   * Update last state (for restore functionality)
+   * Update last state (for restore functionality, also triggers autosave)
    */
   const updateLastState = useCallback((updates) => {
     setProjectState(prev => {
@@ -403,7 +410,52 @@ export function useProject() {
         },
       };
     });
+    setHasUnsavedChanges(true);  // Also mark dirty so autosave triggers
   }, []);
+
+  /**
+   * Autosave effect - saves after delay when changes are made
+   */
+  useEffect(() => {
+    // Only autosave if we have unsaved changes and a file is loaded
+    if (!hasUnsavedChanges || !currentFilename || !projectState) {
+      return;
+    }
+
+    // Clear any existing timer
+    if (autosaveTimerRef.current) {
+      clearTimeout(autosaveTimerRef.current);
+    }
+
+    // Set new autosave timer
+    autosaveTimerRef.current = setTimeout(async () => {
+      try {
+        console.log('[Project] Autosaving...');
+        const stateToSave = {
+          ...projectState,
+          meta: {
+            ...projectState.meta,
+            updatedAt: new Date().toISOString(),
+          },
+        };
+        
+        await saveProject(currentFilename, stateToSave);
+        setHasUnsavedChanges(false);
+        setLastSaved(new Date());
+        console.log('[Project] Autosaved:', currentFilename);
+      } catch (err) {
+        console.error('[Project] Autosave failed:', err);
+        // Don't clear hasUnsavedChanges on error - will retry
+      }
+    }, AUTOSAVE_DELAY);
+
+    // Cleanup on unmount or when dependencies change
+    return () => {
+      if (autosaveTimerRef.current) {
+        clearTimeout(autosaveTimerRef.current);
+      }
+    };
+  }, [hasUnsavedChanges, currentFilename, projectState]);
 
   // Check for existing project folder on mount
   useEffect(() => {
@@ -443,6 +495,7 @@ export function useProject() {
     isLoading,
     error,
     hasUnsavedChanges,
+    lastSaved,
     isProjectLoaded: !!projectState,
     hasProjectFolder: !!projectFolder,
     

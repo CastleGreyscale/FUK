@@ -29,3 +29,8 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+*.png
+*.exr
+**/inputs/
+_old
+node_modules

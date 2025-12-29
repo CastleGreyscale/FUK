@@ -2,7 +2,7 @@
  * Video Generation Tab (Placeholder)
  */
 
-import { Film } from '../components/Icons';
+import { Film } from '../../src/components/Icons';
 import Footer from '../components/Footer';
 
 export default function VideoTab({ config, activeTab, setActiveTab }) {

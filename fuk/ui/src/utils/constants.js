@@ -27,6 +27,18 @@ export const VIDEO_LENGTHS = [
 // Step presets
 export const STEP_PRESETS = [20, 40];
 
+// Seed mode options (ComfyUI-style)
+export const SEED_MODES = {
+  FIXED: 'fixed',       // Use exact seed value
+  RANDOM: 'random',     // Generate new random seed each time
+  INCREMENT: 'increment', // Increment seed by 1 after each generation
+};
+
+// Generate a random seed (0 to 2^32-1)
+export function generateRandomSeed() {
+  return Math.floor(Math.random() * 4294967295);
+}
+
 // Default negative prompt (fallback if not loaded from backend)
 export const DEFAULT_NEGATIVE_PROMPT = 
   'blurry, low quality, distorted, deformed, ugly, bad anatomy, worst quality, ' +
@@ -44,6 +56,8 @@ export const DEFAULT_IMAGE_SETTINGS = {
   guidance_scale: 2.1,
   flow_shift: 2.1,
   seed: null,
+  seedMode: SEED_MODES.RANDOM,  // Default to random
+  lastUsedSeed: null,           // Track last seed used for saving
   lora: null,
   lora_multiplier: 1.0,
   blocks_to_swap: 10,
@@ -63,6 +77,8 @@ export const DEFAULT_VIDEO_SETTINGS = {
   guidance_scale: 5.0,
   flow_shift: 5.0,
   seed: null,
+  seedMode: SEED_MODES.RANDOM,
+  lastUsedSeed: null,
   lora: null,
   lora_multiplier: 1.0,
   blocks_to_swap: 15,

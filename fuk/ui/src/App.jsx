@@ -3,13 +3,13 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { Zap, Loader2, AlertCircle, Pipeline, Enhance, Save } from './components/Icons';
-import ProjectBar from './components/ProjectBar';
+import { Zap, Loader2, AlertCircle, Pipeline, Enhance, Save } from '../src/components/Icons';
+import ProjectBar from '../src/components/ProjectBar';
 import ImageTab from './tabs/ImageTab';
 import VideoTab from './tabs/VideoTab';
 import PlaceholderTab from './tabs/PlaceholderTab';
-import { fetchConfig } from './utils/api';
-import { useProject } from './hooks/useProject';
+import { fetchConfig } from '../src/utils/api';
+import { useProject } from '../src/hooks/useProject';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('image');

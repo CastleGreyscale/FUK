@@ -137,7 +137,7 @@ class QwenImageGenerator:
         
         # Edit mode for control images
         if control_image:
-            cmd.extend(["--edit", "--image_path", str(control_image)])
+            cmd.extend(["--edit", "--control_image_path", str(control_image)])
         
         if seed is not None:
             cmd.extend(["--seed", str(seed)])
