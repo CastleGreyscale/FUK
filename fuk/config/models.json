@@ -41,5 +41,22 @@
 	    "western_qwen": "/home/brad/ai/models/loras/spaghetti_western.safetensors",
 	    "italian_horror_qwen": "/home/brad/ai/models/loras/italy_horror.safetensors"
 
+	  },
+	  "preprocessor_models": {
+	    "depth_anything_v2": {
+	      "checkpoint": "/home/brad/ai/models/checkpoints/depth_anything_v2_vitl.pth",
+	      "url": "https://huggingface.co/depth-anything/Depth-Anything-V2-Large/resolve/main/depth_anything_v2_vitl.pth",
+	      "size_mb": 335,
+	      "description": "Depth Anything V2 Large (ViT-L) - Best quality depth estimation"
+	    },
+	    "midas_large": {
+	      "note": "Auto-downloaded by torch.hub on first use"
+	    },
+	    "midas_small": {
+	      "note": "Auto-downloaded by torch.hub on first use"
+	    },
+	    "zoedepth": {
+	      "note": "Auto-downloaded by torch.hub on first use"
+	    }
 	  }
 }

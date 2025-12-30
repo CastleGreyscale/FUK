@@ -32,7 +32,11 @@ from project_endpoints import (
 
 # Add project root to path
 current_dir = Path(__file__).parent
+project_root = current_dir.parent
+sys.path.insert(0, str(project_root))
 sys.path.insert(0, str(current_dir))
+
+from utils.preprocessors import PreprocessorManager, DepthModel
 
 # Try to import from different possible locations
 try:
@@ -42,6 +46,7 @@ try:
     from image_generation_manager import ImageGenerationManager
     from video_generation_manager import VideoGenerationManager
     from format_convert import FormatConverter
+    
 except ImportError:
     try:
         # Option 2: Files in core/ and utils/ subdirectories
@@ -102,9 +107,9 @@ OUTPUT_ROOTS = [
 def find_path(paths, name):
     for p in paths:
         if p.exists():
-            print(f"Ã¢Å“â€œ Found {name}: {p}")
+            print(f"ÃƒÂ¢Ã…â€œÃ¢â‚¬Å“ Found {name}: {p}")
             return p
-    print(f"Ã¢Å“â€” {name} not found in:")
+    print(f"ÃƒÂ¢Ã…â€œÃ¢â‚¬â€ {name} not found in:")
     for p in paths:
         print(f"  - {p}")
     raise FileNotFoundError(f"{name} not found")
@@ -115,7 +120,7 @@ try:
     MUSUBI_PATH = find_path(MUSUBI_PATHS, "musubi-tuner")
     OUTPUT_ROOT = OUTPUT_ROOTS[0]  # Use first option, create if needed
     OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
-    print(f"Ã¢Å“â€œ Output directory: {OUTPUT_ROOT}")
+    print(f"ÃƒÂ¢Ã…â€œÃ¢â‚¬Å“ Output directory: {OUTPUT_ROOT}")
 except FileNotFoundError as e:
     print(f"\nError: {e}")
     print("\nPlease ensure your project has the following structure:")
@@ -164,6 +169,7 @@ image_generator = QwenImageGenerator(CONFIG_PATH, MUSUBI_PATH, DEFAULTS_PATH)
 video_generator = WanVideoGenerator(CONFIG_PATH, MUSUBI_PATH, DEFAULTS_PATH)
 image_manager = ImageGenerationManager(OUTPUT_ROOT / "image")
 video_manager = VideoGenerationManager(OUTPUT_ROOT / "video")
+preprocessor_manager = PreprocessorManager(OUTPUT_ROOT / "preprocessed")
 
 # ============================================================================
 # Request/Response Models
@@ -222,6 +228,27 @@ class GenerationStatus(BaseModel):
     error: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
 
+    class PreprocessRequest(BaseModel):
+        image_path: str
+        method: str  # 'canny', 'openpose', 'depth'
+        
+        # Canny parameters
+        low_threshold: int = 100
+        high_threshold: int = 200
+        canny_invert: bool = False
+        blur_kernel: int = 3
+        
+        # OpenPose parameters
+        detect_body: bool = True
+        detect_hand: bool = False
+        detect_face: bool = False
+        
+        # Depth parameters
+        depth_model: str = "depth_anything_v2"
+        depth_invert: bool = False
+        depth_normalize: bool = True
+        depth_colormap: Optional[str] = "inferno"
+
 # ============================================================================
 # Progress Tracking
 # ============================================================================
@@ -273,12 +300,12 @@ def clear_vram():
             reserved = torch.cuda.memory_reserved() / (1024**3)    # GB
             
             print(f"  VRAM - Allocated: {allocated:.2f}GB, Reserved: {reserved:.2f}GB")
-            print(f"  Ã¢Å“â€œ VRAM cleared")
+            print(f"  ÃƒÂ¢Ã…â€œÃ¢â‚¬Å“ VRAM cleared")
         else:
-            print(f"  Ã¢Å¡Â  CUDA not available, skipping VRAM clear")
+            print(f"  ÃƒÂ¢Ã…Â¡Ã‚Â  CUDA not available, skipping VRAM clear")
             
     except Exception as e:
-        print(f"  Ã¢Å¡Â  VRAM clear failed: {e}")
+        print(f"  ÃƒÂ¢Ã…Â¡Ã‚Â  VRAM clear failed: {e}")
 
 # ============================================================================
 # File Upload
@@ -309,7 +336,7 @@ async def upload_control_image(file: UploadFile = File(...)):
         # Return relative path for client
         relative_path = f"uploads/{unique_filename}"
         
-        print(f"âœ“ Uploaded control image: {relative_path}")
+        print(f"Ã¢Å“â€œ Uploaded control image: {relative_path}")
         
         return {
             "path": relative_path,
@@ -318,7 +345,7 @@ async def upload_control_image(file: UploadFile = File(...)):
         }
         
     except Exception as e:
-        print(f"âœ— Upload failed: {e}")
+        print(f"Ã¢Å“â€” Upload failed: {e}")
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 # ============================================================================
@@ -330,12 +357,12 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
     
     try:
         print("\n" + "="*80)
-        print(f"ðŸš€ Starting Image Generation: {generation_id}")
+        print(f"Ã°Å¸Å¡â‚¬ Starting Image Generation: {generation_id}")
         print("="*80)
         print(f"Prompt: {request.prompt}")
         print(f"Model: {request.model}")
-        print(f"Size: {request.width}x{request.height} (WÃƒâ€”H)")
-        print(f"  Ã¢â€ â€™ Musubi receives: {request.height}x{request.width} (HÃƒâ€”W)")
+        print(f"Size: {request.width}x{request.height} (WÃƒÆ’Ã¢â‚¬â€H)")
+        print(f"  ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ Musubi receives: {request.height}x{request.width} (HÃƒÆ’Ã¢â‚¬â€W)")
         print(f"Steps: {request.steps}")
         print(f"Guidance: {request.guidance_scale}")
         print(f"Flow Shift: {request.flow_shift}")
@@ -456,7 +483,7 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
         )
         
         # Patterns to match step progress from musubi output
-        # Pattern 1: "100%|Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†| 20/20 [00:45<00:00,  2.27s/it]"
+        # Pattern 1: "100%|ÃƒÂ¢Ã¢â‚¬â€œÃ‹â€ ÃƒÂ¢Ã¢â‚¬â€œÃ‹â€ ÃƒÂ¢Ã¢â‚¬â€œÃ‹â€ ÃƒÂ¢Ã¢â‚¬â€œÃ‹â€ ÃƒÂ¢Ã¢â‚¬â€œÃ‹â€ ÃƒÂ¢Ã¢â‚¬â€œÃ‹â€ ÃƒÂ¢Ã¢â‚¬â€œÃ‹â€ ÃƒÂ¢Ã¢â‚¬â€œÃ‹â€ ÃƒÂ¢Ã¢â‚¬â€œÃ‹â€ ÃƒÂ¢Ã¢â‚¬â€œÃ‹â€ | 20/20 [00:45<00:00,  2.27s/it]"
         tqdm_pattern = re.compile(r'(\d+)/(\d+)\s+\[')
         # Pattern 2: "Step 5/20" or "step 5/20"
         step_pattern = re.compile(r'step\s+(\d+)/(\d+)', re.IGNORECASE)
@@ -510,7 +537,7 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
         if latest_file != paths["generated_png"]:
             latest_file.rename(paths["generated_png"])
         
-        print(f"[{generation_id}] Ã¢Å“â€œ Generation complete!")
+        print(f"[{generation_id}] ÃƒÂ¢Ã…â€œÃ¢â‚¬Å“ Generation complete!")
         
         outputs = {
             "png": get_project_relative_url(paths["generated_png"])
@@ -559,7 +586,7 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
         
         
         print("\n" + "="*80)
-        print(f"âœ… Generation Complete: {generation_id}")
+        print(f"Ã¢Å“â€¦ Generation Complete: {generation_id}")
         print(f"   Output PNG: {outputs['png']}")
         print(f"Output directory: {gen_dir}")
         print(f"Files: {', '.join(outputs.keys())}")
@@ -575,7 +602,7 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
             "error": str(e),
             "failed_at": datetime.now().isoformat()
         })
-        print(f"âŒ Generation Failed: {e}")
+        print(f"Ã¢ÂÅ’ Generation Failed: {e}")
         import traceback
         traceback.print_exc()
 
@@ -777,7 +804,7 @@ async def cancel_generation(generation_id: str):
     gen["phase"] = "cancelled"
     gen["cancelled_at"] = datetime.now().isoformat()
     
-    print(f"\nÃ¢Å¡Â  Generation Cancelled: {generation_id}")
+    print(f"\nÃƒÂ¢Ã…Â¡Ã‚Â  Generation Cancelled: {generation_id}")
     print(f"Note: Backend process may still be running (musubi doesn't support mid-generation cancellation)")
     
     # Clear VRAM
@@ -1121,6 +1148,168 @@ async def remove_seed(request: RemoveSeedRequest):
         _save_seeds(seeds)
     
     return {"success": True}
+
+# ============================================================================
+# PreProcessors
+# ============================================================================
+
+class PreprocessRequest(BaseModel):
+    image_path: str
+    method: str  # 'canny', 'openpose', 'depth'
+    
+    # Canny parameters
+    low_threshold: int = 100
+    high_threshold: int = 200
+    canny_invert: bool = False
+    blur_kernel: int = 3
+    
+    # OpenPose parameters
+    detect_body: bool = True
+    detect_hand: bool = False
+    detect_face: bool = False
+    
+    # Depth parameters
+    depth_model: str = "depth_anything_v2"
+    depth_invert: bool = False
+    depth_normalize: bool = True
+    depth_colormap: Optional[str] = "inferno"
+
+
+@app.post("/api/preprocess")
+async def preprocess_image(request: PreprocessRequest):
+    """
+    Run a preprocessing method on an image
+    
+    Supported methods:
+    - canny: Edge detection
+    - openpose: Pose keypoints
+    - depth: Depth estimation
+    """
+    
+    try:
+        # Resolve input path
+        input_path = OUTPUT_ROOT / request.image_path
+        
+        if not input_path.exists():
+            raise HTTPException(status_code=404, detail=f"Image not found: {request.image_path}")
+        
+        print(f"\n{'='*60}")
+        print(f"Preprocessing: {request.method}")
+        print(f"Input: {input_path}")
+        print(f"{'='*60}\n")
+        
+        # Generate output path
+        output_filename = f"{request.method}_{input_path.stem}.png"
+        output_path = preprocessor_manager.output_dir / output_filename
+        
+        # Run preprocessing
+        if request.method == "canny":
+            result = preprocessor_manager.canny(
+                image_path=input_path,
+                output_path=output_path,
+                low_threshold=request.low_threshold,
+                high_threshold=request.high_threshold,
+                invert=request.canny_invert,
+                blur_kernel=request.blur_kernel,
+            )
+        
+        elif request.method == "openpose":
+            result = preprocessor_manager.openpose(
+                image_path=input_path,
+                output_path=output_path,
+                detect_body=request.detect_body,
+                detect_hand=request.detect_hand,
+                detect_face=request.detect_face,
+            )
+        
+        elif request.method == "depth":
+            # Map string to enum
+            depth_model_map = {
+                "midas_small": DepthModel.MIDAS_SMALL,
+                "midas_large": DepthModel.MIDAS_LARGE,
+                "depth_anything_v2": DepthModel.DEPTH_ANYTHING_V2,
+                "depth_anything_v3": DepthModel.DEPTH_ANYTHING_V3,
+                "zoedepth": DepthModel.ZOEDEPTH,
+            }
+            
+            depth_model = depth_model_map.get(
+                request.depth_model,
+                DepthModel.DEPTH_ANYTHING_V2
+            )
+            
+            result = preprocessor_manager.depth(
+                image_path=input_path,
+                output_path=output_path,
+                model=depth_model,
+                invert=request.depth_invert,
+                normalize=request.depth_normalize,
+                colormap=request.depth_colormap,
+            )
+        
+        else:
+            raise HTTPException(status_code=400, detail=f"Unknown method: {request.method}")
+        
+        # Convert output path to relative URL
+        output_path = Path(result["output_path"])
+        relative_path = output_path.relative_to(OUTPUT_ROOT)
+        result["url"] = f"/outputs/{relative_path}"
+        
+        print(f"âœ“ Preprocessing complete")
+        print(f"  Output: {result['url']}\n")
+        
+        return result
+        
+    except Exception as e:
+        print(f"âœ— Preprocessing failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/preprocess/models")
+async def get_preprocessor_models():
+    """Get available preprocessor models and their info"""
+    return {
+        "canny": {
+            "name": "Canny Edge Detection",
+            "description": "Clean edge detection using Canny algorithm",
+            "parameters": {
+                "low_threshold": {"type": "int", "default": 100, "min": 0, "max": 500},
+                "high_threshold": {"type": "int", "default": 200, "min": 0, "max": 500},
+                "invert": {"type": "bool", "default": False},
+                "blur_kernel": {"type": "int", "default": 3, "min": 0, "max": 15, "step": 2},
+            }
+        },
+        "openpose": {
+            "name": "OpenPose",
+            "description": "Human pose keypoint detection",
+            "parameters": {
+                "detect_body": {"type": "bool", "default": True},
+                "detect_hand": {"type": "bool", "default": False},
+                "detect_face": {"type": "bool", "default": False},
+            }
+        },
+        "depth": {
+            "name": "Depth Estimation",
+            "description": "Monocular depth estimation",
+            "models": {
+                "midas_small": "MiDaS Small (Fast)",
+                "midas_large": "MiDaS Large (Balanced)",
+                "depth_anything_v2": "Depth Anything V2 (SOTA)",
+                "depth_anything_v3": "Depth Anything V3 (Latest)",
+                "zoedepth": "ZoeDepth (Metric)",
+            },
+            "parameters": {
+                "invert": {"type": "bool", "default": False},
+                "normalize": {"type": "bool", "default": True},
+                "colormap": {
+                    "type": "select",
+                    "default": "inferno",
+                    "options": [None, "inferno", "viridis", "magma", "plasma", "turbo"]
+                },
+            }
+        }
+    }
 
 # ============================================================================
 # Main
