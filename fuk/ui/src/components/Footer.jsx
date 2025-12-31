@@ -58,6 +58,12 @@ export default function Footer({
             label="Post-Processors"
           />
           <TabButton
+            active={activeTab === 'layers'}
+            onClick={() => setActiveTab('layers')}
+            icon={<Enhance style={{ width: '1rem', height: '1rem' }} />}
+            label="Layers"
+          />
+          <TabButton
             active={activeTab === 'export'}
             onClick={() => setActiveTab('export')}
             icon={<Save style={{ width: '1rem', height: '1rem' }} />}

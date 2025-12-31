@@ -135,11 +135,20 @@ OUTPUT_ROOT.mkdir(exist_ok=True)
 (OUTPUT_ROOT / "video").mkdir(exist_ok=True)
 (OUTPUT_ROOT / "uploads").mkdir(exist_ok=True)  # For user-uploaded control images
 
+# Cache directory for project-aware outputs
+CACHE_ROOT = BASE_DIR / "cache"
+CACHE_ROOT.mkdir(exist_ok=True)
+
 # ============================================================================
 # Global State
 # ============================================================================
 
 app = FastAPI(title="FUK Generation API", version="1.0.0")
+
+# Initialize project system
+from project_endpoints import initialize_project_system
+initialize_project_system(CACHE_ROOT)
+
 setup_project_routes(app)
 
 # CORS for development
@@ -156,6 +165,9 @@ app.mount("/outputs", StaticFiles(directory=str(OUTPUT_ROOT)), name="outputs")
 
 # Serve uploads directory for control image previews
 app.mount("/uploads", StaticFiles(directory=str(OUTPUT_ROOT / "uploads")), name="uploads")
+
+# Serve project cache directory
+app.mount("/project-cache", StaticFiles(directory=str(CACHE_ROOT)), name="project-cache")
 
 # Active generations tracking
 active_generations: Dict[str, Dict[str, Any]] = {}
@@ -647,21 +659,41 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
         active_generations[generation_id]["status"] = "running"
         active_generations[generation_id]["phase"] = "initialization"
         
-        # Create generation directory
-        gen_dir = video_manager.create_generation_dir(workflow_type="i2v")
-        paths = video_manager.get_output_paths(gen_dir)
+        # Create generation directory in project cache
+        gen_dir = get_generation_output_dir("video")
+        paths = build_output_paths(gen_dir)
         
         active_generations[generation_id]["gen_dir"] = str(gen_dir)
         active_generations[generation_id]["phase"] = "generating"
         
+        # Resolve image paths to absolute paths (musubi runs from its own directory)
+        def resolve_image_path(path_str):
+            """Convert relative path to absolute path"""
+            if not path_str:
+                return None
+            p = Path(path_str)
+            # If already absolute, return as-is
+            if p.is_absolute():
+                return p
+            # Otherwise resolve relative to OUTPUT_ROOT
+            return OUTPUT_ROOT / p
+        
+        image_path_abs = resolve_image_path(request.image_path)
+        end_image_path_abs = resolve_image_path(request.end_image_path)
+        control_path_abs = resolve_image_path(request.control_path)
+        
         # Copy control inputs if provided
-        if request.image_path:
-            video_manager.copy_control_inputs(
-                gen_dir,
-                image_path=Path(request.image_path) if request.image_path else None,
-                end_image_path=Path(request.end_image_path) if request.end_image_path else None,
-                control_path=Path(request.control_path) if request.control_path else None
-            )
+        if image_path_abs:
+            # Copy to gen_dir for reference
+            control_dir = gen_dir / "control"
+            control_dir.mkdir(exist_ok=True)
+            
+            if image_path_abs and image_path_abs.exists():
+                import shutil
+                shutil.copy(image_path_abs, control_dir / "start_image.png")
+            
+            if end_image_path_abs and end_image_path_abs.exists():
+                shutil.copy(end_image_path_abs, control_dir / "end_image.png")
         
         # Create progress callback
         progress_cb = ProgressCallback(generation_id)
@@ -669,17 +701,17 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
         # Map task string to enum
         task_enum = WanTask(request.task)
         
-        # Generate video
+        # Generate video (pass absolute paths to musubi)
         video_generator.generate_video(
             prompt=request.prompt,
-            output_path=paths["video_mp4"],
+            output_path=paths["generated_mp4"],
             task=task_enum,
             video_size=(request.width, request.height),
             video_length=request.video_length,
             seed=request.seed,
-            image_path=Path(request.image_path) if request.image_path else None,
-            end_image_path=Path(request.end_image_path) if request.end_image_path else None,
-            control_path=Path(request.control_path) if request.control_path else None,
+            image_path=image_path_abs,
+            end_image_path=end_image_path_abs,
+            control_path=control_path_abs,
             infer_steps=request.steps,
             guidance_scale=request.guidance_scale,
             flow_shift=request.flow_shift,
@@ -693,7 +725,10 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
             progress_callback=progress_cb
         )
         
-        outputs = {"mp4": str(paths["video_mp4"])}
+        # Build outputs with project-relative URLs
+        outputs = {
+            "mp4": get_project_relative_url(paths["generated_mp4"])
+        }
         
         # Export to EXR if requested
         if request.export_exr:
@@ -712,30 +747,28 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
             else:
                 exr_dir = video_manager.export_to_exr_sequence(
                     gen_dir=gen_dir,
-                    video_path=paths["video_mp4"],
+                    video_path=paths["generated_mp4"],
                     linear=True
                 )
             
-            outputs["exr_sequence"] = str(exr_dir)
+            outputs["exr_sequence"] = get_project_relative_url(exr_dir)
         
-        # Save metadata
-        video_manager.save_metadata(
+        # Save metadata using project function
+        save_generation_metadata(
             gen_dir=gen_dir,
             prompt=request.prompt,
-            enhanced_prompt=request.prompt,
-            task=request.task,
-            video_size=(request.width, request.height),
-            video_length=request.video_length,
+            model=request.task,
             seed=request.seed or 0,
-            image_path=Path(request.image_path) if request.image_path else None,
-            end_image_path=Path(request.end_image_path) if request.end_image_path else None,
-            control_path=Path(request.control_path) if request.control_path else None,
-            lora=request.lora,
-            lora_multiplier=request.lora_multiplier,
-            infer_steps=request.steps,
+            image_size=(request.width, request.height),
+            video_length=request.video_length,
+            negative_prompt=request.negative_prompt or DEFAULTS.get("negative_prompt", ""),
             guidance_scale=request.guidance_scale,
             flow_shift=request.flow_shift,
-            negative_prompt=request.negative_prompt or DEFAULTS.get("negative_prompt", "")
+            infer_steps=request.steps,
+            lora=request.lora,
+            lora_multiplier=request.lora_multiplier,
+            start_image=request.image_path,
+            end_image=request.end_image_path,
         )
         
         # Mark complete
@@ -744,6 +777,7 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
             "phase": "complete",
             "progress": 1.0,
             "outputs": outputs,
+            "seed_used": request.seed,
             "completed_at": datetime.now().isoformat()
         })
         
@@ -1198,9 +1232,15 @@ async def preprocess_image(request: PreprocessRequest):
         print(f"Input: {input_path}")
         print(f"{'='*60}\n")
         
+        # Create generation directory in project cache
+        gen_dir = get_generation_output_dir(f"preprocess_{request.method}")
+        
+        # Copy source image for reference
+        import shutil
+        shutil.copy(input_path, gen_dir / "source.png")
+        
         # Generate output path
-        output_filename = f"{request.method}_{input_path.stem}.png"
-        output_path = preprocessor_manager.output_dir / output_filename
+        output_path = gen_dir / "processed.png"
         
         # Run preprocessing
         if request.method == "canny":
@@ -1249,13 +1289,22 @@ async def preprocess_image(request: PreprocessRequest):
         else:
             raise HTTPException(status_code=400, detail=f"Unknown method: {request.method}")
         
-        # Convert output path to relative URL
-        output_path = Path(result["output_path"])
-        relative_path = output_path.relative_to(OUTPUT_ROOT)
-        result["url"] = f"/outputs/{relative_path}"
+        # Save metadata
+        save_generation_metadata(
+            gen_dir=gen_dir,
+            prompt=f"Preprocessor: {request.method}",
+            model=request.method,
+            seed=None,
+            image_size=(0, 0),
+            source_image=str(request.image_path),
+            parameters=result.get("parameters", {}),
+        )
         
-        print(f"âœ“ Preprocessing complete")
-        print(f"  Output: {result['url']}\n")
+        # Convert output path to project-relative URL
+        output_path = Path(result["output_path"])
+        result["url"] = get_project_relative_url(output_path)
+        
+        #print(f"[Preprocess] Complete - {result[\'url\']}")
         
         return result
         

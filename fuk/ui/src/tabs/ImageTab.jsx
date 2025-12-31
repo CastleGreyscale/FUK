@@ -206,10 +206,10 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
               />
               <div className="fuk-preview-info">
                 <div className="fuk-flex fuk-gap-4">
-                  <span>{getCurrentDimensions().width}Ãƒâ€”{getCurrentDimensions().height}</span>
+                  <span>{getCurrentDimensions().width}x{getCurrentDimensions().height}</span>
                   {result?.outputs?.png && (
                     <>
-                      <span>Ã¢â‚¬Â¢</span>
+                      <span>Complete</span>
                       <span className="fuk-status-complete" style={{ gap: '0.25rem' }}>
                         <CheckCircle style={{ width: '0.875rem', height: '0.875rem' }} />
                         {formatTime(elapsedSeconds)}
@@ -230,7 +230,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
               <div className="fuk-placeholder">
                 <Camera style={{ width: '3rem', height: '3rem', margin: '0 auto 1rem', opacity: 0.3 }} />
                 <p style={{ color: '#6b7280' }}>
-                  {getCurrentDimensions().width} Ãƒâ€” {getCurrentDimensions().height}
+                  {getCurrentDimensions().width} x {getCurrentDimensions().height}
                 </p>
               </div>
             </div>
@@ -308,7 +308,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                   placeholder="1024"
                 />
                 <span style={{ color: '#9ca3af', fontSize: '0.875rem', minWidth: '100px' }}>
-                  = {getCurrentDimensions().width}Ãƒâ€”{getCurrentDimensions().height}
+                  = {getCurrentDimensions().width}x{getCurrentDimensions().height}
                 </span>
               </div>
             </div>

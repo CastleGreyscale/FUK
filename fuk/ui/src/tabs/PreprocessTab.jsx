@@ -365,8 +365,7 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
             )}
           </div>
           
-          {/* Arrow */}
-          <div style={{ fontSize: '2rem', color: '#4b5563' }}>â†’</div>
+
           
           {/* Processed Result */}
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem' }}>

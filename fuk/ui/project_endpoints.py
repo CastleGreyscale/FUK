@@ -1,179 +1,152 @@
 """
-FUK Project API Endpoints
-Handles project files, cache routing, and serves project cache files
-
-=============================================================================
-INTEGRATION GUIDE
-=============================================================================
-
-1. Copy this file next to fuk_web_server.py
-
-2. At the TOP of fuk_web_server.py, add:
-
-    from project_endpoints import (
-        setup_project_routes, 
-        get_generation_output_dir, 
-        build_output_paths,
-        get_project_relative_url
-    )
-
-3. After creating the FastAPI app, add:
-
-    setup_project_routes(app)
-
-4. In run_image_generation(), REPLACE the output path logic:
-
-    # OLD CODE:
-    # gen_dir = image_manager.create_generation_dir()
-    # paths = image_manager.get_output_paths(gen_dir)
-    
-    # NEW CODE:
-    gen_dir = get_generation_output_dir("img_gen")
-    paths = build_output_paths(gen_dir)
-    
-5. When setting outputs at the end of generation, use:
-
-    outputs = {
-        "png": get_project_relative_url(paths["generated_png"]),
-    }
-    
-    # If you also have EXR:
-    if "exr" in outputs:
-        outputs["exr"] = get_project_relative_url(paths["generated_exr"])
-
-=============================================================================
+Project Endpoints and Cache Management
+Handles project-aware output directories and file serving
 """
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException
 from pathlib import Path
 from typing import Optional, Dict, Any
 import json
 from datetime import datetime
-import threading
+import tkinter as tk
+from tkinter import filedialog
 
-# ============================================================================
-# Global Project State
-# ============================================================================
+# Will be set by main server
+_project_folder = None
+_project_state = None  # Current loaded project state
+_cache_root = None
 
-_project_state = {
-    "folder": None,
-    "config": {
-        "versionFormat": "date",
-        "cacheFolder": "cache",
+router = APIRouter(prefix="/api/project", tags=["project"])
+
+
+def initialize_project_system(cache_root: Path):
+    """Initialize the project system with cache root"""
+    global _cache_root
+    _cache_root = Path(cache_root)
+    _cache_root.mkdir(exist_ok=True, parents=True)
+
+
+def get_current_project_info() -> Optional[Dict[str, str]]:
+    """Get current project name, shot, and version from loaded state"""
+    if not _project_state:
+        return None
+    
+    project_info = _project_state.get("project", {})
+    return {
+        "name": project_info.get("name", "default"),
+        "shot": project_info.get("shot", "01"),
+        "version": project_info.get("version", "unnamed"),
     }
-}
 
 
-def get_project_folder() -> Optional[Path]:
-    """Get current project folder path"""
-    if _project_state["folder"]:
-        return Path(_project_state["folder"])
-    return None
-
-
-def get_cache_folder() -> Optional[Path]:
-    """Get cache folder path for current project"""
-    folder = get_project_folder()
-    if folder:
-        cache = folder / _project_state["config"]["cacheFolder"]
-        cache.mkdir(exist_ok=True)
-        return cache
-    return None
-
-
-# ============================================================================
-# OUTPUT PATH HELPERS - Use these in fuk_web_server.py
-# ============================================================================
-
-def get_generation_output_dir(generation_type: str = "img_gen") -> Path:
+def get_project_cache_dir() -> Path:
     """
-    Get output directory for a new generation.
-    Creates timestamped subfolder in project cache if project is set,
-    otherwise falls back to default outputs folder.
+    Get project-specific cache directory
+    
+    Format: cache/{projectname}_shot{shot}_{version}/
+    Example: cache/fuktest_shot01_251229/
+    """
+    if not _cache_root:
+        raise RuntimeError("Project system not initialized")
+    
+    project_info = get_current_project_info()
+    
+    if project_info:
+        # Build project-specific cache dir
+        project_name = project_info["name"]
+        shot = project_info["shot"]
+        version = project_info["version"]
+        
+        cache_dir = _cache_root / f"{project_name}_shot{shot}_{version}"
+    else:
+        # Fallback to default if no project loaded
+        cache_dir = _cache_root / "default"
+    
+    cache_dir.mkdir(exist_ok=True, parents=True)
+    return cache_dir
+
+
+def get_generation_output_dir(gen_type: str = "img_gen") -> Path:
+    """
+    Create numbered output directory for a generation
     
     Args:
-        generation_type: Type prefix for folder name (img_gen, vid_gen, etc.)
-        
-    Returns:
-        Path to generation folder
-    """
-    cache = get_cache_folder()
+        gen_type: Type of generation (img_gen, video, preprocess, etc.)
     
-    if cache:
-        # Project cache path
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        gen_folder = cache / f"{generation_type}_{timestamp}"
-        gen_folder.mkdir(parents=True, exist_ok=True)
-        return gen_folder
+    Returns:
+        Path to generation directory
+        
+    Example:
+        cache/fuktest_shot01_251229/img_gen_001/
+        cache/fuktest_shot01_251229/video_001/
+        cache/fuktest_shot01_251229/preprocess_001/
+    """
+    project_cache = get_project_cache_dir()
+    
+    # Find next number for this generation type
+    existing = [d for d in project_cache.iterdir() 
+                if d.is_dir() and d.name.startswith(f"{gen_type}_")]
+    
+    if existing:
+        # Extract numbers and find max
+        numbers = []
+        for d in existing:
+            try:
+                num = int(d.name.split("_")[-1])
+                numbers.append(num)
+            except ValueError:
+                continue
+        next_num = max(numbers) + 1 if numbers else 1
     else:
-        # Fallback to default outputs folder (original behavior)
-        default = Path("outputs") / "image" / datetime.now().strftime("%Y-%m-%d")
-        default.mkdir(parents=True, exist_ok=True)
-        
-        # Find next generation number
-        existing = [d for d in default.iterdir() if d.is_dir() and d.name.startswith("generation_")]
-        next_num = len(existing) + 1
-        gen_folder = default / f"generation_{next_num:03d}"
-        gen_folder.mkdir()
-        
-        return gen_folder
+        next_num = 1
+    
+    gen_dir = project_cache / f"{gen_type}_{next_num:03d}"
+    gen_dir.mkdir(exist_ok=True, parents=True)
+    
+    return gen_dir
 
 
 def build_output_paths(gen_dir: Path) -> Dict[str, Path]:
     """
-    Build standard output paths for a generation directory.
+    Build standard output paths for a generation directory
     
-    Returns dict with:
-        - generated_png: Path to PNG output
-        - generated_exr: Path to EXR output  
-        - source: Path to source/control image copy
-        - metadata: Path to metadata.json
+    Returns dict with common output file paths
     """
     return {
         "generated_png": gen_dir / "generated.png",
         "generated_exr": gen_dir / "generated.exr",
+        "generated_mp4": gen_dir / "generated.mp4",
+        "latent": gen_dir / "latent.safetensors",
+        "metadata": gen_dir / "metadata.json",
         "source": gen_dir / "source.png",
-        "metadata": gen_dir / "metadata.json"
+        "control": gen_dir / "control",
     }
 
 
 def get_project_relative_url(file_path: Path) -> str:
     """
-    Convert a file path to a URL that can be served by the API.
+    Convert absolute file path to URL for serving via /project-cache/
     
-    If in project cache: returns "project-cache/img_gen_20251229.../generated.png"
-    If in outputs: returns "image/2025-12-29/generation_001/generated.png"
+    Args:
+        file_path: Absolute path to file
     
-    The frontend will prepend the appropriate base path.
-    """
-    cache = get_cache_folder()
-    
-    if cache:
-        try:
-            # Check if path is in cache folder
-            file_path = Path(file_path).resolve()
-            cache_resolved = cache.resolve()
-            
-            if str(file_path).startswith(str(cache_resolved)):
-                relative = file_path.relative_to(cache_resolved)
-                return f"project-cache/{relative}"
-        except:
-            pass
-    
-    # Fallback - try to make relative to outputs
-    try:
-        outputs_root = Path("outputs").resolve()
-        file_resolved = Path(file_path).resolve()
+    Returns:
+        Relative URL starting with project-cache/
         
-        if str(file_resolved).startswith(str(outputs_root)):
-            return str(file_resolved.relative_to(outputs_root))
-    except:
-        pass
+    Example:
+        /home/user/fuk/cache/fuktest_shot01_251229/img_gen_001/generated.png
+        -> project-cache/fuktest_shot01_251229/img_gen_001/generated.png
+    """
+    if not _cache_root:
+        raise RuntimeError("Project system not initialized")
     
-    # Last resort - just the filename
-    return str(Path(file_path).name)
+    try:
+        # Get path relative to cache root
+        rel_path = Path(file_path).relative_to(_cache_root)
+        return f"project-cache/{rel_path}"
+    except ValueError:
+        # If file is not in cache, return as-is (might be in outputs/)
+        return str(file_path)
 
 
 def save_generation_metadata(
@@ -182,35 +155,28 @@ def save_generation_metadata(
     model: str,
     seed: Optional[int],
     image_size: tuple,
-    infer_steps: int = 20,
-    guidance_scale: float = 2.1,
-    negative_prompt: str = "",
-    flow_shift: Optional[float] = None,
-    lora: Optional[str] = None,
-    lora_multiplier: float = 1.0,
-    control_image: Optional[str] = None,
     **kwargs
 ) -> Path:
     """
-    Save generation metadata to JSON file.
-    Call this in run_image_generation after the generation completes.
+    Save generation metadata to JSON file
+    
+    Args:
+        gen_dir: Generation directory
+        prompt: User prompt
+        model: Model used
+        seed: Random seed
+        image_size: (width, height)
+        **kwargs: Additional metadata
+    
+    Returns:
+        Path to metadata.json file
     """
     metadata = {
         "timestamp": datetime.now().isoformat(),
-        "prompt": {
-            "original": prompt,
-            "enhanced": prompt  # Can be different if you have prompt enhancement
-        },
+        "prompt": prompt,
         "model": model,
         "seed": seed,
         "image_size": list(image_size),
-        "infer_steps": infer_steps,
-        "guidance_scale": guidance_scale,
-        "negative_prompt": negative_prompt,
-        "flow_shift": flow_shift,
-        "lora": lora,
-        "lora_multiplier": lora_multiplier,
-        "control_image": control_image,
         **kwargs
     }
     
@@ -222,335 +188,223 @@ def save_generation_metadata(
 
 
 # ============================================================================
-# Request Models
+# FastAPI Routes for Project Management
 # ============================================================================
 
-class SetFolderRequest(BaseModel):
-    path: str
-
-
-class NewProjectRequest(BaseModel):
-    projectName: str
-    shotNumber: str = "01"
-
-
-# ============================================================================
-# Folder Browser (tkinter)
-# ============================================================================
-
-_dialog_result = {"path": None, "done": False}
-
-
-def _open_folder_dialog() -> Optional[str]:
-    """Open native folder selection dialog"""
+@router.post("/browse-folder")
+async def browse_folder():
+    """Open native folder browser dialog"""
     try:
-        import tkinter as tk
-        from tkinter import filedialog
-        
         root = tk.Tk()
-        root.withdraw()
-        root.attributes('-topmost', True)
+        root.withdraw()  # Hide main window
+        root.attributes('-topmost', True)  # Bring to front
         
-        folder_path = filedialog.askdirectory(
-            title="Select FUK Project Folder (ProjectName/Projects/Fuk/)",
+        folder = filedialog.askdirectory(
+            title="Select FUK Project Folder (Projects/Fuk/)",
             mustexist=True
         )
         
         root.destroy()
-        return folder_path if folder_path else None
         
+        if folder:
+            return {"path": folder, "cancelled": False}
+        else:
+            return {"path": None, "cancelled": True}
+            
     except Exception as e:
-        print(f"Folder dialog error: {e}")
-        return None
+        return {"error": str(e), "cancelled": True}
 
 
-def _run_dialog_thread():
-    """Run dialog in thread"""
-    global _dialog_result
-    _dialog_result["path"] = _open_folder_dialog()
-    _dialog_result["done"] = True
+@router.post("/set-folder")
+async def set_folder(data: dict):
+    """Set the active project folder"""
+    global _project_folder
+    
+    folder_path = data.get("path")
+    if not folder_path:
+        raise HTTPException(status_code=400, detail="No path provided")
+    
+    folder = Path(folder_path)
+    if not folder.exists():
+        raise HTTPException(status_code=404, detail="Folder does not exist")
+    
+    _project_folder = folder
+    
+    return {"folder": str(folder), "success": True}
 
 
-# ============================================================================
-# Route Setup
-# ============================================================================
+@router.get("/current")
+async def get_current():
+    """Get current project folder"""
+    return {
+        "isSet": _project_folder is not None,
+        "folder": str(_project_folder) if _project_folder else None,
+        "projectInfo": get_current_project_info()
+    }
 
-def setup_project_routes(app: FastAPI):
-    """Add project management routes to FastAPI app"""
+
+@router.get("/list")
+async def list_files():
+    """List project files in current folder"""
+    if not _project_folder:
+        return {"files": [], "folder": None}
     
-    # ========================================================================
-    # Serve files from project cache
-    # ========================================================================
+    # Find all .json files
+    json_files = list(_project_folder.glob("*.json"))
     
-    @app.get("/project-cache/{file_path:path}")
-    async def serve_project_cache(file_path: str):
-        """Serve files from project cache folder"""
-        cache = get_cache_folder()
-        if not cache:
-            raise HTTPException(status_code=404, detail="No project folder set")
-        
-        full_path = cache / file_path
-        
-        if not full_path.exists():
-            raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
-        
-        if not full_path.is_file():
-            raise HTTPException(status_code=400, detail="Not a file")
-        
-        # Security check
-        try:
-            full_path.resolve().relative_to(cache.resolve())
-        except ValueError:
-            raise HTTPException(status_code=403, detail="Access denied")
-        
-        return FileResponse(full_path)
+    files = []
+    for f in json_files:
+        files.append({
+            "name": f.name,
+            "path": str(f),
+            "modifiedAt": datetime.fromtimestamp(f.stat().st_mtime).isoformat()
+        })
     
-    # ========================================================================
-    # Folder Browser
-    # ========================================================================
+    return {
+        "files": sorted(files, key=lambda x: x["modifiedAt"], reverse=True),
+        "folder": str(_project_folder)
+    }
+
+
+@router.get("/load/{filename}")
+async def load_file(filename: str):
+    """Load a project file"""
+    if not _project_folder:
+        raise HTTPException(status_code=400, detail="No project folder set")
     
-    @app.post("/api/project/browse-folder")
-    async def browse_folder():
-        """Open native folder browser dialog"""
-        global _dialog_result
-        
-        _dialog_result = {"path": None, "done": False}
-        
-        thread = threading.Thread(target=_run_dialog_thread)
-        thread.start()
-        thread.join(timeout=120)
-        
-        if not _dialog_result["done"]:
-            return {"path": None, "error": "Dialog timeout"}
-        
-        if _dialog_result["path"]:
-            folder_path = Path(_dialog_result["path"])
-            _project_state["folder"] = str(folder_path)
-            
-            # Ensure cache exists
-            cache_folder = folder_path / _project_state["config"]["cacheFolder"]
-            cache_folder.mkdir(exist_ok=True)
-            
-            # Load config if exists
-            config_path = folder_path / "fuk_config.json"
-            if config_path.exists():
-                try:
-                    with open(config_path) as f:
-                        user_config = json.load(f)
-                        _project_state["config"].update(user_config)
-                except:
-                    pass
-            
-            return {"path": str(folder_path), "success": True}
-        
-        return {"path": None, "cancelled": True}
+    file_path = _project_folder / filename
     
-    # ========================================================================
-    # Folder Management
-    # ========================================================================
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
     
-    @app.post("/api/project/set-folder")
-    async def set_project_folder(request: SetFolderRequest):
-        """Set project folder by path"""
-        folder_path = Path(request.path).expanduser().resolve()
+    try:
+        with open(file_path, 'r') as f:
+            data = json.load(f)
         
-        if not folder_path.exists():
-            raise HTTPException(status_code=404, detail=f"Folder not found: {folder_path}")
+        # Update global project state
+        global _project_state
+        _project_state = data
         
-        if not folder_path.is_dir():
-            raise HTTPException(status_code=400, detail=f"Not a directory: {folder_path}")
-        
-        _project_state["folder"] = str(folder_path)
-        
-        cache_folder = folder_path / _project_state["config"]["cacheFolder"]
-        cache_folder.mkdir(exist_ok=True)
-        
-        config_path = folder_path / "fuk_config.json"
-        if config_path.exists():
-            try:
-                with open(config_path) as f:
-                    user_config = json.load(f)
-                    _project_state["config"].update(user_config)
-            except Exception as e:
-                print(f"Warning: Could not load project config: {e}")
-        
-        return {
-            "folder": str(folder_path),
-            "config": _project_state["config"],
-            "success": True
-        }
+        return data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to load file: {str(e)}")
+
+
+@router.post("/save/{filename}")
+async def save_file(filename: str, state: dict):
+    """Save project state to file"""
+    if not _project_folder:
+        raise HTTPException(status_code=400, detail="No project folder set")
     
-    @app.get("/api/project/current")
-    async def get_current_project():
-        """Get current project state"""
-        return {
-            "folder": _project_state["folder"],
-            "config": _project_state["config"],
-            "isSet": _project_state["folder"] is not None
-        }
+    file_path = _project_folder / filename
     
-    # ========================================================================
-    # Project Files CRUD
-    # ========================================================================
-    
-    @app.get("/api/project/list")
-    async def list_project_files():
-        """List project files"""
-        if not _project_state["folder"]:
-            raise HTTPException(status_code=400, detail="No project folder set")
-        
-        folder = Path(_project_state["folder"])
-        files = []
-        
-        for json_file in folder.glob("*.json"):
-            if json_file.name in ["fuk_config.json"]:
-                continue
-            
-            stat = json_file.stat()
-            files.append({
-                "name": json_file.name,
-                "path": str(json_file),
-                "modifiedAt": datetime.fromtimestamp(stat.st_mtime).isoformat(),
-                "size": stat.st_size,
-            })
-        
-        files.sort(key=lambda f: f["modifiedAt"], reverse=True)
-        
-        return {"folder": str(folder), "files": files}
-    
-    @app.get("/api/project/load/{filename}")
-    async def load_project(filename: str):
-        """Load a project file"""
-        if not _project_state["folder"]:
-            raise HTTPException(status_code=400, detail="No project folder set")
-        
-        file_path = Path(_project_state["folder"]) / filename
-        
-        if not file_path.exists():
-            raise HTTPException(status_code=404, detail=f"File not found: {filename}")
-        
-        try:
-            with open(file_path) as f:
-                return json.load(f)
-        except json.JSONDecodeError as e:
-            raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
-    
-    @app.post("/api/project/save/{filename}")
-    async def save_project(filename: str, state: Dict[str, Any]):
-        """Save project state"""
-        if not _project_state["folder"]:
-            raise HTTPException(status_code=400, detail="No project folder set")
-        
-        file_path = Path(_project_state["folder"]) / filename
-        
-        if "meta" not in state:
-            state["meta"] = {}
-        
-        state["meta"]["updatedAt"] = datetime.now().isoformat()
-        
-        if not file_path.exists():
-            state["meta"]["createdAt"] = datetime.now().isoformat()
-        
+    try:
         with open(file_path, 'w') as f:
             json.dump(state, f, indent=2)
+        
+        # Update global project state
+        global _project_state
+        _project_state = state
+        
+        return {"success": True, "path": str(file_path)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
+
+
+@router.post("/new")
+async def create_new(data: dict):
+    """Create a new project file"""
+    if not _project_folder:
+        raise HTTPException(status_code=400, detail="No project folder set")
+    
+    project_name = data.get("projectName", "untitled")
+    shot_number = data.get("shotNumber", "01")
+    
+    # Generate version (YYMMDD format)
+    now = datetime.now()
+    version = now.strftime("%y%m%d")
+    
+    # Build filename
+    filename = f"{project_name}_shot{shot_number}_{version}.json"
+    file_path = _project_folder / filename
+    
+    # Check if exists
+    if file_path.exists():
+        # Add letter suffix (a, b, c, etc.)
+        suffix = 'a'
+        while (_project_folder / f"{project_name}_shot{shot_number}_{version}{suffix}.json").exists():
+            suffix = chr(ord(suffix) + 1)
+        filename = f"{project_name}_shot{shot_number}_{version}{suffix}.json"
+        file_path = _project_folder / filename
+    
+    # Create empty project state
+    state = {
+        "meta": {
+            "version": "1.0",
+            "createdAt": datetime.now().isoformat(),
+            "updatedAt": datetime.now().isoformat(),
+            "fukVersion": "1.0.0",
+        },
+        "project": {
+            "name": project_name,
+            "shot": shot_number,
+            "version": version,
+        },
+        "tabs": {
+            "image": {},
+            "video": {},
+            "preprocess": {},
+        },
+        "assets": {},
+        "lastState": {},
+        "notes": "",
+    }
+    
+    try:
+        with open(file_path, 'w') as f:
+            json.dump(state, f, indent=2)
+        
+        # Update global project state
+        global _project_state
+        _project_state = state
         
         return {"success": True, "filename": filename, "path": str(file_path)}
-    
-    @app.post("/api/project/new")
-    async def create_new_project(request: NewProjectRequest):
-        """Create new project file"""
-        if not _project_state["folder"]:
-            raise HTTPException(status_code=400, detail="No project folder set")
-        
-        folder = Path(_project_state["folder"])
-        
-        if _project_state["config"]["versionFormat"] == "date":
-            now = datetime.now()
-            version = f"{now.year % 100:02d}{now.month:02d}{now.day:02d}"
-        else:
-            version = "v01"
-        
-        shot = request.shotNumber.zfill(2)
-        filename = f"{request.projectName}_shot{shot}_{version}.json"
-        file_path = folder / filename
-        
-        if file_path.exists():
-            suffix = 'a'
-            while (folder / f"{request.projectName}_shot{shot}_{version}{suffix}.json").exists():
-                suffix = chr(ord(suffix) + 1)
-            version = f"{version}{suffix}"
-            filename = f"{request.projectName}_shot{shot}_{version}.json"
-            file_path = folder / filename
-        
-        state = {
-            "meta": {
-                "version": "1.0",
-                "createdAt": datetime.now().isoformat(),
-                "updatedAt": datetime.now().isoformat(),
-                "fukVersion": "1.0.0"
-            },
-            "project": {
-                "name": request.projectName,
-                "shot": shot,
-                "version": version
-            },
-            "tabs": {
-                "image": {},
-                "video": {},
-                "preprocess": {},
-                "postprocess": {},
-                "export": {}
-            },
-            "assets": {},
-            "lastState": {"activeTab": "image"},
-            "notes": ""
-        }
-        
-        with open(file_path, 'w') as f:
-            json.dump(state, f, indent=2)
-        
-        return {"success": True, "filename": filename, "state": state}
-    
-    # ========================================================================
-    # Config & Cache Info
-    # ========================================================================
-    
-    @app.get("/api/project/config")
-    async def get_project_config():
-        """Get project config"""
-        return _project_state["config"]
-    
-    @app.get("/api/project/cache-info")
-    async def get_cache_info():
-        """Get cache folder stats"""
-        if not _project_state["folder"]:
-            return {"path": None, "exists": False, "size": 0, "itemCount": 0}
-        
-        cache_folder = Path(_project_state["folder"]) / _project_state["config"]["cacheFolder"]
-        
-        if not cache_folder.exists():
-            return {"path": str(cache_folder), "exists": False, "size": 0, "itemCount": 0}
-        
-        total_size = 0
-        item_count = 0
-        
-        for item in cache_folder.rglob("*"):
-            if item.is_file():
-                total_size += item.stat().st_size
-                item_count += 1
-        
-        return {
-            "path": str(cache_folder),
-            "exists": True,
-            "size": total_size,
-            "sizeFormatted": _format_size(total_size),
-            "itemCount": item_count,
-        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create file: {str(e)}")
 
 
-def _format_size(size_bytes: int) -> str:
-    for unit in ['B', 'KB', 'MB', 'GB']:
-        if size_bytes < 1024:
-            return f"{size_bytes:.1f} {unit}"
-        size_bytes /= 1024
-    return f"{size_bytes:.1f} TB"
+@router.get("/config")
+async def get_config():
+    """Get project configuration"""
+    return {
+        "versionFormat": "date",  # or "sequential"
+        "cacheFolder": str(_cache_root) if _cache_root else None,
+    }
+
+
+@router.get("/cache-info")
+async def get_cache_info():
+    """Get cache folder information"""
+    if not _cache_root:
+        return {"exists": False}
+    
+    project_cache = get_project_cache_dir()
+    
+    # Count generations by type
+    counts = {}
+    for item in project_cache.iterdir():
+        if item.is_dir():
+            gen_type = item.name.rsplit("_", 1)[0]
+            counts[gen_type] = counts.get(gen_type, 0) + 1
+    
+    return {
+        "exists": True,
+        "path": str(project_cache),
+        "projectInfo": get_current_project_info(),
+        "generations": counts,
+    }
+
+
+def setup_project_routes(app):
+    """Setup project routes on FastAPI app"""
+    app.include_router(router)
