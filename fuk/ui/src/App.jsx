@@ -3,7 +3,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { Zap, Loader2, AlertCircle, Pipeline, Enhance, Save } from './components/Icons';
+import {Loader2, AlertCircle, Pipeline, Enhance, Save, FukMonogram } from './components/Icons';
 import ProjectBar from './components/ProjectBar';
 import ImageTab from './tabs/ImageTab';
 import VideoTab from './tabs/VideoTab';
@@ -13,12 +13,14 @@ import LayersTab from './tabs/LayersTab';
 import ExportTab from './tabs/ExportTab';
 import { fetchConfig } from './utils/api';
 import { useProject } from './hooks/useProject';
+import { GenerationHistory } from './components';
+
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('image');
   const [config, setConfig] = useState(null);
   const [status, setStatus] = useState('loading');
-
+  const [historyCollapsed, setHistoryCollapsed] = useState(false);
   // Project management
   const project = useProject();
 
@@ -167,11 +169,11 @@ export default function App() {
         <div className="fuk-header-content">
           <div className="fuk-header-inner">
             <div className="fuk-logo">
-              <Zap />
+              <FukMonogram />
             </div>
             <div>
-              <h1 className="fuk-title">FUK Generation Pipeline</h1>
-              <p className="fuk-subtitle">Qwen Image × Wan Video</p>
+              <h1 className="fuk-title">Framework for Unified Kreation</h1>
+            
             </div>
           </div>
         </div>
@@ -199,6 +201,13 @@ export default function App() {
       <main className="fuk-main">
         {renderTab()}
       </main>
+      <div className="fuk-sidebar">
+          <GenerationHistory 
+            project={project}
+            collapsed={historyCollapsed}
+            onToggle={() => setHistoryCollapsed(!historyCollapsed)}
+          />
+    </div>
     </div>
   );
 }

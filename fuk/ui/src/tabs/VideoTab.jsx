@@ -4,7 +4,7 @@
  */
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Film, Zap, Loader2, CheckCircle, X, Camera, Pipeline } from '../../src/components/Icons';
+import { Film, FukMonogram, Loader2, CheckCircle, X, Camera, Pipeline } from '../../src/components/Icons';
 import ImageUploader from '../components/ImageUploader';
 import SeedControl from '../components/SeedControl';
 import { useGeneration } from '../hooks/useGeneration';
@@ -431,51 +431,6 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
             />
           </div>
 
-          {/* Last Generated Image Card - Pipeline from Image Tab */}
-          {project?.projectState?.lastState?.lastImagePreview && requiresStartImage && (
-            <div className="fuk-card" style={{ background: 'rgba(168, 85, 247, 0.1)', borderColor: '#a855f7' }}>
-              <h3 className="fuk-card-title fuk-mb-3" style={{ color: '#c084fc' }}>
-                Last Generated Image
-              </h3>
-              
-              <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-                <div style={{ flex: '0 0 120px' }}>
-                  <img
-                    src={project.projectState.lastState.lastImagePreview}
-                    alt="Last generated"
-                    style={{
-                      width: '100%',
-                      aspectRatio: '1',
-                      objectFit: 'cover',
-                      borderRadius: '0.375rem',
-                      border: '1px solid #a855f7',
-                    }}
-                  />
-                </div>
-                
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: '0.75rem', color: '#c084fc', marginBottom: '0.5rem' }}>
-                    From Image Generation tab
-                  </div>
-                  
-                  <button
-                    className="fuk-btn fuk-btn-secondary"
-                    onClick={() => {
-                      setFormData(prev => ({
-                        ...prev,
-                        image_path: project.projectState.lastState.lastImagePreview
-                      }));
-                    }}
-                    disabled={generating}
-                    style={{ fontSize: '0.875rem' }}
-                  >
-                    <Camera style={{ width: '1rem', height: '1rem' }} />
-                    Use as Start Image
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
 
           {/* Input Images Card */}
           <div className="fuk-card">

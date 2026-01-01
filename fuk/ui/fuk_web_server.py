@@ -9,6 +9,14 @@ Provides REST API endpoints for:
 - File serving
 - Generation history
 """
+import sys
+import os
+
+# Force unbuffered output for real-time logging
+os.environ['PYTHONUNBUFFERED'] = '1'
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(line_buffering=True)
+
 from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,54 +30,152 @@ import uuid
 from datetime import datetime
 from enum import Enum
 import sys
+import time
+import traceback
 from project_endpoints import (
     setup_project_routes,
     get_generation_output_dir,
     build_output_paths,
     get_project_relative_url,
-    save_generation_metadata
+    save_generation_metadata,
+    get_cache_root
 )
 
-# Add project root to path
-current_dir = Path(__file__).parent
-project_root = current_dir.parent
-sys.path.insert(0, str(project_root))
+# ============================================================================
+# Logging Utility
+# ============================================================================
+
+class FukLogger:
+    """Centralized logging with timestamps and categories"""
+    
+    COLORS = {
+        'header': '\033[95m',
+        'blue': '\033[94m',
+        'cyan': '\033[96m',
+        'green': '\033[92m',
+        'yellow': '\033[93m',
+        'red': '\033[91m',
+        'bold': '\033[1m',
+        'end': '\033[0m'
+    }
+    
+    @staticmethod
+    def timestamp():
+        return datetime.now().strftime("%H:%M:%S.%f")[:-3]
+    
+    @classmethod
+    def header(cls, title: str, char: str = "="):
+        width = 70
+        print(f"\n{cls.COLORS['cyan']}{char * width}")
+        print(f"  {title}")
+        print(f"{char * width}{cls.COLORS['end']}\n")
+    
+    @classmethod
+    def section(cls, title: str):
+        print(f"\n{cls.COLORS['blue']}--- {title} ---{cls.COLORS['end']}")
+    
+    @classmethod
+    def info(cls, category: str, message: str):
+        print(f"{cls.COLORS['cyan']}[{cls.timestamp()}]{cls.COLORS['end']} [{category}] {message}")
+    
+    @classmethod
+    def success(cls, category: str, message: str):
+        print(f"{cls.COLORS['green']}[{cls.timestamp()}] ✓ [{category}] {message}{cls.COLORS['end']}")
+    
+    @classmethod
+    def warning(cls, category: str, message: str):
+        print(f"{cls.COLORS['yellow']}[{cls.timestamp()}] ⚠ [{category}] {message}{cls.COLORS['end']}")
+    
+    @classmethod
+    def error(cls, category: str, message: str):
+        print(f"{cls.COLORS['red']}[{cls.timestamp()}] ✗ [{category}] {message}{cls.COLORS['end']}")
+    
+    @classmethod
+    def params(cls, title: str, params: Dict[str, Any]):
+        """Log parameters in a formatted way"""
+        print(f"\n{cls.COLORS['yellow']}  {title}:{cls.COLORS['end']}")
+        for key, value in params.items():
+            # Truncate long values
+            str_val = str(value)
+            if len(str_val) > 80:
+                str_val = str_val[:77] + "..."
+            print(f"    {key}: {str_val}")
+    
+    @classmethod
+    def command(cls, cmd: List[str]):
+        """Log a command being executed"""
+        print(f"\n{cls.COLORS['bold']}  Command:{cls.COLORS['end']}")
+        # Format command nicely
+        formatted = " \\\n    ".join(cmd)
+        print(f"    {formatted}")
+        print()
+    
+    @classmethod
+    def paths(cls, title: str, paths: Dict[str, Any]):
+        """Log path information"""
+        print(f"\n{cls.COLORS['blue']}  {title}:{cls.COLORS['end']}")
+        for key, value in paths.items():
+            print(f"    {key}: {value}")
+    
+    @classmethod
+    def timing(cls, category: str, start_time: float, message: str = ""):
+        elapsed = time.time() - start_time
+        if elapsed < 60:
+            time_str = f"{elapsed:.1f}s"
+        else:
+            mins = int(elapsed // 60)
+            secs = elapsed % 60
+            time_str = f"{mins}m {secs:.1f}s"
+        print(f"{cls.COLORS['green']}[{cls.timestamp()}] ⏱ [{category}] {message} ({time_str}){cls.COLORS['end']}")
+    
+    @classmethod
+    def exception(cls, category: str, e: Exception):
+        """Log full exception with traceback"""
+        print(f"\n{cls.COLORS['red']}{'=' * 70}")
+        print(f"  EXCEPTION in {category}")
+        print(f"{'=' * 70}")
+        print(f"  Error: {type(e).__name__}: {e}")
+        print(f"\n  Traceback:")
+        for line in traceback.format_exc().split('\n'):
+            print(f"    {line}")
+        print(f"{'=' * 70}{cls.COLORS['end']}\n")
+
+log = FukLogger()
+
+# Add fuk/fuk/ root to path so we can import from core/
+current_dir = Path(__file__).parent      # fuk/fuk/ui/
+fuk_root = current_dir.parent            # fuk/fuk/
+sys.path.insert(0, str(fuk_root))
 sys.path.insert(0, str(current_dir))
 
-from utils.preprocessors import PreprocessorManager, DepthModel
+print(f"[STARTUP] Server directory: {current_dir}")
+print(f"[STARTUP] FUK root: {fuk_root}")
+print(f"[STARTUP] Looking for core/ at: {fuk_root / 'core'}")
 
-# Try to import from different possible locations
+# Import from core/ directory
 try:
-    # Option 1: Files in same directory
-    from qwen_image_wrapper import QwenImageGenerator, QwenModel
-    from wan_video_wrapper import WanVideoGenerator, WanTask
-    from image_generation_manager import ImageGenerationManager
-    from video_generation_manager import VideoGenerationManager
-    from format_convert import FormatConverter
-    
-except ImportError:
-    try:
-        # Option 2: Files in core/ and utils/ subdirectories
-        sys.path.insert(0, str(current_dir.parent))
-        from core.qwen_image_wrapper import QwenImageGenerator, QwenModel
-        from core.wan_video_wrapper import WanVideoGenerator, WanTask
-        from core.image_generation_manager import ImageGenerationManager
-        from core.video_generation_manager import VideoGenerationManager
-        from utils.format_convert import FormatConverter
-    except ImportError as e:
-        print("\n" + "="*60)
-        print("ERROR: Cannot import FUK modules")
-        print("="*60)
-        print("\nMake sure fuk_web_server.py is in the same directory as:")
-        print("  - qwen_image_wrapper.py")
-        print("  - wan_video_wrapper.py")
-        print("  - image_generation_manager.py")
-        print("  - video_generation_manager.py")
-        print("  - format_convert.py")
-        print("\nOr adjust PYTHONPATH to include the directory containing these files.")
-        print(f"\nOriginal error: {e}")
-        print("="*60 + "\n")
-        sys.exit(1)
+    from core.qwen_image_wrapper import QwenImageGenerator, QwenModel
+    from core.wan_video_wrapper import WanVideoGenerator, WanTask
+    from core.image_generation_manager import ImageGenerationManager
+    from core.video_generation_manager import VideoGenerationManager
+    from core.format_convert import FormatConverter
+    from core.preprocessors import PreprocessorManager, DepthModel
+    print("[STARTUP] ✓ Loaded modules from core/")
+except ImportError as e:
+    print(f"\n{'='*60}")
+    print("ERROR: Cannot import FUK modules from core/")
+    print(f"{'='*60}")
+    print(f"\nLooking in: {fuk_root / 'core'}")
+    print(f"\nExpected files:")
+    print("  - core/qwen_image_wrapper.py")
+    print("  - core/wan_video_wrapper.py")
+    print("  - core/image_generation_manager.py")
+    print("  - core/video_generation_manager.py")
+    print("  - core/format_convert.py")
+    print("  - core/preprocessors.py")
+    print(f"\nImport error: {e}")
+    print(f"{'='*60}\n")
+    sys.exit(1)
 
 # ============================================================================
 # Configuration
@@ -107,11 +213,11 @@ OUTPUT_ROOTS = [
 def find_path(paths, name):
     for p in paths:
         if p.exists():
-            print(f"ÃƒÂ¢Ã…â€œÃ¢â‚¬Å“ Found {name}: {p}")
+            print(f"[STARTUP] Found {name}: {p}", flush=True)
             return p
-    print(f"ÃƒÂ¢Ã…â€œÃ¢â‚¬â€ {name} not found in:")
+    print(f"[STARTUP] {name} not found in:", flush=True)
     for p in paths:
-        print(f"  - {p}")
+        print(f"  - {p}", flush=True)
     raise FileNotFoundError(f"{name} not found")
 
 try:
@@ -120,13 +226,13 @@ try:
     MUSUBI_PATH = find_path(MUSUBI_PATHS, "musubi-tuner")
     OUTPUT_ROOT = OUTPUT_ROOTS[0]  # Use first option, create if needed
     OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
-    print(f"ÃƒÂ¢Ã…â€œÃ¢â‚¬Å“ Output directory: {OUTPUT_ROOT}")
+    print(f"[STARTUP] Output directory: {OUTPUT_ROOT}", flush=True)
 except FileNotFoundError as e:
-    print(f"\nError: {e}")
-    print("\nPlease ensure your project has the following structure:")
-    print("  config/models.json")
-    print("  config/defaults.json")
-    print("  vendor/musubi-tuner/")
+    print(f"\nError: {e}", flush=True)
+    print("\nPlease ensure your project has the following structure:", flush=True)
+    print("  config/models.json", flush=True)
+    print("  config/defaults.json", flush=True)
+    print("  vendor/musubi-tuner/", flush=True)
     sys.exit(1)
 
 # Ensure paths exist
@@ -182,6 +288,111 @@ video_generator = WanVideoGenerator(CONFIG_PATH, MUSUBI_PATH, DEFAULTS_PATH)
 image_manager = ImageGenerationManager(OUTPUT_ROOT / "image")
 video_manager = VideoGenerationManager(OUTPUT_ROOT / "video")
 preprocessor_manager = PreprocessorManager(OUTPUT_ROOT / "preprocessed")
+
+# ============================================================================
+# Path Resolution Helper
+# ============================================================================
+
+def resolve_input_path(path_str: str) -> Optional[Path]:
+    """
+    Convert URL paths or relative paths to absolute filesystem paths.
+    
+    Handles:
+    - Already absolute paths -> return as-is
+    - URL paths: api/project/cache/... -> try cache_root, fallback to CACHE_ROOT
+    - URL paths: project-cache/... -> cache_root/...  (legacy)
+    - Relative paths: uploads/... -> OUTPUT_ROOT/uploads/...
+    - Other relative paths -> OUTPUT_ROOT/path
+    
+    Args:
+        path_str: Path string from frontend (URL or relative)
+        
+    Returns:
+        Absolute Path to file, or None if path_str is empty
+    """
+    if not path_str:
+        return None
+    
+    # Get current cache root from project system
+    cache_root = get_cache_root()
+    
+    print(f"[PATH] Resolving: {path_str}", flush=True)
+    print(f"[PATH] Project cache: {cache_root}", flush=True)
+    print(f"[PATH] Default cache: {CACHE_ROOT}", flush=True)
+    
+    p = Path(path_str)
+    
+    # Already absolute path
+    if p.is_absolute():
+        print(f"[PATH] -> Absolute: {p}", flush=True)
+        return p
+    
+    # URL path from dynamic cache endpoint: api/project/cache/...
+    if path_str.startswith('api/project/cache/'):
+        relative = path_str.replace('api/project/cache/', '', 1)
+        
+        # Try project cache first
+        if cache_root:
+            resolved = cache_root / relative
+            if resolved.exists():
+                print(f"[PATH] -> From project cache: {resolved}", flush=True)
+                return resolved
+        
+        # Fallback to default cache
+        resolved = CACHE_ROOT / relative
+        if resolved.exists():
+            print(f"[PATH] -> From default cache (fallback): {resolved}", flush=True)
+            return resolved
+        
+        # Return project cache path even if doesn't exist (for error messages)
+        resolved = (cache_root / relative) if cache_root else (CACHE_ROOT / relative)
+        print(f"[PATH] -> Not found, returning: {resolved}", flush=True)
+        return resolved
+    
+    # Legacy URL path: project-cache/...
+    if path_str.startswith('project-cache/'):
+        relative = path_str.replace('project-cache/', '', 1)
+        
+        # Try project cache first
+        if cache_root:
+            resolved = cache_root / relative
+            if resolved.exists():
+                print(f"[PATH] -> From project cache: {resolved}", flush=True)
+                return resolved
+        
+        # Fallback to default cache
+        resolved = CACHE_ROOT / relative
+        print(f"[PATH] -> From legacy URL: {resolved}", flush=True)
+        return resolved
+    
+    # Uploads directory
+    if path_str.startswith('uploads/'):
+        resolved = OUTPUT_ROOT / path_str
+        print(f"[PATH] -> From uploads: {resolved}", flush=True)
+        return resolved
+    
+    # Other relative path - try OUTPUT_ROOT first
+    resolved = OUTPUT_ROOT / path_str
+    if resolved.exists():
+        print(f"[PATH] -> From OUTPUT_ROOT: {resolved}", flush=True)
+        return resolved
+    
+    # Try project cache
+    if cache_root:
+        cache_resolved = cache_root / path_str
+        if cache_resolved.exists():
+            print(f"[PATH] -> From project cache: {cache_resolved}", flush=True)
+            return cache_resolved
+    
+    # Try default cache
+    default_cache_resolved = CACHE_ROOT / path_str
+    if default_cache_resolved.exists():
+        print(f"[PATH] -> From default cache: {default_cache_resolved}", flush=True)
+        return default_cache_resolved
+    
+    # Return OUTPUT_ROOT version even if doesn't exist (will be caught later)
+    print(f"[PATH] -> Default (OUTPUT_ROOT): {resolved}", flush=True)
+    return resolved
 
 # ============================================================================
 # Request/Response Models
@@ -312,12 +523,12 @@ def clear_vram():
             reserved = torch.cuda.memory_reserved() / (1024**3)    # GB
             
             print(f"  VRAM - Allocated: {allocated:.2f}GB, Reserved: {reserved:.2f}GB")
-            print(f"  ÃƒÂ¢Ã…â€œÃ¢â‚¬Å“ VRAM cleared")
+            print(f"  ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ VRAM cleared")
         else:
-            print(f"  ÃƒÂ¢Ã…Â¡Ã‚Â  CUDA not available, skipping VRAM clear")
+            print(f"  ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã‚Â¡Ãƒâ€šÃ‚Â  CUDA not available, skipping VRAM clear")
             
     except Exception as e:
-        print(f"  ÃƒÂ¢Ã…Â¡Ã‚Â  VRAM clear failed: {e}")
+        print(f"  ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã‚Â¡Ãƒâ€šÃ‚Â  VRAM clear failed: {e}")
 
 # ============================================================================
 # File Upload
@@ -348,7 +559,7 @@ async def upload_control_image(file: UploadFile = File(...)):
         # Return relative path for client
         relative_path = f"uploads/{unique_filename}"
         
-        print(f"Ã¢Å“â€œ Uploaded control image: {relative_path}")
+        print(f"ÃƒÂ¢Ã…â€œÃ¢â‚¬Å“ Uploaded control image: {relative_path}")
         
         return {
             "path": relative_path,
@@ -357,7 +568,7 @@ async def upload_control_image(file: UploadFile = File(...)):
         }
         
     except Exception as e:
-        print(f"Ã¢Å“â€” Upload failed: {e}")
+        print(f"ÃƒÂ¢Ã…â€œÃ¢â‚¬â€ Upload failed: {e}")
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 # ============================================================================
@@ -369,12 +580,12 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
     
     try:
         print("\n" + "="*80)
-        print(f"Ã°Å¸Å¡â‚¬ Starting Image Generation: {generation_id}")
+        print(f"ÃƒÂ°Ã…Â¸Ã…Â¡Ã¢â€šÂ¬ Starting Image Generation: {generation_id}")
         print("="*80)
         print(f"Prompt: {request.prompt}")
         print(f"Model: {request.model}")
-        print(f"Size: {request.width}x{request.height} (WÃƒÆ’Ã¢â‚¬â€H)")
-        print(f"  ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ Musubi receives: {request.height}x{request.width} (HÃƒÆ’Ã¢â‚¬â€W)")
+        print(f"Size: {request.width}x{request.height} (WÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬ÂH)")
+        print(f"  ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ Musubi receives: {request.height}x{request.width} (HÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬ÂW)")
         print(f"Steps: {request.steps}")
         print(f"Guidance: {request.guidance_scale}")
         print(f"Flow Shift: {request.flow_shift}")
@@ -457,20 +668,23 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
         # Support both single image (backward compat) and multiple images
         control_images = []
         if request.control_image_paths:
-            control_images = [OUTPUT_ROOT / path for path in request.control_image_paths]
+            control_images = [resolve_input_path(path) for path in request.control_image_paths]
         elif request.control_image_path:
-            control_images = [OUTPUT_ROOT / request.control_image_path]
+            control_images = [resolve_input_path(request.control_image_path)]
+        
+        # Filter out None values
+        control_images = [p for p in control_images if p is not None]
         
         if control_images:
             cmd.append("--edit")
-            # Try multiple images - musubi may support multiple --image_path flags
             for img_path in control_images:
                 if img_path.exists():
                     cmd.extend(["--control_image_path", str(img_path)])
+                    print(f"[{generation_id}] Control image found: {img_path}", flush=True)
                 else:
-                    print(f"Warning: Control image not found: {img_path}")
+                    print(f"[{generation_id}] WARNING: Control image not found: {img_path}", flush=True)
             
-            print(f"[{generation_id}] Using {len(control_images)} control image(s)")
+            print(f"[{generation_id}] Using {len(control_images)} control image(s)", flush=True)
         
         if request.seed is not None:
             cmd.extend(["--seed", str(request.seed)])
@@ -495,7 +709,7 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
         )
         
         # Patterns to match step progress from musubi output
-        # Pattern 1: "100%|ÃƒÂ¢Ã¢â‚¬â€œÃ‹â€ ÃƒÂ¢Ã¢â‚¬â€œÃ‹â€ ÃƒÂ¢Ã¢â‚¬â€œÃ‹â€ ÃƒÂ¢Ã¢â‚¬â€œÃ‹â€ ÃƒÂ¢Ã¢â‚¬â€œÃ‹â€ ÃƒÂ¢Ã¢â‚¬â€œÃ‹â€ ÃƒÂ¢Ã¢â‚¬â€œÃ‹â€ ÃƒÂ¢Ã¢â‚¬â€œÃ‹â€ ÃƒÂ¢Ã¢â‚¬â€œÃ‹â€ ÃƒÂ¢Ã¢â‚¬â€œÃ‹â€ | 20/20 [00:45<00:00,  2.27s/it]"
+        # Pattern 1: "100%|ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â | 20/20 [00:45<00:00,  2.27s/it]"
         tqdm_pattern = re.compile(r'(\d+)/(\d+)\s+\[')
         # Pattern 2: "Step 5/20" or "step 5/20"
         step_pattern = re.compile(r'step\s+(\d+)/(\d+)', re.IGNORECASE)
@@ -549,7 +763,7 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
         if latest_file != paths["generated_png"]:
             latest_file.rename(paths["generated_png"])
         
-        print(f"[{generation_id}] ÃƒÂ¢Ã…â€œÃ¢â‚¬Å“ Generation complete!")
+        print(f"[{generation_id}] ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ Generation complete!")
         
         outputs = {
             "png": get_project_relative_url(paths["generated_png"])
@@ -598,7 +812,7 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
         
         
         print("\n" + "="*80)
-        print(f"Ã¢Å“â€¦ Generation Complete: {generation_id}")
+        print(f"ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ Generation Complete: {generation_id}")
         print(f"   Output PNG: {outputs['png']}")
         print(f"Output directory: {gen_dir}")
         print(f"Files: {', '.join(outputs.keys())}")
@@ -614,7 +828,7 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
             "error": str(e),
             "failed_at": datetime.now().isoformat()
         })
-        print(f"Ã¢ÂÅ’ Generation Failed: {e}")
+        print(f"ÃƒÂ¢Ã‚ÂÃ…â€™ Generation Failed: {e}")
         import traceback
         traceback.print_exc()
 
@@ -666,21 +880,15 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
         active_generations[generation_id]["gen_dir"] = str(gen_dir)
         active_generations[generation_id]["phase"] = "generating"
         
-        # Resolve image paths to absolute paths (musubi runs from its own directory)
-        def resolve_image_path(path_str):
-            """Convert relative path to absolute path"""
-            if not path_str:
-                return None
-            p = Path(path_str)
-            # If already absolute, return as-is
-            if p.is_absolute():
-                return p
-            # Otherwise resolve relative to OUTPUT_ROOT
-            return OUTPUT_ROOT / p
+        # Resolve image paths using the path resolver (handles URL paths)
+        image_path_abs = resolve_input_path(request.image_path)
+        end_image_path_abs = resolve_input_path(request.end_image_path)
+        control_path_abs = resolve_input_path(request.control_path)
         
-        image_path_abs = resolve_image_path(request.image_path)
-        end_image_path_abs = resolve_image_path(request.end_image_path)
-        control_path_abs = resolve_image_path(request.control_path)
+        print(f"[VIDEO] Resolved paths:", flush=True)
+        print(f"[VIDEO]   image_path: {request.image_path} -> {image_path_abs}", flush=True)
+        print(f"[VIDEO]   end_image_path: {request.end_image_path} -> {end_image_path_abs}", flush=True)
+        print(f"[VIDEO]   control_path: {request.control_path} -> {control_path_abs}", flush=True)
         
         # Copy control inputs if provided
         if image_path_abs:
@@ -838,7 +1046,7 @@ async def cancel_generation(generation_id: str):
     gen["phase"] = "cancelled"
     gen["cancelled_at"] = datetime.now().isoformat()
     
-    print(f"\nÃƒÂ¢Ã…Â¡Ã‚Â  Generation Cancelled: {generation_id}")
+    print(f"\nÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã‚Â¡Ãƒâ€šÃ‚Â  Generation Cancelled: {generation_id}")
     print(f"Note: Backend process may still be running (musubi doesn't support mid-generation cancellation)")
     
     # Clear VRAM
@@ -1221,16 +1429,20 @@ async def preprocess_image(request: PreprocessRequest):
     """
     
     try:
-        # Resolve input path
-        input_path = OUTPUT_ROOT / request.image_path
+        # Resolve input path (handles URL paths from cache)
+        input_path = resolve_input_path(request.image_path)
+        
+        if input_path is None:
+            raise HTTPException(status_code=400, detail="No image path provided")
         
         if not input_path.exists():
-            raise HTTPException(status_code=404, detail=f"Image not found: {request.image_path}")
+            raise HTTPException(status_code=404, detail=f"Image not found: {request.image_path} (resolved to: {input_path})")
         
-        print(f"\n{'='*60}")
-        print(f"Preprocessing: {request.method}")
-        print(f"Input: {input_path}")
-        print(f"{'='*60}\n")
+        print(f"\n{'='*60}", flush=True)
+        print(f"Preprocessing: {request.method}", flush=True)
+        print(f"Input (requested): {request.image_path}", flush=True)
+        print(f"Input (resolved): {input_path}", flush=True)
+        print(f"{'='*60}\n", flush=True)
         
         # Create generation directory in project cache
         gen_dir = get_generation_output_dir(f"preprocess_{request.method}")
@@ -1309,7 +1521,7 @@ async def preprocess_image(request: PreprocessRequest):
         return result
         
     except Exception as e:
-        print(f"âœ— Preprocessing failed: {e}")
+        print(f"Ã¢Å“â€” Preprocessing failed: {e}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))

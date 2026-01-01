@@ -4,7 +4,7 @@
  */
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Camera, Zap, Loader2, CheckCircle, X, Pipeline } from '../../src/components/Icons';
+import { Camera, Loader2, CheckCircle, X, Pipeline } from '../../src/components/Icons';
 import TabButton from '../components/TabButton';
 import ProgressBar from '../components/ProgressBar';
 import ImageUploader from '../components/ImageUploader';
@@ -486,64 +486,6 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
             />
           </div>
 
-          {/* Preprocessed Image Card - shows last preprocessing result */}
-          {project?.projectState?.lastState?.lastPreprocessedImage && formData.model === 'qwen_image_2509_edit' && (
-            <div className="fuk-card" style={{ background: 'rgba(168, 85, 247, 0.1)', borderColor: '#a855f7' }}>
-              <h3 className="fuk-card-title fuk-mb-3" style={{ color: '#c084fc' }}>
-                Last Preprocessed Image
-              </h3>
-              
-              <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-                {/* Thumbnail */}
-                <div style={{ flex: '0 0 120px' }}>
-                  <img
-                    src={project.projectState.lastState.lastPreprocessedImage}
-                    alt="Preprocessed"
-                    style={{
-                      width: '100%',
-                      aspectRatio: '1',
-                      objectFit: 'cover',
-                      borderRadius: '0.375rem',
-                      border: '1px solid #a855f7',
-                    }}
-                  />
-                </div>
-                
-                {/* Info and Actions */}
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: '0.75rem', color: '#c084fc', marginBottom: '0.5rem' }}>
-                    <strong>Method:</strong> {project.projectState.lastState.lastPreprocessedMethod || 'unknown'}
-                  </div>
-                  
-                  <button
-                    className="fuk-btn fuk-btn-secondary"
-                    onClick={() => {
-                      const preprocessedUrl = project.projectState.lastState.lastPreprocessedImage;
-                      // Extract path from URL (remove /outputs/ prefix if present)
-                      const path = preprocessedUrl.replace(/^\/outputs\//, '').replace(/^\//, '');
-                      
-                      // Add to control images if not already present
-                      if (!formData.control_image_paths.includes(path)) {
-                        setFormData(prev => ({
-                          ...prev,
-                          control_image_paths: [...prev.control_image_paths, path]
-                        }));
-                      }
-                    }}
-                    disabled={generating}
-                    style={{ fontSize: '0.875rem' }}
-                  >
-                    <Pipeline style={{ width: '1rem', height: '1rem' }} />
-                    Use as Control Image
-                  </button>
-                  
-                  <p style={{ fontSize: '0.7rem', color: '#9ca3af', marginTop: '0.5rem' }}>
-                    From Pre-Processors tab
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
 
           {/* Image Tools Card */}
           <div className="fuk-card">

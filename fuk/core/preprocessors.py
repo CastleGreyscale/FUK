@@ -7,6 +7,13 @@ Provides:
 - OpenPose pose estimation  
 - Depth estimation (MiDaS, Depth Anything V2/V3, ZoeDepth)
 """
+import sys
+import os
+
+# Force unbuffered output for real-time logging
+os.environ['PYTHONUNBUFFERED'] = '1'
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(line_buffering=True)
 
 from pathlib import Path
 from typing import Optional, Dict, Any, Tuple
@@ -141,7 +148,7 @@ class OpenPosePreprocessor:
             from controlnet_aux import OpenposeDetector
             print("Loading OpenPose detector...")
             self.processor = OpenposeDetector.from_pretrained('lllyasviel/ControlNet')
-            print("âœ“ OpenPose loaded")
+            print("Ã¢Å“â€œ OpenPose loaded")
         except ImportError:
             raise ImportError(
                 "controlnet_aux not installed. Install with:\n"
@@ -263,7 +270,7 @@ class DepthPreprocessor:
         else:
             self.transform = midas_transforms.small_transform
         
-        print("âœ“ MiDaS loaded")
+        print("Ã¢Å“â€œ MiDaS loaded")
     
     def _load_depth_anything_v2(self):
         """
@@ -297,9 +304,9 @@ class DepthPreprocessor:
             if checkpoint_path.exists():
                 print(f"  Found checkpoint: {checkpoint_path}")
                 self.model.load_state_dict(torch.load(str(checkpoint_path), map_location='cpu'))
-                print(f"âœ“ Loaded checkpoint successfully")
+                print(f"Ã¢Å“â€œ Loaded checkpoint successfully")
             else:
-                print(f"âœ— Checkpoint not found: {checkpoint_path}")
+                print(f"Ã¢Å“â€” Checkpoint not found: {checkpoint_path}")
                 print("  Download from: https://huggingface.co/depth-anything/Depth-Anything-V2-Large")
                 print("  File: depth_anything_v2_vitl.pth")
                 raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
@@ -307,10 +314,10 @@ class DepthPreprocessor:
             self.model.to(self.device)
             self.model.eval()
             
-            print("âœ“ Depth Anything V2 loaded successfully")
+            print("Ã¢Å“â€œ Depth Anything V2 loaded successfully")
             
         except ImportError as e:
-            print(f"âœ— Depth Anything V2 package not installed")
+            print(f"Ã¢Å“â€” Depth Anything V2 package not installed")
             print(f"  Import error: {e}")
             print(f"  Install with: pip install depth-anything-v2 --break-system-packages")
             print(f"  OR clone: git clone https://github.com/DepthAnything/Depth-Anything-V2")
@@ -321,7 +328,7 @@ class DepthPreprocessor:
             self._load_midas("DPT_Large")
             
         except FileNotFoundError as e:
-            print(f"âœ— Depth Anything V2 checkpoint not found: {e}")
+            print(f"Ã¢Å“â€” Depth Anything V2 checkpoint not found: {e}")
             print("  Falling back to MiDaS...")
             self.model_type = DepthModel.MIDAS_LARGE  # FIX: Update type
             self._load_midas("DPT_Large")
@@ -406,7 +413,7 @@ class DepthPreprocessor:
                         break
             
             if not checkpoint_path:
-                print(f"✗ Checkpoint not found. Searched:")
+                print(f"âœ— Checkpoint not found. Searched:")
                 print(f"    - vendor/depth-anything-v2/checkpoints/depth_anything_v2_vitl.pth")
                 print(f"    - ~/ai/models/checkpoints/depth_anything_v2_vitl.pth")
                 print(f"  Download from: https://huggingface.co/depth-anything/Depth-Anything-V2-Large")
@@ -415,27 +422,27 @@ class DepthPreprocessor:
             
             # Load checkpoint
             self.model.load_state_dict(torch.load(str(checkpoint_path), map_location='cpu'))
-            print(f"✓ Loaded checkpoint successfully")
+            print(f"âœ“ Loaded checkpoint successfully")
             
             self.model.to(self.device)
             self.model.eval()
             
-            print("✓ Depth Anything V2 loaded successfully")
+            print("âœ“ Depth Anything V2 loaded successfully")
             
         except ImportError as e:
-            print(f"✗ Depth Anything V2 not available: {e}")
+            print(f"âœ— Depth Anything V2 not available: {e}")
             print("  Falling back to MiDaS...")
             self.model_type = DepthModel.MIDAS_LARGE
             self._load_midas("DPT_Large")
             
         except FileNotFoundError as e:
-            print(f"✗ Checkpoint not found: {e}")
+            print(f"âœ— Checkpoint not found: {e}")
             print("  Falling back to MiDaS...")
             self.model_type = DepthModel.MIDAS_LARGE
             self._load_midas("DPT_Large")
         
         except Exception as e:
-            print(f"✗ Failed to load Depth Anything V2: {e}")
+            print(f"âœ— Failed to load Depth Anything V2: {e}")
             print("  Falling back to MiDaS...")
             self.model_type = DepthModel.MIDAS_LARGE
             self._load_midas("DPT_Large")
@@ -462,10 +469,10 @@ class DepthPreprocessor:
                 device=0 if self.device == "cuda" else -1
             )
             
-            print("âœ“ Depth Anything V3 loaded")
+            print("Ã¢Å“â€œ Depth Anything V3 loaded")
             
         except Exception as e:
-            print(f"âš  Could not load Depth Anything V3: {e}")
+            print(f"Ã¢Å¡Â  Could not load Depth Anything V3: {e}")
             print("  Falling back to V2...")
             self.model_type = DepthModel.DEPTH_ANYTHING_V2  # FIX: Update type
             self._load_depth_anything_v2()
@@ -477,10 +484,10 @@ class DepthPreprocessor:
             self.model = torch.hub.load("isl-org/ZoeDepth", "ZoeD_NK", pretrained=True)
             self.model.to(self.device)
             self.model.eval()
-            print("âœ“ ZoeDepth loaded")
+            print("Ã¢Å“â€œ ZoeDepth loaded")
             
         except Exception as e:
-            print(f"âš  Could not load ZoeDepth: {e}")
+            print(f"Ã¢Å¡Â  Could not load ZoeDepth: {e}")
             print("  Falling back to MiDaS...")
             self.model_type = DepthModel.MIDAS_LARGE  # FIX: Update type
             self._load_midas("DPT_Large")
@@ -636,6 +643,32 @@ class PreprocessorManager:
         self._canny = CannyPreprocessor()
         self._openpose = None  # Lazy load
         self._depth_processors = {}  # Cache depth models
+        
+        self._log("PREPROCESS", f"Initialized with output_dir: {self.output_dir}")
+    
+    def _log(self, category: str, message: str, level: str = "info"):
+        """Simple logging helper"""
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        
+        colors = {
+            'info': '\033[96m',    # cyan
+            'success': '\033[92m', # green
+            'warning': '\033[93m', # yellow
+            'error': '\033[91m',   # red
+            'end': '\033[0m'
+        }
+        
+        symbols = {
+            'info': '',
+            'success': '✓ ',
+            'warning': '⚠ ',
+            'error': '✗ '
+        }
+        
+        color = colors.get(level, colors['info'])
+        symbol = symbols.get(level, '')
+        print(f"{color}[{timestamp}] {symbol}[{category}] {message}{colors['end']}")
     
     def canny(
         self,
@@ -644,7 +677,24 @@ class PreprocessorManager:
         **kwargs
     ) -> Dict[str, Any]:
         """Apply Canny edge detection"""
-        return self._canny.process(image_path, output_path, **kwargs)
+        start_time = time.time()
+        
+        print("\n" + "=" * 60)
+        print("  CANNY EDGE DETECTION")
+        print("=" * 60)
+        print(f"\n  Input: {image_path}")
+        print(f"  Output: {output_path}")
+        print(f"  Parameters:")
+        for key, value in kwargs.items():
+            print(f"    {key}: {value}")
+        print()
+        
+        result = self._canny.process(image_path, output_path, **kwargs)
+        
+        elapsed = time.time() - start_time
+        self._log("CANNY", f"Complete in {elapsed:.2f}s -> {result.get('output_path')}", "success")
+        
+        return result
     
     def openpose(
         self,
@@ -653,9 +703,29 @@ class PreprocessorManager:
         **kwargs
     ) -> Dict[str, Any]:
         """Apply OpenPose pose estimation"""
+        start_time = time.time()
+        
+        print("\n" + "=" * 60)
+        print("  OPENPOSE POSE ESTIMATION")
+        print("=" * 60)
+        print(f"\n  Input: {image_path}")
+        print(f"  Output: {output_path}")
+        print(f"  Parameters:")
+        for key, value in kwargs.items():
+            print(f"    {key}: {value}")
+        print()
+        
         if self._openpose is None:
+            self._log("OPENPOSE", "Loading OpenPose model (first use)...")
             self._openpose = OpenPosePreprocessor()
-        return self._openpose.process(image_path, output_path, **kwargs)
+            self._log("OPENPOSE", "Model loaded", "success")
+        
+        result = self._openpose.process(image_path, output_path, **kwargs)
+        
+        elapsed = time.time() - start_time
+        self._log("OPENPOSE", f"Complete in {elapsed:.2f}s -> {result.get('output_path')}", "success")
+        
+        return result
     
     def depth(
         self,
@@ -673,8 +743,28 @@ class PreprocessorManager:
             model: Which depth model to use
             **kwargs: Additional parameters (invert, normalize, colormap)
         """
+        start_time = time.time()
+        
+        print("\n" + "=" * 60)
+        print("  DEPTH ESTIMATION")
+        print("=" * 60)
+        print(f"\n  Input: {image_path}")
+        print(f"  Output: {output_path}")
+        print(f"  Model: {model.value}")
+        print(f"  Parameters:")
+        for key, value in kwargs.items():
+            print(f"    {key}: {value}")
+        print()
+        
         # Cache depth processors by model type
         if model not in self._depth_processors:
+            self._log("DEPTH", f"Loading {model.value} model (first use)...")
             self._depth_processors[model] = DepthPreprocessor(model, config_path=self.config_path)
+            self._log("DEPTH", f"{model.value} model loaded", "success")
         
-        return self._depth_processors[model].process(image_path, output_path, **kwargs)
+        result = self._depth_processors[model].process(image_path, output_path, **kwargs)
+        
+        elapsed = time.time() - start_time
+        self._log("DEPTH", f"Complete in {elapsed:.2f}s -> {result.get('output_path')}", "success")
+        
+        return result

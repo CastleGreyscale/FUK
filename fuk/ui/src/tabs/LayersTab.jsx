@@ -5,18 +5,13 @@
  */
 
 import { useState, useMemo, useCallback } from 'react';
-import { Loader2, CheckCircle, Upload } from '../components/Icons';
+import { Loader2, CheckCircle, Layers, Upload } from '../components/Icons';
 import ImageUploader from '../components/ImageUploader';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { buildImageUrl } from '../utils/constants';
 import Footer from '../components/Footer';
 
-// Layers icon
-const Layers = ({ className, style }) => (
-  <svg className={className} style={style} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-  </svg>
-);
+
 
 const DEFAULT_SETTINGS = {
   // Active layers to generate

@@ -109,7 +109,7 @@ class VideoGenerationManager:
         """
         Export generated video to EXR frame sequence
         
-        NOTE: This converts MP4 → EXR which preserves compression artifacts.
+        NOTE: This converts MP4 â†’ EXR which preserves compression artifacts.
         For lossless output, use export_latent_to_exr() instead.
         
         Args:
@@ -150,7 +150,7 @@ class VideoGenerationManager:
             linear=linear
         )
         
-        print(f"✓ Created {len(exr_frames)} EXR frames")
+        print(f"âœ“ Created {len(exr_frames)} EXR frames")
         
         return exr_dir
     
@@ -164,10 +164,10 @@ class VideoGenerationManager:
         Export latent tensor directly to EXR frames (LOSSLESS)
         
         This is the PROPER workflow for professional output:
-          Generation → Latent → VAE decode → EXR
+          Generation â†’ Latent â†’ VAE decode â†’ EXR
         
         Instead of the lossy path:
-          Generation → Latent → VAE decode → MP4 → Extract → EXR
+          Generation â†’ Latent â†’ VAE decode â†’ MP4 â†’ Extract â†’ EXR
         
         Args:
             gen_dir: Generation directory
@@ -203,7 +203,7 @@ class VideoGenerationManager:
             linear=linear
         )
         
-        print(f"✓ Decoded latent to {exr_dir}")
+        print(f"âœ“ Decoded latent to {exr_dir}")
         
         return exr_dir
     

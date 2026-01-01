@@ -93,6 +93,12 @@ export const DEFAULT_VIDEO_SETTINGS = {
 export function buildImageUrl(path) {
   if (!path) return null;
   
+  // New dynamic cache endpoint (project-specific)
+  if (path.startsWith('api/project/cache/')) {
+    return `/${path}`;
+  }
+  
+  // Legacy static cache mount (fallback)
   if (path.startsWith('project-cache/')) {
     return `/${path}`;
   }

@@ -5,7 +5,7 @@
 
 import TabButton from './TabButton';
 import ProgressBar from './ProgressBar';
-import { Camera, Film, Pipeline, Enhance, Save, Zap, Loader2, X } from './Icons';
+import { Camera, Film, Pipeline, Enhance, Save, FukMonogram, Loader2, X, Layers } from './Icons';
 
 export default function Footer({
   activeTab,
@@ -60,7 +60,7 @@ export default function Footer({
           <TabButton
             active={activeTab === 'layers'}
             onClick={() => setActiveTab('layers')}
-            icon={<Enhance style={{ width: '1rem', height: '1rem' }} />}
+            icon={<Layers style={{ width: '1rem', height: '1rem' }} />}
             label="Layers"
           />
           <TabButton
@@ -86,7 +86,7 @@ export default function Footer({
             </>
           ) : (
             <>
-              <Zap style={{ width: '1.25rem', height: '1.25rem' }} />
+              <FukMonogram style={{ width: '1.25rem', height: '1.25rem' }} />
               {generateLabel}
             </>
           )}

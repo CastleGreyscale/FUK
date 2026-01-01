@@ -34,3 +34,4 @@ __pycache__/
 **/inputs/
 _old
 node_modules
+offline
