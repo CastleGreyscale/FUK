@@ -38,7 +38,8 @@ from project_endpoints import (
     build_output_paths,
     get_project_relative_url,
     save_generation_metadata,
-    get_cache_root
+    get_cache_root,
+    get_default_cache_root
 )
 
 # ============================================================================
@@ -160,6 +161,7 @@ try:
     from core.video_generation_manager import VideoGenerationManager
     from core.format_convert import FormatConverter
     from core.preprocessors import PreprocessorManager, DepthModel
+    from core.postprocessors import PostProcessorManager
     print("[STARTUP] ✓ Loaded modules from core/")
 except ImportError as e:
     print(f"\n{'='*60}")
@@ -288,6 +290,7 @@ video_generator = WanVideoGenerator(CONFIG_PATH, MUSUBI_PATH, DEFAULTS_PATH)
 image_manager = ImageGenerationManager(OUTPUT_ROOT / "image")
 video_manager = VideoGenerationManager(OUTPUT_ROOT / "video")
 preprocessor_manager = PreprocessorManager(OUTPUT_ROOT / "preprocessed")
+postprocessor_manager = PostProcessorManager(OUTPUT_ROOT / "postprocessed")
 
 # ============================================================================
 # Path Resolution Helper
@@ -299,26 +302,28 @@ def resolve_input_path(path_str: str) -> Optional[Path]:
     
     Handles:
     - Already absolute paths -> return as-is
-    - URL paths: api/project/cache/... -> try cache_root, fallback to CACHE_ROOT
-    - URL paths: project-cache/... -> cache_root/...  (legacy)
+    - URL paths: api/project/cache/... -> project cache / relative
+    - URL paths: project-cache/... -> project cache / relative (legacy)
     - Relative paths: uploads/... -> OUTPUT_ROOT/uploads/...
     - Other relative paths -> OUTPUT_ROOT/path
     
-    Args:
-        path_str: Path string from frontend (URL or relative)
-        
-    Returns:
-        Absolute Path to file, or None if path_str is empty
+    Falls back to checking BOTH project cache and default cache when files
+    aren't found at the expected location.
     """
     if not path_str:
         return None
     
     # Get current cache root from project system
     cache_root = get_cache_root()
+    default_cache = get_default_cache_root() or CACHE_ROOT
     
+    print(f"[PATH] ========================================", flush=True)
     print(f"[PATH] Resolving: {path_str}", flush=True)
     print(f"[PATH] Project cache: {cache_root}", flush=True)
-    print(f"[PATH] Default cache: {CACHE_ROOT}", flush=True)
+    print(f"[PATH] Default cache: {default_cache}", flush=True)
+    
+    if cache_root is None:
+        print(f"[PATH] ⚠️  WARNING: No project cache set! Is a project loaded?", flush=True)
     
     p = Path(path_str)
     
@@ -330,23 +335,33 @@ def resolve_input_path(path_str: str) -> Optional[Path]:
     # URL path from dynamic cache endpoint: api/project/cache/...
     if path_str.startswith('api/project/cache/'):
         relative = path_str.replace('api/project/cache/', '', 1)
+        print(f"[PATH] Relative from URL: {relative}", flush=True)
         
-        # Try project cache first
+        # Try project cache first if set
         if cache_root:
             resolved = cache_root / relative
+            print(f"[PATH] Project cache path: {resolved}", flush=True)
             if resolved.exists():
-                print(f"[PATH] -> From project cache: {resolved}", flush=True)
+                print(f"[PATH] ✓ File exists in project cache", flush=True)
                 return resolved
+            else:
+                print(f"[PATH] ⚠️  File NOT found in project cache, checking default...", flush=True)
         
-        # Fallback to default cache
-        resolved = CACHE_ROOT / relative
-        if resolved.exists():
-            print(f"[PATH] -> From default cache (fallback): {resolved}", flush=True)
+        # Fall back to default cache
+        if default_cache:
+            default_resolved = default_cache / relative
+            print(f"[PATH] Default cache path: {default_resolved}", flush=True)
+            if default_resolved.exists():
+                print(f"[PATH] ✓ File found in default cache (fallback)", flush=True)
+                return default_resolved
+        
+        # If still not found, return project cache path (for creation) or default
+        if cache_root:
+            print(f"[PATH] File not found anywhere, using project cache: {resolved}", flush=True)
             return resolved
         
-        # Return project cache path even if doesn't exist (for error messages)
-        resolved = (cache_root / relative) if cache_root else (CACHE_ROOT / relative)
-        print(f"[PATH] -> Not found, returning: {resolved}", flush=True)
+        resolved = default_cache / relative
+        print(f"[PATH] Using default cache (no project): {resolved}", flush=True)
         return resolved
     
     # Legacy URL path: project-cache/...
@@ -357,12 +372,23 @@ def resolve_input_path(path_str: str) -> Optional[Path]:
         if cache_root:
             resolved = cache_root / relative
             if resolved.exists():
-                print(f"[PATH] -> From project cache: {resolved}", flush=True)
+                print(f"[PATH] -> Found in project cache (legacy URL): {resolved}", flush=True)
                 return resolved
         
-        # Fallback to default cache
-        resolved = CACHE_ROOT / relative
-        print(f"[PATH] -> From legacy URL: {resolved}", flush=True)
+        # Fall back to default
+        if default_cache:
+            default_resolved = default_cache / relative
+            if default_resolved.exists():
+                print(f"[PATH] -> Found in default cache (legacy URL fallback): {default_resolved}", flush=True)
+                return default_resolved
+        
+        # Return project cache path for creation, or default
+        if cache_root:
+            print(f"[PATH] -> From project cache (legacy URL): {resolved}", flush=True)
+            return resolved
+        
+        resolved = default_cache / relative
+        print(f"[PATH] -> From default cache (legacy URL): {resolved}", flush=True)
         return resolved
     
     # Uploads directory
@@ -371,28 +397,27 @@ def resolve_input_path(path_str: str) -> Optional[Path]:
         print(f"[PATH] -> From uploads: {resolved}", flush=True)
         return resolved
     
-    # Other relative path - try OUTPUT_ROOT first
+    # Other relative path - try various locations
     resolved = OUTPUT_ROOT / path_str
     if resolved.exists():
         print(f"[PATH] -> From OUTPUT_ROOT: {resolved}", flush=True)
         return resolved
     
-    # Try project cache
     if cache_root:
         cache_resolved = cache_root / path_str
         if cache_resolved.exists():
             print(f"[PATH] -> From project cache: {cache_resolved}", flush=True)
             return cache_resolved
     
-    # Try default cache
-    default_cache_resolved = CACHE_ROOT / path_str
-    if default_cache_resolved.exists():
-        print(f"[PATH] -> From default cache: {default_cache_resolved}", flush=True)
-        return default_cache_resolved
+    if default_cache:
+        default_cache_resolved = default_cache / path_str
+        if default_cache_resolved.exists():
+            print(f"[PATH] -> From default cache: {default_cache_resolved}", flush=True)
+            return default_cache_resolved
     
-    # Return OUTPUT_ROOT version even if doesn't exist (will be caught later)
     print(f"[PATH] -> Default (OUTPUT_ROOT): {resolved}", flush=True)
     return resolved
+
 
 # ============================================================================
 # Request/Response Models
@@ -442,6 +467,18 @@ class GenerationResponse(BaseModel):
     status: str
     message: str
     
+class UpscaleRequest(BaseModel):
+    source_path: str
+    scale: int = 4
+    model: str = "realesrgan"
+    denoise: float = 0.5
+
+class InterpolateRequest(BaseModel):
+    source_path: str
+    source_fps: int = 16
+    target_fps: int = 24
+    model: str = "rife"
+
 class GenerationStatus(BaseModel):
     generation_id: str
     status: str  # queued, running, complete, failed
@@ -451,26 +488,26 @@ class GenerationStatus(BaseModel):
     error: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
 
-    class PreprocessRequest(BaseModel):
-        image_path: str
-        method: str  # 'canny', 'openpose', 'depth'
-        
-        # Canny parameters
-        low_threshold: int = 100
-        high_threshold: int = 200
-        canny_invert: bool = False
-        blur_kernel: int = 3
-        
-        # OpenPose parameters
-        detect_body: bool = True
-        detect_hand: bool = False
-        detect_face: bool = False
-        
-        # Depth parameters
-        depth_model: str = "depth_anything_v2"
-        depth_invert: bool = False
-        depth_normalize: bool = True
-        depth_colormap: Optional[str] = "inferno"
+class PreprocessRequest(BaseModel):
+    image_path: str
+    method: str  # 'canny', 'openpose', 'depth'
+    
+    # Canny parameters
+    low_threshold: int = 100
+    high_threshold: int = 200
+    canny_invert: bool = False
+    blur_kernel: int = 3
+    
+    # OpenPose parameters
+    detect_body: bool = True
+    detect_hand: bool = False
+    detect_face: bool = False
+    
+    # Depth parameters
+    depth_model: str = "depth_anything_v2"
+    depth_invert: bool = False
+    depth_normalize: bool = True
+    depth_colormap: Optional[str] = "inferno"
 
 # ============================================================================
 # Progress Tracking
@@ -1568,6 +1605,202 @@ async def get_preprocessor_models():
                     "default": "inferno",
                     "options": [None, "inferno", "viridis", "magma", "plasma", "turbo"]
                 },
+            }
+        }
+    }
+
+# ============================================================================
+# Post-Processing Endpoints
+# ============================================================================
+
+@app.post("/api/postprocess/upscale")
+async def upscale_image(request: UpscaleRequest):
+    """
+    Upscale an image using Real-ESRGAN or Lanczos
+    
+    Supports 2x, 4x, and 8x upscaling
+    """
+    try:
+        print(f"\n{'='*60}")
+        print(f"UPSCALE REQUEST")
+        print(f"{'='*60}")
+        print(f"  Source: {request.source_path}")
+        print(f"  Scale: {request.scale}x")
+        print(f"  Model: {request.model}")
+        print(f"  Denoise: {request.denoise}")
+        
+        # Resolve input path
+        source_path = resolve_input_path(request.source_path)
+        if not source_path:
+            raise HTTPException(status_code=400, detail=f"Source file not found: {request.source_path}")
+        
+        # Generate output directory and path
+        gen_dir = get_generation_output_dir(f"upscale_{request.scale}x")
+        output_path = gen_dir / f"upscaled_{request.scale}x.png"
+        
+        # Run upscaling
+        result = postprocessor_manager.upscale_image(
+            input_path=source_path,
+            output_path=output_path,
+            scale=request.scale,
+            model=request.model,
+            denoise=request.denoise,
+        )
+        
+        # Get dimensions
+        from PIL import Image
+        with Image.open(output_path) as img:
+            output_width, output_height = img.size
+        with Image.open(source_path) as img:
+            input_width, input_height = img.size
+        
+        # Save metadata
+        save_generation_metadata(
+            gen_dir=gen_dir,
+            prompt=f"Upscale {request.scale}x ({request.model})",
+            model=request.model,
+            seed=None,
+            image_size=(output_width, output_height),
+            source_image=str(source_path),
+            parameters={
+                "scale": request.scale,
+                "denoise": request.denoise,
+                "method": result.get("method", "unknown"),
+            },
+        )
+        
+        # Build URL using project-relative path (IMPORTANT!)
+        output_url = get_project_relative_url(output_path)
+        
+        print(f"✓ Upscaled: {input_width}x{input_height} -> {output_width}x{output_height}")
+        print(f"  Output URL: {output_url}")
+        
+        return {
+            "success": True,
+            "output_path": str(output_path),
+            "output_url": output_url,
+            "input_size": {"width": input_width, "height": input_height},
+            "output_size": {"width": output_width, "height": output_height},
+            "scale": request.scale,
+            "model": request.model,
+            "method": result.get("method", "unknown"),
+        }
+        
+    except Exception as e:
+        print(f"✗ Upscaling failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/postprocess/interpolate")
+async def interpolate_video(request: InterpolateRequest):
+    """
+    Interpolate video frames to increase framerate
+    
+    Uses RIFE for AI-based interpolation with OpenCV blend fallback
+    """
+    try:
+        print(f"\n{'='*60}")
+        print(f"INTERPOLATION REQUEST")
+        print(f"{'='*60}")
+        print(f"  Source: {request.source_path}")
+        print(f"  Source FPS: {request.source_fps}")
+        print(f"  Target FPS: {request.target_fps}")
+        print(f"  Model: {request.model}")
+        
+        # Resolve input path
+        source_path = resolve_input_path(request.source_path)
+        if not source_path:
+            raise HTTPException(status_code=400, detail=f"Source file not found: {request.source_path}")
+        
+        # Generate output directory and path
+        gen_dir = get_generation_output_dir(f"interpolate_{request.target_fps}fps")
+        output_path = gen_dir / f"interpolated_{request.target_fps}fps.mp4"
+        
+        # Run interpolation
+        result = postprocessor_manager.interpolate_video(
+            input_path=source_path,
+            output_path=output_path,
+            source_fps=request.source_fps,
+            target_fps=request.target_fps,
+            model=request.model,
+        )
+        
+        # Save metadata
+        save_generation_metadata(
+            gen_dir=gen_dir,
+            prompt=f"Interpolate {request.source_fps}fps -> {request.target_fps}fps",
+            model=request.model,
+            seed=None,
+            image_size=(0, 0),
+            source_image=str(source_path),
+            parameters={
+                "source_fps": request.source_fps,
+                "target_fps": request.target_fps,
+                "multiplier": result.get("multiplier", 0),
+                "method": result.get("method", "unknown"),
+            },
+        )
+        
+        # Build URL using project-relative path (IMPORTANT!)
+        output_url = get_project_relative_url(output_path)
+        
+        multiplier = result.get("multiplier", round(request.target_fps / request.source_fps))
+        print(f"✓ Interpolated: {request.source_fps}fps -> {request.target_fps}fps ({multiplier}x)")
+        print(f"  Output URL: {output_url}")
+        
+        return {
+            "success": True,
+            "output_path": str(output_path),
+            "output_url": output_url,
+            "source_fps": request.source_fps,
+            "target_fps": request.target_fps,
+            "multiplier": multiplier,
+            "model": request.model,
+            "method": result.get("method", "unknown"),
+        }
+        
+    except Exception as e:
+        print(f"✗ Interpolation failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/postprocess/capabilities")
+async def get_postprocess_capabilities():
+    """Get available post-processing capabilities"""
+    return postprocessor_manager.get_capabilities()
+
+
+@app.get("/api/postprocess/models")
+async def get_postprocessor_models():
+    """Get available post-processor models and their info"""
+    return {
+        "upscaling": {
+            "realesrgan": {
+                "name": "Real-ESRGAN",
+                "description": "AI-based photo-realistic upscaling",
+                "scales": [2, 4, 8],
+                "parameters": {
+                    "denoise": {"type": "float", "default": 0.5, "min": 0, "max": 1},
+                }
+            },
+            "lanczos": {
+                "name": "Lanczos",
+                "description": "Fast traditional upscaling (fallback)",
+                "scales": [2, 4, 8],
+                "parameters": {}
+            }
+        },
+        "interpolation": {
+            "rife": {
+                "name": "RIFE",
+                "description": "Real-Time Intermediate Flow Estimation",
+                "source_fps": [8, 12, 16, 24],
+                "target_fps": [24, 30, 60],
+                "parameters": {}
             }
         }
     }

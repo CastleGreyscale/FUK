@@ -12,29 +12,47 @@ export function useGeneration() {
   const [progress, setProgress] = useState(null);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
-  const [startTime, setStartTime] = useState(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   
   // Ref to track if component is mounted
   const mountedRef = useRef(true);
+  // Ref to track start time (using ref to avoid dependency issues)
+  const startTimeRef = useRef(null);
+  // Ref to track timer interval
+  const timerRef = useRef(null);
   
   useEffect(() => {
     mountedRef.current = true;
-    return () => { mountedRef.current = false; };
+    return () => { 
+      mountedRef.current = false;
+      // Clean up timer on unmount
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+    };
   }, []);
 
-  // Timer for elapsed time
+  // Start/stop timer based on generating state
   useEffect(() => {
-    if (!generating || !startTime) return;
-    
-    const interval = setInterval(() => {
-      if (mountedRef.current) {
-        setElapsedSeconds(Math.floor((Date.now() - startTime) / 1000));
-      }
-    }, 1000);
-    
-    return () => clearInterval(interval);
-  }, [generating, startTime]);
+    if (generating && startTimeRef.current) {
+      // Start the timer
+      console.log('[useGeneration] Starting timer');
+      timerRef.current = setInterval(() => {
+        if (mountedRef.current && startTimeRef.current) {
+          const elapsed = Math.floor((Date.now() - startTimeRef.current) / 1000);
+          setElapsedSeconds(elapsed);
+        }
+      }, 1000);
+      
+      return () => {
+        console.log('[useGeneration] Stopping timer');
+        if (timerRef.current) {
+          clearInterval(timerRef.current);
+          timerRef.current = null;
+        }
+      };
+    }
+  }, [generating]);
 
   // SSE progress stream
   useEffect(() => {
@@ -56,7 +74,11 @@ export function useGeneration() {
         // onComplete
         (data) => {
           if (!mountedRef.current) return;
-          console.log('[useGeneration] Complete:', data);
+          const finalElapsed = startTimeRef.current 
+            ? Math.floor((Date.now() - startTimeRef.current) / 1000)
+            : 0;
+          console.log('[useGeneration] Complete:', data, `(${finalElapsed}s)`);
+          setElapsedSeconds(finalElapsed);  // Set final elapsed time
           setResult(data);
           setGenerating(false);
         },
@@ -84,11 +106,11 @@ export function useGeneration() {
 
   const startGeneration = useCallback((id) => {
     console.log('[useGeneration] Starting generation:', id);
+    startTimeRef.current = Date.now();  // Set start time using ref
     setGenerating(true);
     setProgress(null);
     setResult(null);
     setError(null);
-    setStartTime(Date.now());
     setElapsedSeconds(0);
     setGenerationId(id);
   }, []);
@@ -113,7 +135,7 @@ export function useGeneration() {
     setProgress(null);
     setResult(null);
     setError(null);
-    setStartTime(null);
+    startTimeRef.current = null;
     setElapsedSeconds(0);
   }, []);
 

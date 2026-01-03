@@ -4,19 +4,31 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { Film, Camera, Clock, Trash2, RefreshCw, ChevronDown, ChevronRight, Enhance } from './Icons';
+import { Film, Camera, Clock, Trash2, RefreshCw, ChevronDown, ChevronRight, Enhance, Zap, ArrowUp } from './Icons';
 import { buildImageUrl, API_URL } from '../utils/constants';
 
 // Draggable thumbnail component
 function DraggableThumbnail({ generation, onDelete }) {
   const [imageError, setImageError] = useState(false);
   
-  const isVideo = generation.type === 'video';
+  const isVideo = generation.type === 'video' || generation.type === 'interpolate';
   const isPreprocess = generation.type === 'preprocess';
+  const isUpscale = generation.type === 'upscale';
+  const isInterpolate = generation.type === 'interpolate';
   const previewUrl = buildImageUrl(generation.preview);
   
-  // Get the appropriate icon
-  const TypeIcon = isVideo ? Film : isPreprocess ? Enhance : Camera;
+  // Get the appropriate icon based on type
+  const getTypeIcon = () => {
+    switch (generation.type) {
+      case 'video': return Film;
+      case 'interpolate': return Zap;
+      case 'upscale': return ArrowUp;
+      case 'preprocess': return Enhance;
+      default: return Camera;
+    }
+  };
+  
+  const TypeIcon = getTypeIcon();
   
   const handleDragStart = (e) => {
     // Set the data being dragged - the path that can be used as input
@@ -97,24 +109,35 @@ export default function GenerationHistory({ project, collapsed, onToggle }) {
   const [error, setError] = useState(null);
 
   // Fetch generations from API
-  const fetchGenerations = useCallback(async () => {
-    if (!project?.isProjectLoaded) {
+  const fetchGenerations = useCallback(async (force = false) => {
+    // Only skip if not forced AND no project loaded
+    if (!force && !project?.isProjectLoaded) {
+      console.log('[History] Skipping fetch - no project loaded');
       setGenerations([]);
       return;
     }
     
+    console.log('[History] Fetching generations...');
     setLoading(true);
     setError(null);
     
     try {
       const res = await fetch(`${API_URL}/project/generations`);
+      console.log('[History] Response status:', res.status);
+      
       if (!res.ok) {
         throw new Error(`Failed to fetch: ${res.statusText}`);
       }
       const data = await res.json();
+      console.log('[History] Got generations:', data.generations?.length || 0);
+      
+      if (data.error) {
+        console.warn('[History] API returned error:', data.error);
+      }
+      
       setGenerations(data.generations || []);
     } catch (err) {
-      console.error('Failed to fetch generations:', err);
+      console.error('[History] Failed to fetch generations:', err);
       setError(err.message);
     } finally {
       setLoading(false);
@@ -125,6 +148,12 @@ export default function GenerationHistory({ project, collapsed, onToggle }) {
   useEffect(() => {
     fetchGenerations();
   }, [fetchGenerations, project?.currentFilename]);
+
+  // Manual refresh - always force fetch
+  const handleRefresh = () => {
+    console.log('[History] Manual refresh clicked');
+    fetchGenerations(true);
+  };
 
   // Group by date
   const groupedGenerations = generations.reduce((groups, gen) => {
@@ -177,13 +206,15 @@ export default function GenerationHistory({ project, collapsed, onToggle }) {
             {counts.image > 0 && <span className="count-badge image"><Camera /> {counts.image}</span>}
             {counts.video > 0 && <span className="count-badge video"><Film /> {counts.video}</span>}
             {counts.preprocess > 0 && <span className="count-badge preprocess"><Enhance /> {counts.preprocess}</span>}
+            {counts.upscale > 0 && <span className="count-badge upscale"><ArrowUp /> {counts.upscale}</span>}
+            {counts.interpolate > 0 && <span className="count-badge interpolate"><Zap /> {counts.interpolate}</span>}
           </span>
         </div>
         
         <div className="gen-history-actions">
           <button 
             className="gen-history-refresh"
-            onClick={fetchGenerations}
+            onClick={handleRefresh}
             disabled={loading}
             title="Refresh"
           >
@@ -198,7 +229,7 @@ export default function GenerationHistory({ project, collapsed, onToggle }) {
         ) : error ? (
           <div className="gen-history-error">
             {error}
-            <button onClick={fetchGenerations}>Retry</button>
+            <button onClick={handleRefresh}>Retry</button>
           </div>
         ) : generations.length === 0 ? (
           <div className="gen-history-empty">

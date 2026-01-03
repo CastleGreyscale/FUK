@@ -3,7 +3,7 @@
  * Main UI for Qwen image generation
  */
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Camera, Loader2, CheckCircle, X, Pipeline } from '../../src/components/Icons';
 import TabButton from '../components/TabButton';
 import ProgressBar from '../components/ProgressBar';
@@ -47,18 +47,26 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
     return { ...initialDefaults, ...localFormData };
   }, [project?.projectState?.tabs?.image, localFormData, initialDefaults]);
 
+  // Ref to track latest formData for setFormData callback
+  const formDataRef = useRef(formData);
+  useEffect(() => {
+    formDataRef.current = formData;
+  }, [formData]);
+
   // Update function that writes to project or localStorage
+  // Uses ref to avoid dependency on formData which causes infinite loops
   const setFormData = useCallback((updater) => {
+    const currentData = formDataRef.current;
     const newData = typeof updater === 'function' 
-      ? updater(formData) 
+      ? updater(currentData) 
       : updater;
     
-    if (project?.isProjectLoaded && project.updateTabState) {
+    if (project?.isProjectLoaded && project?.updateTabState) {
       project.updateTabState('image', newData);
     } else {
       setLocalFormData(newData);
     }
-  }, [project, formData, setLocalFormData]);
+  }, [project?.isProjectLoaded, project?.updateTabState, setLocalFormData]);
 
   // Generation state
   const {
@@ -102,12 +110,24 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
   };
 
   // Update height when aspect ratio changes
+  // Using a ref to track previous values to avoid unnecessary updates
+  const prevDimsRef = useRef({ aspectRatio: null, width: null });
   useEffect(() => {
-    const dims = calculateDimensions(formData.aspectRatio, formData.width || 1024);
+    const { aspectRatio, width } = formData;
+    const prev = prevDimsRef.current;
+    
+    // Only run if aspectRatio or width actually changed
+    if (prev.aspectRatio === aspectRatio && prev.width === width) {
+      return;
+    }
+    
+    prevDimsRef.current = { aspectRatio, width };
+    
+    const dims = calculateDimensions(aspectRatio, width || 1024);
     if (dims.height !== formData.height) {
       setFormData(prev => ({ ...prev, height: dims.height }));
     }
-  }, [formData.aspectRatio, formData.width]);
+  }, [formData.aspectRatio, formData.width, formData.height, setFormData]);
 
   // Update last state and seed when generation completes
   useEffect(() => {
@@ -128,7 +148,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
         }));
       }
     }
-  }, [result, project]);
+  }, [result, project?.updateLastState, setFormData]);
 
   // Determine the seed to use based on mode
   const getEffectiveSeed = useCallback(() => {
@@ -486,6 +506,64 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
             />
           </div>
 
+          {/* Preprocessed Image Card - shows last preprocessing result */}
+          {project?.projectState?.lastState?.lastPreprocessedImage && formData.model === 'qwen_image_2509_edit' && (
+            <div className="fuk-card" >
+              <h3 className="fuk-card-title fuk-mb-3" style={{ color: '#c084fc' }}>
+                Last Preprocessed Image
+              </h3>
+              
+              <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                {/* Thumbnail */}
+                <div style={{ flex: '0 0 120px' }}>
+                  <img
+                    src={project.projectState.lastState.lastPreprocessedImage}
+                    alt="Preprocessed"
+                    style={{
+                      width: '100%',
+                      aspectRatio: '1',
+                      objectFit: 'cover',
+                      borderRadius: '0.375rem',
+                      border: '1px solid #a855f7',
+                    }}
+                  />
+                </div>
+                
+                {/* Info and Actions */}
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: '0.75rem', color: '#c084fc', marginBottom: '0.5rem' }}>
+                    <strong>Method:</strong> {project.projectState.lastState.lastPreprocessedMethod || 'unknown'}
+                  </div>
+                  
+                  <button
+                    className="fuk-btn fuk-btn-secondary"
+                    onClick={() => {
+                      const preprocessedUrl = project.projectState.lastState.lastPreprocessedImage;
+                      // Extract path from URL (remove /outputs/ prefix if present)
+                      const path = preprocessedUrl.replace(/^\/outputs\//, '').replace(/^\//, '');
+                      
+                      // Add to control images if not already present
+                      if (!formData.control_image_paths.includes(path)) {
+                        setFormData(prev => ({
+                          ...prev,
+                          control_image_paths: [...prev.control_image_paths, path]
+                        }));
+                      }
+                    }}
+                    disabled={generating}
+                    style={{ fontSize: '0.875rem' }}
+                  >
+                    <Pipeline style={{ width: '1rem', height: '1rem' }} />
+                    Use as Control Image
+                  </button>
+                  
+                  <p style={{ fontSize: '0.7rem', color: '#9ca3af', marginTop: '0.5rem' }}>
+                    From Pre-Processors tab
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Image Tools Card */}
           <div className="fuk-card">

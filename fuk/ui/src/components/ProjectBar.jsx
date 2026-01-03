@@ -40,6 +40,7 @@ export default function ProjectBar({
   shots,
   currentShotVersions,
   hasUnsavedChanges,
+  isSaving,  // NEW: actual saving in progress
   isLoading,
   hasFiles,
   onBrowseFolder,
@@ -254,10 +255,14 @@ export default function ProjectBar({
       <div className="fuk-project-spacer" />
 
       {/* Autosave Status Indicator */}
-      {hasUnsavedChanges ? (
-        <span className="fuk-autosave-indicator fuk-autosave-pending" title="Autosaving...">
+      {isSaving ? (
+        <span className="fuk-autosave-indicator fuk-autosave-pending" title="Saving...">
           <Loader2 className="animate-spin" style={{ width: '0.875rem', height: '0.875rem' }} />
           <span>Saving...</span>
+        </span>
+      ) : hasUnsavedChanges ? (
+        <span className="fuk-autosave-indicator fuk-autosave-dirty" title="Unsaved changes">
+          <span className="fuk-dirty-dot" />
         </span>
       ) : currentFileInfo && (
         <span className="fuk-autosave-indicator fuk-autosave-saved" title="All changes saved">

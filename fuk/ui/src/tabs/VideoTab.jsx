@@ -3,7 +3,7 @@
  * Wan video generation with I2V, T2V, FLF2V support
  */
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Film, FukMonogram, Loader2, CheckCircle, X, Camera, Pipeline } from '../../src/components/Icons';
 import ImageUploader from '../components/ImageUploader';
 import SeedControl from '../components/SeedControl';
@@ -45,18 +45,26 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
     return { ...initialDefaults, ...localFormData };
   }, [project?.projectState?.tabs?.video, localFormData, initialDefaults]);
 
+  // Ref to track latest formData for setFormData callback
+  const formDataRef = useRef(formData);
+  useEffect(() => {
+    formDataRef.current = formData;
+  }, [formData]);
+
   // Update function that writes to project or localStorage
+  // Uses ref to avoid dependency on formData which causes infinite loops
   const setFormData = useCallback((updater) => {
+    const currentData = formDataRef.current;
     const newData = typeof updater === 'function' 
-      ? updater(formData) 
+      ? updater(currentData) 
       : updater;
     
-    if (project?.isProjectLoaded && project.updateTabState) {
+    if (project?.isProjectLoaded && project?.updateTabState) {
       project.updateTabState('video', newData);
     } else {
       setLocalFormData(newData);
     }
-  }, [project, formData, setLocalFormData]);
+  }, [project?.isProjectLoaded, project?.updateTabState, setLocalFormData]);
 
   // Generation state
   const {
@@ -112,7 +120,7 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
         }));
       }
     }
-  }, [result, project]);
+  }, [result, project?.updateLastState, setFormData]);
 
   // Determine the seed to use based on mode
   const getEffectiveSeed = useCallback(() => {

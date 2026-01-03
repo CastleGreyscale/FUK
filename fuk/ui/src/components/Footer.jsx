@@ -77,11 +77,17 @@ export default function Footer({
         <button
           onClick={onGenerate}
           disabled={generating || !canGenerate}
-          className="fuk-btn fuk-btn-primary"
+          className={`fuk-btn fuk-btn-primary ${generating ? 'fuk-btn-generating' : ''}`}
         >
           {generating ? (
             <>
-              <Loader2 className="animate-spin" style={{ width: '1.25rem', height: '1.25rem' }} />
+              <Loader2 
+                style={{ 
+                  width: '1.25rem', 
+                  height: '1.25rem',
+                  animation: 'spin 1s linear infinite'
+                }} 
+              />
               {generatingLabel}
             </>
           ) : (

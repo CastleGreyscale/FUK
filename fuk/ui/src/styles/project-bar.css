@@ -324,6 +324,23 @@
   background-color: rgba(251, 191, 36, 0.1);
 }
 
+.fuk-autosave-pending svg {
+  animation: spin 1s linear infinite;
+}
+
+.fuk-autosave-dirty {
+  color: #6b7280;
+  background-color: transparent;
+  padding: 0.25rem;
+}
+
+.fuk-dirty-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background-color: #6b7280;
+}
+
 .fuk-autosave-saved {
   color: #10b981;
   background-color: rgba(16, 185, 129, 0.1);

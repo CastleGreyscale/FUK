@@ -1,18 +1,23 @@
 /**
  * Image Uploader Component
  * Handles multi-image upload with thumbnails and drag-drop
- * Supports both file uploads AND internal path drops from GenerationHistory
+ * Supports BOTH file uploads AND internal path drops from GenerationHistory
  */
 
 import { useState } from 'react';
 import { uploadControlImage } from '../utils/api';
+import { X, Upload } from './Icons';
 import { buildImageUrl } from '../utils/constants';
-import { X, Upload, Link } from './Icons';
 
-export default function ImageUploader({ images, onImagesChange, disabled, accept = "image/*" }) {
+export default function ImageUploader({ 
+  images, 
+  onImagesChange, 
+  disabled,
+  accept = 'image/*',  // Can override for video: 'video/*'
+  multiple = true,
+}) {
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
-  const [dragType, setDragType] = useState(null); // 'file' or 'internal'
 
   const handleUpload = async (files) => {
     if (!files || files.length === 0) return;
@@ -26,11 +31,15 @@ export default function ImageUploader({ images, onImagesChange, disabled, accept
         uploadedPaths.push(data.path);
       }
       
-      onImagesChange([...images, ...uploadedPaths]);
-      console.log('✓ Uploaded images:', uploadedPaths);
+      if (multiple) {
+        onImagesChange([...images, ...uploadedPaths]);
+      } else {
+        onImagesChange(uploadedPaths.slice(0, 1));
+      }
+      console.log('✓ Uploaded files:', uploadedPaths);
     } catch (error) {
-      console.error('Image upload failed:', error);
-      alert(`Failed to upload images: ${error.message}`);
+      console.error('Upload failed:', error);
+      alert(`Failed to upload: ${error.message}`);
     } finally {
       setUploading(false);
     }
@@ -43,85 +52,75 @@ export default function ImageUploader({ images, onImagesChange, disabled, accept
   const handleDrop = (e) => {
     e.preventDefault();
     setDragOver(false);
-    setDragType(null);
     
-    // Check for internal FUK generation drop first
-    const fukData = e.dataTransfer.getData('application/x-fuk-generation');
-    if (fukData) {
-      try {
-        const generation = JSON.parse(fukData);
-        const path = generation.path;
-        
-        // Don't add duplicates
-        if (!images.includes(path)) {
-          onImagesChange([...images, path]);
-          console.log('✓ Added from history:', path);
+    // First, check for internal path drop from GenerationHistory
+    const internalPath = e.dataTransfer.getData('text/plain');
+    const generationData = e.dataTransfer.getData('application/x-fuk-generation');
+    
+    if (internalPath && internalPath.startsWith('api/project/cache/')) {
+      // This is an internal drop from history panel
+      console.log('[ImageUploader] Internal drop detected:', internalPath);
+      
+      // Parse generation data for additional info
+      let generation = null;
+      if (generationData) {
+        try {
+          generation = JSON.parse(generationData);
+          console.log('[ImageUploader] Generation data:', generation);
+        } catch (err) {
+          console.warn('[ImageUploader] Failed to parse generation data');
         }
-        return;
-      } catch (err) {
-        console.error('Failed to parse generation data:', err);
       }
-    }
-    
-    // Check for plain text path (simpler drag)
-    const textData = e.dataTransfer.getData('text/plain');
-    if (textData && textData.startsWith('api/project/cache/')) {
-      if (!images.includes(textData)) {
-        onImagesChange([...images, textData]);
-        console.log('✓ Added path:', textData);
+      
+      // Use the path directly - no upload needed
+      if (multiple) {
+        onImagesChange([...images, internalPath]);
+      } else {
+        onImagesChange([internalPath]);
       }
       return;
     }
     
-    // Fall back to file upload
+    // Otherwise, handle file drops from computer
+    const acceptType = accept.replace('/*', '');
     const files = Array.from(e.dataTransfer.files).filter(f => 
-      f.type.startsWith('image/') || (accept !== "image/*" && f.type.startsWith('video/'))
+      f.type.startsWith(acceptType)
     );
     
     if (files.length > 0) {
+      console.log('[ImageUploader] File drop detected:', files.length, 'files');
       handleUpload(files);
+    } else if (internalPath) {
+      // Fallback: try to use any path that was dropped
+      console.log('[ImageUploader] Using fallback path:', internalPath);
+      if (multiple) {
+        onImagesChange([...images, internalPath]);
+      } else {
+        onImagesChange([internalPath]);
+      }
     }
   };
 
   const handleDragOver = (e) => {
     e.preventDefault();
-    
-    // Detect what's being dragged
-    const types = e.dataTransfer.types;
-    if (types.includes('application/x-fuk-generation') || 
-        (types.includes('text/plain') && !types.includes('Files'))) {
-      setDragType('internal');
-    } else {
-      setDragType('file');
-    }
-    
     setDragOver(true);
   };
 
   const handleDragLeave = () => {
     setDragOver(false);
-    setDragType(null);
   };
 
-  // Get display URL for a path
-  const getDisplayUrl = (path) => {
-    // If it's already a full URL or starts with /, use as-is
-    if (path.startsWith('http') || path.startsWith('/')) {
-      return path;
-    }
-    // If it's an api path, build the proper URL
-    if (path.startsWith('api/')) {
-      return buildImageUrl(path);
-    }
-    // Otherwise assume it's relative to outputs
-    return `/${path}`;
+  // Determine if path is video based on extension
+  const isVideo = (path) => {
+    const ext = path.split('.').pop()?.toLowerCase();
+    return ['mp4', 'webm', 'mov', 'avi', 'mkv'].includes(ext);
   };
 
   return (
     <div className="fuk-image-uploader">
       {/* Drop Zone */}
       <div 
-        className={`fuk-dropzone ${dragOver ? 'drag-over' : ''} ${dragType === 'internal' ? 'drag-over-internal' : ''}`}
+        className={`fuk-dropzone ${dragOver ? 'drag-over' : ''}`}
         onDrop={handleDrop}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -129,7 +128,7 @@ export default function ImageUploader({ images, onImagesChange, disabled, accept
         <input
           type="file"
           accept={accept}
-          multiple
+          multiple={multiple}
           onChange={(e) => {
             if (e.target.files && e.target.files.length > 0) {
               handleUpload(Array.from(e.target.files));
@@ -145,22 +144,13 @@ export default function ImageUploader({ images, onImagesChange, disabled, accept
           className="fuk-dropzone-label"
           style={{ cursor: disabled ? 'not-allowed' : 'pointer' }}
         >
-          {dragOver && dragType === 'internal' ? (
-            <>
-              <Link style={{ width: '1.5rem', height: '1.5rem', color: '#10b981', marginBottom: '0.5rem' }} />
-              <span style={{ color: '#10b981' }}>Drop to add from history</span>
-            </>
-          ) : (
-            <>
-              <Upload style={{ width: '1.5rem', height: '1.5rem', opacity: 0.5, marginBottom: '0.5rem' }} />
-              <span>
-                {uploading ? 'Uploading...' : 'Drop images or click to upload'}
-              </span>
-              <span style={{ fontSize: '0.7rem', color: '#6b7280' }}>
-                {images.length} item{images.length !== 1 ? 's' : ''} selected
-              </span>
-            </>
-          )}
+          <Upload style={{ width: '1.5rem', height: '1.5rem', opacity: 0.5, marginBottom: '0.5rem' }} />
+          <span>
+            {uploading ? 'Uploading...' : 'Drop file or drag from History'}
+          </span>
+          <span style={{ fontSize: '0.7rem', color: '#6b7280' }}>
+            {images.length} file{images.length !== 1 ? 's' : ''} selected
+          </span>
         </label>
       </div>
 
@@ -168,30 +158,31 @@ export default function ImageUploader({ images, onImagesChange, disabled, accept
       {images.length > 0 && (
         <div className="fuk-thumbnail-grid">
           {images.map((path, index) => (
-            <div key={index} className="fuk-thumbnail">
-              <img
-                src={getDisplayUrl(path)}
-                alt={`Control ${index + 1}`}
-                onError={(e) => {
-                  e.target.style.display = 'none';
-                  e.target.nextSibling.style.display = 'flex';
-                }}
-              />
-              <div className="fuk-thumbnail-error" style={{ display: 'none' }}>
-                <span>?</span>
-              </div>
+            <div key={`${path}-${index}`} className="fuk-thumbnail">
+              {isVideo(path) ? (
+                <video
+                  src={buildImageUrl(path)}
+                  muted
+                  loop
+                  onMouseEnter={(e) => e.target.play()}
+                  onMouseLeave={(e) => { e.target.pause(); e.target.currentTime = 0; }}
+                />
+              ) : (
+                <img
+                  src={buildImageUrl(path)}
+                  alt={`Input ${index + 1}`}
+                  onError={(e) => {
+                    e.target.style.display = 'none';
+                  }}
+                />
+              )}
               <button
                 onClick={() => handleRemove(index)}
                 className="fuk-thumbnail-remove"
-                title="Remove image"
+                title="Remove"
               >
                 <X style={{ width: '0.75rem', height: '0.75rem' }} />
               </button>
-              {path.startsWith('api/project/cache/') && (
-                <div className="fuk-thumbnail-badge" title="From generation history">
-                  <Link style={{ width: '0.5rem', height: '0.5rem' }} />
-                </div>
-              )}
             </div>
           ))}
         </div>

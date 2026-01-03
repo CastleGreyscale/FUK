@@ -626,6 +626,16 @@
   transform: none;
 }
 
+.fuk-btn-primary.fuk-btn-generating {
+  background: linear-gradient(to right, #6b21a8, #c2410c);
+  animation: pulse-generating 2s ease-in-out infinite;
+}
+
+@keyframes pulse-generating {
+  0%, 100% { box-shadow: 0 2px 8px rgba(168, 85, 247, 0.3); }
+  50% { box-shadow: 0 4px 20px rgba(168, 85, 247, 0.6); }
+}
+
 .fuk-btn-secondary {
   background-color: #374151;
   color: white;

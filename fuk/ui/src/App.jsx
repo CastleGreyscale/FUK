@@ -15,12 +15,12 @@ import { fetchConfig } from './utils/api';
 import { useProject } from './hooks/useProject';
 import { GenerationHistory } from './components';
 
-
 export default function App() {
   const [activeTab, setActiveTab] = useState('image');
   const [config, setConfig] = useState(null);
   const [status, setStatus] = useState('loading');
   const [historyCollapsed, setHistoryCollapsed] = useState(false);
+
   // Project management
   const project = useProject();
 
@@ -32,8 +32,8 @@ export default function App() {
   const loadConfig = async () => {
     try {
       const data = await fetchConfig();
-      console.log('✓ Config loaded:', data);
-      console.log('✓ Available LoRAs:', data.models.loras);
+      console.log('âœ“ Config loaded:', data);
+      console.log('âœ“ Available LoRAs:', data.models.loras);
       setConfig(data);
       setStatus('ready');
     } catch (error) {
@@ -59,7 +59,7 @@ export default function App() {
   const handleSave = useCallback(async () => {
     try {
       await project.save();
-      console.log('✓ Project saved');
+      console.log('âœ“ Project saved');
     } catch (err) {
       alert(`Failed to save: ${err.message}`);
     }
@@ -69,7 +69,7 @@ export default function App() {
   const handleVersionUp = useCallback(async () => {
     try {
       const newFilename = await project.saveAsNewVersion();
-      console.log('✓ New version created:', newFilename);
+      console.log('âœ“ New version created:', newFilename);
     } catch (err) {
       alert(`Failed to create new version: ${err.message}`);
     }
@@ -79,7 +79,7 @@ export default function App() {
   const handleNewShot = useCallback(async (shotNumber) => {
     try {
       const newFilename = await project.createNewShot(shotNumber);
-      console.log('✓ New shot created:', newFilename);
+      console.log('âœ“ New shot created:', newFilename);
     } catch (err) {
       alert(`Failed to create new shot: ${err.message}`);
     }
@@ -89,7 +89,7 @@ export default function App() {
   const handleNewProject = useCallback(async (projectName) => {
     try {
       const newFilename = await project.createProject(projectName);
-      console.log('✓ New project created:', newFilename);
+      console.log('âœ“ New project created:', newFilename);
     } catch (err) {
       alert(`Failed to create project: ${err.message}`);
     }
@@ -186,6 +186,7 @@ export default function App() {
         shots={project.shots}
         currentShotVersions={project.currentShotVersions}
         hasUnsavedChanges={project.hasUnsavedChanges}
+        isSaving={project.isSaving}
         isLoading={project.isLoading}
         hasFiles={project.projectFiles.length > 0}
         onBrowseFolder={handleBrowseFolder}
@@ -200,14 +201,13 @@ export default function App() {
       {/* Main Content */}
       <main className="fuk-main">
         {renderTab()}
+
       </main>
-      <div className="fuk-sidebar">
-          <GenerationHistory 
-            project={project}
-            collapsed={historyCollapsed}
-            onToggle={() => setHistoryCollapsed(!historyCollapsed)}
-          />
-    </div>
+              <GenerationHistory 
+          project={project}
+          collapsed={historyCollapsed}
+          onToggle={() => setHistoryCollapsed(!historyCollapsed)}
+        />
     </div>
   );
 }

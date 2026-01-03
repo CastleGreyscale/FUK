@@ -438,21 +438,30 @@ async def list_generations():
     List all generations in the project cache.
     Returns generation metadata for the history panel.
     """
+    print("[HISTORY] Fetching generations...", flush=True)
+    
     if not _cache_root:
+        print("[HISTORY] No cache root set", flush=True)
         return {"generations": [], "error": "No project loaded"}
     
     try:
         project_cache = get_project_cache_dir()
-    except RuntimeError:
+        print(f"[HISTORY] Project cache dir: {project_cache}", flush=True)
+    except RuntimeError as e:
+        print(f"[HISTORY] Error getting project cache: {e}", flush=True)
         return {"generations": [], "error": "Project system not initialized"}
     
     if not project_cache.exists():
+        print(f"[HISTORY] Project cache doesn't exist: {project_cache}", flush=True)
         return {"generations": []}
     
     generations = []
     
     # Scan all generation directories
-    for gen_dir in sorted(project_cache.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+    dirs = list(project_cache.iterdir())
+    print(f"[HISTORY] Found {len(dirs)} items in cache", flush=True)
+    
+    for gen_dir in sorted(dirs, key=lambda p: p.stat().st_mtime if p.is_dir() else 0, reverse=True):
         if not gen_dir.is_dir():
             continue
         
@@ -463,6 +472,10 @@ async def list_generations():
             gen_type = "preprocess"
         elif gen_name.startswith("video") or gen_name.endswith("_video"):
             gen_type = "video"
+        elif gen_name.startswith("upscale"):
+            gen_type = "upscale"
+        elif gen_name.startswith("interpolate"):
+            gen_type = "interpolate"
         else:
             gen_type = "image"
         
@@ -478,12 +491,24 @@ async def list_generations():
                     output_path = candidate
                     preview_path = candidate
                     break
+        elif gen_type == "interpolate":
+            # Interpolated video output
+            video_files = list(gen_dir.glob("interpolated*.mp4")) + list(gen_dir.glob("interpolated*.webm"))
+            if video_files:
+                output_path = video_files[0]
+                preview_path = output_path
+        elif gen_type == "upscale":
+            # Upscaled image output
+            upscaled_files = list(gen_dir.glob("upscaled*.png")) + list(gen_dir.glob("upscaled*.jpg"))
+            if upscaled_files:
+                output_path = upscaled_files[0]
+                preview_path = output_path
         elif gen_type == "preprocess":
-            # Preprocessor output is processed.png
-            candidate = gen_dir / "processed.png"
-            if candidate.exists():
-                output_path = candidate
-                preview_path = candidate
+            # Preprocessor output is processed*.png (may have suffix like processed_abc123.png)
+            processed_files = list(gen_dir.glob("processed*.png"))
+            if processed_files:
+                output_path = processed_files[0]  # Take first match
+                preview_path = output_path
         else:
             # Image generation - look for generated.png
             for ext in [".png", ".jpg", ".jpeg"]:
@@ -494,7 +519,10 @@ async def list_generations():
                     break
         
         if not output_path:
+            print(f"[HISTORY]   {gen_name}: no output file found, skipping", flush=True)
             continue
+        
+        print(f"[HISTORY]   {gen_name}: {gen_type} -> {output_path.name}", flush=True)
         
         # Get file stats
         stat = output_path.stat()
@@ -527,6 +555,12 @@ async def list_generations():
             "seed": metadata.get("seed"),
             "model": metadata.get("model", ""),
         })
+    
+    # Summary
+    types = {}
+    for g in generations:
+        types[g['type']] = types.get(g['type'], 0) + 1
+    print(f"[HISTORY] Returning {len(generations)} generations: {types}", flush=True)
     
     return {"generations": generations}
 
@@ -569,11 +603,6 @@ async def delete_generation(gen_id: str):
 def setup_project_routes(app):
     """Setup project routes on FastAPI app"""
     app.include_router(router)
-
-
-def get_cache_root() -> Optional[Path]:
-    """Get current cache root (for external use)"""
-    return _cache_root
 
 
 # ============================================================================
@@ -650,3 +679,27 @@ async def serve_cache_file(file_path: str):
         media_type=content_type,
         filename=full_path.name
     )
+
+@router.get("/debug")
+async def debug_project_state():
+    """Debug endpoint to check project system state"""
+    return {
+        "project_folder": str(_project_folder) if _project_folder else None,
+        "cache_root": str(_cache_root) if _cache_root else None,
+        "default_cache_root": str(_default_cache_root) if _default_cache_root else None,
+        "cache_exists": _cache_root.exists() if _cache_root else False,
+        "project_state_keys": list(_project_state.keys()) if _project_state else [],
+    }
+
+def get_cache_root() -> Optional[Path]:
+    """Get current cache root (for external use)"""
+    global _cache_root
+    # Add debug logging
+    if _cache_root is None:
+        print(f"[PROJECT] get_cache_root() -> None (no project loaded)", flush=True)
+    return _cache_root
+
+
+def get_default_cache_root() -> Optional[Path]:
+    """Get the default cache root (original location before any project was opened)"""
+    return _default_cache_root

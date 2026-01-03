@@ -3,7 +3,7 @@
  * Image preprocessing for control inputs: Canny, OpenPose, Depth
  */
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Pipeline, Loader2, CheckCircle, Camera } from '../../src/components/Icons';
 import TabButton from '../components/TabButton';
 import ImageUploader from '../components/ImageUploader';
@@ -53,15 +53,22 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
     return { ...DEFAULT_SETTINGS, ...localSettings };
   }, [project?.projectState?.tabs?.preprocess, localSettings]);
   
+  // Ref to track latest settings for updateSettings callback
+  const settingsRef = useRef(settings);
+  useEffect(() => {
+    settingsRef.current = settings;
+  }, [settings]);
+  
   const updateSettings = useCallback((methodUpdates) => {
-    const newSettings = { ...settings, ...methodUpdates };
+    const currentSettings = settingsRef.current;
+    const newSettings = { ...currentSettings, ...methodUpdates };
     
-    if (project?.isProjectLoaded && project.updateTabState) {
+    if (project?.isProjectLoaded && project?.updateTabState) {
       project.updateTabState('preprocess', newSettings);
     } else {
       setLocalSettings(newSettings);
     }
-  }, [project, settings, setLocalSettings]);
+  }, [project?.isProjectLoaded, project?.updateTabState, setLocalSettings]);
   
   // Current method settings
   const currentSettings = settings[selectedMethod] || DEFAULT_SETTINGS[selectedMethod];
@@ -321,9 +328,9 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
           </div>
           
           <p style={{ fontSize: '0.75rem', color: '#9ca3af', marginTop: '1rem' }}>
-            {currentSettings.depth_model === 'depth_anything_v2' && 'âœ“ Recommended: Best quality/speed balance'}
-            {currentSettings.depth_model === 'depth_anything_v3' && 'âš¡ Latest model with improved detail'}
-            {currentSettings.depth_model === 'midas_small' && 'âš¡ Fastest processing'}
+            {currentSettings.depth_model === 'depth_anything_v2' && 'Ã¢Å“â€œ Recommended: Best quality/speed balance'}
+            {currentSettings.depth_model === 'depth_anything_v3' && 'Ã¢Å¡Â¡ Latest model with improved detail'}
+            {currentSettings.depth_model === 'midas_small' && 'Ã¢Å¡Â¡ Fastest processing'}
             {currentSettings.depth_model === 'midas_large' && 'Good quality, widely compatible'}
             {currentSettings.depth_model === 'zoedepth' && 'Metric depth estimation'}
           </p>

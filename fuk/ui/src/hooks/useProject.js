@@ -43,6 +43,7 @@ export function useProject() {
   
   // UI state
   const [isLoading, setIsLoading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);  // NEW: actual save in progress
   const [error, setError] = useState(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [lastSaved, setLastSaved] = useState(null);
@@ -430,6 +431,7 @@ export function useProject() {
     // Set new autosave timer
     autosaveTimerRef.current = setTimeout(async () => {
       try {
+        setIsSaving(true);  // Show saving indicator
         console.log('[Project] Autosaving...');
         const stateToSave = {
           ...projectState,
@@ -446,6 +448,8 @@ export function useProject() {
       } catch (err) {
         console.error('[Project] Autosave failed:', err);
         // Don't clear hasUnsavedChanges on error - will retry
+      } finally {
+        setIsSaving(false);  // Hide saving indicator
       }
     }, AUTOSAVE_DELAY);
 
@@ -493,6 +497,7 @@ export function useProject() {
     
     // Status
     isLoading,
+    isSaving,  // NEW
     error,
     hasUnsavedChanges,
     lastSaved,
