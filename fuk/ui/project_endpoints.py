@@ -3,13 +3,13 @@ Project Endpoints and Cache Management
 Handles project-aware output directories and file serving
 """
 
-from fastapi import APIRouter, HTTPException, Body
+from fastapi import APIRouter, HTTPException, Body, Query
 from fastapi.responses import FileResponse
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import json
 import mimetypes
-from datetime import datetime
+from datetime import datetime, timedelta
 import tkinter as tk
 from tkinter import filedialog
 
@@ -224,6 +224,60 @@ async def browse_folder():
         return {"error": str(e), "cancelled": True}
 
 
+@router.post("/browse-save")
+async def browse_save_location(data: dict = Body(...)):
+    """
+    Open native save file dialog.
+    
+    Args (in body):
+        title: Dialog title
+        defaultName: Default filename
+        fileTypes: List of [description, pattern] tuples
+        initialDir: Starting directory (optional)
+    
+    Returns:
+        path: Selected file path or None if cancelled
+        cancelled: True if user cancelled
+    """
+    print("[PROJECT] Opening save dialog...", flush=True)
+    
+    try:
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes('-topmost', True)
+        
+        # Parse file types
+        file_types = data.get('fileTypes', [['All Files', '*.*']])
+        tk_filetypes = [(desc, pattern) for desc, pattern in file_types]
+        
+        # Get initial directory
+        initial_dir = data.get('initialDir')
+        if not initial_dir and _project_folder:
+            initial_dir = str(_project_folder)
+        
+        # Open save dialog
+        file_path = filedialog.asksaveasfilename(
+            title=data.get('title', 'Save File'),
+            initialfile=data.get('defaultName', ''),
+            initialdir=initial_dir,
+            filetypes=tk_filetypes,
+            defaultextension='.exr',
+        )
+        
+        root.destroy()
+        
+        if file_path:
+            print(f"[PROJECT] User selected save location: {file_path}", flush=True)
+            return {"path": file_path, "cancelled": False}
+        else:
+            print("[PROJECT] User cancelled save dialog", flush=True)
+            return {"path": None, "cancelled": True}
+            
+    except Exception as e:
+        print(f"[PROJECT] ✗ Save dialog error: {e}", flush=True)
+        return {"error": str(e), "cancelled": True}
+
+
 @router.post("/set-folder")
 async def set_folder(data: dict = Body(...)):
     """Set the active project folder and update cache location"""
@@ -239,19 +293,14 @@ async def set_folder(data: dict = Body(...)):
     
     _project_folder = folder
     
-    # IMPORTANT: Set cache root to be inside the project folder
-    # This ensures all generations go to projectname/project/fuk/cache/
+    # Update cache root to be inside the project folder
     _cache_root = folder / "cache"
     _cache_root.mkdir(exist_ok=True, parents=True)
     
-    print(f"[PROJECT] ✓ Project folder set: {folder}", flush=True)
-    print(f"[PROJECT] ✓ Cache root updated: {_cache_root}", flush=True)
+    print(f"[PROJECT] Set project folder: {folder}", flush=True)
+    print(f"[PROJECT] Cache root updated to: {_cache_root}", flush=True)
     
-    return {
-        "folder": str(folder), 
-        "cacheFolder": str(_cache_root),
-        "success": True
-    }
+    return {"folder": str(folder), "success": True, "cacheRoot": str(_cache_root)}
 
 
 @router.get("/current")
@@ -315,11 +364,9 @@ async def load_file(filename: str):
 async def save_file(filename: str, state: dict = Body(...)):
     """Save project state to file"""
     if not _project_folder:
-        raise HTTPException(status_code=400, detail="No project folder set. Please open a project folder first.")
+        raise HTTPException(status_code=400, detail="No project folder set")
     
     file_path = _project_folder / filename
-    
-    print(f"[PROJECT] Saving: {file_path}", flush=True)
     
     try:
         with open(file_path, 'w') as f:
@@ -329,10 +376,8 @@ async def save_file(filename: str, state: dict = Body(...)):
         global _project_state
         _project_state = state
         
-        print(f"[PROJECT] ✓ Saved successfully", flush=True)
         return {"success": True, "path": str(file_path)}
     except Exception as e:
-        print(f"[PROJECT] ✗ Save failed: {e}", flush=True)
         raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
 
 
@@ -340,12 +385,10 @@ async def save_file(filename: str, state: dict = Body(...)):
 async def create_new(data: dict = Body(...)):
     """Create a new project file"""
     if not _project_folder:
-        raise HTTPException(status_code=400, detail="No project folder set. Please open a project folder first.")
+        raise HTTPException(status_code=400, detail="No project folder set")
     
     project_name = data.get("projectName", "untitled")
     shot_number = data.get("shotNumber", "01")
-    
-    print(f"[PROJECT] Creating new project: {project_name}_shot{shot_number}", flush=True)
     
     # Generate version (YYMMDD format)
     now = datetime.now()
@@ -415,7 +458,10 @@ async def get_cache_info():
     if not _cache_root:
         return {"exists": False}
     
-    project_cache = get_project_cache_dir()
+    try:
+        project_cache = get_project_cache_dir()
+    except RuntimeError:
+        return {"exists": False}
     
     # Count generations by type
     counts = {}
@@ -433,29 +479,47 @@ async def get_cache_info():
 
 
 @router.get("/generations")
-async def list_generations():
+async def list_generations(
+    days: int = Query(default=1, description="Number of days to load (0 = all)"),
+    pinned: str = Query(default="", description="Comma-separated list of pinned IDs to always include")
+):
     """
-    List all generations in the project cache.
+    List generations in the project cache with pagination support.
+    
+    Args:
+        days: Number of days of history to load (default 1 = today only, 0 = all)
+        pinned: Comma-separated pinned item IDs to always include regardless of date
+    
     Returns generation metadata for the history panel.
     """
-    print("[HISTORY] Fetching generations...", flush=True)
+    print(f"[HISTORY] Fetching generations (days={days}, pinned={pinned[:50]}...)", flush=True)
     
     if not _cache_root:
         print("[HISTORY] No cache root set", flush=True)
-        return {"generations": [], "error": "No project loaded"}
+        return {"generations": [], "error": "No project loaded", "hasMore": False}
     
     try:
         project_cache = get_project_cache_dir()
         print(f"[HISTORY] Project cache dir: {project_cache}", flush=True)
     except RuntimeError as e:
         print(f"[HISTORY] Error getting project cache: {e}", flush=True)
-        return {"generations": [], "error": "Project system not initialized"}
+        return {"generations": [], "error": "Project system not initialized", "hasMore": False}
     
     if not project_cache.exists():
         print(f"[HISTORY] Project cache doesn't exist: {project_cache}", flush=True)
-        return {"generations": []}
+        return {"generations": [], "hasMore": False}
+    
+    # Parse pinned IDs
+    pinned_ids = set(p.strip() for p in pinned.split(",") if p.strip())
+    
+    # Calculate date cutoff
+    if days > 0:
+        cutoff_date = datetime.now() - timedelta(days=days)
+    else:
+        cutoff_date = None
     
     generations = []
+    has_more = False
     
     # Scan all generation directories
     dirs = list(project_cache.iterdir())
@@ -466,9 +530,22 @@ async def list_generations():
             continue
         
         gen_name = gen_dir.name
+        dir_mtime = datetime.fromtimestamp(gen_dir.stat().st_mtime)
+        
+        # Check if within date range (unless pinned)
+        is_pinned = gen_name in pinned_ids
+        if cutoff_date and dir_mtime < cutoff_date and not is_pinned:
+            # Check for any pinned sub-items (for layers)
+            has_pinned_child = any(f"{gen_name}/{prefix}" in pinned_ids 
+                                   for prefix in ["depth", "normals", "crypto"])
+            if not has_pinned_child:
+                has_more = True
+                continue
         
         # Determine type based on directory name prefix
-        if gen_name.startswith("preprocess"):
+        if gen_name.startswith("layers"):
+            gen_type = "layers"
+        elif gen_name.startswith("preprocess"):
             gen_type = "preprocess"
         elif gen_name.startswith("video") or gen_name.endswith("_video"):
             gen_type = "video"
@@ -476,61 +553,10 @@ async def list_generations():
             gen_type = "upscale"
         elif gen_name.startswith("interpolate"):
             gen_type = "interpolate"
+        elif gen_name.startswith("export"):
+            gen_type = "export"
         else:
             gen_type = "image"
-        
-        # Find the main output file based on type
-        preview_path = None
-        output_path = None
-        
-        if gen_type == "video":
-            # Look for video file
-            for ext in [".mp4", ".webm"]:
-                candidate = gen_dir / f"generated{ext}"
-                if candidate.exists():
-                    output_path = candidate
-                    preview_path = candidate
-                    break
-        elif gen_type == "interpolate":
-            # Interpolated video output
-            video_files = list(gen_dir.glob("interpolated*.mp4")) + list(gen_dir.glob("interpolated*.webm"))
-            if video_files:
-                output_path = video_files[0]
-                preview_path = output_path
-        elif gen_type == "upscale":
-            # Upscaled image output
-            upscaled_files = list(gen_dir.glob("upscaled*.png")) + list(gen_dir.glob("upscaled*.jpg"))
-            if upscaled_files:
-                output_path = upscaled_files[0]
-                preview_path = output_path
-        elif gen_type == "preprocess":
-            # Preprocessor output is processed*.png (may have suffix like processed_abc123.png)
-            processed_files = list(gen_dir.glob("processed*.png"))
-            if processed_files:
-                output_path = processed_files[0]  # Take first match
-                preview_path = output_path
-        else:
-            # Image generation - look for generated.png
-            for ext in [".png", ".jpg", ".jpeg"]:
-                candidate = gen_dir / f"generated{ext}"
-                if candidate.exists():
-                    output_path = candidate
-                    preview_path = candidate
-                    break
-        
-        if not output_path:
-            print(f"[HISTORY]   {gen_name}: no output file found, skipping", flush=True)
-            continue
-        
-        print(f"[HISTORY]   {gen_name}: {gen_type} -> {output_path.name}", flush=True)
-        
-        # Get file stats
-        stat = output_path.stat()
-        mtime = datetime.fromtimestamp(stat.st_mtime)
-        
-        # Build relative path for API URL
-        rel_path = output_path.relative_to(_cache_root)
-        api_path = f"api/project/cache/{rel_path}"
         
         # Load metadata if available
         metadata = {}
@@ -542,32 +568,149 @@ async def list_generations():
             except:
                 pass
         
+        # Special handling for layers - create entry for EACH layer file
+        if gen_type == "layers":
+            layer_entries = _get_layer_entries(gen_dir, gen_name, metadata, pinned_ids, _cache_root)
+            generations.extend(layer_entries)
+            continue
+        
+        # Find the main output file based on type
+        preview_path = None
+        output_path = None
+        
+        if gen_type == "video":
+            for ext in [".mp4", ".webm"]:
+                candidate = gen_dir / f"generated{ext}"
+                if candidate.exists():
+                    output_path = candidate
+                    preview_path = candidate
+                    break
+        elif gen_type == "interpolate":
+            video_files = list(gen_dir.glob("interpolated*.mp4")) + list(gen_dir.glob("interpolated*.webm"))
+            if video_files:
+                output_path = video_files[0]
+                preview_path = output_path
+        elif gen_type == "upscale":
+            upscaled_files = list(gen_dir.glob("upscaled*.png")) + list(gen_dir.glob("upscaled*.jpg"))
+            if upscaled_files:
+                output_path = upscaled_files[0]
+                preview_path = output_path
+        elif gen_type == "preprocess":
+            processed_files = list(gen_dir.glob("processed*.png"))
+            if processed_files:
+                output_path = processed_files[0]
+                preview_path = output_path
+        elif gen_type == "export":
+            exr_files = list(gen_dir.glob("*.exr"))
+            if exr_files:
+                output_path = exr_files[0]
+            png_files = list(gen_dir.glob("*.png"))
+            if png_files:
+                preview_path = png_files[0]
+            elif exr_files:
+                preview_path = exr_files[0]
+        else:
+            for ext in [".png", ".jpg", ".jpeg"]:
+                candidate = gen_dir / f"generated{ext}"
+                if candidate.exists():
+                    output_path = candidate
+                    preview_path = candidate
+                    break
+        
+        if not output_path:
+            print(f"[HISTORY]   {gen_name}: no output file found, skipping", flush=True)
+            continue
+        
+        # Get file stats
+        stat = output_path.stat()
+        mtime = datetime.fromtimestamp(stat.st_mtime)
+        
+        # Build relative path for API URL
+        rel_path = output_path.relative_to(_cache_root)
+        api_path = f"api/project/cache/{rel_path}"
+        
+        # Preview path
+        preview_rel = preview_path.relative_to(_cache_root) if preview_path else rel_path
+        preview_api = f"api/project/cache/{preview_rel}"
+        
         generations.append({
             "id": gen_name,
             "name": gen_name,
             "type": gen_type,
             "path": api_path,
-            "preview": api_path,
+            "preview": preview_api,
             "date": mtime.strftime("%Y-%m-%d"),
             "timestamp": mtime.strftime("%H:%M:%S"),
             "size": stat.st_size,
             "prompt": metadata.get("prompt", ""),
             "seed": metadata.get("seed"),
             "model": metadata.get("model", ""),
+            "pinned": gen_name in pinned_ids,
         })
+    
+    # Sort: pinned first, then by date
+    generations.sort(key=lambda g: (not g.get("pinned", False), g["date"], g["timestamp"]), reverse=True)
     
     # Summary
     types = {}
     for g in generations:
         types[g['type']] = types.get(g['type'], 0) + 1
-    print(f"[HISTORY] Returning {len(generations)} generations: {types}", flush=True)
+    print(f"[HISTORY] Returning {len(generations)} generations: {types}, hasMore={has_more}", flush=True)
     
-    return {"generations": generations}
+    return {"generations": generations, "hasMore": has_more}
 
 
-@router.delete("/generations/{gen_id}")
+def _get_layer_entries(gen_dir: Path, gen_name: str, metadata: dict, pinned_ids: set, cache_root: Path) -> List[dict]:
+    """
+    Create separate history entries for each layer file in a layers directory.
+    
+    Returns list of generation entries for depth, normals, crypto files.
+    """
+    entries = []
+    
+    # Layer type mapping
+    layer_types = {
+        "depth_": ("depth", "Depth"),
+        "normals_": ("normals", "Normals"),
+        "crypto_": ("crypto", "Crypto"),
+    }
+    
+    for prefix, (layer_type, label) in layer_types.items():
+        layer_files = list(gen_dir.glob(f"{prefix}*.png"))
+        
+        for layer_file in layer_files:
+            stat = layer_file.stat()
+            mtime = datetime.fromtimestamp(stat.st_mtime)
+            
+            rel_path = layer_file.relative_to(cache_root)
+            api_path = f"api/project/cache/{rel_path}"
+            
+            # Create unique ID for this specific layer
+            layer_id = f"{gen_name}/{layer_type}"
+            
+            entries.append({
+                "id": layer_id,
+                "name": f"{gen_name}/{label}",
+                "type": "layers",
+                "subtype": layer_type,  # depth, normals, or crypto
+                "path": api_path,
+                "preview": api_path,
+                "date": mtime.strftime("%Y-%m-%d"),
+                "timestamp": mtime.strftime("%H:%M:%S"),
+                "size": stat.st_size,
+                "prompt": metadata.get("prompt", ""),
+                "seed": metadata.get("seed"),
+                "model": metadata.get("model", ""),
+                "pinned": layer_id in pinned_ids,
+                "parentDir": gen_name,
+            })
+    
+    return entries
+
+
+@router.delete("/generations/{gen_id:path}")
 async def delete_generation(gen_id: str):
-    """Delete a generation directory"""
+    """Delete a generation directory or specific layer file"""
     if not _cache_root:
         raise HTTPException(status_code=400, detail="No project loaded")
     
@@ -575,6 +718,12 @@ async def delete_generation(gen_id: str):
         project_cache = get_project_cache_dir()
     except RuntimeError:
         raise HTTPException(status_code=400, detail="Project system not initialized")
+    
+    # Check if it's a layer-specific ID (contains /)
+    if "/" in gen_id:
+        # It's a specific layer - just delete that file? Or the whole dir?
+        # For now, delete the whole layers directory
+        gen_id = gen_id.split("/")[0]
     
     gen_dir = project_cache / gen_id
     

@@ -160,7 +160,7 @@ try:
     from core.image_generation_manager import ImageGenerationManager
     from core.video_generation_manager import VideoGenerationManager
     from core.format_convert import FormatConverter
-    from core.preprocessors import PreprocessorManager, DepthModel
+    from core.preprocessors import PreprocessorManager, DepthModel, NormalsMethod, SAMModel
     from core.postprocessors import PostProcessorManager
     print("[STARTUP] ✓ Loaded modules from core/")
 except ImportError as e:
@@ -1434,7 +1434,7 @@ async def remove_seed(request: RemoveSeedRequest):
 
 class PreprocessRequest(BaseModel):
     image_path: str
-    method: str  # 'canny', 'openpose', 'depth'
+    method: str  # 'canny', 'openpose', 'depth', 'normals', 'crypto'
     
     # Canny parameters
     low_threshold: int = 100
@@ -1452,6 +1452,21 @@ class PreprocessRequest(BaseModel):
     depth_invert: bool = False
     depth_normalize: bool = True
     depth_colormap: Optional[str] = "inferno"
+    
+    # Normals parameters
+    normals_method: str = "from_depth"  # 'from_depth' or 'dsine'
+    normals_depth_model: str = "depth_anything_v2"
+    normals_space: str = "tangent"  # 'tangent', 'world', 'object'
+    normals_flip_y: bool = False
+    normals_flip_x: bool = False
+    normals_intensity: float = 1.0
+    
+    # Crypto/SAM parameters
+    crypto_model: str = "sam2_hiera_large"  # 'sam2_hiera_tiny', 'sam2_hiera_small', 'sam2_hiera_base_plus', 'sam2_hiera_large'
+    crypto_max_objects: int = 50
+    crypto_min_area: int = 500
+    crypto_output_mode: str = "id_matte"  # 'id_matte', 'layers', 'both'
+
 
 
 @app.post("/api/preprocess")
@@ -1534,7 +1549,64 @@ async def preprocess_image(request: PreprocessRequest):
                 normalize=request.depth_normalize,
                 colormap=request.depth_colormap,
             )
+
+        elif request.method == "normals":
+            # Map strings to enums
+            normals_method_map = {
+                "from_depth": NormalsMethod.FROM_DEPTH,
+                "dsine": NormalsMethod.DSINE,
+            }
+            depth_model_map = {
+                "midas_small": DepthModel.MIDAS_SMALL,
+                "midas_large": DepthModel.MIDAS_LARGE,
+                "depth_anything_v2": DepthModel.DEPTH_ANYTHING_V2,
+                "depth_anything_v3": DepthModel.DEPTH_ANYTHING_V3,
+                "zoedepth": DepthModel.ZOEDEPTH,
+            }
+            
+            normals_method = normals_method_map.get(
+                request.normals_method,
+                NormalsMethod.FROM_DEPTH
+            )
+            depth_model = depth_model_map.get(
+                request.normals_depth_model,
+                DepthModel.DEPTH_ANYTHING_V2
+            )
+            
+            result = preprocessor_manager.normals(
+                image_path=input_path,
+                output_path=output_path,
+                method=normals_method,
+                depth_model=depth_model,
+                space=request.normals_space,
+                flip_y=request.normals_flip_y,
+                flip_x=request.normals_flip_x,
+                intensity=request.normals_intensity,
+            )
         
+        elif request.method == "crypto":
+            # Map string to enum
+            sam_model_map = {
+                "sam2_hiera_tiny": SAMModel.TINY,
+                "sam2_hiera_small": SAMModel.SMALL,
+                "sam2_hiera_base_plus": SAMModel.BASE,
+                "sam2_hiera_large": SAMModel.LARGE,
+            }
+            
+            sam_model = sam_model_map.get(
+                request.crypto_model,
+                SAMModel.LARGE
+            )
+            
+            result = preprocessor_manager.crypto(
+                image_path=input_path,
+                output_path=output_path,
+                model=sam_model,
+                max_objects=request.crypto_max_objects,
+                min_area=request.crypto_min_area,
+                output_mode=request.crypto_output_mode,
+            )
+
         else:
             raise HTTPException(status_code=400, detail=f"Unknown method: {request.method}")
         
@@ -1589,7 +1661,7 @@ async def get_preprocessor_models():
         },
         "depth": {
             "name": "Depth Estimation",
-            "description": "Monocular depth estimation",
+            "description": "Monocular depth estimation for Z-depth AOV",
             "models": {
                 "midas_small": "MiDaS Small (Fast)",
                 "midas_large": "MiDaS Large (Balanced)",
@@ -1606,7 +1678,56 @@ async def get_preprocessor_models():
                     "options": [None, "inferno", "viridis", "magma", "plasma", "turbo"]
                 },
             }
-        }
+        },
+        "normals": {
+            "name": "Normal Map",
+            "description": "Surface normal estimation for relighting",
+            "methods": {
+                "from_depth": "From Depth (Fast, uses depth model)",
+                "dsine": "DSINE (Dedicated model, better quality)",
+            },
+            "depth_models": {
+                "midas_small": "MiDaS Small (Fast)",
+                "midas_large": "MiDaS Large (Balanced)",
+                "depth_anything_v2": "Depth Anything V2 (SOTA)",
+                "depth_anything_v3": "Depth Anything V3 (Latest)",
+                "zoedepth": "ZoeDepth (Metric)",
+            },
+            "parameters": {
+                "space": {
+                    "type": "select",
+                    "default": "tangent",
+                    "options": ["tangent", "world", "object"]
+                },
+                "flip_y": {"type": "bool", "default": False, "description": "Flip Y for DirectX convention"},
+                "flip_x": {"type": "bool", "default": False},
+                "intensity": {"type": "float", "default": 1.0, "min": 0.1, "max": 5.0, "description": "Normal strength (depth-derived only)"},
+            }
+        },
+        "crypto": {
+            "name": "Cryptomatte",
+            "description": "Instance segmentation for per-object mattes (uses SAM2)",
+            "models": {
+                "sam2_hiera_tiny": "SAM2 Tiny (Fast, ~39MB)",
+                "sam2_hiera_small": "SAM2 Small (Balanced, ~46MB)",
+                "sam2_hiera_base_plus": "SAM2 Base+ (Good, ~81MB)",
+                "sam2_hiera_large": "SAM2 Large (Best, ~224MB)",
+            },
+            "parameters": {
+                "max_objects": {"type": "int", "default": 50, "min": 1, "max": 200},
+                "min_area": {"type": "int", "default": 500, "min": 100, "max": 10000, "description": "Minimum mask size in pixels"},
+                "output_mode": {
+                    "type": "select",
+                    "default": "id_matte",
+                    "options": ["id_matte", "layers", "both"],
+                    "descriptions": {
+                        "id_matte": "Single colored ID visualization",
+                        "layers": "Individual mask files per object",
+                        "both": "Both outputs"
+                    }
+                },
+            }
+        },
     }
 
 # ============================================================================
@@ -1804,6 +1925,724 @@ async def get_postprocessor_models():
             }
         }
     }
+
+    # ============================================================================
+# PreProcessors
+# ============================================================================
+
+class PreprocessRequest(BaseModel):
+    image_path: str
+    method: str  # 'canny', 'openpose', 'depth', 'normals', 'crypto'
+    
+    # Canny parameters
+    low_threshold: int = 100
+    high_threshold: int = 200
+    canny_invert: bool = False
+    blur_kernel: int = 3
+    
+    # OpenPose parameters
+    detect_body: bool = True
+    detect_hand: bool = False
+    detect_face: bool = False
+    
+    # Depth parameters
+    depth_model: str = "depth_anything_v2"
+    depth_invert: bool = False
+    depth_normalize: bool = True
+    depth_colormap: Optional[str] = "inferno"
+    
+    # Normals parameters
+    normals_method: str = "from_depth"  # 'from_depth' or 'dsine'
+    normals_depth_model: str = "depth_anything_v2"
+    normals_space: str = "tangent"  # 'tangent', 'world', 'object'
+    normals_flip_y: bool = False
+    normals_flip_x: bool = False
+    normals_intensity: float = 1.0
+    
+    # Crypto/SAM parameters
+    crypto_model: str = "sam2_hiera_large"
+    crypto_max_objects: int = 50
+    crypto_min_area: int = 500
+    crypto_output_mode: str = "id_matte"  # 'id_matte', 'layers', 'both'
+
+
+@app.post("/api/preprocess")
+async def preprocess_image(request: PreprocessRequest):
+    """
+    Run a preprocessing method on an image
+    
+    Supported methods:
+    - canny: Edge detection
+    - openpose: Pose keypoints
+    - depth: Depth estimation
+    - normals: Surface normal maps
+    - crypto: Instance segmentation / cryptomatte
+    """
+    
+    try:
+        # Resolve input path (handles URL paths from cache)
+        input_path = resolve_input_path(request.image_path)
+        
+        if input_path is None:
+            raise HTTPException(status_code=400, detail="No image path provided")
+        
+        if not input_path.exists():
+            raise HTTPException(status_code=404, detail=f"Image not found: {request.image_path} (resolved to: {input_path})")
+        
+        print(f"\n{'='*60}", flush=True)
+        print(f"Preprocessing: {request.method}", flush=True)
+        print(f"Input (requested): {request.image_path}", flush=True)
+        print(f"Input (resolved): {input_path}", flush=True)
+        print(f"{'='*60}\n", flush=True)
+        
+        # Create generation directory in project cache
+        gen_dir = get_generation_output_dir(f"preprocess_{request.method}")
+        
+        # Copy source image for reference
+        import shutil
+        shutil.copy(input_path, gen_dir / "source.png")
+        
+        # Generate output path
+        output_path = gen_dir / "processed.png"
+        
+        # Run preprocessing based on method
+        if request.method == "canny":
+            result = preprocessor_manager.canny(
+                image_path=input_path,
+                output_path=output_path,
+                low_threshold=request.low_threshold,
+                high_threshold=request.high_threshold,
+                invert=request.canny_invert,
+                blur_kernel=request.blur_kernel,
+            )
+        
+        elif request.method == "openpose":
+            result = preprocessor_manager.openpose(
+                image_path=input_path,
+                output_path=output_path,
+                detect_body=request.detect_body,
+                detect_hand=request.detect_hand,
+                detect_face=request.detect_face,
+            )
+        
+        elif request.method == "depth":
+            # Map string to enum
+            depth_model_map = {
+                "midas_small": DepthModel.MIDAS_SMALL,
+                "midas_large": DepthModel.MIDAS_LARGE,
+                "depth_anything_v2": DepthModel.DEPTH_ANYTHING_V2,
+                "depth_anything_v3": DepthModel.DEPTH_ANYTHING_V3,
+                "zoedepth": DepthModel.ZOEDEPTH,
+            }
+            
+            depth_model = depth_model_map.get(
+                request.depth_model,
+                DepthModel.DEPTH_ANYTHING_V2
+            )
+            
+            result = preprocessor_manager.depth(
+                image_path=input_path,
+                output_path=output_path,
+                model=depth_model,
+                invert=request.depth_invert,
+                normalize=request.depth_normalize,
+                colormap=request.depth_colormap,
+            )
+        
+        elif request.method == "normals":
+            # Map strings to enums
+            normals_method_map = {
+                "from_depth": NormalsMethod.FROM_DEPTH,
+                "dsine": NormalsMethod.DSINE,
+            }
+            depth_model_map = {
+                "midas_small": DepthModel.MIDAS_SMALL,
+                "midas_large": DepthModel.MIDAS_LARGE,
+                "depth_anything_v2": DepthModel.DEPTH_ANYTHING_V2,
+                "depth_anything_v3": DepthModel.DEPTH_ANYTHING_V3,
+                "zoedepth": DepthModel.ZOEDEPTH,
+            }
+            
+            normals_method = normals_method_map.get(
+                request.normals_method,
+                NormalsMethod.FROM_DEPTH
+            )
+            depth_model = depth_model_map.get(
+                request.normals_depth_model,
+                DepthModel.DEPTH_ANYTHING_V2
+            )
+            
+            result = preprocessor_manager.normals(
+                image_path=input_path,
+                output_path=output_path,
+                method=normals_method,
+                depth_model=depth_model,
+                space=request.normals_space,
+                flip_y=request.normals_flip_y,
+                flip_x=request.normals_flip_x,
+                intensity=request.normals_intensity,
+            )
+        
+        elif request.method == "crypto":
+            # Map string to enum
+            sam_model_map = {
+                "sam2_hiera_tiny": SAMModel.TINY,
+                "sam2_hiera_small": SAMModel.SMALL,
+                "sam2_hiera_base_plus": SAMModel.BASE,
+                "sam2_hiera_large": SAMModel.LARGE,
+            }
+            
+            sam_model = sam_model_map.get(
+                request.crypto_model,
+                SAMModel.LARGE
+            )
+            
+            result = preprocessor_manager.crypto(
+                image_path=input_path,
+                output_path=output_path,
+                model=sam_model,
+                max_objects=request.crypto_max_objects,
+                min_area=request.crypto_min_area,
+                output_mode=request.crypto_output_mode,
+            )
+        
+        else:
+            raise HTTPException(status_code=400, detail=f"Unknown method: {request.method}")
+        
+        # Save metadata
+        save_generation_metadata(
+            gen_dir=gen_dir,
+            prompt=f"Preprocessor: {request.method}",
+            model=request.method,
+            seed=None,
+            image_size=(0, 0),
+            source_image=str(request.image_path),
+            parameters=result.get("parameters", {}),
+        )
+        
+        # Convert output path to project-relative URL
+        output_path = Path(result["output_path"])
+        result["url"] = get_project_relative_url(output_path)
+        
+        return result
+        
+    except Exception as e:
+        print(f"✗ Preprocessing failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/preprocess/models")
+async def get_preprocessor_models():
+    """Get available preprocessor models and their info"""
+    return {
+        "canny": {
+            "name": "Canny Edge Detection",
+            "description": "Clean edge detection using Canny algorithm",
+            "parameters": {
+                "low_threshold": {"type": "int", "default": 100, "min": 0, "max": 500},
+                "high_threshold": {"type": "int", "default": 200, "min": 0, "max": 500},
+                "invert": {"type": "bool", "default": False},
+                "blur_kernel": {"type": "int", "default": 3, "min": 0, "max": 15, "step": 2},
+            }
+        },
+        "openpose": {
+            "name": "OpenPose",
+            "description": "Human pose keypoint detection",
+            "parameters": {
+                "detect_body": {"type": "bool", "default": True},
+                "detect_hand": {"type": "bool", "default": False},
+                "detect_face": {"type": "bool", "default": False},
+            }
+        },
+        "depth": {
+            "name": "Depth Estimation",
+            "description": "Monocular depth estimation for Z-depth AOV",
+            "models": {
+                "midas_small": "MiDaS Small (Fast)",
+                "midas_large": "MiDaS Large (Balanced)",
+                "depth_anything_v2": "Depth Anything V2 (SOTA)",
+                "depth_anything_v3": "Depth Anything V3 (Latest)",
+                "zoedepth": "ZoeDepth (Metric)",
+            },
+            "parameters": {
+                "invert": {"type": "bool", "default": False},
+                "normalize": {"type": "bool", "default": True},
+                "colormap": {
+                    "type": "select",
+                    "default": "inferno",
+                    "options": [None, "inferno", "viridis", "magma", "plasma", "turbo"]
+                },
+            }
+        },
+        "normals": {
+            "name": "Normal Map",
+            "description": "Surface normal estimation for relighting",
+            "methods": {
+                "from_depth": "From Depth (Fast, uses depth model)",
+                "dsine": "DSINE (Dedicated model, better quality)",
+            },
+            "depth_models": {
+                "midas_small": "MiDaS Small (Fast)",
+                "midas_large": "MiDaS Large (Balanced)",
+                "depth_anything_v2": "Depth Anything V2 (SOTA)",
+                "depth_anything_v3": "Depth Anything V3 (Latest)",
+                "zoedepth": "ZoeDepth (Metric)",
+            },
+            "parameters": {
+                "space": {
+                    "type": "select",
+                    "default": "tangent",
+                    "options": ["tangent", "world", "object"]
+                },
+                "flip_y": {"type": "bool", "default": False, "description": "Flip Y for DirectX convention"},
+                "flip_x": {"type": "bool", "default": False},
+                "intensity": {"type": "float", "default": 1.0, "min": 0.1, "max": 5.0, "description": "Normal strength (depth-derived only)"},
+            }
+        },
+        "crypto": {
+            "name": "Cryptomatte",
+            "description": "Instance segmentation for per-object mattes (uses SAM2)",
+            "models": {
+                "sam2_hiera_tiny": "SAM2 Tiny (Fast, ~39MB)",
+                "sam2_hiera_small": "SAM2 Small (Balanced, ~46MB)",
+                "sam2_hiera_base_plus": "SAM2 Base+ (Good, ~81MB)",
+                "sam2_hiera_large": "SAM2 Large (Best, ~224MB)",
+            },
+            "parameters": {
+                "max_objects": {"type": "int", "default": 50, "min": 1, "max": 200},
+                "min_area": {"type": "int", "default": 500, "min": 100, "max": 10000, "description": "Minimum mask size in pixels"},
+                "output_mode": {
+                    "type": "select",
+                    "default": "id_matte",
+                    "options": ["id_matte", "layers", "both"],
+                    "descriptions": {
+                        "id_matte": "Single colored ID visualization",
+                        "layers": "Individual mask files per object",
+                        "both": "Both outputs"
+                    }
+                },
+            }
+        },
+    }
+
+
+# ============================================================================
+# Layers (Batch AOV Generation)
+# ============================================================================
+
+class LayersRequest(BaseModel):
+    """Request to generate multiple AOV layers from a single image"""
+    image_path: str
+    
+    # Which layers to generate
+    layers: Dict[str, bool] = {
+        "depth": True,
+        "normals": True,
+        "crypto": False,
+    }
+    
+    # Depth settings
+    depth_model: str = "depth_anything_v2"
+    depth_invert: bool = False
+    depth_normalize: bool = True
+    depth_colormap: Optional[str] = "inferno"
+    
+    # Normals settings
+    normals_method: str = "from_depth"
+    normals_depth_model: str = "depth_anything_v2"
+    normals_space: str = "tangent"
+    normals_flip_y: bool = False
+    normals_intensity: float = 1.0
+    
+    # Crypto settings
+    crypto_model: str = "sam2_hiera_large"
+    crypto_max_objects: int = 50
+    crypto_min_area: int = 500
+
+
+@app.post("/api/layers/generate")
+async def generate_layers(request: LayersRequest):
+    """
+    Generate multiple AOV layers from a single source image
+    
+    Returns all requested layers in one call, useful for the Layers tab.
+    """
+    try:
+        # Resolve input path
+        input_path = resolve_input_path(request.image_path)
+        
+        if input_path is None:
+            raise HTTPException(status_code=400, detail="No image path provided")
+        
+        if not input_path.exists():
+            raise HTTPException(status_code=404, detail=f"Image not found: {request.image_path}")
+        
+        log.header("LAYERS GENERATION")
+        log.info("Layers", f"Source: {input_path}")
+        log.info("Layers", f"Requested: {[k for k, v in request.layers.items() if v]}")
+        
+        # Create generation directory
+        gen_dir = get_generation_output_dir("layers")
+        
+        # Copy source image
+        import shutil
+        source_copy = gen_dir / "source.png"
+        shutil.copy(input_path, source_copy)
+        
+        results = {
+            "success": True,
+            "source": get_project_relative_url(source_copy),
+            "layers": {},
+            "errors": {},
+        }
+        
+        # Generate depth
+        if request.layers.get("depth"):
+            try:
+                log.info("Layers", "Generating depth...")
+                
+                depth_model_map = {
+                    "midas_small": DepthModel.MIDAS_SMALL,
+                    "midas_large": DepthModel.MIDAS_LARGE,
+                    "depth_anything_v2": DepthModel.DEPTH_ANYTHING_V2,
+                    "depth_anything_v3": DepthModel.DEPTH_ANYTHING_V3,
+                    "zoedepth": DepthModel.ZOEDEPTH,
+                }
+                
+                depth_result = preprocessor_manager.depth(
+                    image_path=input_path,
+                    output_path=gen_dir / "depth.png",
+                    model=depth_model_map.get(request.depth_model, DepthModel.DEPTH_ANYTHING_V2),
+                    invert=request.depth_invert,
+                    normalize=request.depth_normalize,
+                    colormap=request.depth_colormap,
+                )
+                
+                results["layers"]["depth"] = {
+                    "url": get_project_relative_url(Path(depth_result["output_path"])),
+                    "path": depth_result["output_path"],
+                    "model": depth_result.get("model", request.depth_model),
+                }
+                log.success("Layers", "Depth complete")
+                
+            except Exception as e:
+                log.error("Layers", f"Depth failed: {e}")
+                results["errors"]["depth"] = str(e)
+        
+        # Generate normals
+        if request.layers.get("normals"):
+            try:
+                log.info("Layers", "Generating normals...")
+                
+                normals_method_map = {
+                    "from_depth": NormalsMethod.FROM_DEPTH,
+                    "dsine": NormalsMethod.DSINE,
+                }
+                depth_model_map = {
+                    "midas_small": DepthModel.MIDAS_SMALL,
+                    "midas_large": DepthModel.MIDAS_LARGE,
+                    "depth_anything_v2": DepthModel.DEPTH_ANYTHING_V2,
+                    "depth_anything_v3": DepthModel.DEPTH_ANYTHING_V3,
+                    "zoedepth": DepthModel.ZOEDEPTH,
+                }
+                
+                normals_result = preprocessor_manager.normals(
+                    image_path=input_path,
+                    output_path=gen_dir / "normals.png",
+                    method=normals_method_map.get(request.normals_method, NormalsMethod.FROM_DEPTH),
+                    depth_model=depth_model_map.get(request.normals_depth_model, DepthModel.DEPTH_ANYTHING_V2),
+                    space=request.normals_space,
+                    flip_y=request.normals_flip_y,
+                    intensity=request.normals_intensity,
+                )
+                
+                results["layers"]["normals"] = {
+                    "url": get_project_relative_url(Path(normals_result["output_path"])),
+                    "path": normals_result["output_path"],
+                    "method": normals_result.get("estimation", request.normals_method),
+                }
+                log.success("Layers", "Normals complete")
+                
+            except Exception as e:
+                log.error("Layers", f"Normals failed: {e}")
+                results["errors"]["normals"] = str(e)
+        
+        # Generate cryptomatte
+        if request.layers.get("crypto"):
+            try:
+                log.info("Layers", "Generating cryptomatte...")
+                
+                sam_model_map = {
+                    "sam2_hiera_tiny": SAMModel.TINY,
+                    "sam2_hiera_small": SAMModel.SMALL,
+                    "sam2_hiera_base_plus": SAMModel.BASE,
+                    "sam2_hiera_large": SAMModel.LARGE,
+                }
+                
+                crypto_result = preprocessor_manager.crypto(
+                    image_path=input_path,
+                    output_path=gen_dir / "crypto.png",
+                    model=sam_model_map.get(request.crypto_model, SAMModel.LARGE),
+                    max_objects=request.crypto_max_objects,
+                    min_area=request.crypto_min_area,
+                    output_mode="id_matte",
+                )
+                
+                results["layers"]["crypto"] = {
+                    "url": get_project_relative_url(Path(crypto_result["output_path"])),
+                    "path": crypto_result["output_path"],
+                    "num_objects": crypto_result.get("num_objects", 0),
+                }
+                log.success("Layers", f"Cryptomatte complete ({crypto_result.get('num_objects', 0)} objects)")
+                
+            except Exception as e:
+                log.error("Layers", f"Cryptomatte failed: {e}")
+                results["errors"]["crypto"] = str(e)
+        
+        # Save metadata
+        save_generation_metadata(
+            gen_dir=gen_dir,
+            prompt=f"Layers: {', '.join(results['layers'].keys())}",
+            model="layers",
+            seed=None,
+            image_size=(0, 0),
+            source_image=str(request.image_path),
+            parameters={
+                "layers": request.layers,
+                "generated": list(results["layers"].keys()),
+                "errors": list(results["errors"].keys()),
+            },
+        )
+        
+        log.success("Layers", f"Generated {len(results['layers'])} layers")
+        
+        return results
+        
+    except Exception as e:
+        log.exception("Layers", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/layers/capabilities")
+async def get_layers_capabilities():
+    """Get available layer types and their requirements"""
+    return {
+        "layers": {
+            "depth": {
+                "name": "Depth (Z)",
+                "description": "Distance from camera for DOF/fog effects",
+                "available": True,
+                "requirements": ["Depth Anything V2 or MiDaS"],
+            },
+            "normals": {
+                "name": "Normals",
+                "description": "Surface orientation for relighting",
+                "available": True,
+                "requirements": ["Depth model (for from_depth) or DSINE"],
+            },
+            "crypto": {
+                "name": "Cryptomatte",
+                "description": "Per-object ID masks for selection",
+                "available": True,
+                "requirements": ["SAM2 model checkpoint"],
+            },
+        },
+        "export_formats": ["png", "exr"],
+    }
+
+# ============================================================================
+# Export Endpoints
+# ============================================================================
+
+class ExportEXRRequest(BaseModel):
+    """Request to export layers to EXR"""
+    layers: Dict[str, Optional[str]]  # layer_name -> image_path (can be None)
+    
+    # EXR settings
+    bit_depth: int = 32  # 16 or 32
+    compression: str = "ZIP"
+    color_space: str = "Linear"  # 'Linear' or 'sRGB'
+    
+    # Export mode
+    multi_layer: bool = True  # Single multi-layer EXR
+    single_files: bool = False  # Also export individual EXRs
+    
+    # Output naming and location
+    filename: Optional[str] = None  # Custom filename (without extension)
+    export_path: Optional[str] = None  # Custom save directory (empty = use project cache)
+
+
+@app.post("/api/export/exr")
+async def export_to_exr(request: ExportEXRRequest):
+    """
+    Export AOV layers to EXR file(s)
+    
+    Creates:
+    - Multi-layer EXR with all AOVs (if multi_layer=True)
+    - Individual EXR files per layer (if single_files=True)
+    
+    If export_path is provided, saves directly to that location.
+    Otherwise saves to project cache.
+    """
+    try:
+        log.header("EXR EXPORT")
+        log.info("Export", f"Layers: {list(request.layers.keys())}")
+        log.info("Export", f"Bit Depth: {request.bit_depth}")
+        log.info("Export", f"Compression: {request.compression}")
+        
+        # Import exporter
+        from core.exr_exporter import EXRExporter
+        
+        # Determine output location
+        custom_export = bool(request.export_path)
+        
+        if custom_export:
+            # Use custom export path
+            export_dir = Path(request.export_path)
+            if not export_dir.exists():
+                export_dir.mkdir(parents=True, exist_ok=True)
+            gen_dir = export_dir  # For metadata
+            log.info("Export", f"Custom export path: {export_dir}")
+        else:
+            # Use project cache
+            gen_dir = get_generation_output_dir("export_exr")
+            export_dir = gen_dir
+            log.info("Export", f"Cache path: {gen_dir}")
+        
+        # Resolve layer paths
+        resolved_layers = {}
+        for layer_name, layer_path in request.layers.items():
+            if layer_path is None:
+                continue
+            
+            resolved_path = resolve_input_path(layer_path)
+            if resolved_path and resolved_path.exists():
+                resolved_layers[layer_name] = str(resolved_path)
+                log.info("Export", f"  {layer_name}: {resolved_path.name}")
+            else:
+                log.warning("Export", f"  {layer_name}: not found ({layer_path})")
+        
+        if not resolved_layers:
+            raise HTTPException(status_code=400, detail="No valid layers to export")
+        
+        exporter = EXRExporter()
+        results = {"success": True, "outputs": {}}
+        
+        # Determine filename
+        base_filename = request.filename or "export"
+        
+        # Export multi-layer EXR
+        if request.multi_layer:
+            output_path = export_dir / f"{base_filename}.exr"
+            
+            result = exporter.export_multilayer(
+                layers=resolved_layers,
+                output_path=output_path,
+                bit_depth=request.bit_depth,
+                compression=request.compression,
+                linear=(request.color_space == "Linear"),
+            )
+            
+            result["url"] = get_project_relative_url(output_path) if not custom_export else None
+            result["saved_path"] = str(output_path)
+            results["multi_layer"] = result
+            log.success("Export", f"Multi-layer EXR: {output_path}")
+        
+        # Export single-layer EXRs
+        if request.single_files:
+            if custom_export:
+                singles_dir = export_dir
+            else:
+                singles_dir = gen_dir / "single_layers"
+                singles_dir.mkdir(exist_ok=True)
+            
+            single_results = exporter.export_single_layers(
+                layers=resolved_layers,
+                output_dir=singles_dir,
+                bit_depth=request.bit_depth,
+                compression=request.compression,
+                linear=(request.color_space == "Linear"),
+                filename_prefix=base_filename + "_" if custom_export else "",
+            )
+            
+            # Add URLs to results
+            for layer_name, layer_result in single_results.items():
+                if not custom_export:
+                    layer_result["url"] = get_project_relative_url(Path(layer_result["output_path"]))
+                layer_result["saved_path"] = layer_result["output_path"]
+            
+            results["single_layers"] = single_results
+            log.success("Export", f"Single-layer EXRs: {list(single_results.keys())}")
+        
+        # Add summary info
+        results["saved_path"] = str(export_dir / f"{base_filename}.exr") if request.multi_layer else str(export_dir)
+        results["custom_export"] = custom_export
+        
+        # Save metadata (only in project cache)
+        if not custom_export:
+            save_generation_metadata(
+                gen_dir=gen_dir,
+                prompt=f"EXR Export ({len(resolved_layers)} layers)",
+                model="exr_export",
+                seed=None,
+                image_size=(0, 0),
+                source_image=None,
+                parameters={
+                    "layers": list(resolved_layers.keys()),
+                    "bit_depth": request.bit_depth,
+                    "compression": request.compression,
+                    "color_space": request.color_space,
+                    "filename": base_filename,
+                },
+            )
+        
+        log.success("Export", "EXR export complete")
+        
+        return results
+        
+    except Exception as e:
+        log.exception("Export", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/export/capabilities")
+async def get_export_capabilities():
+    """Get available export formats and options"""
+    
+    # Check for OpenEXR
+    try:
+        import OpenEXR
+        has_openexr = True
+    except ImportError:
+        has_openexr = False
+    
+    return {
+        "exr": {
+            "available": has_openexr,
+            "bit_depths": [16, 32],
+            "compressions": [
+                {"value": "ZIP", "name": "ZIP (Lossless, Recommended)"},
+                {"value": "PIZ", "name": "PIZ (Lossless, Wavelet)"},
+                {"value": "PXR24", "name": "PXR24 (Lossy, 24-bit)"},
+                {"value": "B44", "name": "B44 (Lossy, Fast)"},
+                {"value": "DWAA", "name": "DWAA (Lossy, Small)"},
+                {"value": "NONE", "name": "None (Uncompressed)"},
+            ],
+            "color_spaces": ["Linear", "sRGB"],
+            "missing_dependency": None if has_openexr else "pip install OpenEXR --break-system-packages",
+        },
+        "png": {
+            "available": True,
+            "bit_depths": [8, 16],
+        },
+        "jpg": {
+            "available": True,
+            "quality_range": [50, 100],
+        },
+    }
+
 
 # ============================================================================
 # Main

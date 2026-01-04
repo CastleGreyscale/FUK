@@ -209,6 +209,8 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
                   <span>{formData.width}×{formData.height}</span>
                   <span>•</span>
                   <span>{formData.video_length} frames</span>
+                  <span>•</span>
+                  <span>{formData.steps} steps</span>
                   {result?.outputs?.mp4 && (
                     <>
                       <span>•</span>
@@ -216,6 +218,12 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
                         <CheckCircle style={{ width: '0.875rem', height: '0.875rem' }} />
                         {formatTime(elapsedSeconds)}
                       </span>
+                    </>
+                  )}
+                  {result?.seed_used && (
+                    <>
+                      <span>•</span>
+                      <span style={{ color: '#a855f7' }}>Seed: {result.seed_used}</span>
                     </>
                   )}
                 </div>

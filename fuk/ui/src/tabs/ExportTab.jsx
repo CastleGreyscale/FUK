@@ -1,13 +1,13 @@
 /**
  * Export Tab
- * Final export options with visual layer preview
- * Shows Beauty pass large + smaller thumbnails for all other layers
+ * Export AOV layers to multi-layer EXR for compositing
  */
 
 import { useState, useMemo, useCallback } from 'react';
-import { Save, Loader2, CheckCircle, Download, Pipeline } from '../components/Icons';
+import { Save, Loader2, CheckCircle, Download, AlertCircle } from '../components/Icons';
+import InlineImageInput from '../components/InlineImageInput';
 import { useLocalStorage } from '../hooks/useLocalStorage';
-import { buildImageUrl } from '../utils/constants';
+import { buildImageUrl, API_URL } from '../utils/constants';
 import Footer from '../components/Footer';
 
 // Folder icon
@@ -18,39 +18,19 @@ const Folder = ({ className, style }) => (
 );
 
 const DEFAULT_SETTINGS = {
-  // What to export
   exports: {
     multiLayerEXR: true,
     singleLayerEXRs: false,
-    previewRender: true,
-    saveTensors: false,
-    collectProject: false,
   },
-  
-  // EXR settings
   exrBitDepth: 32,
   exrCompression: 'ZIP',
   exrColorSpace: 'Linear',
-  
-  // Preview settings
-  previewFormat: 'PNG',
-  previewQuality: 95,
-  previewColorSpace: 'sRGB',
-  
-  // Tensor settings
-  tensorFormat: 'SafeTensors',
-  includeLatents: true,
-  includeVAE: false,
-  
-  // Collection settings
-  includeInputs: true,
-  includeIntermediates: false,
-  includeConfig: true,
-  packageFormat: 'zip',
+  exportFilename: 'export',
+  exportPath: '',
 };
 
 export default function ExportTab({ config, activeTab, setActiveTab, project }) {
-  // Settings (localStorage fallback)
+  // Settings
   const [localSettings, setLocalSettings] = useLocalStorage('fuk_export_settings', DEFAULT_SETTINGS);
   
   const settings = useMemo(() => {
@@ -70,19 +50,28 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
     }
   }, [project, settings, setLocalSettings]);
   
+  // Layer inputs
+  const [layers, setLayers] = useState({
+    beauty: null,
+    depth: null,
+    normals: null,
+    crypto: null,
+  });
+  
   // UI state
   const [exporting, setExporting] = useState(false);
-  const [exportPath, setExportPath] = useState('');
-  const [exportComplete, setExportComplete] = useState(false);
+  const [exportResult, setExportResult] = useState(null);
+  const [error, setError] = useState(null);
+  const [elapsedTime, setElapsedTime] = useState(0);
   
-  // Layer data - in reality, populated from project state or generation results
-  // For now, empty to show placeholders
-  const [availableLayers] = useState({
-    // beauty: { url: '/path/to/beauty.png', name: 'Beauty Pass' },
-    // depth: { url: '/path/to/depth.png', name: 'Depth (Z)' },
-    // normals: { url: '/path/to/normals.png', name: 'Normals' },
-    // cryptomatte: { url: '/path/to/crypto.png', name: 'Cryptomatte' },
-  });
+  const updateLayer = (layerName, path) => {
+    setLayers(prev => ({
+      ...prev,
+      [layerName]: path,
+    }));
+    setExportResult(null);
+    setError(null);
+  };
   
   const updateExport = (exportName, enabled) => {
     updateSettings({
@@ -93,545 +82,493 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
     });
   };
   
-  const handleBrowsePath = async () => {
-    // TODO: Implement native folder browser via backend
-    // For now, just prompt
-    const path = prompt('Enter export path:', exportPath || '/outputs/exports/');
-    if (path) {
-      setExportPath(path);
+  // Browse for save location
+  const handleBrowseSaveLocation = async () => {
+    try {
+      const response = await fetch(`${API_URL}/project/browse-save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: 'Save EXR Export',
+          defaultName: `${settings.exportFilename}.exr`,
+          fileTypes: [['EXR Files', '*.exr'], ['All Files', '*.*']],
+        }),
+      });
+      
+      const data = await response.json();
+      
+      if (data.path && !data.cancelled) {
+        // Extract directory and filename
+        const lastSlash = Math.max(data.path.lastIndexOf('/'), data.path.lastIndexOf('\\'));
+        const dir = data.path.substring(0, lastSlash);
+        let filename = data.path.substring(lastSlash + 1);
+        
+        // Remove .exr extension if present
+        if (filename.toLowerCase().endsWith('.exr')) {
+          filename = filename.slice(0, -4);
+        }
+        
+        updateSettings({
+          exportPath: dir,
+          exportFilename: filename,
+        });
+      }
+    } catch (err) {
+      console.error('Browse failed:', err);
     }
   };
   
   const handleExport = async () => {
-    if (!exportPath) {
-      alert('Please select an export path');
+    if (!layers.beauty) {
+      setError('Please add at least a Beauty pass to export');
+      return;
+    }
+    
+    if (!settings.exports.multiLayerEXR && !settings.exports.singleLayerEXRs) {
+      setError('Please select at least one export type');
       return;
     }
     
     setExporting(true);
-    setExportComplete(false);
+    setExportResult(null);
+    setError(null);
+    setElapsedTime(0);
     
-    // TODO: Implement backend API call for export
-    // Simulate for now
-    setTimeout(() => {
+    const startTime = Date.now();
+    const timer = setInterval(() => {
+      setElapsedTime(Math.floor((Date.now() - startTime) / 1000));
+    }, 1000);
+    
+    try {
+      const response = await fetch(`${API_URL}/export/exr`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          layers: {
+            beauty: layers.beauty,
+            depth: layers.depth,
+            normals: layers.normals,
+            crypto: layers.crypto,
+          },
+          bit_depth: settings.exrBitDepth,
+          compression: settings.exrCompression,
+          color_space: settings.exrColorSpace,
+          multi_layer: settings.exports.multiLayerEXR,
+          single_files: settings.exports.singleLayerEXRs,
+          filename: settings.exportFilename,
+          export_path: settings.exportPath,
+        }),
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || `Server error: ${response.status}`);
+      }
+      
+      const result = await response.json();
+      setExportResult(result);
+      
+    } catch (err) {
+      console.error('Export failed:', err);
+      setError(err.message);
+    } finally {
+      clearInterval(timer);
       setExporting(false);
-      setExportComplete(true);
-    }, 3000);
+    }
   };
   
-  // Count enabled exports
-  const enabledExportsCount = Object.values(settings.exports).filter(v => v).length;
+  const availableLayersCount = Object.values(layers).filter(v => v !== null).length;
+  const canExport = layers.beauty && (settings.exports.multiLayerEXR || settings.exports.singleLayerEXRs);
+  
+  // Get the largest layer for main preview
+  const mainPreview = layers.beauty || layers.depth || layers.normals || layers.crypto;
   
   return (
     <>
-      {/* Preview Area - Large Beauty + Small Layer Thumbnails */}
+      {/* Preview Area */}
       <div className="fuk-preview-area">
         <div className="fuk-preview-container" style={{ 
           width: '100%', 
           height: '100%',
           display: 'flex',
-          gap: '1.5rem',
-          padding: '1.5rem',
+          flexDirection: 'column',
+          padding: '1rem',
         }}>
-          {/* Large Beauty Pass */}
-          <div style={{ flex: 2, display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              paddingBottom: '0.5rem',
-            }}>
-              <h3 style={{ 
-                fontSize: '0.875rem', 
-                fontWeight: 600, 
-                color: '#c084fc',
-                textTransform: 'uppercase',
-                letterSpacing: '0.05em',
-              }}>
-                Beauty Pass
-              </h3>
-              {exportComplete && (
-                <div style={{ 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  gap: '0.25rem',
-                  color: '#10b981',
-                  fontSize: '0.75rem',
-                }}>
-                  <CheckCircle style={{ width: '1rem', height: '1rem' }} />
-                  Exported
-                </div>
-              )}
-            </div>
-            
-            {availableLayers.beauty ? (
-              <div style={{ 
-                flex: 1,
+          {/* Main preview */}
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            {mainPreview ? (
+              <div style={{
+                maxWidth: '100%',
+                maxHeight: '100%',
                 borderRadius: '0.5rem',
                 border: '1px solid #374151',
                 overflow: 'hidden',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
                 background: '#000',
               }}>
                 <img
-                  src={buildImageUrl(availableLayers.beauty.url)}
-                  alt="Beauty Pass"
+                  src={buildImageUrl(mainPreview)}
+                  alt="Preview"
                   style={{
                     maxWidth: '100%',
-                    maxHeight: '100%',
+                    maxHeight: '60vh',
                     objectFit: 'contain',
                   }}
                 />
               </div>
             ) : (
-              <div className="fuk-card-dashed" style={{ flex: 1 }}>
-                <div className="fuk-placeholder">
-                  <Save style={{ width: '3rem', height: '3rem', margin: '0 auto 1rem', opacity: 0.3 }} />
-                  <p style={{ color: '#6b7280' }}>No render available</p>
-                </div>
+              <div style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: '0.5rem',
+                color: '#6b7280',
+              }}>
+                <Download style={{ width: '3rem', height: '3rem', opacity: 0.3 }} />
+                <p style={{ fontSize: '0.875rem' }}>Add layers to preview</p>
               </div>
             )}
           </div>
           
-          {/* Layer Thumbnails Grid */}
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-            <h3 style={{ 
-              fontSize: '0.75rem', 
-              fontWeight: 600, 
-              color: '#9ca3af',
-              textTransform: 'uppercase',
-              letterSpacing: '0.05em',
-              paddingBottom: '0.5rem',
+          {/* Layer thumbnails row */}
+          {availableLayersCount > 0 && (
+            <div style={{
+              display: 'flex',
+              gap: '0.5rem',
+              justifyContent: 'center',
+              paddingTop: '0.75rem',
+              borderTop: '1px solid #374151',
+              marginTop: '0.75rem',
             }}>
-              AOV Layers
-            </h3>
-            
-            <div style={{ 
-              display: 'grid',
-              gridTemplateColumns: 'repeat(2, 1fr)',
-              gap: '0.75rem',
-              flex: 1,
-              alignContent: 'start',
-            }}>
-              {Object.entries(availableLayers).filter(([name]) => name !== 'beauty').length > 0 ? (
-                // Show actual layers
-                Object.entries(availableLayers)
-                  .filter(([name]) => name !== 'beauty')
-                  .map(([layerName, layerData]) => (
-                    <div 
-                      key={layerName}
-                      style={{
-                        background: 'rgba(31, 41, 55, 0.5)',
-                        borderRadius: '0.375rem',
-                        border: '1px solid #374151',
-                        overflow: 'hidden',
-                      }}
-                    >
-                      <div style={{ aspectRatio: '16/9', overflow: 'hidden', background: '#000' }}>
-                        <img
-                          src={buildImageUrl(layerData.url)}
-                          alt={layerData.name}
-                          style={{
-                            width: '100%',
-                            height: '100%',
-                            objectFit: 'cover',
-                          }}
-                        />
-                      </div>
-                      <div style={{ 
-                        padding: '0.375rem 0.5rem',
-                        fontSize: '0.65rem',
-                        fontWeight: 600,
-                        textTransform: 'uppercase',
-                        color: '#9ca3af',
-                        letterSpacing: '0.025em',
-                        textAlign: 'center',
-                      }}>
-                        {layerData.name}
-                      </div>
-                    </div>
-                  ))
-              ) : (
-                // Show placeholders for each AOV type
-                ['Depth', 'Normals', 'Cryptomatte'].map((layerName) => (
-                  <div 
-                    key={layerName}
-                    style={{
-                      background: 'rgba(31, 41, 55, 0.3)',
-                      borderRadius: '0.375rem',
-                      border: '1px dashed #374151',
-                      overflow: 'hidden',
-                    }}
-                  >
-                    <div style={{ 
-                      aspectRatio: '16/9', 
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      background: 'rgba(0, 0, 0, 0.2)',
-                    }}>
-                      <Pipeline style={{ width: '1.5rem', height: '1.5rem', opacity: 0.2 }} />
-                    </div>
-                    <div style={{ 
-                      padding: '0.375rem 0.5rem',
-                      fontSize: '0.65rem',
-                      fontWeight: 600,
-                      textTransform: 'uppercase',
-                      color: '#4b5563',
-                      letterSpacing: '0.025em',
-                      textAlign: 'center',
-                    }}>
-                      {layerName}
-                    </div>
+              {Object.entries(layers).map(([name, path]) => path && (
+                <div key={name} style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: '0.25rem',
+                }}>
+                  <div style={{
+                    width: '60px',
+                    height: '60px',
+                    borderRadius: '0.25rem',
+                    overflow: 'hidden',
+                    border: name === 'beauty' ? '2px solid #a855f7' : '1px solid #374151',
+                  }}>
+                    <img
+                      src={buildImageUrl(path)}
+                      alt={name}
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    />
                   </div>
-                ))
+                  <span style={{
+                    fontSize: '0.6rem',
+                    color: name === 'beauty' ? '#c084fc' : '#9ca3af',
+                    textTransform: 'capitalize',
+                  }}>
+                    {name}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+          
+          {/* Export result */}
+          {exportResult && (
+            <div style={{
+              marginTop: '0.75rem',
+              padding: '0.75rem',
+              background: 'rgba(16, 185, 129, 0.1)',
+              border: '1px solid rgba(16, 185, 129, 0.3)',
+              borderRadius: '0.5rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#10b981' }}>
+                <CheckCircle style={{ width: '1.25rem', height: '1.25rem' }} />
+                <span style={{ fontSize: '0.875rem' }}>
+                  Exported to: {exportResult.saved_path || exportResult.multi_layer?.url || 'cache'}
+                </span>
+              </div>
+              {exportResult.multi_layer?.url && (
+                <a
+                  href={`/${exportResult.multi_layer.url}`}
+                  download
+                  style={{
+                    padding: '0.375rem 0.75rem',
+                    background: '#10b981',
+                    color: 'white',
+                    borderRadius: '0.25rem',
+                    fontSize: '0.75rem',
+                    textDecoration: 'none',
+                  }}
+                >
+                  Download EXR
+                </a>
               )}
             </div>
-          </div>
+          )}
+          
+          {error && (
+            <div style={{
+              marginTop: '0.75rem',
+              padding: '0.75rem',
+              background: 'rgba(239, 68, 68, 0.1)',
+              border: '1px solid rgba(239, 68, 68, 0.3)',
+              borderRadius: '0.5rem',
+              color: '#ef4444',
+              fontSize: '0.875rem',
+            }}>
+              {error}
+            </div>
+          )}
         </div>
       </div>
 
       {/* Settings Area */}
       <div className="fuk-settings-area">
         <div className="fuk-settings-grid">
-          {/* Export Options Card */}
+          {/* Layer Inputs - Compact Grid */}
           <div className="fuk-card">
-            <h3 className="fuk-card-title fuk-mb-3">Export Options</h3>
+            <h3 className="fuk-card-title fuk-mb-3">Layer Inputs</h3>
             
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              <label className="fuk-checkbox-group">
+            <div className="layer-inputs-grid">
+              <InlineImageInput
+                label="Beauty"
+                required
+                value={layers.beauty}
+                onChange={(path) => updateLayer('beauty', path)}
+                disabled={exporting}
+                placeholder="Beauty pass"
+              />
+              
+              <InlineImageInput
+                label="Depth"
+                value={layers.depth}
+                onChange={(path) => updateLayer('depth', path)}
+                disabled={exporting}
+                placeholder="Depth map"
+              />
+              
+              <InlineImageInput
+                label="Normals"
+                value={layers.normals}
+                onChange={(path) => updateLayer('normals', path)}
+                disabled={exporting}
+                placeholder="Normal map"
+              />
+              
+              <InlineImageInput
+                label="Crypto"
+                value={layers.crypto}
+                onChange={(path) => updateLayer('crypto', path)}
+                disabled={exporting}
+                placeholder="Cryptomatte"
+              />
+            </div>
+            
+            <p style={{ fontSize: '0.65rem', color: '#6b7280', marginTop: '0.5rem' }}>
+              Drag from History or click to upload
+            </p>
+          </div>
+
+          {/* Save Location */}
+          <div className="fuk-card">
+            <h3 className="fuk-card-title fuk-mb-3">Save Location</h3>
+            
+            <div className="export-filename-group">
+              <label className="fuk-label">Filename</label>
+              <div className="export-filename-row">
+                <input
+                  type="text"
+                  className="fuk-input"
+                  value={settings.exportFilename}
+                  onChange={(e) => updateSettings({ exportFilename: e.target.value })}
+                  placeholder="export"
+                  disabled={exporting}
+                />
+                <span className="extension">.exr</span>
+              </div>
+            </div>
+            
+            <div style={{ marginTop: '0.75rem' }}>
+              <label className="fuk-label">Export To</label>
+              <div className="save-location-row">
+                <input
+                  type="text"
+                  className="fuk-input"
+                  value={settings.exportPath || '(project cache)'}
+                  readOnly
+                  style={{ 
+                    color: settings.exportPath ? '#d1d5db' : '#6b7280',
+                    fontStyle: settings.exportPath ? 'normal' : 'italic',
+                  }}
+                />
+                <button
+                  className="fuk-btn fuk-btn-secondary"
+                  onClick={handleBrowseSaveLocation}
+                  disabled={exporting}
+                  title="Browse for save location"
+                >
+                  <Folder style={{ width: '1rem', height: '1rem' }} />
+                </button>
+              </div>
+              <p style={{ fontSize: '0.65rem', color: '#6b7280', marginTop: '0.25rem' }}>
+                Leave empty to save in project cache
+              </p>
+            </div>
+          </div>
+
+          {/* Export Options - Compact */}
+          <div className="fuk-card">
+            <h3 className="fuk-card-title fuk-mb-2">Export Format</h3>
+            
+            <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+              <label className="fuk-checkbox-group" style={{ flex: 1, minWidth: '140px' }}>
                 <input
                   type="checkbox"
                   className="fuk-checkbox"
                   checked={settings.exports.multiLayerEXR}
                   onChange={(e) => updateExport('multiLayerEXR', e.target.checked)}
+                  disabled={exporting}
                 />
-                <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  <span className="fuk-label" style={{ marginBottom: 0 }}>Multi-Layer EXR</span>
-                  <span style={{ fontSize: '0.7rem', color: '#6b7280' }}>
-                    All AOVs in single file (Nuke/Fusion)
+                <div>
+                  <span className="fuk-label" style={{ marginBottom: 0, fontSize: '0.75rem' }}>Multi-Layer</span>
+                  <span style={{ fontSize: '0.6rem', color: '#6b7280', display: 'block' }}>
+                    All AOVs in one file
                   </span>
                 </div>
               </label>
               
-              <label className="fuk-checkbox-group">
+              <label className="fuk-checkbox-group" style={{ flex: 1, minWidth: '140px' }}>
                 <input
                   type="checkbox"
                   className="fuk-checkbox"
                   checked={settings.exports.singleLayerEXRs}
                   onChange={(e) => updateExport('singleLayerEXRs', e.target.checked)}
+                  disabled={exporting}
                 />
-                <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  <span className="fuk-label" style={{ marginBottom: 0 }}>Single-Layer EXRs</span>
-                  <span style={{ fontSize: '0.7rem', color: '#6b7280' }}>
-                    Separate file per AOV
+                <div>
+                  <span className="fuk-label" style={{ marginBottom: 0, fontSize: '0.75rem' }}>Separate Files</span>
+                  <span style={{ fontSize: '0.6rem', color: '#6b7280', display: 'block' }}>
+                    One file per AOV
                   </span>
                 </div>
               </label>
-              
-              <label className="fuk-checkbox-group">
-                <input
-                  type="checkbox"
-                  className="fuk-checkbox"
-                  checked={settings.exports.previewRender}
-                  onChange={(e) => updateExport('previewRender', e.target.checked)}
-                />
-                <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  <span className="fuk-label" style={{ marginBottom: 0 }}>Preview Render</span>
-                  <span style={{ fontSize: '0.7rem', color: '#6b7280' }}>
-                    PNG/JPG for review
-                  </span>
-                </div>
-              </label>
-              
-              <label className="fuk-checkbox-group">
-                <input
-                  type="checkbox"
-                  className="fuk-checkbox"
-                  checked={settings.exports.saveTensors}
-                  onChange={(e) => updateExport('saveTensors', e.target.checked)}
-                />
-                <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  <span className="fuk-label" style={{ marginBottom: 0 }}>Save Tensors</span>
-                  <span style={{ fontSize: '0.7rem', color: '#6b7280' }}>
-                    Raw latents for re-processing
-                  </span>
-                </div>
-              </label>
-              
-              <label className="fuk-checkbox-group">
-                <input
-                  type="checkbox"
-                  className="fuk-checkbox"
-                  checked={settings.exports.collectProject}
-                  onChange={(e) => updateExport('collectProject', e.target.checked)}
-                />
-                <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  <span className="fuk-label" style={{ marginBottom: 0 }}>Collect Project</span>
-                  <span style={{ fontSize: '0.7rem', color: '#6b7280' }}>
-                    Package everything for archival
-                  </span>
-                </div>
-              </label>
-            </div>
-            
-            <div style={{ 
-              marginTop: '1rem', 
-              padding: '0.5rem 0.75rem', 
-              background: 'rgba(168, 85, 247, 0.1)', 
-              borderRadius: '0.375rem',
-              fontSize: '0.7rem',
-              color: '#c084fc',
-            }}>
-              {enabledExportsCount} export{enabledExportsCount !== 1 ? 's' : ''} selected
             </div>
           </div>
 
-          {/* Export Path Card */}
+          {/* EXR Settings - Compact Row Layout */}
           <div className="fuk-card">
-            <h3 className="fuk-card-title fuk-mb-3">Export Destination</h3>
+            <h3 className="fuk-card-title fuk-mb-2">EXR Settings</h3>
             
-            <div className="fuk-form-group-compact">
-              <label className="fuk-label">Output Path</label>
-              <div style={{ display: 'flex', gap: '0.5rem' }}>
-                <input
-                  type="text"
-                  className="fuk-input"
-                  value={exportPath}
-                  onChange={(e) => setExportPath(e.target.value)}
-                  placeholder="/outputs/exports/"
-                  style={{ flex: 1 }}
-                />
-                <button
-                  onClick={handleBrowsePath}
-                  className="fuk-btn fuk-btn-secondary"
-                  style={{ paddingLeft: '1rem', paddingRight: '1rem' }}
-                >
-                  <Folder style={{ width: '1rem', height: '1rem' }} />
-                </button>
-              </div>
-            </div>
-            
-            <p style={{ fontSize: '0.7rem', color: '#9ca3af', marginTop: '0.5rem' }}>
-              Files will be organized by export type
-            </p>
-          </div>
-
-          {/* EXR Settings */}
-          {(settings.exports.multiLayerEXR || settings.exports.singleLayerEXRs) && (
-            <div className="fuk-card">
-              <h3 className="fuk-card-title fuk-mb-3">EXR Settings</h3>
-              
-              <div className="fuk-form-group-compact">
-                <label className="fuk-label">Bit Depth</label>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <div className="compact-form-row">
+                <label className="fuk-label" style={{ marginBottom: 0, minWidth: '70px' }}>Bit Depth</label>
                 <select
                   className="fuk-select"
                   value={settings.exrBitDepth}
                   onChange={(e) => updateSettings({ exrBitDepth: parseInt(e.target.value) })}
+                  disabled={exporting}
+                  style={{ fontSize: '0.75rem', padding: '0.375rem' }}
                 >
-                  <option value="16">16-bit Half Float</option>
-                  <option value="32">32-bit Float (Recommended)</option>
+                  <option value="16">16-bit Half</option>
+                  <option value="32">32-bit Float</option>
                 </select>
               </div>
               
-              <div className="fuk-form-group-compact">
-                <label className="fuk-label">Compression</label>
+              <div className="compact-form-row">
+                <label className="fuk-label" style={{ marginBottom: 0, minWidth: '70px' }}>Compress</label>
                 <select
                   className="fuk-select"
                   value={settings.exrCompression}
                   onChange={(e) => updateSettings({ exrCompression: e.target.value })}
+                  disabled={exporting}
+                  style={{ fontSize: '0.75rem', padding: '0.375rem' }}
                 >
-                  <option value="ZIP">ZIP (Lossless, Recommended)</option>
-                  <option value="PIZ">PIZ (Lossless, Wavelet)</option>
-                  <option value="PXR24">PXR24 (Lossy)</option>
-                  <option value="B44">B44 (Lossy, Fast)</option>
-                  <option value="DWAA">DWAA (Lossy, Small)</option>
-                  <option value="None">None (Uncompressed)</option>
+                  <option value="ZIP">ZIP</option>
+                  <option value="PIZ">PIZ</option>
+                  <option value="PXR24">PXR24</option>
+                  <option value="DWAA">DWAA</option>
+                  <option value="NONE">None</option>
                 </select>
               </div>
               
-              <div className="fuk-form-group-compact">
-                <label className="fuk-label">Color Space</label>
+              <div className="compact-form-row">
+                <label className="fuk-label" style={{ marginBottom: 0, minWidth: '70px' }}>Color</label>
                 <select
                   className="fuk-select"
                   value={settings.exrColorSpace}
                   onChange={(e) => updateSettings({ exrColorSpace: e.target.value })}
+                  disabled={exporting}
+                  style={{ fontSize: '0.75rem', padding: '0.375rem' }}
                 >
-                  <option value="Linear">Linear (Recommended)</option>
-                  <option value="sRGB">sRGB</option>
-                  <option value="ACES">ACES</option>
-                </select>
-              </div>
-            </div>
-          )}
-
-          {/* Preview Settings */}
-          {settings.exports.previewRender && (
-            <div className="fuk-card">
-              <h3 className="fuk-card-title fuk-mb-3">Preview Settings</h3>
-              
-              <div className="fuk-form-group-compact">
-                <label className="fuk-label">Format</label>
-                <select
-                  className="fuk-select"
-                  value={settings.previewFormat}
-                  onChange={(e) => updateSettings({ previewFormat: e.target.value })}
-                >
-                  <option value="PNG">PNG (Lossless)</option>
-                  <option value="JPG">JPG (Compressed)</option>
-                  <option value="MP4">MP4 (Video)</option>
-                  <option value="MOV">MOV (ProRes)</option>
-                </select>
-              </div>
-              
-              {settings.previewFormat === 'JPG' && (
-                <div className="fuk-form-group-compact">
-                  <label className="fuk-label">Quality</label>
-                  <div className="fuk-input-inline">
-                    <input
-                      type="range"
-                      className="fuk-input"
-                      style={{ flex: 2 }}
-                      value={settings.previewQuality}
-                      onChange={(e) => updateSettings({ previewQuality: parseInt(e.target.value) })}
-                      min={50}
-                      max={100}
-                    />
-                    <input
-                      type="number"
-                      className="fuk-input"
-                      style={{ width: '80px' }}
-                      value={settings.previewQuality}
-                      onChange={(e) => updateSettings({ previewQuality: parseInt(e.target.value) })}
-                      min={50}
-                      max={100}
-                    />
-                  </div>
-                </div>
-              )}
-              
-              <div className="fuk-form-group-compact">
-                <label className="fuk-label">Color Space</label>
-                <select
-                  className="fuk-select"
-                  value={settings.previewColorSpace}
-                  onChange={(e) => updateSettings({ previewColorSpace: e.target.value })}
-                >
-                  <option value="sRGB">sRGB (Recommended)</option>
                   <option value="Linear">Linear</option>
-                  <option value="ACES">ACES</option>
+                  <option value="sRGB">sRGB</option>
                 </select>
               </div>
             </div>
-          )}
+          </div>
 
-          {/* Tensor Settings */}
-          {settings.exports.saveTensors && (
-            <div className="fuk-card">
-              <h3 className="fuk-card-title fuk-mb-3">Tensor Settings</h3>
-              
-              <div className="fuk-form-group-compact">
-                <label className="fuk-label">Format</label>
-                <select
-                  className="fuk-select"
-                  value={settings.tensorFormat}
-                  onChange={(e) => updateSettings({ tensorFormat: e.target.value })}
-                >
-                  <option value="SafeTensors">SafeTensors (Recommended)</option>
-                  <option value="PyTorch">PyTorch (.pt)</option>
-                </select>
+          {/* Channel Summary - Compact */}
+          <div className="fuk-card">
+            <h3 className="fuk-card-title fuk-mb-2">Channels</h3>
+            
+            <div style={{ 
+              display: 'grid', 
+              gridTemplateColumns: 'repeat(2, 1fr)', 
+              gap: '0.25rem',
+              fontSize: '0.7rem',
+            }}>
+              <div style={{ 
+                display: 'flex', 
+                justifyContent: 'space-between',
+                padding: '0.25rem 0.375rem',
+                background: layers.beauty ? 'rgba(16, 185, 129, 0.1)' : 'transparent',
+                borderRadius: '0.25rem',
+              }}>
+                <span style={{ color: '#9ca3af' }}>R,G,B</span>
+                <span style={{ color: layers.beauty ? '#10b981' : '#4b5563' }}>
+                  {layers.beauty ? '✓' : '—'}
+                </span>
               </div>
-              
-              <div className="fuk-form-group-compact">
-                <label className="fuk-checkbox-group">
-                  <input
-                    type="checkbox"
-                    className="fuk-checkbox"
-                    checked={settings.includeLatents}
-                    onChange={(e) => updateSettings({ includeLatents: e.target.checked })}
-                  />
-                  <span className="fuk-label" style={{ marginBottom: 0 }}>Include Latent Tensors</span>
-                </label>
+              <div style={{ 
+                display: 'flex', 
+                justifyContent: 'space-between',
+                padding: '0.25rem 0.375rem',
+                background: layers.depth ? 'rgba(16, 185, 129, 0.1)' : 'transparent',
+                borderRadius: '0.25rem',
+              }}>
+                <span style={{ color: '#9ca3af' }}>Z</span>
+                <span style={{ color: layers.depth ? '#10b981' : '#4b5563' }}>
+                  {layers.depth ? '✓' : '—'}
+                </span>
               </div>
-              
-              <div className="fuk-form-group-compact">
-                <label className="fuk-checkbox-group">
-                  <input
-                    type="checkbox"
-                    className="fuk-checkbox"
-                    checked={settings.includeVAE}
-                    onChange={(e) => updateSettings({ includeVAE: e.target.checked })}
-                  />
-                  <span className="fuk-label" style={{ marginBottom: 0 }}>Include VAE Outputs</span>
-                </label>
+              <div style={{ 
+                display: 'flex', 
+                justifyContent: 'space-between',
+                padding: '0.25rem 0.375rem',
+                background: layers.normals ? 'rgba(16, 185, 129, 0.1)' : 'transparent',
+                borderRadius: '0.25rem',
+              }}>
+                <span style={{ color: '#9ca3af' }}>N.XYZ</span>
+                <span style={{ color: layers.normals ? '#10b981' : '#4b5563' }}>
+                  {layers.normals ? '✓' : '—'}
+                </span>
               </div>
-              
-              <p style={{ fontSize: '0.7rem', color: '#9ca3af', marginTop: '0.5rem' }}>
-                Raw tensors can be re-decoded with different VAE settings
-              </p>
+              <div style={{ 
+                display: 'flex', 
+                justifyContent: 'space-between',
+                padding: '0.25rem 0.375rem',
+                background: layers.crypto ? 'rgba(16, 185, 129, 0.1)' : 'transparent',
+                borderRadius: '0.25rem',
+              }}>
+                <span style={{ color: '#9ca3af' }}>Crypto</span>
+                <span style={{ color: layers.crypto ? '#10b981' : '#4b5563' }}>
+                  {layers.crypto ? '✓' : '—'}
+                </span>
+              </div>
             </div>
-          )}
-
-          {/* Collection Settings */}
-          {settings.exports.collectProject && (
-            <div className="fuk-card">
-              <h3 className="fuk-card-title fuk-mb-3">Project Collection</h3>
-              
-              <div className="fuk-form-group-compact">
-                <label className="fuk-checkbox-group">
-                  <input
-                    type="checkbox"
-                    className="fuk-checkbox"
-                    checked={settings.includeInputs}
-                    onChange={(e) => updateSettings({ includeInputs: e.target.checked })}
-                  />
-                  <span className="fuk-label" style={{ marginBottom: 0 }}>Include Source Files</span>
-                </label>
-              </div>
-              
-              <div className="fuk-form-group-compact">
-                <label className="fuk-checkbox-group">
-                  <input
-                    type="checkbox"
-                    className="fuk-checkbox"
-                    checked={settings.includeIntermediates}
-                    onChange={(e) => updateSettings({ includeIntermediates: e.target.checked })}
-                  />
-                  <span className="fuk-label" style={{ marginBottom: 0 }}>Include Intermediate Files</span>
-                </label>
-              </div>
-              
-              <div className="fuk-form-group-compact">
-                <label className="fuk-checkbox-group">
-                  <input
-                    type="checkbox"
-                    className="fuk-checkbox"
-                    checked={settings.includeConfig}
-                    onChange={(e) => updateSettings({ includeConfig: e.target.checked })}
-                  />
-                  <span className="fuk-label" style={{ marginBottom: 0 }}>Include Project Config</span>
-                </label>
-              </div>
-              
-              <div className="fuk-form-group-compact">
-                <label className="fuk-label">Package Format</label>
-                <select
-                  className="fuk-select"
-                  value={settings.packageFormat}
-                  onChange={(e) => updateSettings({ packageFormat: e.target.value })}
-                >
-                  <option value="zip">ZIP Archive</option>
-                  <option value="folder">Folder Structure</option>
-                </select>
-              </div>
-              
-              <p style={{ fontSize: '0.7rem', color: '#9ca3af', marginTop: '0.5rem' }}>
-                Creates complete project package for archival or transfer
-              </p>
-            </div>
-          )}
+          </div>
         </div>
       </div>
 
@@ -641,11 +578,11 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
         setActiveTab={setActiveTab}
         generating={exporting}
         progress={exporting ? { progress: 0.5, phase: 'exporting' } : null}
-        elapsedSeconds={0}
+        elapsedSeconds={elapsedTime}
         onGenerate={handleExport}
         onCancel={() => setExporting(false)}
-        canGenerate={!!exportPath && enabledExportsCount > 0}
-        generateLabel="Export"
+        canGenerate={canExport}
+        generateLabel={`Export EXR${settings.exportFilename ? ` (${settings.exportFilename})` : ''}`}
         generatingLabel="Exporting..."
       />
     </>

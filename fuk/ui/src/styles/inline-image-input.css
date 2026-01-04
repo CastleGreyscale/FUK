@@ -1,0 +1,204 @@
+/* Inline Image Input - Compact dropzone with side preview */
+
+.inline-image-input {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.inline-image-label {
+  font-size: 0.75rem;
+  color: #d1d5db;
+  font-weight: 500;
+}
+
+.inline-image-label .required {
+  color: #ef4444;
+  margin-left: 0.125rem;
+}
+
+.inline-image-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0.5rem;
+  min-height: 48px;
+}
+
+.inline-dropzone {
+  flex: 1;
+  min-width: 100px;
+  max-width: 140px;
+  border: 1px dashed #4b5563;
+  border-radius: 0.375rem;
+  background: rgba(31, 41, 55, 0.3);
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.inline-dropzone:hover {
+  border-color: #6b7280;
+  background: rgba(31, 41, 55, 0.5);
+}
+
+.inline-dropzone.drag-over {
+  border-color: #a855f7;
+  background: rgba(168, 85, 247, 0.1);
+  border-style: solid;
+}
+
+.inline-dropzone.has-value {
+  max-width: 100px;
+  border-style: solid;
+  border-color: #374151;
+}
+
+.inline-dropzone-label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.125rem;
+  padding: 0.375rem;
+  cursor: pointer;
+  width: 100%;
+  height: 100%;
+  text-align: center;
+}
+
+.inline-dropzone-label .upload-icon {
+  width: 1rem;
+  height: 1rem;
+  color: #6b7280;
+}
+
+.inline-dropzone-label span {
+  font-size: 0.6rem;
+  color: #6b7280;
+}
+
+.inline-dropzone-label .uploading {
+  color: #a855f7;
+  font-size: 0.65rem;
+}
+
+.inline-preview {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  border-radius: 0.375rem;
+  overflow: hidden;
+  border: 1px solid #374151;
+  background: #000;
+  flex-shrink: 0;
+}
+
+.inline-preview img,
+.inline-preview video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.inline-preview-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  background: rgba(0, 0, 0, 0.7);
+  border: none;
+  border-radius: 2px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.inline-preview:hover .inline-preview-remove {
+  opacity: 1;
+}
+
+.inline-preview-remove:hover {
+  background: rgba(239, 68, 68, 0.9);
+}
+
+.inline-preview-remove svg {
+  width: 10px;
+  height: 10px;
+  color: white;
+}
+
+/* Layer Input Grid - for Export tab */
+.layer-inputs-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.75rem;
+}
+
+@media (max-width: 1400px) {
+  .layer-inputs-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Compact form layout */
+.compact-form-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.compact-form-row > label {
+  min-width: 80px;
+  font-size: 0.75rem;
+  color: #d1d5db;
+}
+
+.compact-form-row > select,
+.compact-form-row > input {
+  flex: 1;
+}
+
+/* Save location input */
+.save-location-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.save-location-row input {
+  flex: 1;
+}
+
+.save-location-row button {
+  flex-shrink: 0;
+}
+
+/* Export filename input */
+.export-filename-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.export-filename-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.export-filename-row input {
+  flex: 1;
+}
+
+.export-filename-row .extension {
+  font-size: 0.75rem;
+  color: #6b7280;
+  padding: 0.5rem;
+  background: rgba(31, 41, 55, 0.5);
+  border-radius: 0.25rem;
+}

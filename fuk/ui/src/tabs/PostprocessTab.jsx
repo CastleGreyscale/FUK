@@ -61,6 +61,34 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
   const [error, setError] = useState(null);
   const [capabilities, setCapabilities] = useState(null);
   
+  // Track input dimensions for proper aspect ratio
+  const [inputDimensions, setInputDimensions] = useState({ width: 16, height: 9 });
+  const [outputDimensions, setOutputDimensions] = useState({ width: 16, height: 9 });
+  
+  // Timer state to match useGeneration hook behavior
+  const [startTime, setStartTime] = useState(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const mountedRef = useRef(true);
+  
+  // Track mounted state
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+  
+  // Timer for elapsed time - matches useGeneration hook
+  useEffect(() => {
+    if (!processing || !startTime) return;
+    
+    const interval = setInterval(() => {
+      if (mountedRef.current) {
+        setElapsedSeconds(Math.floor((Date.now() - startTime) / 1000));
+      }
+    }, 1000);
+    
+    return () => clearInterval(interval);
+  }, [processing, startTime]);
+  
   // Fetch capabilities on mount
   useEffect(() => {
     fetch(`${API_URL}/postprocess/capabilities`)
@@ -73,6 +101,47 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
         console.warn('[PostProcess] Could not fetch capabilities:', err);
       });
   }, []);
+  
+  // Load input dimensions when source changes
+  useEffect(() => {
+    if (!sourceInput) {
+      setInputDimensions({ width: 16, height: 9 });
+      return;
+    }
+    
+    const url = buildImageUrl(sourceInput);
+    
+    // For images, load and get natural dimensions
+    if (activeProcess === 'upscale' || sourceInput.match(/\.(png|jpg|jpeg|webp)$/i)) {
+      const img = new Image();
+      img.onload = () => {
+        setInputDimensions({ width: img.naturalWidth, height: img.naturalHeight });
+      };
+      img.src = url;
+    } else {
+      // For videos, create a video element to get dimensions
+      const video = document.createElement('video');
+      video.onloadedmetadata = () => {
+        setInputDimensions({ width: video.videoWidth, height: video.videoHeight });
+      };
+      video.src = url;
+    }
+  }, [sourceInput, activeProcess]);
+  
+  // Update output dimensions when result changes
+  useEffect(() => {
+    if (!result) {
+      setOutputDimensions(inputDimensions);
+      return;
+    }
+    
+    if (result.type === 'image' && result.outputSize) {
+      setOutputDimensions({ width: result.outputSize.width, height: result.outputSize.height });
+    } else if (result.type === 'video') {
+      // For video, aspect ratio stays the same
+      setOutputDimensions(inputDimensions);
+    }
+  }, [result, inputDimensions]);
   
   const handleSourceChange = (paths) => {
     setSourceInput(paths[0] || null);
@@ -87,6 +156,8 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
     }
     
     setProcessing(true);
+    setStartTime(Date.now());
+    setElapsedSeconds(0);
     setProgress({ phase: 'Starting upscale...', progress: 0.1 });
     setError(null);
     
@@ -120,12 +191,14 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
         method: data.method,
       });
       
+      // Mark progress as complete
+      setProgress({ phase: 'Complete', progress: 1 });
+      
     } catch (err) {
       console.error('[PostProcess] Upscale error:', err);
       setError(err.message);
     } finally {
       setProcessing(false);
-      setProgress(null);
     }
   };
   
@@ -136,6 +209,8 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
     }
     
     setProcessing(true);
+    setStartTime(Date.now());
+    setElapsedSeconds(0);
     setProgress({ phase: 'Starting interpolation...', progress: 0.1 });
     setError(null);
     
@@ -169,12 +244,14 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
         method: data.method,
       });
       
+      // Mark progress as complete
+      setProgress({ phase: 'Complete', progress: 1 });
+      
     } catch (err) {
       console.error('[PostProcess] Interpolate error:', err);
       setError(err.message);
     } finally {
       setProcessing(false);
-      setProgress(null);
     }
   };
   
@@ -186,13 +263,24 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
     }
   };
   
+  const handleCancel = () => {
+    setProcessing(false);
+    setProgress(null);
+    setStartTime(null);
+    setElapsedSeconds(0);
+  };
+  
   const canProcess = sourceInput && !processing;
+  
+  // Calculate aspect ratio for preview containers
+  const inputAspectRatio = inputDimensions.width / inputDimensions.height;
+  const outputAspectRatio = outputDimensions.width / outputDimensions.height;
   
   // Calculate preview info
   const getInputInfo = () => {
     if (!sourceInput) return null;
     if (activeProcess === 'upscale') {
-      return 'Original Resolution';
+      return `${inputDimensions.width}×${inputDimensions.height}`;
     }
     return `${settings.sourceFramerate} fps`;
   };
@@ -200,7 +288,7 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
   const getOutputInfo = () => {
     if (!result) return null;
     if (result.type === 'image') {
-      return `${result.outputSize.width}x${result.outputSize.height} (${result.scale}x)`;
+      return `${result.outputSize.width}×${result.outputSize.height} (${result.scale}x)`;
     }
     return `${result.targetFps} fps (${result.multiplier}x frames)`;
   };
@@ -244,8 +332,8 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
             
             {sourceInput ? (
               <div style={{
-                width: '100%',
-                aspectRatio: '16/9',
+                width: 'auto',
+                maxHeight: '400px',
                 borderRadius: '0.5rem',
                 border: '1px solid #374151',
                 overflow: 'hidden',
@@ -260,7 +348,7 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                     alt="Input"
                     style={{
                       maxWidth: '100%',
-                      maxHeight: '100%',
+                      maxHeight: '400px',
                       objectFit: 'contain',
                     }}
                   />
@@ -271,14 +359,18 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                     loop
                     style={{
                       maxWidth: '100%',
-                      maxHeight: '100%',
+                      maxHeight: '400px',
                       objectFit: 'contain',
                     }}
                   />
                 )}
               </div>
             ) : (
-              <div className="fuk-card-dashed" style={{ width: '100%', aspectRatio: '16/9' }}>
+              <div className="fuk-card-dashed" style={{ 
+                width: '100%', 
+                aspectRatio: '16/9',
+                maxHeight: '400px',
+              }}>
                 <div className="fuk-placeholder">
                   {activeProcess === 'upscale' ? (
                     <Camera style={{ width: '2rem', height: '2rem', margin: '0 auto 0.5rem', opacity: 0.3 }} />
@@ -350,8 +442,8 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
             
             {result ? (
               <div style={{
-                width: '100%',
-                aspectRatio: '16/9',
+                width: 'auto',
+                maxHeight: '400px',
                 borderRadius: '0.5rem',
                 border: '2px solid #10b981',
                 overflow: 'hidden',
@@ -367,7 +459,7 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                     alt="Processed"
                     style={{
                       maxWidth: '100%',
-                      maxHeight: '100%',
+                      maxHeight: '400px',
                       objectFit: 'contain',
                     }}
                   />
@@ -379,7 +471,7 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                     loop
                     style={{
                       maxWidth: '100%',
-                      maxHeight: '100%',
+                      maxHeight: '400px',
                       objectFit: 'contain',
                     }}
                   />
@@ -400,7 +492,11 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                 </div>
               </div>
             ) : (
-              <div className="fuk-card-dashed" style={{ width: '100%', aspectRatio: '16/9' }}>
+              <div className="fuk-card-dashed" style={{ 
+                width: '100%', 
+                aspectRatio: sourceInput ? inputAspectRatio : '16/9',
+                maxHeight: '400px',
+              }}>
                 <div className="fuk-placeholder">
                   <Enhance style={{ width: '2rem', height: '2rem', margin: '0 auto 0.5rem', opacity: 0.3 }} />
                   <p style={{ color: '#6b7280', fontSize: '0.75rem' }}>
@@ -676,9 +772,9 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
         setActiveTab={setActiveTab}
         generating={processing}
         progress={progress}
-        elapsedSeconds={0}
+        elapsedSeconds={elapsedSeconds}
         onGenerate={handleProcess}
-        onCancel={() => setProcessing(false)}
+        onCancel={handleCancel}
         canGenerate={canProcess}
         generateLabel={activeProcess === 'upscale' ? 'Upscale' : 'Interpolate'}
         generatingLabel={activeProcess === 'upscale' ? 'Upscaling...' : 'Interpolating...'}
