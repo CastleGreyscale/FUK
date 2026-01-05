@@ -169,6 +169,7 @@ class CryptoPreprocessor(BasePreprocessor):
         max_objects: int = 50,
         min_area: int = 500,
         output_mode: str = "id_matte",  # 'id_matte', 'layers', 'both'
+        exact_output: bool = False,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -183,6 +184,7 @@ class CryptoPreprocessor(BasePreprocessor):
                 - 'id_matte': Single image with colored IDs
                 - 'layers': Individual mask files per object
                 - 'both': Both outputs
+            exact_output: If True, write to exact output_path (for video frames)
             
         Returns:
             Dict with output_path(s) and metadata
@@ -219,9 +221,9 @@ class CryptoPreprocessor(BasePreprocessor):
                 'num_objects': len(masks),
                 'max_objects': max_objects,
             }
-            unique_output = self._make_unique_path(output_path, params)
-            cv2.imwrite(str(unique_output), cv2.cvtColor(id_matte, cv2.COLOR_RGB2BGR))
-            outputs['id_matte'] = str(unique_output)
+            final_output = self._make_unique_path(output_path, params, exact_output=exact_output)
+            cv2.imwrite(str(final_output), cv2.cvtColor(id_matte, cv2.COLOR_RGB2BGR))
+            outputs['id_matte'] = str(final_output)
         
         # Generate individual layer masks
         if output_mode in ['layers', 'both']:

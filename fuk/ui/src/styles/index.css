@@ -1,12 +1,25 @@
 /*
  * FUK UI Main Stylesheet
+ * Consolidated imports for modular CSS architecture
  */
 
-/* Import base styles */
+/* ============================================================================
+ * CSS MODULE IMPORTS
+ * Order matters: base → components → utilities
+ * ========================================================================== */
+
+/* Base styles and core layout */
 @import './fuk-ui.css';
+
+/* Component-specific styles */
 @import './project-bar.css';
 @import './generation-history.css';
 @import './inline-image-input.css';
+@import './tabs.css';
+@import './forms.css';
+@import './media-uploader.css';
+@import './sequence-styles.css';
+
 /* ============================================================================
  * GLOBAL RESETS
  * ========================================================================== */
@@ -33,8 +46,17 @@ body {
   to { transform: rotate(360deg); }
 }
 
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
 .animate-spin {
   animation: spin 1s linear infinite;
+}
+
+.animate-pulse {
+  animation: pulse 2s infinite;
 }
 
 /* ============================================================================
@@ -149,7 +171,34 @@ body {
 }
 
 /* ============================================================================
- * ADDITIONAL UTILITIES
+ * VIDEO-SPECIFIC PREVIEW
+ * ========================================================================== */
+
+.fuk-preview-media--video {
+  border-radius: 0.5rem;
+  border: 1px solid #374151;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+/* ============================================================================
+ * INPUT SEPARATOR (for dimension inputs)
+ * ========================================================================== */
+
+.fuk-input-separator {
+  color: #9ca3af;
+  flex-shrink: 0;
+}
+
+/* ============================================================================
+ * SEED DISPLAY
+ * ========================================================================== */
+
+.fuk-seed-display {
+  color: #a855f7;
+}
+
+/* ============================================================================
+ * ADDITIONAL ICON UTILITIES
  * ========================================================================== */
 
 .fuk-icon-sm {

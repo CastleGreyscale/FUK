@@ -1,6 +1,7 @@
 /**
  * Image Generation Tab
  * Main UI for Qwen image generation
+ * Refactored: All inline styles moved to CSS classes
  */
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
@@ -54,7 +55,6 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
   }, [formData]);
 
   // Update function that writes to project or localStorage
-  // Uses ref to avoid dependency on formData which causes infinite loops
   const setFormData = useCallback((updater) => {
     const currentData = formDataRef.current;
     const newData = typeof updater === 'function' 
@@ -84,7 +84,6 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
   const savedSeedsHook = useSavedSeeds();
 
   // Reset generation result when switching project files
-  // This allows the saved preview to show instead of stale result
   useEffect(() => {
     if (project?.currentFilename) {
       resetGeneration();
@@ -93,11 +92,9 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
 
   // Get saved preview from project or use generation result
   const previewImage = useMemo(() => {
-    // Current generation result takes priority
     if (result?.outputs?.png) {
       return result.outputs.png;
     }
-    // Fall back to saved preview from project
     if (project?.projectState?.lastState?.lastImagePreview) {
       return project.projectState.lastState.lastImagePreview;
     }
@@ -110,13 +107,11 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
   };
 
   // Update height when aspect ratio changes
-  // Using a ref to track previous values to avoid unnecessary updates
   const prevDimsRef = useRef({ aspectRatio: null, width: null });
   useEffect(() => {
     const { aspectRatio, width } = formData;
     const prev = prevDimsRef.current;
     
-    // Only run if aspectRatio or width actually changed
     if (prev.aspectRatio === aspectRatio && prev.width === width) {
       return;
     }
@@ -132,7 +127,6 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
   // Update last state and seed when generation completes
   useEffect(() => {
     if (result?.outputs?.png) {
-      // Update project last state
       if (project?.updateLastState) {
         project.updateLastState({
           lastImagePreview: result.outputs.png,
@@ -140,7 +134,6 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
         });
       }
       
-      // If backend returned seed_used, update lastUsedSeed
       if (result.seed_used !== undefined && result.seed_used !== null) {
         setFormData(prev => ({
           ...prev,
@@ -160,7 +153,6 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
       case SEED_MODES.RANDOM:
         return generateRandomSeed();
       case SEED_MODES.INCREMENT:
-        // If we have a last used seed, increment it; otherwise start with current seed or random
         if (formData.lastUsedSeed !== null) {
           return formData.lastUsedSeed + 1;
         }
@@ -172,8 +164,6 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
 
   const handleGenerate = async () => {
     const dims = calculateDimensions(formData.aspectRatio, formData.width);
-    
-    // Get the effective seed based on mode
     const effectiveSeed = getEffectiveSeed();
     
     const payload = {
@@ -181,7 +171,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
       width: dims.width,
       height: dims.height,
       steps: formData.stepsMode === 'custom' ? formData.steps : parseInt(formData.steps),
-      seed: effectiveSeed,  // Use the computed seed
+      seed: effectiveSeed,
       control_image_paths: formData.control_image_paths,
       control_image_path: formData.control_image_paths.length > 0 
         ? formData.control_image_paths[0] 
@@ -191,11 +181,9 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
     console.log('Generation payload:', payload);
     console.log(`Seed mode: ${formData.seedMode}, using seed: ${effectiveSeed}`);
     
-    // Update lastUsedSeed and possibly increment the fixed seed
     setFormData(prev => ({
       ...prev,
       lastUsedSeed: effectiveSeed,
-      // For increment mode, also update the seed field
       seed: prev.seedMode === SEED_MODES.INCREMENT ? effectiveSeed : prev.seed,
     }));
     
@@ -212,45 +200,46 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
     setFormData(prev => ({ ...prev, control_image_paths: paths }));
   };
 
+  // Calculate CSS variable for dynamic aspect ratio
+  const dims = getCurrentDimensions();
+  const aspectRatioStyle = { '--preview-aspect': `${dims.width} / ${dims.height}` };
+
   return (
     <>
       {/* Preview Area */}
       <div className="fuk-preview-area">
-        <div className="fuk-preview-container" style={{ position: 'relative' }}>
+        <div className="fuk-preview-single">
           {previewImage ? (
-            <>
+            <div className="fuk-preview-container">
               <img
                 src={buildImageUrl(previewImage)}
                 alt="Generated"
-                className="fuk-preview-image"
+                className="fuk-preview-media"
               />
               <div className="fuk-preview-info">
-                <div className="fuk-flex fuk-gap-4">
-                  <span>{getCurrentDimensions().width}x{getCurrentDimensions().height}</span>
+                <div className="fuk-preview-info-row">
+                  <span>{dims.width}x{dims.height}</span>
                   {result?.outputs?.png && (
                     <>
                       <span>Complete</span>
-                      <span className="fuk-status-complete" style={{ gap: '0.25rem' }}>
-                        <CheckCircle style={{ width: '0.875rem', height: '0.875rem' }} />
+                      <span className="fuk-status-complete">
+                        <CheckCircle className="fuk-icon--sm" />
                         {formatTime(elapsedSeconds)}
                       </span>
                     </>
                   )}
                 </div>
               </div>
-            </>
+            </div>
           ) : (
             <div 
-              className="fuk-card-dashed" 
-              style={{ 
-                width: '60%', 
-                aspectRatio: getCurrentDimensions().width / getCurrentDimensions().height 
-              }}
+              className="fuk-placeholder-card fuk-placeholder-card--60 fuk-placeholder-card--dynamic"
+              style={aspectRatioStyle}
             >
               <div className="fuk-placeholder">
-                <Camera style={{ width: '3rem', height: '3rem', margin: '0 auto 1rem', opacity: 0.3 }} />
-                <p style={{ color: '#6b7280' }}>
-                  {getCurrentDimensions().width} x {getCurrentDimensions().height}
+                <Camera className="fuk-placeholder-icon" />
+                <p className="fuk-placeholder-text">
+                  {dims.width} x {dims.height}
                 </p>
               </div>
             </div>
@@ -327,8 +316,8 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                   max={2048}
                   placeholder="1024"
                 />
-                <span style={{ color: '#9ca3af', fontSize: '0.875rem', minWidth: '100px' }}>
-                  = {getCurrentDimensions().width}x{getCurrentDimensions().height}
+                <span className="fuk-input-suffix">
+                  = {dims.width}x{dims.height}
                 </span>
               </div>
             </div>
@@ -372,8 +361,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                 <div className="fuk-input-inline">
                   <input
                     type="range"
-                    className="fuk-input"
-                    style={{ flex: 2 }}
+                    className="fuk-input fuk-input--flex-2"
                     value={formData.lora_multiplier}
                     onChange={(e) => setFormData({...formData, lora_multiplier: parseFloat(e.target.value)})}
                     min={0}
@@ -382,8 +370,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                   />
                   <input
                     type="number"
-                    className="fuk-input"
-                    style={{ width: '80px' }}
+                    className="fuk-input fuk-input--w-80"
                     value={formData.lora_multiplier}
                     onChange={(e) => setFormData({...formData, lora_multiplier: parseFloat(e.target.value)})}
                     step={0.1}
@@ -434,8 +421,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                 
                 <input
                   type="number"
-                  className="fuk-input"
-                  style={{ width: '80px' }}
+                  className="fuk-input fuk-input--w-80"
                   value={formData.steps}
                   onChange={(e) => setFormData({...formData, stepsMode: 'custom', steps: parseInt(e.target.value)})}
                   disabled={formData.stepsMode !== 'custom'}
@@ -506,32 +492,24 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
             />
           </div>
 
-          {/* Preprocessed Image Card - shows last preprocessing result */}
+          {/* Preprocessed Image Card */}
           {project?.projectState?.lastState?.lastPreprocessedImage && formData.model === 'qwen_image_2509_edit' && (
-            <div className="fuk-card" >
-              <h3 className="fuk-card-title fuk-mb-3" style={{ color: '#c084fc' }}>
+            <div className="fuk-card">
+              <h3 className="fuk-card-title fuk-card-title--highlight fuk-mb-3">
                 Last Preprocessed Image
               </h3>
               
-              <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-                {/* Thumbnail */}
-                <div style={{ flex: '0 0 120px' }}>
+              <div className="fuk-preprocess-preview">
+                <div className="fuk-preprocess-preview-thumb">
                   <img
                     src={project.projectState.lastState.lastPreprocessedImage}
                     alt="Preprocessed"
-                    style={{
-                      width: '100%',
-                      aspectRatio: '1',
-                      objectFit: 'cover',
-                      borderRadius: '0.375rem',
-                      border: '1px solid #a855f7',
-                    }}
+                    className="fuk-preprocess-preview-image"
                   />
                 </div>
                 
-                {/* Info and Actions */}
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: '0.75rem', color: '#c084fc', marginBottom: '0.5rem' }}>
+                <div className="fuk-preprocess-preview-info">
+                  <div className="fuk-preprocess-preview-method">
                     <strong>Method:</strong> {project.projectState.lastState.lastPreprocessedMethod || 'unknown'}
                   </div>
                   
@@ -539,10 +517,8 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                     className="fuk-btn fuk-btn-secondary"
                     onClick={() => {
                       const preprocessedUrl = project.projectState.lastState.lastPreprocessedImage;
-                      // Extract path from URL (remove /outputs/ prefix if present)
                       const path = preprocessedUrl.replace(/^\/outputs\//, '').replace(/^\//, '');
                       
-                      // Add to control images if not already present
                       if (!formData.control_image_paths.includes(path)) {
                         setFormData(prev => ({
                           ...prev,
@@ -551,15 +527,12 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                       }
                     }}
                     disabled={generating}
-                    style={{ fontSize: '0.875rem' }}
                   >
-                    <Pipeline style={{ width: '1rem', height: '1rem' }} />
+                    <Pipeline className="fuk-icon--md" />
                     Use as Control Image
                   </button>
                   
-                  <p style={{ fontSize: '0.7rem', color: '#9ca3af', marginTop: '0.5rem' }}>
-                    From Pre-Processors tab
-                  </p>
+                  <p className="fuk-help-text">From Pre-Processors tab</p>
                 </div>
               </div>
             </div>
@@ -582,13 +555,12 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                   />
                 </div>
                 
-                <div className="fuk-form-group-compact" style={{ marginTop: '1rem' }}>
+                <div className="fuk-form-group-compact fuk-mt-4">
                   <label className="fuk-label">Edit Strength</label>
                   <div className="fuk-input-inline">
                     <input
                       type="range"
-                      className="fuk-input"
-                      style={{ flex: 2 }}
+                      className="fuk-input fuk-input--flex-2"
                       value={formData.edit_strength || 0.7}
                       onChange={(e) => setFormData({...formData, edit_strength: parseFloat(e.target.value)})}
                       min={0}
@@ -597,8 +569,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                     />
                     <input
                       type="number"
-                      className="fuk-input"
-                      style={{ width: '80px' }}
+                      className="fuk-input fuk-input--w-80"
                       value={formData.edit_strength || 0.7}
                       onChange={(e) => setFormData({...formData, edit_strength: parseFloat(e.target.value)})}
                       step={0.05}
@@ -608,14 +579,14 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                   </div>
                 </div>
                 
-                <p style={{ fontSize: '0.7rem', color: '#9ca3af', marginTop: '0.5rem' }}>
+                <p className="fuk-help-text">
                   Upload one or more images to guide the generation.
                 </p>
               </>
             ) : (
-              <div style={{ padding: '2rem 1rem', textAlign: 'center' }}>
-                <Camera style={{ width: '2rem', height: '2rem', margin: '0 auto 0.5rem', opacity: 0.3 }} />
-                <p style={{ fontSize: '0.75rem', color: '#6b7280' }}>
+              <div className="fuk-empty-state">
+                <Camera className="fuk-empty-state-icon" />
+                <p className="fuk-empty-state-text">
                   Select "Qwen Edit 2509" model<br />to enable image editing tools
                 </p>
               </div>

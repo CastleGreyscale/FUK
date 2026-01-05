@@ -1,14 +1,15 @@
 /**
  * Preprocess Tab
- * Image preprocessing for control inputs: Canny, OpenPose, Depth
+ * Image/Video preprocessing for control inputs: Canny, OpenPose, Depth
+ * Supports both single images and frame-by-frame video processing
  */
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Pipeline, Loader2, CheckCircle, Camera } from '../../src/components/Icons';
+import { Pipeline, Loader2, CheckCircle, Camera, Film, AlertCircle, Folder } from '../components/Icons';
 import TabButton from '../components/TabButton';
-import ImageUploader from '../components/ImageUploader';
-import { useLocalStorage } from '../../src/hooks/useLocalStorage';
-import { buildImageUrl } from '../../src/utils/constants';
+import MediaUploader, { isVideoFile } from '../components/MediaUploader';
+import { useLocalStorage } from '../hooks/useLocalStorage';
+import { buildImageUrl } from '../utils/constants';
 import Footer from '../components/Footer';
 
 const API_URL = '/api';
@@ -32,15 +33,27 @@ const DEFAULT_SETTINGS = {
     depth_normalize: true,
     depth_colormap: 'inferno',
   },
+  // Video-specific settings
+  video: {
+    output_mode: 'mp4',  // 'mp4' or 'sequence'
+  },
 };
 
 export default function PreprocessTab({ config, activeTab, setActiveTab, project }) {
   // UI state
   const [selectedMethod, setSelectedMethod] = useState('canny');
-  const [sourceImage, setSourceImage] = useState(null);
+  const [sourceInput, setSourceInput] = useState(null);
   const [processing, setProcessing] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
+  
+  // Timer state
+  const [startTime, setStartTime] = useState(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const mountedRef = useRef(true);
+  
+  // Detect if input is video
+  const isVideo = useMemo(() => isVideoFile(sourceInput), [sourceInput]);
   
   // Settings per method (localStorage fallback)
   const [localSettings, setLocalSettings] = useLocalStorage('fuk_preprocess_settings', DEFAULT_SETTINGS);
@@ -59,6 +72,24 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
     settingsRef.current = settings;
   }, [settings]);
   
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+  
+  // Timer effect
+  useEffect(() => {
+    if (!processing || !startTime) return;
+    
+    const interval = setInterval(() => {
+      if (mountedRef.current) {
+        setElapsedSeconds(Math.floor((Date.now() - startTime) / 1000));
+      }
+    }, 1000);
+    
+    return () => clearInterval(interval);
+  }, [processing, startTime]);
+  
   const updateSettings = useCallback((methodUpdates) => {
     const currentSettings = settingsRef.current;
     const newSettings = { ...currentSettings, ...methodUpdates };
@@ -72,6 +103,7 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
   
   // Current method settings
   const currentSettings = settings[selectedMethod] || DEFAULT_SETTINGS[selectedMethod];
+  const videoSettings = settings.video || DEFAULT_SETTINGS.video;
   
   const setCurrentSettings = (updates) => {
     updateSettings({
@@ -79,34 +111,56 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
     });
   };
   
-  // Handle source image selection
-  const handleSourceImageChange = (paths) => {
-    setSourceImage(paths[0] || null);
+  const setVideoSettings = (updates) => {
+    updateSettings({
+      video: { ...videoSettings, ...updates }
+    });
+  };
+  
+  // Handle source input selection (MediaUploader passes array of media objects)
+  const handleSourceInputChange = (media) => {
+    const first = media[0];
+    setSourceInput(first?.path || first || null);
     setResult(null);
     setError(null);
   };
   
   // Run preprocessing
   const handleProcess = async () => {
-    if (!sourceImage) {
-      alert('Please select a source image');
+    if (!sourceInput) {
+      alert('Please select a source image or video');
       return;
     }
     
     setProcessing(true);
+    setStartTime(Date.now());
+    setElapsedSeconds(0);
     setError(null);
     setResult(null);
     
     try {
+      // Build request payload
       const payload = {
-        image_path: sourceImage,
         method: selectedMethod,
         ...currentSettings,
       };
       
-      console.log('Preprocessing:', payload);
+      let endpoint;
       
-      const res = await fetch(`${API_URL}/preprocess`, {
+      if (isVideo) {
+        // Video processing
+        endpoint = `${API_URL}/preprocess/video`;
+        payload.video_path = sourceInput;
+        payload.output_mode = videoSettings.output_mode;
+      } else {
+        // Image processing
+        endpoint = `${API_URL}/preprocess`;
+        payload.image_path = sourceInput;
+      }
+      
+      console.log(`Preprocessing (${isVideo ? 'video' : 'image'}):`, payload);
+      
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -120,14 +174,30 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
       const data = await res.json();
       console.log('Preprocessing complete:', data);
       
-      setResult(data);
+      // Handle response - use preview_url for sequences, output_url for videos/images
+      const displayUrl = data.is_sequence 
+        ? (data.preview_url || data.output_url) 
+        : (data.output_url || data.url);
+      
+      setResult({
+        ...data,
+        isVideo,
+        url: displayUrl,
+        // Keep is_sequence flag for display logic
+        isSequence: data.is_sequence || false,
+        // For sequences, store the directory URL separately
+        sequenceUrl: data.is_sequence ? data.output_url : null,
+        frames: data.frames || [],
+      });
       
       // Save to project lastState so ImageTab can access it
       if (project?.updateLastState) {
         project.updateLastState({
-          lastPreprocessedImage: data.url,
+          lastPreprocessedImage: displayUrl,
           lastPreprocessedMethod: selectedMethod,
           lastPreprocessedParams: currentSettings,
+          lastPreprocessedIsVideo: isVideo,
+          lastPreprocessedIsSequence: data.is_sequence || false,
         });
       }
       
@@ -149,8 +219,7 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
             <div className="fuk-input-inline">
               <input
                 type="range"
-                className="fuk-input"
-                style={{ flex: 2 }}
+                className="fuk-input fuk-input--flex-2"
                 value={currentSettings.low_threshold}
                 onChange={(e) => setCurrentSettings({ low_threshold: parseInt(e.target.value) })}
                 min={0}
@@ -159,8 +228,7 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
               />
               <input
                 type="number"
-                className="fuk-input"
-                style={{ width: '80px' }}
+                className="fuk-input fuk-input--w-80"
                 value={currentSettings.low_threshold}
                 onChange={(e) => setCurrentSettings({ low_threshold: parseInt(e.target.value) })}
                 min={0}
@@ -174,8 +242,7 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
             <div className="fuk-input-inline">
               <input
                 type="range"
-                className="fuk-input"
-                style={{ flex: 2 }}
+                className="fuk-input fuk-input--flex-2"
                 value={currentSettings.high_threshold}
                 onChange={(e) => setCurrentSettings({ high_threshold: parseInt(e.target.value) })}
                 min={0}
@@ -184,8 +251,7 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
               />
               <input
                 type="number"
-                className="fuk-input"
-                style={{ width: '80px' }}
+                className="fuk-input fuk-input--w-80"
                 value={currentSettings.high_threshold}
                 onChange={(e) => setCurrentSettings({ high_threshold: parseInt(e.target.value) })}
                 min={0}
@@ -195,7 +261,7 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
           </div>
           
           <div className="fuk-form-group-compact">
-            <label className="fuk-label">Blur Kernel (reduce noise)</label>
+            <label className="fuk-label">Blur Kernel</label>
             <select
               className="fuk-select"
               value={currentSettings.blur_kernel}
@@ -216,7 +282,7 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
                 checked={currentSettings.canny_invert}
                 onChange={(e) => setCurrentSettings({ canny_invert: e.target.checked })}
               />
-              <span className="fuk-label" style={{ marginBottom: 0 }}>Invert (white edges on black)</span>
+              <span className="fuk-checkbox-label">Invert Output</span>
             </label>
           </div>
         </>
@@ -234,7 +300,7 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
                 checked={currentSettings.detect_body}
                 onChange={(e) => setCurrentSettings({ detect_body: e.target.checked })}
               />
-              <span className="fuk-label" style={{ marginBottom: 0 }}>Detect Body</span>
+              <span className="fuk-checkbox-label">Detect Body</span>
             </label>
           </div>
           
@@ -246,7 +312,7 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
                 checked={currentSettings.detect_hand}
                 onChange={(e) => setCurrentSettings({ detect_hand: e.target.checked })}
               />
-              <span className="fuk-label" style={{ marginBottom: 0 }}>Detect Hands</span>
+              <span className="fuk-checkbox-label">Detect Hands</span>
             </label>
           </div>
           
@@ -258,12 +324,12 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
                 checked={currentSettings.detect_face}
                 onChange={(e) => setCurrentSettings({ detect_face: e.target.checked })}
               />
-              <span className="fuk-label" style={{ marginBottom: 0 }}>Detect Face</span>
+              <span className="fuk-checkbox-label">Detect Face</span>
             </label>
           </div>
           
-          <p style={{ fontSize: '0.75rem', color: '#9ca3af', marginTop: '1rem' }}>
-            OpenPose detects human pose keypoints for precise control over body position and gesture.
+          <p className="fuk-help-text fuk-mt-4">
+            OpenPose detection for human pose estimation. Enable what you need.
           </p>
         </>
       );
@@ -279,11 +345,11 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
               value={currentSettings.depth_model}
               onChange={(e) => setCurrentSettings({ depth_model: e.target.value })}
             >
+              <option value="depth_anything_v2">Depth Anything V2</option>
+              <option value="depth_anything_v3">Depth Anything V3</option>
               <option value="midas_small">MiDaS Small (Fast)</option>
-              <option value="midas_large">MiDaS Large (Balanced)</option>
-              <option value="depth_anything_v2">Depth Anything V2 (SOTA)</option>
-              <option value="depth_anything_v3">Depth Anything V3 (Latest)</option>
-              <option value="zoedepth">ZoeDepth (Metric)</option>
+              <option value="midas_large">MiDaS Large</option>
+              <option value="zoedepth">ZoeDepth</option>
             </select>
           </div>
           
@@ -291,15 +357,15 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
             <label className="fuk-label">Colormap</label>
             <select
               className="fuk-select"
-              value={currentSettings.depth_colormap || 'inferno'}
-              onChange={(e) => setCurrentSettings({ depth_colormap: e.target.value === 'none' ? null : e.target.value })}
+              value={currentSettings.depth_colormap || ''}
+              onChange={(e) => setCurrentSettings({ depth_colormap: e.target.value || null })}
             >
-              <option value="none">Grayscale</option>
-              <option value="inferno">Inferno</option>
-              <option value="viridis">Viridis</option>
-              <option value="magma">Magma</option>
-              <option value="plasma">Plasma</option>
-              <option value="turbo">Turbo</option>
+              <option value="">Grayscale</option>
+              <option value="inferno">Inferno (Heat)</option>
+              <option value="viridis">Viridis (Green-Blue)</option>
+              <option value="magma">Magma (Purple-Orange)</option>
+              <option value="plasma">Plasma (Purple-Yellow)</option>
+              <option value="turbo">Turbo (Rainbow)</option>
             </select>
           </div>
           
@@ -311,7 +377,7 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
                 checked={currentSettings.depth_normalize}
                 onChange={(e) => setCurrentSettings({ depth_normalize: e.target.checked })}
               />
-              <span className="fuk-label" style={{ marginBottom: 0 }}>Normalize Depth</span>
+              <span className="fuk-checkbox-label">Normalize Depth</span>
             </label>
           </div>
           
@@ -323,14 +389,14 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
                 checked={currentSettings.depth_invert}
                 onChange={(e) => setCurrentSettings({ depth_invert: e.target.checked })}
               />
-              <span className="fuk-label" style={{ marginBottom: 0 }}>Invert Depth (near = dark)</span>
+              <span className="fuk-checkbox-label">Invert Depth (near = dark)</span>
             </label>
           </div>
           
-          <p style={{ fontSize: '0.75rem', color: '#9ca3af', marginTop: '1rem' }}>
-            {currentSettings.depth_model === 'depth_anything_v2' && 'Ã¢Å“â€œ Recommended: Best quality/speed balance'}
-            {currentSettings.depth_model === 'depth_anything_v3' && 'Ã¢Å¡Â¡ Latest model with improved detail'}
-            {currentSettings.depth_model === 'midas_small' && 'Ã¢Å¡Â¡ Fastest processing'}
+          <p className="fuk-help-text fuk-mt-4">
+            {currentSettings.depth_model === 'depth_anything_v2' && '✓ Recommended: Best quality/speed balance'}
+            {currentSettings.depth_model === 'depth_anything_v3' && '⚡ Latest model with improved detail'}
+            {currentSettings.depth_model === 'midas_small' && '⚡ Fastest processing'}
             {currentSettings.depth_model === 'midas_large' && 'Good quality, widely compatible'}
             {currentSettings.depth_model === 'zoedepth' && 'Metric depth estimation'}
           </p>
@@ -339,95 +405,151 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
     }
   };
   
+  const methodTitle = selectedMethod.charAt(0).toUpperCase() + selectedMethod.slice(1);
+  
+  // Format elapsed time
+  const formatTime = (seconds) => {
+    if (seconds < 60) return `${seconds}s`;
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}m ${secs}s`;
+  };
+  
+  // Render the result preview - handles video, sequence, and image
+  const renderResultPreview = () => {
+    if (!result) return null;
+    
+    // Sequence output - show first frame as image
+    if (result.isSequence) {
+      return (
+        <div className="fuk-media-frame fuk-media-frame--success">
+          {result.url ? (
+            <img
+              src={buildImageUrl(result.url)}
+              alt={`${methodTitle} Preview (Frame 1)`}
+              className="fuk-preview-media--constrained"
+            />
+          ) : (
+            <div className="fuk-placeholder fuk-placeholder--sm">
+              <Folder className="fuk-placeholder-icon" />
+              <p className="fuk-placeholder-text">Sequence saved</p>
+            </div>
+          )}
+          <div className="fuk-preview-badge fuk-preview-badge--success">
+            <CheckCircle className="fuk-icon--md" />
+            {result.frame_count} frames
+          </div>
+          {/* Sequence info overlay */}
+          <div className="fuk-sequence-info">
+            <Folder className="fuk-icon--sm" />
+            <span>Image Sequence</span>
+          </div>
+        </div>
+      );
+    }
+    
+    // Video output - show as video player
+    if (result.isVideo) {
+      return (
+        <div className="fuk-media-frame fuk-media-frame--success">
+          <video
+            src={buildImageUrl(result.url)}
+            controls
+            className="fuk-preview-media--constrained"
+          />
+          <div className="fuk-preview-badge fuk-preview-badge--success">
+            <CheckCircle className="fuk-icon--md" />
+            Complete
+          </div>
+        </div>
+      );
+    }
+    
+    // Image output
+    return (
+      <div className="fuk-media-frame fuk-media-frame--success">
+        <img
+          src={buildImageUrl(result.url)}
+          alt="Processed"
+          className="fuk-preview-media--constrained"
+        />
+        <div className="fuk-preview-badge fuk-preview-badge--success">
+          <CheckCircle className="fuk-icon--md" />
+          Complete
+        </div>
+      </div>
+    );
+  };
+  
   return (
     <>
-      {/* Preview Area */}
+      {/* Preview Area - Side by Side Comparison */}
       <div className="fuk-preview-area">
-        <div className="fuk-preview-container" style={{ display: 'flex', gap: '2rem', alignItems: 'center', justifyContent: 'center' }}>
-          {/* Source Image */}
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem' }}>
-            <h3 style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#9ca3af', letterSpacing: '0.05em' }}>Source</h3>
-            {sourceImage ? (
-              <img
-                src={buildImageUrl(sourceImage)}
-                alt="Source"
-                style={{
-                  maxWidth: '100%',
-                  maxHeight: '60vh',
-                  objectFit: 'contain',
-                  borderRadius: '0.5rem',
-                  border: '1px solid #374151',
-                }}
-              />
+        <div className="fuk-preview-compare">
+          {/* Source Input */}
+          <div className="fuk-preview-pane">
+            <div className="fuk-preview-pane-header">
+              <h3 className="fuk-preview-pane-title">
+                Source {isVideo && <Film className="fuk-icon--sm fuk-ml-2" />}
+              </h3>
+              {isVideo && (
+                <span className="fuk-badge fuk-badge--purple">Video</span>
+              )}
+            </div>
+            {sourceInput ? (
+              isVideo ? (
+                <video
+                  src={buildImageUrl(sourceInput)}
+                  controls
+                  className="fuk-preview-media fuk-preview-media--constrained"
+                />
+              ) : (
+                <img
+                  src={buildImageUrl(sourceInput)}
+                  alt="Source"
+                  className="fuk-preview-media fuk-preview-media--constrained"
+                />
+              )
             ) : (
-              <div 
-                className="fuk-card-dashed" 
-                style={{ width: '100%', aspectRatio: '16/9' }}
-              >
+              <div className="fuk-placeholder-card fuk-placeholder-card--100 fuk-placeholder-card--16x9">
                 <div className="fuk-placeholder">
-                  <Camera style={{ width: '3rem', height: '3rem', margin: '0 auto 1rem', opacity: 0.3 }} />
-                  <p style={{ color: '#6b7280' }}>Select source image below</p>
+                  <Camera className="fuk-placeholder-icon" />
+                  <p className="fuk-placeholder-text">Select source image or video below</p>
                 </div>
               </div>
             )}
           </div>
           
-
-          
           {/* Processed Result */}
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem' }}>
-            <h3 style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#9ca3af', letterSpacing: '0.05em' }}>
-              {selectedMethod.charAt(0).toUpperCase() + selectedMethod.slice(1)} Result
-            </h3>
+          <div className="fuk-preview-pane">
+            <div className="fuk-preview-pane-header">
+              <h3 className="fuk-preview-pane-title">{methodTitle} Result</h3>
+              {result?.isVideo && !result?.isSequence && (
+                <span className="fuk-badge fuk-badge--green">
+                  {result.frame_count} frames
+                </span>
+              )}
+              {result?.isSequence && (
+                <span className="fuk-badge fuk-badge--blue">
+                  Sequence: {result.frame_count} frames
+                </span>
+              )}
+            </div>
             {result ? (
-              <div style={{ position: 'relative', width: '100%' }}>
-                <img
-                  src={buildImageUrl(result.url)}
-                  alt="Processed"
-                  style={{
-                    maxWidth: '100%',
-                    maxHeight: '60vh',
-                    objectFit: 'contain',
-                    borderRadius: '0.5rem',
-                    border: '1px solid #374151',
-                  }}
-                />
-                <div 
-                  style={{
-                    position: 'absolute',
-                    top: '0.5rem',
-                    right: '0.5rem',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.25rem',
-                    padding: '0.25rem 0.5rem',
-                    background: 'rgba(16, 185, 129, 0.9)',
-                    borderRadius: '0.375rem',
-                    fontSize: '0.75rem',
-                  }}
-                >
-                  <CheckCircle style={{ width: '1rem', height: '1rem' }} />
-                  Complete
-                </div>
-              </div>
+              renderResultPreview()
             ) : error ? (
-              <div 
-                className="fuk-card-dashed" 
-                style={{ width: '100%', aspectRatio: '16/9', borderColor: '#ef4444' }}
-              >
+              <div className="fuk-placeholder-card fuk-placeholder-card--100 fuk-placeholder-card--16x9 fuk-placeholder-card--error">
                 <div className="fuk-placeholder">
-                  <p style={{ color: '#ef4444' }}>Error: {error}</p>
+                  <AlertCircle className="fuk-placeholder-icon fuk-placeholder-icon--error" />
+                  <p className="fuk-placeholder-text--error">Error: {error}</p>
                 </div>
               </div>
             ) : (
-              <div 
-                className="fuk-card-dashed" 
-                style={{ width: '100%', aspectRatio: '16/9' }}
-              >
+              <div className="fuk-placeholder-card fuk-placeholder-card--100 fuk-placeholder-card--16x9">
                 <div className="fuk-placeholder">
-                  <Pipeline style={{ width: '3rem', height: '3rem', margin: '0 auto 1rem', opacity: 0.3 }} />
-                  <p style={{ color: '#6b7280' }}>
-                    {processing ? 'Processing...' : 'Click Process to generate'}
+                  <Pipeline className="fuk-placeholder-icon" />
+                  <p className="fuk-placeholder-text">
+                    {processing ? `Processing... ${formatTime(elapsedSeconds)}` : 'Click Process to generate'}
                   </p>
                 </div>
               </div>
@@ -439,19 +561,43 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
       {/* Settings Area */}
       <div className="fuk-settings-area">
         <div className="fuk-settings-grid">
-          {/* Source Image Card */}
+          {/* Source Input Card */}
           <div className="fuk-card">
-            <h3 className="fuk-card-title fuk-mb-3">Source Image</h3>
+            <h3 className="fuk-card-title fuk-mb-3">Source Input</h3>
             
-            <ImageUploader
-              images={sourceImage ? [sourceImage] : []}
-              onImagesChange={handleSourceImageChange}
+            <MediaUploader
+              media={sourceInput ? [{ path: sourceInput }] : []}
+              onMediaChange={handleSourceInputChange}
               disabled={processing}
+              accept="all"
             />
             
-            <p style={{ fontSize: '0.7rem', color: '#9ca3af', marginTop: '0.5rem' }}>
-              Upload or select an image to preprocess
+            <p className="fuk-help-text">
+              Upload or select an image or video to preprocess
             </p>
+            
+            {/* Video-specific settings */}
+            {isVideo && (
+              <div className="fuk-mt-4 fuk-pt-4 fuk-border-top">
+                <div className="fuk-form-group-compact">
+                  <label className="fuk-label">Output Format</label>
+                  <select
+                    className="fuk-select"
+                    value={videoSettings.output_mode}
+                    onChange={(e) => setVideoSettings({ output_mode: e.target.value })}
+                    disabled={processing}
+                  >
+                    <option value="mp4">MP4 Video</option>
+                    <option value="sequence">Image Sequence</option>
+                  </select>
+                </div>
+                <p className="fuk-help-text">
+                  {videoSettings.output_mode === 'mp4' 
+                    ? 'Outputs a single video file' 
+                    : 'Outputs individual PNG frames for EXR workflow'}
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Method Selector Card */}
@@ -475,11 +621,20 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
               </select>
             </div>
             
-            <div style={{ marginTop: '1rem', padding: '0.75rem', background: 'rgba(168, 85, 247, 0.1)', borderRadius: '0.375rem', fontSize: '0.75rem', color: '#c084fc' }}>
+            <div className="fuk-method-info fuk-method-info--purple">
               {selectedMethod === 'canny' && 'Clean edge detection for line art and contours'}
               {selectedMethod === 'openpose' && 'Detect human pose keypoints for precise control'}
               {selectedMethod === 'depth' && 'Estimate depth map for 3D-aware generation'}
             </div>
+            
+            {isVideo && (
+              <div className="fuk-alert fuk-alert--info fuk-mt-4">
+                <Film className="fuk-alert-icon" />
+                <span className="fuk-alert-text">
+                  Video mode: Processing frame-by-frame
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Method-Specific Settings Card */}
@@ -496,12 +651,12 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
         setActiveTab={setActiveTab}
         generating={processing}
         progress={processing ? { progress: 0.5, phase: 'processing' } : null}
-        elapsedSeconds={0}
+        elapsedSeconds={elapsedSeconds}
         onGenerate={handleProcess}
         onCancel={() => setProcessing(false)}
-        canGenerate={!!sourceImage}
-        generateLabel="Process"
-        generatingLabel="Processing..."
+        canGenerate={!!sourceInput}
+        generateLabel={isVideo ? "Process Video" : "Process"}
+        generatingLabel={isVideo ? "Processing Video..." : "Processing..."}
       />
     </>
   );

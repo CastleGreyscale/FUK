@@ -9,6 +9,9 @@ from .image_generation_manager import ImageGenerationManager
 from .video_generation_manager import VideoGenerationManager
 from .format_convert import FormatConverter
 from .preprocessors import PreprocessorManager, DepthModel
+from .file_browser import MediaType, MediaFile
+from .exr_exporter import EXRCompression, EXRExporter
+from .video_processor import OutputMode, VideoProcessor
 
 __all__ = [
     'QwenImageGenerator',

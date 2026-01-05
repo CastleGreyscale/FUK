@@ -1,6 +1,7 @@
 /**
  * Placeholder Tab Component
  * Used for tabs that aren't implemented yet
+ * Refactored: All inline styles moved to CSS classes
  */
 
 import Footer from '../components/Footer';
@@ -15,14 +16,12 @@ export default function PlaceholderTab({
   return (
     <>
       <div className="fuk-preview-area">
-        <div className="fuk-card-dashed" style={{ width: '40%' }}>
+        <div className="fuk-placeholder-card fuk-placeholder-card--40">
           <div className="fuk-placeholder">
-            {Icon && <Icon style={{ width: '3rem', height: '3rem', margin: '0 auto 1rem', opacity: 0.5 }} />}
-            <p>{title}</p>
+            {Icon && <Icon className="fuk-placeholder-icon fuk-placeholder-icon--faded" />}
+            <p className="fuk-placeholder-text">{title}</p>
             {description && (
-              <p style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.5rem' }}>
-                {description}
-              </p>
+              <p className="fuk-placeholder-subtext">{description}</p>
             )}
           </div>
         </div>

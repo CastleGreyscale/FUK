@@ -119,6 +119,7 @@ class NormalsPreprocessor(BasePreprocessor):
         flip_y: bool = False,
         flip_x: bool = False,
         intensity: float = 1.0,
+        exact_output: bool = False,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -131,6 +132,7 @@ class NormalsPreprocessor(BasePreprocessor):
             flip_y: Flip Y component (for different engine conventions)
             flip_x: Flip X component
             intensity: Normal intensity multiplier (affects depth-derived)
+            exact_output: If True, write to exact output_path (for video frames)
             
         Returns:
             Dict with output_path and metadata
@@ -161,7 +163,7 @@ class NormalsPreprocessor(BasePreprocessor):
         # OpenCV uses BGR, so swap R and B
         normals_bgr = cv2.cvtColor(normals_uint8, cv2.COLOR_RGB2BGR)
         
-        # Save with unique filename
+        # Save - use exact path for video frames, unique path for single images
         params = {
             'method': 'normals',
             'estimation': self.method.value,
@@ -170,11 +172,11 @@ class NormalsPreprocessor(BasePreprocessor):
             'flip_x': flip_x,
             'intensity': intensity,
         }
-        unique_output = self._make_unique_path(output_path, params)
-        cv2.imwrite(str(unique_output), normals_bgr)
+        final_output = self._make_unique_path(output_path, params, exact_output=exact_output)
+        cv2.imwrite(str(final_output), normals_bgr)
         
         return {
-            "output_path": str(unique_output),
+            "output_path": str(final_output),
             "method": "normals",
             "estimation": self.method.value,
             "parameters": params,

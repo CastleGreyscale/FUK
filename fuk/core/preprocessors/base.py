@@ -6,10 +6,11 @@ Provides shared utilities:
 - Unique filename generation (prevents caching issues)
 - Common output patterns
 - Device detection
+- Video processing support
 """
 
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Callable, Union
 from abc import ABC, abstractmethod
 import json
 import hashlib
@@ -22,8 +23,11 @@ class BasePreprocessor(ABC):
     Abstract base class for all preprocessors
     
     Subclasses must implement:
-    - process(): Main processing method
+    - process(): Main processing method for single images
     - _initialize(): Lazy model loading
+    
+    Video processing is handled automatically via process_video()
+    which calls process() on each frame.
     """
     
     def __init__(self, config_path: Optional[Path] = None):
@@ -65,7 +69,12 @@ class BasePreprocessor(ABC):
             self._initialize()
             self._initialized = True
     
-    def _make_unique_path(self, base_path: Path, params: dict) -> Path:
+    def _make_unique_path(
+        self, 
+        base_path: Path, 
+        params: dict,
+        exact_output: bool = False
+    ) -> Path:
         """
         Generate unique filename to prevent caching issues
         
@@ -76,10 +85,17 @@ class BasePreprocessor(ABC):
         Args:
             base_path: Original output path
             params: Dictionary of parameters to hash
+            exact_output: If True, skip unique naming and use base_path as-is.
+                         Use this for video frame processing where the caller
+                         expects output at the exact specified path.
             
         Returns:
-            New path with unique suffix
+            New path with unique suffix, or base_path if exact_output=True
         """
+        # Skip unique naming for video frame processing
+        if exact_output:
+            return base_path
+        
         param_str = json.dumps(params, sort_keys=True)
         param_hash = hashlib.md5(param_str.encode()).hexdigest()[:8]
         timestamp = int(time.time() * 1000) % 10000
@@ -130,6 +146,73 @@ class BasePreprocessor(ABC):
         # Import the module
         import importlib
         return importlib.import_module(module_path)
+    
+    def process_video(
+        self,
+        video_path: Path,
+        output_path: Path,
+        output_mode: str = "mp4",
+        progress_callback: Optional[Callable[[float, str], None]] = None,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """
+        Process a video frame-by-frame
+        
+        Uses VideoProcessor to extract frames, applies self.process() to each,
+        then reassembles to output format.
+        
+        Args:
+            video_path: Input video path
+            output_path: Output path (video or directory for sequences)
+            output_mode: "mp4" or "sequence"
+            progress_callback: Optional (progress, message) callback
+            **kwargs: Processor-specific parameters passed to process()
+            
+        Returns:
+            Dict with output info and per-frame results
+        """
+        # Import here to avoid circular imports
+        from core.video_processor import VideoProcessor, OutputMode
+        
+        self._ensure_initialized()
+        
+        video_path = Path(video_path)
+        output_path = Path(output_path)
+        
+        processor = VideoProcessor()
+        
+        # Create a frame processor that wraps self.process()
+        # Pass exact_output=True to ensure frames are written to exact paths
+        def frame_processor(input_frame: Path, output_frame: Path) -> Dict[str, Any]:
+            return self.process(input_frame, output_frame, exact_output=True, **kwargs)
+        
+        mode = OutputMode.SEQUENCE if output_mode == "sequence" else OutputMode.MP4
+        
+        result = processor.process_video(
+            input_video=video_path,
+            output_path=output_path,
+            frame_processor=frame_processor,
+            output_mode=mode,
+            progress_callback=progress_callback,
+        )
+        
+        # Add processor-specific info
+        result["method"] = self.__class__.__name__
+        result["parameters"] = kwargs
+        
+        return result
+    
+    @staticmethod
+    def is_video(path: Union[str, Path]) -> bool:
+        """Check if path is a video file"""
+        video_extensions = {'.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v'}
+        return Path(path).suffix.lower() in video_extensions
+    
+    @staticmethod
+    def is_image(path: Union[str, Path]) -> bool:
+        """Check if path is an image file"""
+        image_extensions = {'.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tiff', '.tif'}
+        return Path(path).suffix.lower() in image_extensions
 
 
 class SimplePreprocessor(BasePreprocessor):

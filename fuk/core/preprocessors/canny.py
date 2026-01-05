@@ -29,6 +29,7 @@ class CannyPreprocessor(SimplePreprocessor):
         high_threshold: int = 200,
         blur_kernel: int = 5,
         invert: bool = False,
+        exact_output: bool = False,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -41,6 +42,7 @@ class CannyPreprocessor(SimplePreprocessor):
             high_threshold: Upper threshold for edge detection (0-255)
             blur_kernel: Gaussian blur kernel size (odd number)
             invert: Invert output (white background, black lines)
+            exact_output: If True, write to exact output_path (for video frames)
             
         Returns:
             Dict with output_path and metadata
@@ -67,7 +69,7 @@ class CannyPreprocessor(SimplePreprocessor):
         # Convert to 3-channel for consistency
         edges_rgb = cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
         
-        # Save result with unique filename
+        # Save result - use exact path for video frames, unique path for single images
         params = {
             'method': 'canny',
             'low_threshold': low_threshold,
@@ -75,11 +77,11 @@ class CannyPreprocessor(SimplePreprocessor):
             'blur_kernel': blur_kernel,
             'invert': invert,
         }
-        unique_output = self._make_unique_path(output_path, params)
-        cv2.imwrite(str(unique_output), edges_rgb)
+        final_output = self._make_unique_path(output_path, params, exact_output=exact_output)
+        cv2.imwrite(str(final_output), edges_rgb)
         
         return {
-            "output_path": str(unique_output),
+            "output_path": str(final_output),
             "method": "canny",
             "parameters": params,
         }

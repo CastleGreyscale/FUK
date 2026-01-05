@@ -11,8 +11,8 @@ import { buildImageUrl, API_URL } from '../utils/constants';
 import Footer from '../components/Footer';
 
 // Folder icon
-const Folder = ({ className, style }) => (
-  <svg className={className} style={style} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+const Folder = ({ className }) => (
+  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
   </svg>
 );
@@ -187,83 +187,39 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
     <>
       {/* Preview Area */}
       <div className="fuk-preview-area">
-        <div className="fuk-preview-container" style={{ 
-          width: '100%', 
-          height: '100%',
-          display: 'flex',
-          flexDirection: 'column',
-          padding: '1rem',
-        }}>
+        <div className="fuk-preview-centered">
           {/* Main preview */}
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div className="fuk-preview-main">
             {mainPreview ? (
-              <div style={{
-                maxWidth: '100%',
-                maxHeight: '100%',
-                borderRadius: '0.5rem',
-                border: '1px solid #374151',
-                overflow: 'hidden',
-                background: '#000',
-              }}>
+              <div className="fuk-media-frame">
                 <img
                   src={buildImageUrl(mainPreview)}
                   alt="Preview"
-                  style={{
-                    maxWidth: '100%',
-                    maxHeight: '60vh',
-                    objectFit: 'contain',
-                  }}
+                  className="fuk-preview-media fuk-preview-media--constrained"
                 />
               </div>
             ) : (
-              <div style={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                gap: '0.5rem',
-                color: '#6b7280',
-              }}>
-                <Download style={{ width: '3rem', height: '3rem', opacity: 0.3 }} />
-                <p style={{ fontSize: '0.875rem' }}>Add layers to preview</p>
+              <div className="fuk-placeholder-card fuk-placeholder-card--60 fuk-placeholder-card--16x9">
+                <div className="fuk-placeholder">
+                  <Download className="fuk-placeholder-icon fuk-placeholder-icon--faded" />
+                  <p className="fuk-placeholder-text">Add layers to preview</p>
+                </div>
               </div>
             )}
           </div>
           
           {/* Layer thumbnails row */}
           {availableLayersCount > 0 && (
-            <div style={{
-              display: 'flex',
-              gap: '0.5rem',
-              justifyContent: 'center',
-              paddingTop: '0.75rem',
-              borderTop: '1px solid #374151',
-              marginTop: '0.75rem',
-            }}>
+            <div className="fuk-thumb-strip">
               {Object.entries(layers).map(([name, path]) => path && (
-                <div key={name} style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  gap: '0.25rem',
-                }}>
-                  <div style={{
-                    width: '60px',
-                    height: '60px',
-                    borderRadius: '0.25rem',
-                    overflow: 'hidden',
-                    border: name === 'beauty' ? '2px solid #a855f7' : '1px solid #374151',
-                  }}>
+                <div key={name} className="fuk-thumb-item">
+                  <div className={`fuk-thumb-frame ${name === 'beauty' ? 'fuk-thumb-frame--primary' : ''}`}>
                     <img
                       src={buildImageUrl(path)}
                       alt={name}
-                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                     />
                   </div>
-                  <span style={{
-                    fontSize: '0.6rem',
-                    color: name === 'beauty' ? '#c084fc' : '#9ca3af',
-                    textTransform: 'capitalize',
-                  }}>
+                  <span className={`fuk-thumb-label ${name === 'beauty' ? 'fuk-thumb-label--primary' : ''}`}>
                     {name}
                   </span>
                 </div>
@@ -273,19 +229,10 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
           
           {/* Export result */}
           {exportResult && (
-            <div style={{
-              marginTop: '0.75rem',
-              padding: '0.75rem',
-              background: 'rgba(16, 185, 129, 0.1)',
-              border: '1px solid rgba(16, 185, 129, 0.3)',
-              borderRadius: '0.5rem',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#10b981' }}>
-                <CheckCircle style={{ width: '1.25rem', height: '1.25rem' }} />
-                <span style={{ fontSize: '0.875rem' }}>
+            <div className="fuk-result-banner fuk-result-banner--success">
+              <div className="fuk-result-content">
+                <CheckCircle className="fuk-icon fuk-icon--lg" />
+                <span className="fuk-result-text">
                   Exported to: {exportResult.saved_path || exportResult.multi_layer?.url || 'cache'}
                 </span>
               </div>
@@ -293,14 +240,7 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
                 <a
                   href={`/${exportResult.multi_layer.url}`}
                   download
-                  style={{
-                    padding: '0.375rem 0.75rem',
-                    background: '#10b981',
-                    color: 'white',
-                    borderRadius: '0.25rem',
-                    fontSize: '0.75rem',
-                    textDecoration: 'none',
-                  }}
+                  className="fuk-download-btn"
                 >
                   Download EXR
                 </a>
@@ -309,16 +249,11 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
           )}
           
           {error && (
-            <div style={{
-              marginTop: '0.75rem',
-              padding: '0.75rem',
-              background: 'rgba(239, 68, 68, 0.1)',
-              border: '1px solid rgba(239, 68, 68, 0.3)',
-              borderRadius: '0.5rem',
-              color: '#ef4444',
-              fontSize: '0.875rem',
-            }}>
-              {error}
+            <div className="fuk-result-banner fuk-result-banner--error">
+              <div className="fuk-result-content fuk-result-content--error">
+                <AlertCircle className="fuk-icon fuk-icon--lg" />
+                <span className="fuk-result-text">{error}</span>
+              </div>
             </div>
           )}
         </div>
@@ -366,7 +301,7 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
               />
             </div>
             
-            <p style={{ fontSize: '0.65rem', color: '#6b7280', marginTop: '0.5rem' }}>
+            <p className="fuk-help-text fuk-help-text--sm">
               Drag from History or click to upload
             </p>
           </div>
@@ -390,18 +325,14 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
               </div>
             </div>
             
-            <div style={{ marginTop: '0.75rem' }}>
+            <div className="fuk-form-section">
               <label className="fuk-label">Export To</label>
               <div className="save-location-row">
                 <input
                   type="text"
-                  className="fuk-input"
+                  className={`fuk-input ${settings.exportPath ? 'fuk-input--readonly-filled' : 'fuk-input--readonly'}`}
                   value={settings.exportPath || '(project cache)'}
                   readOnly
-                  style={{ 
-                    color: settings.exportPath ? '#d1d5db' : '#6b7280',
-                    fontStyle: settings.exportPath ? 'normal' : 'italic',
-                  }}
                 />
                 <button
                   className="fuk-btn fuk-btn-secondary"
@@ -409,10 +340,10 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
                   disabled={exporting}
                   title="Browse for save location"
                 >
-                  <Folder style={{ width: '1rem', height: '1rem' }} />
+                  <Folder className="fuk-icon fuk-icon--md" />
                 </button>
               </div>
-              <p style={{ fontSize: '0.65rem', color: '#6b7280', marginTop: '0.25rem' }}>
+              <p className="fuk-help-text fuk-help-text--sm fuk-help-text--inline">
                 Leave empty to save in project cache
               </p>
             </div>
@@ -422,8 +353,8 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
           <div className="fuk-card">
             <h3 className="fuk-card-title fuk-mb-2">Export Format</h3>
             
-            <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-              <label className="fuk-checkbox-group" style={{ flex: 1, minWidth: '140px' }}>
+            <div className="fuk-export-format-group">
+              <label className="fuk-checkbox-group fuk-export-format-item">
                 <input
                   type="checkbox"
                   className="fuk-checkbox"
@@ -432,14 +363,12 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
                   disabled={exporting}
                 />
                 <div>
-                  <span className="fuk-label" style={{ marginBottom: 0, fontSize: '0.75rem' }}>Multi-Layer</span>
-                  <span style={{ fontSize: '0.6rem', color: '#6b7280', display: 'block' }}>
-                    All AOVs in one file
-                  </span>
+                  <span className="fuk-export-format-label">Multi-Layer</span>
+                  <span className="fuk-export-format-desc">All AOVs in one file</span>
                 </div>
               </label>
               
-              <label className="fuk-checkbox-group" style={{ flex: 1, minWidth: '140px' }}>
+              <label className="fuk-checkbox-group fuk-export-format-item">
                 <input
                   type="checkbox"
                   className="fuk-checkbox"
@@ -448,10 +377,8 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
                   disabled={exporting}
                 />
                 <div>
-                  <span className="fuk-label" style={{ marginBottom: 0, fontSize: '0.75rem' }}>Separate Files</span>
-                  <span style={{ fontSize: '0.6rem', color: '#6b7280', display: 'block' }}>
-                    One file per AOV
-                  </span>
+                  <span className="fuk-export-format-label">Separate Files</span>
+                  <span className="fuk-export-format-desc">One file per AOV</span>
                 </div>
               </label>
             </div>
@@ -461,15 +388,14 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
           <div className="fuk-card">
             <h3 className="fuk-card-title fuk-mb-2">EXR Settings</h3>
             
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            <div className="fuk-form-stack">
               <div className="compact-form-row">
-                <label className="fuk-label" style={{ marginBottom: 0, minWidth: '70px' }}>Bit Depth</label>
+                <label className="fuk-label">Bit Depth</label>
                 <select
-                  className="fuk-select"
+                  className="fuk-select fuk-select--compact"
                   value={settings.exrBitDepth}
                   onChange={(e) => updateSettings({ exrBitDepth: parseInt(e.target.value) })}
                   disabled={exporting}
-                  style={{ fontSize: '0.75rem', padding: '0.375rem' }}
                 >
                   <option value="16">16-bit Half</option>
                   <option value="32">32-bit Float</option>
@@ -477,13 +403,12 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
               </div>
               
               <div className="compact-form-row">
-                <label className="fuk-label" style={{ marginBottom: 0, minWidth: '70px' }}>Compress</label>
+                <label className="fuk-label">Compress</label>
                 <select
-                  className="fuk-select"
+                  className="fuk-select fuk-select--compact"
                   value={settings.exrCompression}
                   onChange={(e) => updateSettings({ exrCompression: e.target.value })}
                   disabled={exporting}
-                  style={{ fontSize: '0.75rem', padding: '0.375rem' }}
                 >
                   <option value="ZIP">ZIP</option>
                   <option value="PIZ">PIZ</option>
@@ -494,13 +419,12 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
               </div>
               
               <div className="compact-form-row">
-                <label className="fuk-label" style={{ marginBottom: 0, minWidth: '70px' }}>Color</label>
+                <label className="fuk-label">Color</label>
                 <select
-                  className="fuk-select"
+                  className="fuk-select fuk-select--compact"
                   value={settings.exrColorSpace}
                   onChange={(e) => updateSettings({ exrColorSpace: e.target.value })}
                   disabled={exporting}
-                  style={{ fontSize: '0.75rem', padding: '0.375rem' }}
                 >
                   <option value="Linear">Linear</option>
                   <option value="sRGB">sRGB</option>
@@ -513,57 +437,28 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
           <div className="fuk-card">
             <h3 className="fuk-card-title fuk-mb-2">Channels</h3>
             
-            <div style={{ 
-              display: 'grid', 
-              gridTemplateColumns: 'repeat(2, 1fr)', 
-              gap: '0.25rem',
-              fontSize: '0.7rem',
-            }}>
-              <div style={{ 
-                display: 'flex', 
-                justifyContent: 'space-between',
-                padding: '0.25rem 0.375rem',
-                background: layers.beauty ? 'rgba(16, 185, 129, 0.1)' : 'transparent',
-                borderRadius: '0.25rem',
-              }}>
-                <span style={{ color: '#9ca3af' }}>R,G,B</span>
-                <span style={{ color: layers.beauty ? '#10b981' : '#4b5563' }}>
+            <div className="fuk-channel-grid">
+              <div className={`fuk-channel-item ${layers.beauty ? 'fuk-channel-item--active' : ''}`}>
+                <span className="fuk-channel-name">R,G,B</span>
+                <span className={`fuk-channel-status ${layers.beauty ? 'fuk-channel-status--active' : ''}`}>
                   {layers.beauty ? '✓' : '—'}
                 </span>
               </div>
-              <div style={{ 
-                display: 'flex', 
-                justifyContent: 'space-between',
-                padding: '0.25rem 0.375rem',
-                background: layers.depth ? 'rgba(16, 185, 129, 0.1)' : 'transparent',
-                borderRadius: '0.25rem',
-              }}>
-                <span style={{ color: '#9ca3af' }}>Z</span>
-                <span style={{ color: layers.depth ? '#10b981' : '#4b5563' }}>
+              <div className={`fuk-channel-item ${layers.depth ? 'fuk-channel-item--active' : ''}`}>
+                <span className="fuk-channel-name">Z</span>
+                <span className={`fuk-channel-status ${layers.depth ? 'fuk-channel-status--active' : ''}`}>
                   {layers.depth ? '✓' : '—'}
                 </span>
               </div>
-              <div style={{ 
-                display: 'flex', 
-                justifyContent: 'space-between',
-                padding: '0.25rem 0.375rem',
-                background: layers.normals ? 'rgba(16, 185, 129, 0.1)' : 'transparent',
-                borderRadius: '0.25rem',
-              }}>
-                <span style={{ color: '#9ca3af' }}>N.XYZ</span>
-                <span style={{ color: layers.normals ? '#10b981' : '#4b5563' }}>
+              <div className={`fuk-channel-item ${layers.normals ? 'fuk-channel-item--active' : ''}`}>
+                <span className="fuk-channel-name">N.XYZ</span>
+                <span className={`fuk-channel-status ${layers.normals ? 'fuk-channel-status--active' : ''}`}>
                   {layers.normals ? '✓' : '—'}
                 </span>
               </div>
-              <div style={{ 
-                display: 'flex', 
-                justifyContent: 'space-between',
-                padding: '0.25rem 0.375rem',
-                background: layers.crypto ? 'rgba(16, 185, 129, 0.1)' : 'transparent',
-                borderRadius: '0.25rem',
-              }}>
-                <span style={{ color: '#9ca3af' }}>Crypto</span>
-                <span style={{ color: layers.crypto ? '#10b981' : '#4b5563' }}>
+              <div className={`fuk-channel-item ${layers.crypto ? 'fuk-channel-item--active' : ''}`}>
+                <span className="fuk-channel-name">Crypto</span>
+                <span className={`fuk-channel-status ${layers.crypto ? 'fuk-channel-status--active' : ''}`}>
                   {layers.crypto ? '✓' : '—'}
                 </span>
               </div>

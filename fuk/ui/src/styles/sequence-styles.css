@@ -1,0 +1,30 @@
+/* Sequence Output Indicator Styles */
+/* Add to fuk-ui.css or create sequence.css */
+
+.fuk-sequence-info {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: rgba(59, 130, 246, 0.9);
+  color: white;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  backdrop-filter: blur(4px);
+}
+
+.fuk-sequence-info svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Badge variant for sequence */
+.fuk-badge--blue {
+  background: rgba(59, 130, 246, 0.15);
+  color: rgb(59, 130, 246);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}

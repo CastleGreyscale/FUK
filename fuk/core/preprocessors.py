@@ -1,770 +1,663 @@
-# utils/preprocessors.py
-"""
-Image Preprocessing Tools for FUK Pipeline
+/**
+ * Preprocess Tab
+ * Image/Video preprocessing for control inputs: Canny, OpenPose, Depth
+ * Supports both single images and frame-by-frame video processing
+ */
 
-Provides:
-- Canny edge detection
-- OpenPose pose estimation  
-- Depth estimation (MiDaS, Depth Anything V2/V3, ZoeDepth)
-"""
-import sys
-import os
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { Pipeline, Loader2, CheckCircle, Camera, Film, AlertCircle, Folder } from '../components/Icons';
+import TabButton from '../components/TabButton';
+import MediaUploader, { isVideoFile } from '../components/MediaUploader';
+import { useLocalStorage } from '../hooks/useLocalStorage';
+import { buildImageUrl } from '../utils/constants';
+import Footer from '../components/Footer';
 
-# Force unbuffered output for real-time logging
-os.environ['PYTHONUNBUFFERED'] = '1'
-if hasattr(sys.stdout, 'reconfigure'):
-    sys.stdout.reconfigure(line_buffering=True)
+const API_URL = '/api';
 
-from pathlib import Path
-from typing import Optional, Dict, Any, Tuple
-from enum import Enum
-import cv2
-import numpy as np
-from PIL import Image
-import torch
-import json
-import hashlib
-import time
+// Default settings for each method
+const DEFAULT_SETTINGS = {
+  canny: {
+    low_threshold: 100,
+    high_threshold: 200,
+    canny_invert: false,
+    blur_kernel: 3,
+  },
+  openpose: {
+    detect_body: true,
+    detect_hand: false,
+    detect_face: false,
+  },
+  depth: {
+    depth_model: 'depth_anything_v2',
+    depth_invert: false,
+    depth_normalize: true,
+    depth_colormap: 'inferno',
+  },
+  // Video-specific settings
+  video: {
+    output_mode: 'mp4',  // 'mp4' or 'sequence'
+  },
+};
 
-# ============================================================================
-# Depth Model Selection
-# ============================================================================
+export default function PreprocessTab({ config, activeTab, setActiveTab, project }) {
+  // UI state
+  const [selectedMethod, setSelectedMethod] = useState('canny');
+  const [sourceInput, setSourceInput] = useState(null);
+  const [processing, setProcessing] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
+  
+  // Timer state
+  const [startTime, setStartTime] = useState(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const mountedRef = useRef(true);
+  
+  // Detect if input is video
+  const isVideo = useMemo(() => isVideoFile(sourceInput), [sourceInput]);
+  
+  // Settings per method (localStorage fallback)
+  const [localSettings, setLocalSettings] = useLocalStorage('fuk_preprocess_settings', DEFAULT_SETTINGS);
+  
+  // Use project state if available, otherwise localStorage
+  const settings = useMemo(() => {
+    if (project?.projectState?.tabs?.preprocess) {
+      return { ...DEFAULT_SETTINGS, ...project.projectState.tabs.preprocess };
+    }
+    return { ...DEFAULT_SETTINGS, ...localSettings };
+  }, [project?.projectState?.tabs?.preprocess, localSettings]);
+  
+  // Ref to track latest settings for updateSettings callback
+  const settingsRef = useRef(settings);
+  useEffect(() => {
+    settingsRef.current = settings;
+  }, [settings]);
+  
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+  
+  // Timer effect
+  useEffect(() => {
+    if (!processing || !startTime) return;
+    
+    const interval = setInterval(() => {
+      if (mountedRef.current) {
+        setElapsedSeconds(Math.floor((Date.now() - startTime) / 1000));
+      }
+    }, 1000);
+    
+    return () => clearInterval(interval);
+  }, [processing, startTime]);
+  
+  const updateSettings = useCallback((methodUpdates) => {
+    const currentSettings = settingsRef.current;
+    const newSettings = { ...currentSettings, ...methodUpdates };
+    
+    if (project?.isProjectLoaded && project?.updateTabState) {
+      project.updateTabState('preprocess', newSettings);
+    } else {
+      setLocalSettings(newSettings);
+    }
+  }, [project?.isProjectLoaded, project?.updateTabState, setLocalSettings]);
+  
+  // Current method settings
+  const currentSettings = settings[selectedMethod] || DEFAULT_SETTINGS[selectedMethod];
+  const videoSettings = settings.video || DEFAULT_SETTINGS.video;
+  
+  const setCurrentSettings = (updates) => {
+    updateSettings({
+      [selectedMethod]: { ...currentSettings, ...updates }
+    });
+  };
+  
+  const setVideoSettings = (updates) => {
+    updateSettings({
+      video: { ...videoSettings, ...updates }
+    });
+  };
+  
+  // Handle source input selection (MediaUploader passes array of media objects)
+  const handleSourceInputChange = (media) => {
+    const first = media[0];
+    setSourceInput(first?.path || first || null);
+    setResult(null);
+    setError(null);
+  };
+  
+  // Run preprocessing
+  const handleProcess = async () => {
+    if (!sourceInput) {
+      alert('Please select a source image or video');
+      return;
+    }
+    
+    setProcessing(true);
+    setStartTime(Date.now());
+    setElapsedSeconds(0);
+    setError(null);
+    setResult(null);
+    
+    try {
+      // Build request payload
+      const payload = {
+        method: selectedMethod,
+        ...currentSettings,
+      };
+      
+      let endpoint;
+      
+      if (isVideo) {
+        // Video processing
+        endpoint = `${API_URL}/preprocess/video`;
+        payload.video_path = sourceInput;
+        payload.output_mode = videoSettings.output_mode;
+      } else {
+        // Image processing
+        endpoint = `${API_URL}/preprocess`;
+        payload.image_path = sourceInput;
+      }
+      
+      console.log(`Preprocessing (${isVideo ? 'video' : 'image'}):`, payload);
+      
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(errorData.detail || `Preprocessing failed: ${res.statusText}`);
+      }
+      
+      const data = await res.json();
+      console.log('Preprocessing complete:', data);
+      
+      // Handle response - use preview_url for sequences, output_url for videos/images
+      const displayUrl = data.is_sequence 
+        ? (data.preview_url || data.output_url) 
+        : (data.output_url || data.url);
+      
+      setResult({
+        ...data,
+        isVideo,
+        url: displayUrl,
+        // Keep is_sequence flag for display logic
+        isSequence: data.is_sequence || false,
+        // For sequences, store the directory URL separately
+        sequenceUrl: data.is_sequence ? data.output_url : null,
+        frames: data.frames || [],
+      });
+      
+      // Save to project lastState so ImageTab can access it
+      if (project?.updateLastState) {
+        project.updateLastState({
+          lastPreprocessedImage: displayUrl,
+          lastPreprocessedMethod: selectedMethod,
+          lastPreprocessedParams: currentSettings,
+          lastPreprocessedIsVideo: isVideo,
+          lastPreprocessedIsSequence: data.is_sequence || false,
+        });
+      }
+      
+    } catch (err) {
+      console.error('Preprocessing error:', err);
+      setError(err.message);
+    } finally {
+      setProcessing(false);
+    }
+  };
+  
+  // Render method-specific controls
+  const renderMethodControls = () => {
+    if (selectedMethod === 'canny') {
+      return (
+        <>
+          <div className="fuk-form-group-compact">
+            <label className="fuk-label">Low Threshold</label>
+            <div className="fuk-input-inline">
+              <input
+                type="range"
+                className="fuk-input fuk-input--flex-2"
+                value={currentSettings.low_threshold}
+                onChange={(e) => setCurrentSettings({ low_threshold: parseInt(e.target.value) })}
+                min={0}
+                max={500}
+                step={10}
+              />
+              <input
+                type="number"
+                className="fuk-input fuk-input--w-80"
+                value={currentSettings.low_threshold}
+                onChange={(e) => setCurrentSettings({ low_threshold: parseInt(e.target.value) })}
+                min={0}
+                max={500}
+              />
+            </div>
+          </div>
+          
+          <div className="fuk-form-group-compact">
+            <label className="fuk-label">High Threshold</label>
+            <div className="fuk-input-inline">
+              <input
+                type="range"
+                className="fuk-input fuk-input--flex-2"
+                value={currentSettings.high_threshold}
+                onChange={(e) => setCurrentSettings({ high_threshold: parseInt(e.target.value) })}
+                min={0}
+                max={500}
+                step={10}
+              />
+              <input
+                type="number"
+                className="fuk-input fuk-input--w-80"
+                value={currentSettings.high_threshold}
+                onChange={(e) => setCurrentSettings({ high_threshold: parseInt(e.target.value) })}
+                min={0}
+                max={500}
+              />
+            </div>
+          </div>
+          
+          <div className="fuk-form-group-compact">
+            <label className="fuk-label">Blur Kernel</label>
+            <select
+              className="fuk-select"
+              value={currentSettings.blur_kernel}
+              onChange={(e) => setCurrentSettings({ blur_kernel: parseInt(e.target.value) })}
+            >
+              <option value={0}>None</option>
+              <option value={3}>3x3</option>
+              <option value={5}>5x5</option>
+              <option value={7}>7x7</option>
+            </select>
+          </div>
+          
+          <div className="fuk-form-group-compact">
+            <label className="fuk-checkbox-group">
+              <input
+                type="checkbox"
+                className="fuk-checkbox"
+                checked={currentSettings.canny_invert}
+                onChange={(e) => setCurrentSettings({ canny_invert: e.target.checked })}
+              />
+              <span className="fuk-checkbox-label">Invert Output</span>
+            </label>
+          </div>
+        </>
+      );
+    }
+    
+    if (selectedMethod === 'openpose') {
+      return (
+        <>
+          <div className="fuk-form-group-compact">
+            <label className="fuk-checkbox-group">
+              <input
+                type="checkbox"
+                className="fuk-checkbox"
+                checked={currentSettings.detect_body}
+                onChange={(e) => setCurrentSettings({ detect_body: e.target.checked })}
+              />
+              <span className="fuk-checkbox-label">Detect Body</span>
+            </label>
+          </div>
+          
+          <div className="fuk-form-group-compact">
+            <label className="fuk-checkbox-group">
+              <input
+                type="checkbox"
+                className="fuk-checkbox"
+                checked={currentSettings.detect_hand}
+                onChange={(e) => setCurrentSettings({ detect_hand: e.target.checked })}
+              />
+              <span className="fuk-checkbox-label">Detect Hands</span>
+            </label>
+          </div>
+          
+          <div className="fuk-form-group-compact">
+            <label className="fuk-checkbox-group">
+              <input
+                type="checkbox"
+                className="fuk-checkbox"
+                checked={currentSettings.detect_face}
+                onChange={(e) => setCurrentSettings({ detect_face: e.target.checked })}
+              />
+              <span className="fuk-checkbox-label">Detect Face</span>
+            </label>
+          </div>
+          
+          <p className="fuk-help-text fuk-mt-4">
+            OpenPose detection for human pose estimation. Enable what you need.
+          </p>
+        </>
+      );
+    }
+    
+    if (selectedMethod === 'depth') {
+      return (
+        <>
+          <div className="fuk-form-group-compact">
+            <label className="fuk-label">Depth Model</label>
+            <select
+              className="fuk-select"
+              value={currentSettings.depth_model}
+              onChange={(e) => setCurrentSettings({ depth_model: e.target.value })}
+            >
+              <option value="depth_anything_v2">Depth Anything V2</option>
+              <option value="depth_anything_v3">Depth Anything V3</option>
+              <option value="midas_small">MiDaS Small (Fast)</option>
+              <option value="midas_large">MiDaS Large</option>
+              <option value="zoedepth">ZoeDepth</option>
+            </select>
+          </div>
+          
+          <div className="fuk-form-group-compact">
+            <label className="fuk-label">Colormap</label>
+            <select
+              className="fuk-select"
+              value={currentSettings.depth_colormap || ''}
+              onChange={(e) => setCurrentSettings({ depth_colormap: e.target.value || null })}
+            >
+              <option value="">Grayscale</option>
+              <option value="inferno">Inferno (Heat)</option>
+              <option value="viridis">Viridis (Green-Blue)</option>
+              <option value="magma">Magma (Purple-Orange)</option>
+              <option value="plasma">Plasma (Purple-Yellow)</option>
+              <option value="turbo">Turbo (Rainbow)</option>
+            </select>
+          </div>
+          
+          <div className="fuk-form-group-compact">
+            <label className="fuk-checkbox-group">
+              <input
+                type="checkbox"
+                className="fuk-checkbox"
+                checked={currentSettings.depth_normalize}
+                onChange={(e) => setCurrentSettings({ depth_normalize: e.target.checked })}
+              />
+              <span className="fuk-checkbox-label">Normalize Depth</span>
+            </label>
+          </div>
+          
+          <div className="fuk-form-group-compact">
+            <label className="fuk-checkbox-group">
+              <input
+                type="checkbox"
+                className="fuk-checkbox"
+                checked={currentSettings.depth_invert}
+                onChange={(e) => setCurrentSettings({ depth_invert: e.target.checked })}
+              />
+              <span className="fuk-checkbox-label">Invert Depth (near = dark)</span>
+            </label>
+          </div>
+          
+          <p className="fuk-help-text fuk-mt-4">
+            {currentSettings.depth_model === 'depth_anything_v2' && '✓ Recommended: Best quality/speed balance'}
+            {currentSettings.depth_model === 'depth_anything_v3' && '⚡ Latest model with improved detail'}
+            {currentSettings.depth_model === 'midas_small' && '⚡ Fastest processing'}
+            {currentSettings.depth_model === 'midas_large' && 'Good quality, widely compatible'}
+            {currentSettings.depth_model === 'zoedepth' && 'Metric depth estimation'}
+          </p>
+        </>
+      );
+    }
+  };
+  
+  const methodTitle = selectedMethod.charAt(0).toUpperCase() + selectedMethod.slice(1);
+  
+  // Format elapsed time
+  const formatTime = (seconds) => {
+    if (seconds < 60) return `${seconds}s`;
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}m ${secs}s`;
+  };
+  
+  // Render the result preview - handles video, sequence, and image
+  const renderResultPreview = () => {
+    if (!result) return null;
+    
+    // Sequence output - show first frame as image
+    if (result.isSequence) {
+      return (
+        <div className="fuk-media-frame fuk-media-frame--success">
+          {result.url ? (
+            <img
+              src={buildImageUrl(result.url)}
+              alt={`${methodTitle} Preview (Frame 1)`}
+              className="fuk-preview-media--constrained"
+            />
+          ) : (
+            <div className="fuk-placeholder fuk-placeholder--sm">
+              <Folder className="fuk-placeholder-icon" />
+              <p className="fuk-placeholder-text">Sequence saved</p>
+            </div>
+          )}
+          <div className="fuk-preview-badge fuk-preview-badge--success">
+            <CheckCircle className="fuk-icon--md" />
+            {result.frame_count} frames
+          </div>
+          {/* Sequence info overlay */}
+          <div className="fuk-sequence-info">
+            <Folder className="fuk-icon--sm" />
+            <span>Image Sequence</span>
+          </div>
+        </div>
+      );
+    }
+    
+    // Video output - show as video player
+    if (result.isVideo) {
+      return (
+        <div className="fuk-media-frame fuk-media-frame--success">
+          <video
+            src={buildImageUrl(result.url)}
+            controls
+            className="fuk-preview-media--constrained"
+          />
+          <div className="fuk-preview-badge fuk-preview-badge--success">
+            <CheckCircle className="fuk-icon--md" />
+            Complete
+          </div>
+        </div>
+      );
+    }
+    
+    // Image output
+    return (
+      <div className="fuk-media-frame fuk-media-frame--success">
+        <img
+          src={buildImageUrl(result.url)}
+          alt="Processed"
+          className="fuk-preview-media--constrained"
+        />
+        <div className="fuk-preview-badge fuk-preview-badge--success">
+          <CheckCircle className="fuk-icon--md" />
+          Complete
+        </div>
+      </div>
+    );
+  };
+  
+  return (
+    <>
+      {/* Preview Area - Side by Side Comparison */}
+      <div className="fuk-preview-area">
+        <div className="fuk-preview-compare">
+          {/* Source Input */}
+          <div className="fuk-preview-pane">
+            <div className="fuk-preview-pane-header">
+              <h3 className="fuk-preview-pane-title">
+                Source {isVideo && <Film className="fuk-icon--sm fuk-ml-2" />}
+              </h3>
+              {isVideo && (
+                <span className="fuk-badge fuk-badge--purple">Video</span>
+              )}
+            </div>
+            {sourceInput ? (
+              isVideo ? (
+                <video
+                  src={buildImageUrl(sourceInput)}
+                  controls
+                  className="fuk-preview-media fuk-preview-media--constrained"
+                />
+              ) : (
+                <img
+                  src={buildImageUrl(sourceInput)}
+                  alt="Source"
+                  className="fuk-preview-media fuk-preview-media--constrained"
+                />
+              )
+            ) : (
+              <div className="fuk-placeholder-card fuk-placeholder-card--100 fuk-placeholder-card--16x9">
+                <div className="fuk-placeholder">
+                  <Camera className="fuk-placeholder-icon" />
+                  <p className="fuk-placeholder-text">Select source image or video below</p>
+                </div>
+              </div>
+            )}
+          </div>
+          
+          {/* Processed Result */}
+          <div className="fuk-preview-pane">
+            <div className="fuk-preview-pane-header">
+              <h3 className="fuk-preview-pane-title">{methodTitle} Result</h3>
+              {result?.isVideo && !result?.isSequence && (
+                <span className="fuk-badge fuk-badge--green">
+                  {result.frame_count} frames
+                </span>
+              )}
+              {result?.isSequence && (
+                <span className="fuk-badge fuk-badge--blue">
+                  Sequence: {result.frame_count} frames
+                </span>
+              )}
+            </div>
+            {result ? (
+              renderResultPreview()
+            ) : error ? (
+              <div className="fuk-placeholder-card fuk-placeholder-card--100 fuk-placeholder-card--16x9 fuk-placeholder-card--error">
+                <div className="fuk-placeholder">
+                  <AlertCircle className="fuk-placeholder-icon fuk-placeholder-icon--error" />
+                  <p className="fuk-placeholder-text--error">Error: {error}</p>
+                </div>
+              </div>
+            ) : (
+              <div className="fuk-placeholder-card fuk-placeholder-card--100 fuk-placeholder-card--16x9">
+                <div className="fuk-placeholder">
+                  <Pipeline className="fuk-placeholder-icon" />
+                  <p className="fuk-placeholder-text">
+                    {processing ? `Processing... ${formatTime(elapsedSeconds)}` : 'Click Process to generate'}
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
 
-class DepthModel(str, Enum):
-    """Available depth estimation models"""
-    MIDAS_SMALL = "midas_small"      # Fast, lower quality
-    MIDAS_LARGE = "midas_large"      # Balanced (default fallback)
-    DEPTH_ANYTHING_V2 = "depth_anything_v2"  # SOTA quality
-    DEPTH_ANYTHING_V3 = "depth_anything_v3"  # Latest (if available)
-    ZOEDEPTH = "zoedepth"            # Metric depth estimation
+      {/* Settings Area */}
+      <div className="fuk-settings-area">
+        <div className="fuk-settings-grid">
+          {/* Source Input Card */}
+          <div className="fuk-card">
+            <h3 className="fuk-card-title fuk-mb-3">Source Input</h3>
+            
+            <MediaUploader
+              media={sourceInput ? [{ path: sourceInput }] : []}
+              onMediaChange={handleSourceInputChange}
+              disabled={processing}
+              accept="all"
+            />
+            
+            <p className="fuk-help-text">
+              Upload or select an image or video to preprocess
+            </p>
+            
+            {/* Video-specific settings */}
+            {isVideo && (
+              <div className="fuk-mt-4 fuk-pt-4 fuk-border-top">
+                <div className="fuk-form-group-compact">
+                  <label className="fuk-label">Output Format</label>
+                  <select
+                    className="fuk-select"
+                    value={videoSettings.output_mode}
+                    onChange={(e) => setVideoSettings({ output_mode: e.target.value })}
+                    disabled={processing}
+                  >
+                    <option value="mp4">MP4 Video</option>
+                    <option value="sequence">Image Sequence</option>
+                  </select>
+                </div>
+                <p className="fuk-help-text">
+                  {videoSettings.output_mode === 'mp4' 
+                    ? 'Outputs a single video file' 
+                    : 'Outputs individual PNG frames for EXR workflow'}
+                </p>
+              </div>
+            )}
+          </div>
 
+          {/* Method Selector Card */}
+          <div className="fuk-card">
+            <h3 className="fuk-card-title fuk-mb-3">Method</h3>
+            
+            <div className="fuk-form-group-compact">
+              <select
+                className="fuk-select"
+                value={selectedMethod}
+                onChange={(e) => {
+                  setSelectedMethod(e.target.value);
+                  setResult(null);
+                  setError(null);
+                }}
+                disabled={processing}
+              >
+                <option value="canny">Canny Edge Detection</option>
+                <option value="openpose">OpenPose (Pose)</option>
+                <option value="depth">Depth Estimation</option>
+              </select>
+            </div>
+            
+            <div className="fuk-method-info fuk-method-info--purple">
+              {selectedMethod === 'canny' && 'Clean edge detection for line art and contours'}
+              {selectedMethod === 'openpose' && 'Detect human pose keypoints for precise control'}
+              {selectedMethod === 'depth' && 'Estimate depth map for 3D-aware generation'}
+            </div>
+            
+            {isVideo && (
+              <div className="fuk-alert fuk-alert--info fuk-mt-4">
+                <Film className="fuk-alert-icon" />
+                <span className="fuk-alert-text">
+                  Video mode: Processing frame-by-frame
+                </span>
+              </div>
+            )}
+          </div>
 
-# ============================================================================
-# Canny Edge Detection
-# ============================================================================
+          {/* Method-Specific Settings Card */}
+          <div className="fuk-card">
+            <h3 className="fuk-card-title fuk-mb-3">Settings</h3>
+            {renderMethodControls()}
+          </div>
+        </div>
+      </div>
 
-class CannyPreprocessor:
-    """
-    Canny edge detection preprocessor
-    
-    Good for:
-    - Architectural/structural control
-    - Line art generation
-    - Preserving sharp edges
-    """
-    
-    def process(
-        self,
-        image_path: Path,
-        output_path: Path,
-        low_threshold: int = 100,
-        high_threshold: int = 200,
-        **kwargs
-    ) -> Dict[str, Any]:
-        """
-        Apply Canny edge detection
-        
-        Args:
-            image_path: Input image path
-            output_path: Where to save result
-            low_threshold: Lower threshold for edge detection (0-255)
-            high_threshold: Upper threshold for edge detection (0-255)
-            
-        Returns:
-            Dict with output_path and metadata
-        """
-        
-        # Load image
-        image = cv2.imread(str(image_path))
-        if image is None:
-            raise ValueError(f"Could not load image: {image_path}")
-        
-        # Convert to grayscale
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        
-        # Apply Gaussian blur to reduce noise
-        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-        
-        # Canny edge detection
-        edges = cv2.Canny(blurred, low_threshold, high_threshold)
-        
-        # Convert to 3-channel for consistency
-        edges_rgb = cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
-        
-        # Save result with unique filename based on parameters
-        params = {
-            'method': 'canny',
-            'low_threshold': low_threshold,
-            'high_threshold': high_threshold
-        }
-        unique_output = self._make_unique_path(output_path, params)
-        cv2.imwrite(str(unique_output), edges_rgb)
-        
-        return {
-            "output_path": str(unique_output),
-            "method": "canny",
-            "parameters": {
-                "low_threshold": low_threshold,
-                "high_threshold": high_threshold,
-            }
-        }
-    
-    def _make_unique_path(self, base_path: Path, params: dict) -> Path:
-        """Generate unique filename to prevent caching"""
-        param_str = json.dumps(params, sort_keys=True)
-        param_hash = hashlib.md5(param_str.encode()).hexdigest()[:8]
-        timestamp = int(time.time() * 1000) % 10000
-        
-        stem = base_path.stem
-        suffix = base_path.suffix
-        parent = base_path.parent
-        
-        return parent / f"{stem}_{param_hash}_{timestamp}{suffix}"
-
-
-# ============================================================================
-# OpenPose Estimation
-# ============================================================================
-
-class OpenPosePreprocessor:
-    """
-    OpenPose pose estimation using controlnet_aux
-    
-    Good for:
-    - Character pose control
-    - Animation/motion transfer
-    - Human figure consistency
-    """
-    
-    def __init__(self):
-        self.processor = None
-    
-    def _initialize(self):
-        """Lazy load processor"""
-        if self.processor is not None:
-            return
-        
-        try:
-            from controlnet_aux import OpenposeDetector
-            print("Loading OpenPose detector...")
-            self.processor = OpenposeDetector.from_pretrained('lllyasviel/ControlNet')
-            print("Ã¢Å“â€œ OpenPose loaded")
-        except ImportError:
-            raise ImportError(
-                "controlnet_aux not installed. Install with:\n"
-                "pip install controlnet-aux"
-            )
-    
-    def process(
-        self,
-        image_path: Path,
-        output_path: Path,
-        detect_hand: bool = False,
-        detect_face: bool = False,
-        **kwargs
-    ) -> Dict[str, Any]:
-        """
-        Detect pose using OpenPose
-        
-        Args:
-            image_path: Input image
-            output_path: Where to save result
-            detect_hand: Detect hand keypoints
-            detect_face: Detect face keypoints
-            
-        Returns:
-            Dict with output_path and metadata
-        """
-        
-        if self.processor is None:
-            self._initialize()
-        
-        # Load image
-        image = Image.open(image_path)
-        
-        # Process with OpenPose
-        pose_image = self.processor(
-            image,
-            hand_and_face=detect_hand or detect_face,
-            include_hand=detect_hand,
-            include_face=detect_face,
-        )
-        
-        # Save result with unique filename
-        params = {
-            'method': 'openpose',
-            'detect_hand': detect_hand,
-            'detect_face': detect_face
-        }
-        unique_output = self._make_unique_path(output_path, params)
-        pose_image.save(unique_output)
-        
-        return {
-            "output_path": str(unique_output),
-            "method": "openpose",
-            "parameters": {
-                "detect_hand": detect_hand,
-                "detect_face": detect_face,
-            }
-        }
-    
-    def _make_unique_path(self, base_path: Path, params: dict) -> Path:
-        """Generate unique filename to prevent caching"""
-        param_str = json.dumps(params, sort_keys=True)
-        param_hash = hashlib.md5(param_str.encode()).hexdigest()[:8]
-        timestamp = int(time.time() * 1000) % 10000
-        
-        stem = base_path.stem
-        suffix = base_path.suffix
-        parent = base_path.parent
-        
-        return parent / f"{stem}_{param_hash}_{timestamp}{suffix}"
-
-
-# ============================================================================
-# Depth Estimation
-# ============================================================================
-
-class DepthPreprocessor:
-    """
-    Depth map estimation with multiple model options
-    
-    Models (in order of quality):
-    1. Depth Anything V3 - Latest SOTA (if available)
-    2. Depth Anything V2 - Excellent quality, auto-downloads checkpoint
-    3. ZoeDepth - Metric depth estimation
-    4. MiDaS Large - Good quality, slower
-    5. MiDaS Small - Fast, lower quality
-    
-    Good for:
-    - 3D scene control
-    - Parallax effects
-    - Bokeh/DOF effects
-    - Spatial composition
-    """
-    
-    def __init__(self, model_type: DepthModel = DepthModel.DEPTH_ANYTHING_V2, config_path: Optional[Path] = None):
-        self.model_type = model_type
-        self.model = None
-        self.transform = None
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.config_path = config_path
-        print(f"Depth preprocessor using device: {self.device}")
-    
-    def _load_midas(self, model_name: str = "DPT_Large"):
-        """
-        Load MiDaS depth estimation model
-        
-        Args:
-            model_name: "MiDaS_small" (fast) or "DPT_Large" (quality)
-        """
-        print(f"Loading MiDaS {model_name}...")
-        self.model = torch.hub.load("intel-isl/MiDaS", model_name)
-        self.model.to(self.device)
-        self.model.eval()
-        
-        # Load appropriate transform
-        midas_transforms = torch.hub.load("intel-isl/MiDaS", "transforms")
-        if model_name == "DPT_Large":
-            self.transform = midas_transforms.dpt_transform
-        else:
-            self.transform = midas_transforms.small_transform
-        
-        print("Ã¢Å“â€œ MiDaS loaded")
-    
-    def _load_depth_anything_v2(self):
-        """
-        Load Depth Anything V2
-        
-        Requirements:
-        1. Install package: pip install depth-anything-v2
-           OR clone: git clone https://github.com/DepthAnything/Depth-Anything-V2
-        2. Download checkpoint to: ~/ai/models/checkpoints/depth_anything_v2_vitl.pth
-           From: https://huggingface.co/depth-anything/Depth-Anything-V2-Large
-        """
-        try:
-            from depth_anything_v2.dpt import DepthAnythingV2
-            
-            print("Loading Depth Anything V2...")
-            
-            model_configs = {
-                'vits': {'encoder': 'vits', 'features': 64, 'out_channels': [48, 96, 192, 384]},
-                'vitb': {'encoder': 'vitb', 'features': 128, 'out_channels': [96, 192, 384, 768]},
-                'vitl': {'encoder': 'vitl', 'features': 256, 'out_channels': [256, 512, 1024, 1024]},
-            }
-            
-            # Use vitl (large) for best quality
-            encoder = 'vitl'
-            
-            self.model = DepthAnythingV2(**model_configs[encoder])
-            
-            # Load checkpoint (user needs to download this)
-            checkpoint_path = Path.home() / "ai" / "models" / "checkpoints" / "depth_anything_v2_vitl.pth"
-            
-            if checkpoint_path.exists():
-                print(f"  Found checkpoint: {checkpoint_path}")
-                self.model.load_state_dict(torch.load(str(checkpoint_path), map_location='cpu'))
-                print(f"Ã¢Å“â€œ Loaded checkpoint successfully")
-            else:
-                print(f"Ã¢Å“â€” Checkpoint not found: {checkpoint_path}")
-                print("  Download from: https://huggingface.co/depth-anything/Depth-Anything-V2-Large")
-                print("  File: depth_anything_v2_vitl.pth")
-                raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
-            
-            self.model.to(self.device)
-            self.model.eval()
-            
-            print("Ã¢Å“â€œ Depth Anything V2 loaded successfully")
-            
-        except ImportError as e:
-            print(f"Ã¢Å“â€” Depth Anything V2 package not installed")
-            print(f"  Import error: {e}")
-            print(f"  Install with: pip install depth-anything-v2 --break-system-packages")
-            print(f"  OR clone: git clone https://github.com/DepthAnything/Depth-Anything-V2")
-            print(f"           cd Depth-Anything-V2")
-            print(f"           pip install -e . --break-system-packages")
-            print("  Falling back to MiDaS...")
-            self.model_type = DepthModel.MIDAS_LARGE  # FIX: Update type
-            self._load_midas("DPT_Large")
-            
-        except FileNotFoundError as e:
-            print(f"Ã¢Å“â€” Depth Anything V2 checkpoint not found: {e}")
-            print("  Falling back to MiDaS...")
-            self.model_type = DepthModel.MIDAS_LARGE  # FIX: Update type
-            self._load_midas("DPT_Large")
-    
-    def _load_depth_anything_v2(self):
-        """
-        Load Depth Anything V2
-        
-        Auto-downloads checkpoint from HuggingFace if missing.
-        Works with vendor directory without requiring pip install (handles Python 3.12+ requirement).
-        """
-        try:
-            # Try importing from installed package first
-            try:
-                from depth_anything_v2.dpt import DepthAnythingV2
-                print("Using installed depth-anything-v2 package")
-            except ImportError:
-                # Fall back to vendor directory (avoids Python 3.12 requirement)
-                # Go up to project root: utils/ -> fuk/ -> vendor/
-                vendor_path = Path(__file__).parent.parent / "vendor" / "depth-anything-v2"
-                if not vendor_path.exists():
-                    raise ImportError(
-                        f"depth-anything-v2 not found. Either:\n"
-                        f"  1. pip install depth-anything-v2 (requires Python 3.12+)\n"
-                        f"  2. Clone to vendor: git clone https://github.com/DepthAnything/Depth-Anything-V2 {vendor_path}"
-                    )
-                
-                # Add vendor path to sys.path
-                import sys
-                sys.path.insert(0, str(vendor_path))
-                from depth_anything_v2.dpt import DepthAnythingV2
-                print(f"Using depth-anything-v2 from vendor: {vendor_path}")
-            
-            print("Loading Depth Anything V2...")
-            
-            model_configs = {
-                'vits': {'encoder': 'vits', 'features': 64, 'out_channels': [48, 96, 192, 384]},
-                'vitb': {'encoder': 'vitb', 'features': 128, 'out_channels': [96, 192, 384, 768]},
-                'vitl': {'encoder': 'vitl', 'features': 256, 'out_channels': [256, 512, 1024, 1024]},
-            }
-            
-            # Use vitl (large) for best quality
-            encoder = 'vitl'
-            
-            self.model = DepthAnythingV2(**model_configs[encoder])
-            
-            # Try to get checkpoint path from config and auto-download if needed
-            checkpoint_path = None
-            
-            if self.config_path and self.config_path.exists():
-                try:
-                    # Try auto-download using config
-                    import sys
-                    import importlib.util
-                    
-                    # Load model_downloader module
-                    downloader_path = Path(__file__).parent / "model_downloader.py"
-                    if downloader_path.exists():
-                        spec = importlib.util.spec_from_file_location("model_downloader", downloader_path)
-                        downloader_module = importlib.util.module_from_spec(spec)
-                        spec.loader.exec_module(downloader_module)
-                        
-                        checkpoint_path = downloader_module.ensure_model_downloaded("depth_anything_v2", self.config_path)
-                        if checkpoint_path:
-                            print(f"  Auto-downloaded checkpoint: {checkpoint_path}")
-                except Exception as e:
-                    print(f"  Auto-download attempt failed: {e}")
-            
-            # Fall back to manual search if auto-download didn't work
-            if not checkpoint_path:
-                possible_paths = [
-                    # Vendor directory
-                    Path(__file__).parent / "vendor" / "depth-anything-v2" / "checkpoints" / "depth_anything_v2_vitl.pth",
-                    # User's ai/models directory
-                    Path.home() / "ai" / "models" / "checkpoints" / "depth_anything_v2_vitl.pth",
-                ]
-                
-                for path in possible_paths:
-                    if path.exists():
-                        checkpoint_path = path
-                        print(f"  Found checkpoint: {checkpoint_path}")
-                        break
-            
-            if not checkpoint_path:
-                print(f"âœ— Checkpoint not found. Searched:")
-                print(f"    - vendor/depth-anything-v2/checkpoints/depth_anything_v2_vitl.pth")
-                print(f"    - ~/ai/models/checkpoints/depth_anything_v2_vitl.pth")
-                print(f"  Download from: https://huggingface.co/depth-anything/Depth-Anything-V2-Large")
-                print(f"  File: depth_anything_v2_vitl.pth")
-                raise FileNotFoundError("Checkpoint not found")
-            
-            # Load checkpoint
-            self.model.load_state_dict(torch.load(str(checkpoint_path), map_location='cpu'))
-            print(f"âœ“ Loaded checkpoint successfully")
-            
-            self.model.to(self.device)
-            self.model.eval()
-            
-            print("âœ“ Depth Anything V2 loaded successfully")
-            
-        except ImportError as e:
-            print(f"âœ— Depth Anything V2 not available: {e}")
-            print("  Falling back to MiDaS...")
-            self.model_type = DepthModel.MIDAS_LARGE
-            self._load_midas("DPT_Large")
-            
-        except FileNotFoundError as e:
-            print(f"âœ— Checkpoint not found: {e}")
-            print("  Falling back to MiDaS...")
-            self.model_type = DepthModel.MIDAS_LARGE
-            self._load_midas("DPT_Large")
-        
-        except Exception as e:
-            print(f"âœ— Failed to load Depth Anything V2: {e}")
-            print("  Falling back to MiDaS...")
-            self.model_type = DepthModel.MIDAS_LARGE
-            self._load_midas("DPT_Large")
-    
-    def _load_depth_anything_v3(self):
-        """
-        Load Depth Anything V3 (latest SOTA)
-        
-        V3 improvements:
-        - Better edge preservation
-        - Improved small object detail
-        - Faster inference
-        """
-        try:
-            # V3 might use HuggingFace transformers
-            from transformers import pipeline
-            
-            print("Loading Depth Anything V3...")
-            
-            # Try loading from HuggingFace
-            self.model = pipeline(
-                task="depth-estimation",
-                model="depth-anything/Depth-Anything-V2-Large-hf",  # Update when V3 released
-                device=0 if self.device == "cuda" else -1
-            )
-            
-            print("Ã¢Å“â€œ Depth Anything V3 loaded")
-            
-        except Exception as e:
-            print(f"Ã¢Å¡Â  Could not load Depth Anything V3: {e}")
-            print("  Falling back to V2...")
-            self.model_type = DepthModel.DEPTH_ANYTHING_V2  # FIX: Update type
-            self._load_depth_anything_v2()
-    
-    def _load_zoedepth(self):
-        """Load ZoeDepth (metric depth estimation)"""
-        try:
-            print("Loading ZoeDepth...")
-            self.model = torch.hub.load("isl-org/ZoeDepth", "ZoeD_NK", pretrained=True)
-            self.model.to(self.device)
-            self.model.eval()
-            print("Ã¢Å“â€œ ZoeDepth loaded")
-            
-        except Exception as e:
-            print(f"Ã¢Å¡Â  Could not load ZoeDepth: {e}")
-            print("  Falling back to MiDaS...")
-            self.model_type = DepthModel.MIDAS_LARGE  # FIX: Update type
-            self._load_midas("DPT_Large")
-    
-    def _initialize(self):
-        """Load model based on selected type"""
-        if self.model_type == DepthModel.MIDAS_SMALL:
-            self._load_midas("MiDaS_small")
-        elif self.model_type == DepthModel.MIDAS_LARGE:
-            self._load_midas("DPT_Large")
-        elif self.model_type == DepthModel.DEPTH_ANYTHING_V2:
-            self._load_depth_anything_v2()
-        elif self.model_type == DepthModel.DEPTH_ANYTHING_V3:
-            self._load_depth_anything_v3()
-        elif self.model_type == DepthModel.ZOEDEPTH:
-            self._load_zoedepth()
-    
-    def process(
-        self,
-        image_path: Path,
-        output_path: Path,
-        invert: bool = False,
-        normalize: bool = True,
-        colormap: Optional[str] = "inferno",
-    ) -> Dict[str, Any]:
-        """
-        Estimate depth map
-        
-        Args:
-            image_path: Input image
-            output_path: Where to save result
-            invert: Invert depth (far = white, near = black)
-            normalize: Normalize depth to [0, 1]
-            colormap: Apply colormap (None, 'inferno', 'viridis', 'magma')
-            
-        Returns:
-            Dict with output_path and metadata
-        """
-        
-        if self.model is None:
-            self._initialize()
-        
-        # Load image
-        image = cv2.imread(str(image_path))
-        if image is None:
-            raise ValueError(f"Could not load image: {image_path}")
-        
-        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        h, w = image.shape[:2]
-        
-        # Process based on ACTUAL model type (not requested, in case of fallback)
-        if self.model_type in [DepthModel.MIDAS_SMALL, DepthModel.MIDAS_LARGE]:
-            # MiDaS processing
-            input_batch = self.transform(image_rgb).to(self.device)
-            
-            with torch.no_grad():
-                prediction = self.model(input_batch)
-                prediction = torch.nn.functional.interpolate(
-                    prediction.unsqueeze(1),
-                    size=image.shape[:2],
-                    mode="bicubic",
-                    align_corners=False,
-                ).squeeze()
-            
-            depth = prediction.cpu().numpy()
-        
-        elif self.model_type in [DepthModel.DEPTH_ANYTHING_V2, DepthModel.DEPTH_ANYTHING_V3]:
-            # Depth Anything processing
-            depth = self.model.infer_image(image_rgb)
-        
-        elif self.model_type == DepthModel.ZOEDEPTH:
-            # ZoeDepth processing
-            pil_image = Image.fromarray(image_rgb)
-            depth = self.model.infer_pil(pil_image)
-        
-        # Normalize depth
-        if normalize:
-            depth = (depth - depth.min()) / (depth.max() - depth.min())
-        
-        # Invert if requested (near = white, far = black)
-        if invert:
-            depth = 1.0 - depth
-        
-        # Apply colormap or save as grayscale
-        if colormap:
-            # Convert to 0-255 range
-            depth_uint8 = (depth * 255).astype(np.uint8)
-            
-            # Apply colormap
-            colormap_func = getattr(cv2, f"COLORMAP_{colormap.upper()}", cv2.COLORMAP_INFERNO)
-            depth_colored = cv2.applyColorMap(depth_uint8, colormap_func)
-            output_image = depth_colored
-        else:
-            # Grayscale output
-            depth_uint8 = (depth * 255).astype(np.uint8)
-            output_image = cv2.cvtColor(depth_uint8, cv2.COLOR_GRAY2BGR)
-        
-        # Save result with unique filename
-        params = {
-            'method': 'depth',
-            'model': self.model_type.value,
-            'invert': invert,
-            'normalize': normalize,
-            'colormap': colormap
-        }
-        unique_output = self._make_unique_path(output_path, params)
-        cv2.imwrite(str(unique_output), output_image)
-        
-        return {
-            "output_path": str(unique_output),
-            "method": "depth",
-            "model": self.model_type.value,
-            "parameters": {
-                "invert": invert,
-                "normalize": normalize,
-                "colormap": colormap,
-            }
-        }
-    
-    def _make_unique_path(self, base_path: Path, params: dict) -> Path:
-        """Generate unique filename to prevent caching"""
-        param_str = json.dumps(params, sort_keys=True)
-        param_hash = hashlib.md5(param_str.encode()).hexdigest()[:8]
-        timestamp = int(time.time() * 1000) % 10000
-        
-        stem = base_path.stem
-        suffix = base_path.suffix
-        parent = base_path.parent
-        
-        return parent / f"{stem}_{param_hash}_{timestamp}{suffix}"
-
-
-# ============================================================================
-# Preprocessor Manager
-# ============================================================================
-
-class PreprocessorManager:
-    """
-    Central manager for all preprocessing operations
-    
-    Usage:
-        manager = PreprocessorManager(output_dir)
-        result = manager.canny(image_path, output_path, low_threshold=100)
-        result = manager.openpose(image_path, output_path, detect_hand=True)
-        result = manager.depth(image_path, output_path, model=DepthModel.DEPTH_ANYTHING_V2)
-    """
-    
-    def __init__(self, output_dir: Optional[Path] = None, config_path: Optional[Path] = None):
-        self.output_dir = Path(output_dir) if output_dir else Path("outputs/preprocessed")
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.config_path = Path(config_path) if config_path else None
-        
-        self._canny = CannyPreprocessor()
-        self._openpose = None  # Lazy load
-        self._depth_processors = {}  # Cache depth models
-        
-        self._log("PREPROCESS", f"Initialized with output_dir: {self.output_dir}")
-    
-    def _log(self, category: str, message: str, level: str = "info"):
-        """Simple logging helper"""
-        from datetime import datetime
-        timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-        
-        colors = {
-            'info': '\033[96m',    # cyan
-            'success': '\033[92m', # green
-            'warning': '\033[93m', # yellow
-            'error': '\033[91m',   # red
-            'end': '\033[0m'
-        }
-        
-        symbols = {
-            'info': '',
-            'success': '✓ ',
-            'warning': '⚠ ',
-            'error': '✗ '
-        }
-        
-        color = colors.get(level, colors['info'])
-        symbol = symbols.get(level, '')
-        print(f"{color}[{timestamp}] {symbol}[{category}] {message}{colors['end']}")
-    
-    def canny(
-        self,
-        image_path: Path,
-        output_path: Path,
-        **kwargs
-    ) -> Dict[str, Any]:
-        """Apply Canny edge detection"""
-        start_time = time.time()
-        
-        print("\n" + "=" * 60)
-        print("  CANNY EDGE DETECTION")
-        print("=" * 60)
-        print(f"\n  Input: {image_path}")
-        print(f"  Output: {output_path}")
-        print(f"  Parameters:")
-        for key, value in kwargs.items():
-            print(f"    {key}: {value}")
-        print()
-        
-        result = self._canny.process(image_path, output_path, **kwargs)
-        
-        elapsed = time.time() - start_time
-        self._log("CANNY", f"Complete in {elapsed:.2f}s -> {result.get('output_path')}", "success")
-        
-        return result
-    
-    def openpose(
-        self,
-        image_path: Path,
-        output_path: Path,
-        **kwargs
-    ) -> Dict[str, Any]:
-        """Apply OpenPose pose estimation"""
-        start_time = time.time()
-        
-        print("\n" + "=" * 60)
-        print("  OPENPOSE POSE ESTIMATION")
-        print("=" * 60)
-        print(f"\n  Input: {image_path}")
-        print(f"  Output: {output_path}")
-        print(f"  Parameters:")
-        for key, value in kwargs.items():
-            print(f"    {key}: {value}")
-        print()
-        
-        if self._openpose is None:
-            self._log("OPENPOSE", "Loading OpenPose model (first use)...")
-            self._openpose = OpenPosePreprocessor()
-            self._log("OPENPOSE", "Model loaded", "success")
-        
-        result = self._openpose.process(image_path, output_path, **kwargs)
-        
-        elapsed = time.time() - start_time
-        self._log("OPENPOSE", f"Complete in {elapsed:.2f}s -> {result.get('output_path')}", "success")
-        
-        return result
-    
-    def depth(
-        self,
-        image_path: Path,
-        output_path: Path,
-        model: DepthModel = DepthModel.DEPTH_ANYTHING_V2,
-        **kwargs
-    ) -> Dict[str, Any]:
-        """
-        Apply depth estimation
-        
-        Args:
-            image_path: Input image
-            output_path: Where to save result
-            model: Which depth model to use
-            **kwargs: Additional parameters (invert, normalize, colormap)
-        """
-        start_time = time.time()
-        
-        print("\n" + "=" * 60)
-        print("  DEPTH ESTIMATION")
-        print("=" * 60)
-        print(f"\n  Input: {image_path}")
-        print(f"  Output: {output_path}")
-        print(f"  Model: {model.value}")
-        print(f"  Parameters:")
-        for key, value in kwargs.items():
-            print(f"    {key}: {value}")
-        print()
-        
-        # Cache depth processors by model type
-        if model not in self._depth_processors:
-            self._log("DEPTH", f"Loading {model.value} model (first use)...")
-            self._depth_processors[model] = DepthPreprocessor(model, config_path=self.config_path)
-            self._log("DEPTH", f"{model.value} model loaded", "success")
-        
-        result = self._depth_processors[model].process(image_path, output_path, **kwargs)
-        
-        elapsed = time.time() - start_time
-        self._log("DEPTH", f"Complete in {elapsed:.2f}s -> {result.get('output_path')}", "success")
-        
-        return result
+      {/* Footer */}
+      <Footer
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        generating={processing}
+        progress={processing ? { progress: 0.5, phase: 'processing' } : null}
+        elapsedSeconds={elapsedSeconds}
+        onGenerate={handleProcess}
+        onCancel={() => setProcessing(false)}
+        canGenerate={!!sourceInput}
+        generateLabel={isVideo ? "Process Video" : "Process"}
+        generatingLabel={isVideo ? "Processing Video..." : "Processing..."}
+      />
+    </>
+  );
+}

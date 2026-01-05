@@ -1,0 +1,834 @@
+/*
+ * FUK Tabs - Shared Tab Component Styles
+ * Unified styling for all generation/processing tabs
+ */
+
+/* ============================================================================
+ * PREVIEW AREA - Content-fitting media display
+ * The key is: media fills available space, maintains aspect ratio
+ * ========================================================================== */
+
+.fuk-preview-area {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem 2rem;
+  overflow: hidden;
+  min-height: 0; /* Allow flex shrinking */
+}
+
+.fuk-preview-container {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+/* Single media preview (Image/Video tabs) */
+.fuk-preview-single {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+
+/* Side-by-side comparison (Preprocess, Postprocess) */
+.fuk-preview-compare {
+  display: flex;
+  gap: 2rem;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 1rem;
+}
+
+.fuk-preview-pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  max-width: 45%;
+  height: 100%;
+}
+
+.fuk-preview-pane-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 0.5rem;
+}
+
+.fuk-preview-pane-title {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  color: #9ca3af;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+
+.fuk-preview-pane-info {
+  font-size: 0.7rem;
+  color: #6b7280;
+}
+
+/* Grid layout (Layers tab) */
+.fuk-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+  width: 100%;
+  height: 100%;
+  align-content: start;
+  padding: 1rem;
+}
+
+/* Centered content layout (Export tab) */
+.fuk-preview-centered {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 1rem;
+}
+
+.fuk-preview-main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ============================================================================
+ * MEDIA DISPLAY - Images and videos that fit their container
+ * ========================================================================== */
+
+.fuk-media-frame {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 0.5rem;
+  border: 1px solid #374151;
+  overflow: hidden;
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.fuk-media-frame--success {
+  border-color: #10b981;
+  border-width: 2px;
+}
+
+.fuk-media-frame--highlighted {
+  border-color: #a855f7;
+  border-width: 2px;
+}
+
+.fuk-media-frame img,
+.fuk-media-frame video {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+/* Full preview for single media display */
+.fuk-preview-media {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 0.5rem;
+  border: 1px solid #374151;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+/* Constrained preview for comparison views */
+.fuk-preview-media--constrained {
+  max-height: 400px;
+}
+
+/* ============================================================================
+ * PREVIEW INFO OVERLAY
+ * ========================================================================== */
+
+.fuk-preview-info {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  background-color: rgba(17, 24, 39, 0.9);
+  backdrop-filter: blur(12px);
+  border: 1px solid #374151;
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.75rem;
+  color: #9ca3af;
+}
+
+.fuk-preview-info-row {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+}
+
+.fuk-preview-badge {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.375rem;
+  font-size: 0.75rem;
+}
+
+.fuk-preview-badge--success {
+  background: rgba(16, 185, 129, 0.9);
+  color: white;
+}
+
+.fuk-preview-badge--method {
+  background: rgba(0, 0, 0, 0.7);
+  color: #9ca3af;
+  bottom: 0.5rem;
+  top: auto;
+  font-size: 0.65rem;
+}
+
+/* ============================================================================
+ * PLACEHOLDER - Empty state displays
+ * ========================================================================== */
+
+.fuk-placeholder-card {
+  background-color: rgba(31, 41, 55, 0.3);
+  border-radius: 0.5rem;
+  border: 2px dashed #374151;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem;
+}
+
+/* Percentage-based width placeholders */
+.fuk-placeholder-card--40 {
+  width: 40%;
+}
+
+.fuk-placeholder-card--60 {
+  width: 60%;
+}
+
+.fuk-placeholder-card--100 {
+  width: 100%;
+}
+
+/* Aspect ratio variants */
+.fuk-placeholder-card--16x9 {
+  aspect-ratio: 16 / 9;
+}
+
+.fuk-placeholder-card--square {
+  aspect-ratio: 1;
+}
+
+/* Dynamic aspect ratio via CSS variable */
+.fuk-placeholder-card--dynamic {
+  aspect-ratio: var(--preview-aspect, 16 / 9);
+}
+
+/* Error state placeholder */
+.fuk-placeholder-card--error {
+  border-color: #ef4444;
+}
+
+.fuk-placeholder {
+  text-align: center;
+  color: #6b7280;
+}
+
+.fuk-placeholder-icon {
+  width: 3rem;
+  height: 3rem;
+  margin: 0 auto 1rem;
+  opacity: 0.3;
+}
+
+.fuk-placeholder-icon--sm {
+  width: 2rem;
+  height: 2rem;
+  margin: 0 auto 0.5rem;
+}
+
+.fuk-placeholder-icon--spin {
+  opacity: 0.5;
+  animation: spin 1s linear infinite;
+}
+
+.fuk-placeholder-icon--faded {
+  opacity: 0.5;
+}
+
+.fuk-placeholder-text {
+  color: #6b7280;
+}
+
+.fuk-placeholder-text--highlight {
+  color: #c084fc;
+}
+
+.fuk-placeholder-text--error {
+  color: #ef4444;
+}
+
+.fuk-placeholder-subtext {
+  font-size: 0.75rem;
+  color: #6b7280;
+  margin-top: 0.5rem;
+}
+
+/* ============================================================================
+ * COMPARISON ARROW / DIVIDER
+ * ========================================================================== */
+
+.fuk-compare-arrow {
+  font-size: 2.5rem;
+  color: #4b5563;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.fuk-compare-arrow--active {
+  color: #a855f7;
+  animation: pulse 2s infinite;
+}
+
+.fuk-compare-arrow-icon {
+  width: 2rem;
+  height: 2rem;
+}
+
+.fuk-compare-arrow-icon--spin {
+  animation: spin 1s linear infinite;
+}
+
+.fuk-compare-arrow-label {
+  font-size: 0.7rem;
+  color: #a855f7;
+}
+
+/* ============================================================================
+ * LAYER CARD - For Layers tab grid display
+ * ========================================================================== */
+
+.fuk-layer-card {
+  background: rgba(31, 41, 55, 0.5);
+  border-radius: 0.5rem;
+  border: 1px solid #374151;
+  overflow: hidden;
+}
+
+.fuk-layer-card-header {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid #374151;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.fuk-layer-card-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: #c084fc;
+  letter-spacing: 0.05em;
+}
+
+.fuk-layer-card-info {
+  font-size: 0.65rem;
+  color: #6b7280;
+  margin-left: 0.5rem;
+}
+
+.fuk-layer-card-body {
+  overflow: hidden;
+}
+
+.fuk-layer-card-body img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/* ============================================================================
+ * METHOD INFO BOX - Colored info panels
+ * ========================================================================== */
+
+.fuk-method-info {
+  margin-top: 1rem;
+  padding: 0.75rem;
+  border-radius: 0.375rem;
+  font-size: 0.75rem;
+}
+
+.fuk-method-info--purple {
+  background: rgba(168, 85, 247, 0.1);
+  color: #c084fc;
+}
+
+.fuk-method-info--gray {
+  background: #1f2937;
+  color: #9ca3af;
+}
+
+/* ============================================================================
+ * CAPABILITY / STATUS INDICATORS
+ * ========================================================================== */
+
+.fuk-capability-box {
+  margin-top: 0.75rem;
+  padding: 0.5rem;
+  background: #1f2937;
+  border-radius: 0.375rem;
+}
+
+.fuk-capability-label {
+  font-size: 0.65rem;
+  color: #6b7280;
+  margin-bottom: 0.25rem;
+}
+
+.fuk-capability-list {
+  display: flex;
+  gap: 0.5rem;
+  font-size: 0.7rem;
+}
+
+.fuk-capability-item {
+  color: #6b7280;
+}
+
+.fuk-capability-item--active {
+  color: #10b981;
+}
+
+/* ============================================================================
+ * FRAME MULTIPLIER / STATS BOX
+ * ========================================================================== */
+
+.fuk-stats-box {
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: #1f2937;
+  border-radius: 0.375rem;
+}
+
+.fuk-stats-primary {
+  font-size: 0.75rem;
+  color: #d1d5db;
+}
+
+.fuk-stats-primary strong {
+  color: #a855f7;
+}
+
+.fuk-stats-secondary {
+  font-size: 0.65rem;
+  color: #6b7280;
+  margin-top: 0.25rem;
+}
+
+/* ============================================================================
+ * SLIDER RANGE LABELS
+ * ========================================================================== */
+
+.fuk-range-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.65rem;
+  color: #6b7280;
+}
+
+/* ============================================================================
+ * ERROR / SUCCESS ALERTS
+ * ========================================================================== */
+
+.fuk-alert {
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.375rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.fuk-alert--error {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.fuk-alert--error .fuk-alert-icon {
+  color: #ef4444;
+}
+
+.fuk-alert--error .fuk-alert-text {
+  color: #ef4444;
+  font-size: 0.75rem;
+}
+
+.fuk-alert--success {
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.fuk-alert--success .fuk-alert-icon {
+  color: #10b981;
+}
+
+.fuk-alert--success .fuk-alert-text {
+  color: #10b981;
+  font-size: 0.875rem;
+}
+
+.fuk-alert-icon {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+}
+
+.fuk-alert-icon--lg {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+/* ============================================================================
+ * PROCESS TYPE SELECTOR (Radio cards)
+ * ========================================================================== */
+
+.fuk-radio-card-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.fuk-radio-card {
+  padding: 0.75rem;
+  background: transparent;
+  border: 1px solid #374151;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  transition: all 0.2s;
+}
+
+.fuk-radio-card--active {
+  background: rgba(168, 85, 247, 0.1);
+  border-color: #a855f7;
+}
+
+.fuk-radio-card-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.fuk-radio-card-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.fuk-radio-card-title .fuk-icon {
+  width: 1rem;
+  height: 1rem;
+}
+
+.fuk-radio-card-desc {
+  font-size: 0.7rem;
+  color: #6b7280;
+}
+
+/* ============================================================================
+ * LAYER TOGGLE (Checkbox with description)
+ * ========================================================================== */
+
+.fuk-layer-toggle {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.fuk-layer-toggle-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.fuk-layer-toggle-content {
+  display: flex;
+  flex-direction: column;
+}
+
+.fuk-layer-toggle-label {
+  margin-bottom: 0;
+}
+
+.fuk-layer-toggle-desc {
+  font-size: 0.7rem;
+  color: #6b7280;
+}
+
+/* ============================================================================
+ * THUMBNAIL STRIP (Export tab)
+ * ========================================================================== */
+
+.fuk-thumb-strip {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+  padding-top: 0.75rem;
+  border-top: 1px solid #374151;
+  margin-top: 0.75rem;
+}
+
+.fuk-thumb-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.fuk-thumb-frame {
+  width: 60px;
+  height: 60px;
+  border-radius: 0.25rem;
+  overflow: hidden;
+  border: 1px solid #374151;
+}
+
+.fuk-thumb-frame--primary {
+  border: 2px solid #a855f7;
+}
+
+.fuk-thumb-frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.fuk-thumb-label {
+  font-size: 0.6rem;
+  color: #9ca3af;
+  text-transform: capitalize;
+}
+
+.fuk-thumb-label--primary {
+  color: #c084fc;
+}
+
+/* ============================================================================
+ * CHANNEL SUMMARY GRID (Export tab)
+ * ========================================================================== */
+
+.fuk-channel-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.25rem;
+  font-size: 0.7rem;
+}
+
+.fuk-channel-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.25rem 0.375rem;
+  border-radius: 0.25rem;
+}
+
+.fuk-channel-item--active {
+  background: rgba(16, 185, 129, 0.1);
+}
+
+.fuk-channel-name {
+  color: #9ca3af;
+}
+
+.fuk-channel-status {
+  color: #4b5563;
+}
+
+.fuk-channel-status--active {
+  color: #10b981;
+}
+
+/* ============================================================================
+ * HELPER TEXT
+ * ========================================================================== */
+
+.fuk-help-text {
+  font-size: 0.7rem;
+  color: #9ca3af;
+  margin-top: 0.5rem;
+}
+
+.fuk-help-text--inline {
+  margin-top: 0.25rem;
+}
+
+.fuk-help-text--sm {
+  font-size: 0.65rem;
+}
+
+/* ============================================================================
+ * ICON UTILITIES
+ * ========================================================================== */
+
+.fuk-icon {
+  flex-shrink: 0;
+}
+
+.fuk-icon--xs {
+  width: 0.625rem;
+  height: 0.625rem;
+}
+
+.fuk-icon--sm {
+  width: 0.875rem;
+  height: 0.875rem;
+}
+
+.fuk-icon--md {
+  width: 1rem;
+  height: 1rem;
+}
+
+.fuk-icon--lg {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+.fuk-icon--xl {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+.fuk-icon--2xl {
+  width: 2rem;
+  height: 2rem;
+}
+
+.fuk-icon--3xl {
+  width: 3rem;
+  height: 3rem;
+}
+
+/* ============================================================================
+ * ANIMATION UTILITIES
+ * ========================================================================== */
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.fuk-spin {
+  animation: spin 1s linear infinite;
+}
+
+.fuk-pulse {
+  animation: pulse 2s infinite;
+}
+
+/* ============================================================================
+ * EXPORT RESULT BANNER
+ * ========================================================================== */
+
+.fuk-result-banner {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  border-radius: 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.fuk-result-banner--success {
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.fuk-result-banner--error {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.fuk-result-content {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #10b981;
+  flex: 1;
+  min-width: 0;
+}
+
+.fuk-result-content--error {
+  color: #ef4444;
+}
+
+.fuk-result-text {
+  font-size: 0.875rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fuk-download-btn {
+  padding: 0.375rem 0.75rem;
+  background: #10b981;
+  color: white;
+  border-radius: 0.25rem;
+  font-size: 0.75rem;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background 0.2s;
+}
+
+.fuk-download-btn:hover {
+  background: #059669;
+}
+
+/* ============================================================================
+ * RESPONSIVE
+ * ========================================================================== */
+
+@media (max-width: 1024px) {
+  .fuk-preview-compare {
+    flex-direction: column;
+    gap: 1rem;
+  }
+  
+  .fuk-preview-pane {
+    max-width: 100%;
+    height: auto;
+  }
+  
+  .fuk-preview-media--constrained {
+    max-height: 250px;
+  }
+}

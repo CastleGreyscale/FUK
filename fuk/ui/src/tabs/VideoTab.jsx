@@ -1,6 +1,7 @@
 /**
  * Video Generation Tab
  * Wan video generation with I2V, T2V, FLF2V support
+ * Refactored: All inline styles moved to CSS classes
  */
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
@@ -52,7 +53,6 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
   }, [formData]);
 
   // Update function that writes to project or localStorage
-  // Uses ref to avoid dependency on formData which causes infinite loops
   const setFormData = useCallback((updater) => {
     const currentData = formDataRef.current;
     const newData = typeof updater === 'function' 
@@ -90,11 +90,9 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
 
   // Get saved preview from project or use generation result
   const previewVideo = useMemo(() => {
-    // Current generation result takes priority
     if (result?.outputs?.mp4) {
       return result.outputs.mp4;
     }
-    // Fall back to saved preview from project
     if (project?.projectState?.lastState?.lastVideoPreview) {
       return project.projectState.lastState.lastVideoPreview;
     }
@@ -104,7 +102,6 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
   // Update last state when generation completes
   useEffect(() => {
     if (result?.outputs?.mp4) {
-      // Update project last state
       if (project?.updateLastState) {
         project.updateLastState({
           lastVideoPreview: result.outputs.mp4,
@@ -112,7 +109,6 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
         });
       }
       
-      // If backend returned seed_used, update lastUsedSeed
       if (result.seed_used !== undefined && result.seed_used !== null) {
         setFormData(prev => ({
           ...prev,
@@ -142,13 +138,11 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
   }, [formData.seedMode, formData.seed, formData.lastUsedSeed]);
 
   const handleGenerate = async () => {
-    // Get the effective seed based on mode
     const effectiveSeed = getEffectiveSeed();
     
     const payload = {
       ...formData,
       seed: effectiveSeed,
-      // Convert image_path to backend-relative path
       image_path: formData.image_path ? formData.image_path.replace(/^\/outputs\//, '').replace(/^\//, '') : null,
       end_image_path: formData.end_image_path ? formData.end_image_path.replace(/^\/outputs\//, '').replace(/^\//, '') : null,
     };
@@ -156,7 +150,6 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
     console.log('Video generation payload:', payload);
     console.log(`Seed mode: ${formData.seedMode}, using seed: ${effectiveSeed}`);
     
-    // Update lastUsedSeed and possibly increment the fixed seed
     setFormData(prev => ({
       ...prev,
       lastUsedSeed: effectiveSeed,
@@ -183,29 +176,26 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
   // Check if task requires start image
   const requiresStartImage = formData.task.includes('i2v') || formData.task.includes('flf2v');
   const requiresEndImage = formData.task.includes('flf2v');
+  
+  // Calculate CSS variable for dynamic aspect ratio
+  const aspectRatioStyle = { '--preview-aspect': `${formData.width} / ${formData.height}` };
 
   return (
     <>
       {/* Preview Area */}
       <div className="fuk-preview-area">
-        <div className="fuk-preview-container" style={{ position: 'relative' }}>
+        <div className="fuk-preview-single">
           {previewVideo ? (
-            <>
+            <div className="fuk-preview-container">
               <video
                 src={buildImageUrl(previewVideo)}
                 controls
                 loop
                 autoPlay
-                style={{
-                  maxWidth: '100%',
-                  maxHeight: '100%',
-                  borderRadius: '0.5rem',
-                  border: '1px solid #374151',
-                  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
-                }}
+                className="fuk-preview-media"
               />
               <div className="fuk-preview-info">
-                <div className="fuk-flex fuk-gap-4">
+                <div className="fuk-preview-info-row">
                   <span>{formData.width}×{formData.height}</span>
                   <span>•</span>
                   <span>{formData.video_length} frames</span>
@@ -214,8 +204,8 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
                   {result?.outputs?.mp4 && (
                     <>
                       <span>•</span>
-                      <span className="fuk-status-complete" style={{ gap: '0.25rem' }}>
-                        <CheckCircle style={{ width: '0.875rem', height: '0.875rem' }} />
+                      <span className="fuk-status-complete">
+                        <CheckCircle className="fuk-icon--sm" />
                         {formatTime(elapsedSeconds)}
                       </span>
                     </>
@@ -223,23 +213,20 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
                   {result?.seed_used && (
                     <>
                       <span>•</span>
-                      <span style={{ color: '#a855f7' }}>Seed: {result.seed_used}</span>
+                      <span className="fuk-seed-display">Seed: {result.seed_used}</span>
                     </>
                   )}
                 </div>
               </div>
-            </>
+            </div>
           ) : (
             <div 
-              className="fuk-card-dashed" 
-              style={{ 
-                width: '60%', 
-                aspectRatio: formData.width / formData.height 
-              }}
+              className="fuk-placeholder-card fuk-placeholder-card--60 fuk-placeholder-card--dynamic"
+              style={aspectRatioStyle}
             >
               <div className="fuk-placeholder">
-                <Film style={{ width: '3rem', height: '3rem', margin: '0 auto 1rem', opacity: 0.3 }} />
-                <p style={{ color: '#6b7280' }}>
+                <Film className="fuk-placeholder-icon" />
+                <p className="fuk-placeholder-text">
                   {formData.width} × {formData.height} × {formData.video_length} frames
                 </p>
               </div>
@@ -308,7 +295,7 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
                   max={1920}
                   placeholder="832"
                 />
-                <span style={{ color: '#9ca3af' }}>×</span>
+                <span className="fuk-input-separator">×</span>
                 <input
                   type="number"
                   className="fuk-input"
@@ -375,8 +362,7 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
                 
                 <input
                   type="number"
-                  className="fuk-input"
-                  style={{ width: '80px' }}
+                  className="fuk-input fuk-input--w-80"
                   value={formData.steps}
                   onChange={(e) => setFormData({...formData, stepsMode: 'custom', steps: parseInt(e.target.value)})}
                   disabled={formData.stepsMode !== 'custom'}
@@ -447,7 +433,6 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
             />
           </div>
 
-
           {/* Input Images Card */}
           <div className="fuk-card">
             <h3 className="fuk-card-title fuk-mb-3">Input Images</h3>
@@ -466,7 +451,7 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
                 </div>
                 
                 {requiresEndImage && (
-                  <div className="fuk-form-group-compact" style={{ marginTop: '1rem' }}>
+                  <div className="fuk-form-group-compact fuk-mt-4">
                     <label className="fuk-label">End Image (Required for FLF2V)</label>
                     <ImageUploader
                       images={formData.end_image_path ? [formData.end_image_path] : []}
@@ -477,9 +462,9 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
                 )}
               </>
             ) : (
-              <div style={{ padding: '2rem 1rem', textAlign: 'center' }}>
-                <Film style={{ width: '2rem', height: '2rem', margin: '0 auto 0.5rem', opacity: 0.3 }} />
-                <p style={{ fontSize: '0.75rem', color: '#6b7280' }}>
+              <div className="fuk-empty-state">
+                <Film className="fuk-empty-state-icon" />
+                <p className="fuk-empty-state-text">
                   Select I2V or FLF2V task<br />to enable image inputs
                 </p>
               </div>

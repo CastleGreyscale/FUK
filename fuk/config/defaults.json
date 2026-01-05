@@ -12,7 +12,7 @@
   "_flow_shift_note": "Controls timestep scheduling (equivalent to ModelSamplingDiscrete in ComfyUI). Lower (2.0-2.2) = more natural/photorealistic. Higher (2.5-3.0+) = more detail/sharper. Set to null to use musubi's dynamic calculation based on resolution.",
   "flow_shift": 2.1,
   
-  "blocks_to_swap": 10,
+  "blocks_to_swap": 0,
   "lora_multiplier": 1.0,
   
   "seed": null,

@@ -235,6 +235,7 @@ class DepthPreprocessor(BasePreprocessor):
         invert: bool = False,
         normalize: bool = True,
         colormap: Optional[str] = "inferno",
+        exact_output: bool = False,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -246,6 +247,7 @@ class DepthPreprocessor(BasePreprocessor):
             invert: Invert depth (far = white, near = black)
             normalize: Normalize depth to [0, 1]
             colormap: Apply colormap (None, 'inferno', 'viridis', 'magma', 'plasma')
+            exact_output: If True, write to exact output_path (for video frames)
             
         Returns:
             Dict with output_path and metadata
@@ -280,7 +282,7 @@ class DepthPreprocessor(BasePreprocessor):
             depth_uint8 = (depth * 255).astype(np.uint8)
             output_image = cv2.cvtColor(depth_uint8, cv2.COLOR_GRAY2BGR)
         
-        # Save with unique filename
+        # Save - use exact path for video frames, unique path for single images
         params = {
             'method': 'depth',
             'model': self.model_type.value,
@@ -288,11 +290,11 @@ class DepthPreprocessor(BasePreprocessor):
             'normalize': normalize,
             'colormap': colormap,
         }
-        unique_output = self._make_unique_path(output_path, params)
-        cv2.imwrite(str(unique_output), output_image)
+        final_output = self._make_unique_path(output_path, params, exact_output=exact_output)
+        cv2.imwrite(str(final_output), output_image)
         
         return {
-            "output_path": str(unique_output),
+            "output_path": str(final_output),
             "method": "depth",
             "model": self.model_type.value,
             "parameters": params,

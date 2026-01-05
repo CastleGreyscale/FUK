@@ -6,6 +6,10 @@ export { default as Footer } from './Footer';
 export { default as ProjectBar } from './ProjectBar';
 export { default as SeedControl } from './SeedControl';
 export { default as GenerationHistory } from './GenerationHistory';
+export { isVideoFile, isSequenceFile, isImageFile } from './MediaUploader';
+export { default as InlineImageInput } from './InlineImageInput';
+
+
 
 // Icons
 export * from './Icons';

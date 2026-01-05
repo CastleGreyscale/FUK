@@ -24,6 +24,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from pathlib import Path
 from typing import Optional, List, Dict, Any
+from file_browser_endpoints import setup_file_browser_routes
+from video_endpoints import setup_video_routes
 import json
 import asyncio
 import uuid
@@ -596,7 +598,7 @@ async def upload_control_image(file: UploadFile = File(...)):
         # Return relative path for client
         relative_path = f"uploads/{unique_filename}"
         
-        print(f"ÃƒÂ¢Ã…â€œÃ¢â‚¬Å“ Uploaded control image: {relative_path}")
+        print(f" Uploaded control image: {relative_path}")
         
         return {
             "path": relative_path,
@@ -605,8 +607,47 @@ async def upload_control_image(file: UploadFile = File(...)):
         }
         
     except Exception as e:
-        print(f"ÃƒÂ¢Ã…â€œÃ¢â‚¬â€ Upload failed: {e}")
+        print(f"Upload failed: {e}")
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+
+@app.post("/api/upload/media")
+async def upload_media(file: UploadFile = File(...)):
+    """
+    Upload media file (image or video)
+    """
+    try:
+        # Read file
+        contents = await file.read()
+        
+        # Create uploads directory
+        upload_dir = OUTPUT_ROOT / "uploads"
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Generate unique filename
+        import uuid
+        ext = Path(file.filename).suffix
+        unique_filename = f"{uuid.uuid4().hex[:12]}{ext}"
+        file_path = upload_dir / unique_filename
+        
+        # Save file
+        with open(file_path, "wb") as f:
+            f.write(contents)
+        
+        # Build relative path for API
+        relative_path = f"api/project/cache/uploads/{unique_filename}"
+        
+        log.success("Upload", f"Saved: {file_path}")
+        
+        return {
+            "path": relative_path,
+            "filename": unique_filename,
+            "size": len(contents),
+            "media_type": "video" if ext.lower() in ['.mp4', '.mov', '.avi', '.mkv', '.webm'] else "image"
+        }
+        
+    except Exception as e:
+        log.exception("Upload", e)
+        raise HTTPException(status_code=500, detail=str(e))
 
 # ============================================================================
 # Image Generation
@@ -849,7 +890,7 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
         
         
         print("\n" + "="*80)
-        print(f"ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ Generation Complete: {generation_id}")
+        print(f"Generation Complete: {generation_id}")
         print(f"   Output PNG: {outputs['png']}")
         print(f"Output directory: {gen_dir}")
         print(f"Files: {', '.join(outputs.keys())}")
@@ -865,7 +906,7 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
             "error": str(e),
             "failed_at": datetime.now().isoformat()
         })
-        print(f"ÃƒÂ¢Ã‚ÂÃ…â€™ Generation Failed: {e}")
+        print(f"Generation Failed: {e}")
         import traceback
         traceback.print_exc()
 
@@ -1630,7 +1671,7 @@ async def preprocess_image(request: PreprocessRequest):
         return result
         
     except Exception as e:
-        print(f"Ã¢Å“â€” Preprocessing failed: {e}")
+        print(f"Preprocessing failed: {e}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
@@ -1644,8 +1685,8 @@ async def get_preprocessor_models():
             "name": "Canny Edge Detection",
             "description": "Clean edge detection using Canny algorithm",
             "parameters": {
-                "low_threshold": {"type": "int", "default": 100, "min": 0, "max": 500},
-                "high_threshold": {"type": "int", "default": 200, "min": 0, "max": 500},
+                "low_threshold": {"type": "int", "default": 1, "min": 0, "max": 40},
+                "high_threshold": {"type": "int", "default": 20, "min": 0, "max": 40},
                 "invert": {"type": "bool", "default": False},
                 "blur_kernel": {"type": "int", "default": 3, "min": 0, "max": 15, "step": 2},
             }
@@ -1926,7 +1967,7 @@ async def get_postprocessor_models():
         }
     }
 
-    # ============================================================================
+# ============================================================================
 # PreProcessors
 # ============================================================================
 
@@ -2643,6 +2684,27 @@ async def get_export_capabilities():
         },
     }
 
+# ============================================================================
+# Video Endpoints
+# ============================================================================
+
+# File browser routes (native dialogs)
+setup_file_browser_routes(app, log)
+
+# Video processing routes
+setup_video_routes(
+    app=app,
+    preprocessor_manager=preprocessor_manager,
+    postprocessor_manager=postprocessor_manager,
+    resolve_input_path=resolve_input_path,
+    get_generation_output_dir=get_generation_output_dir,
+    get_project_relative_url=get_project_relative_url,
+    save_generation_metadata=save_generation_metadata,
+    DepthModel=DepthModel,
+    NormalsMethod=NormalsMethod,
+    SAMModel=SAMModel,
+    log=log
+)
 
 # ============================================================================
 # Main

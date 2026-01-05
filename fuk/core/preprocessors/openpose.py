@@ -49,6 +49,7 @@ class OpenPosePreprocessor(BasePreprocessor):
         detect_body: bool = True,
         detect_hand: bool = False,
         detect_face: bool = False,
+        exact_output: bool = False,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -60,6 +61,7 @@ class OpenPosePreprocessor(BasePreprocessor):
             detect_body: Detect body keypoints (always True)
             detect_hand: Detect hand keypoints (slower)
             detect_face: Detect face keypoints (slower)
+            exact_output: If True, write to exact output_path (for video frames)
             
         Returns:
             Dict with output_path and metadata
@@ -77,18 +79,18 @@ class OpenPosePreprocessor(BasePreprocessor):
             include_face=detect_face,
         )
         
-        # Save result with unique filename
+        # Save - use exact path for video frames, unique path for single images
         params = {
             'method': 'openpose',
             'detect_body': detect_body,
             'detect_hand': detect_hand,
             'detect_face': detect_face,
         }
-        unique_output = self._make_unique_path(output_path, params)
-        pose_image.save(unique_output)
+        final_output = self._make_unique_path(output_path, params, exact_output=exact_output)
+        pose_image.save(final_output)
         
         return {
-            "output_path": str(unique_output),
+            "output_path": str(final_output),
             "method": "openpose",
             "parameters": params,
         }

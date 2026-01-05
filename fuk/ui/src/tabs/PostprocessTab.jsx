@@ -1,12 +1,13 @@
 /**
  * Post-Process Tab
- * Upscaling and frame interpolation for final polish
+ * Upscaling (images & videos) and frame interpolation
  * Before/After comparison layout
+ * Supports both single images and frame-by-frame video processing
  */
 
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { Enhance, Loader2, CheckCircle, Camera, Film, AlertCircle } from '../components/Icons';
-import ImageUploader from '../components/ImageUploader';
+import MediaUploader, { isVideoFile } from '../components/MediaUploader';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { buildImageUrl } from '../utils/constants';
 import Footer from '../components/Footer';
@@ -23,6 +24,9 @@ const DEFAULT_SETTINGS = {
   interpolationMethod: 'rife',
   targetFramerate: 24,
   sourceFramerate: 16,
+  
+  // Video output mode
+  videoOutputMode: 'mp4',
 };
 
 export default function PostprocessTab({ config, activeTab, setActiveTab, project }) {
@@ -53,7 +57,7 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
   }, [project?.isProjectLoaded, project?.updateTabState, setLocalSettings]);
   
   // UI state
-  const [activeProcess, setActiveProcess] = useState('upscale'); // 'upscale' or 'interpolate'
+  const [activeProcess, setActiveProcess] = useState('upscale');
   const [sourceInput, setSourceInput] = useState(null);
   const [processing, setProcessing] = useState(false);
   const [progress, setProgress] = useState(null);
@@ -65,18 +69,19 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
   const [inputDimensions, setInputDimensions] = useState({ width: 16, height: 9 });
   const [outputDimensions, setOutputDimensions] = useState({ width: 16, height: 9 });
   
-  // Timer state to match useGeneration hook behavior
+  // Timer state
   const [startTime, setStartTime] = useState(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const mountedRef = useRef(true);
   
-  // Track mounted state
+  // Detect if input is video
+  const isVideo = useMemo(() => isVideoFile(sourceInput), [sourceInput]);
+  
   useEffect(() => {
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
   }, []);
   
-  // Timer for elapsed time - matches useGeneration hook
   useEffect(() => {
     if (!processing || !startTime) return;
     
@@ -111,22 +116,20 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
     
     const url = buildImageUrl(sourceInput);
     
-    // For images, load and get natural dimensions
-    if (activeProcess === 'upscale' || sourceInput.match(/\.(png|jpg|jpeg|webp)$/i)) {
+    if (!isVideo) {
       const img = new Image();
       img.onload = () => {
         setInputDimensions({ width: img.naturalWidth, height: img.naturalHeight });
       };
       img.src = url;
     } else {
-      // For videos, create a video element to get dimensions
       const video = document.createElement('video');
       video.onloadedmetadata = () => {
         setInputDimensions({ width: video.videoWidth, height: video.videoHeight });
       };
       video.src = url;
     }
-  }, [sourceInput, activeProcess]);
+  }, [sourceInput, isVideo]);
   
   // Update output dimensions when result changes
   useEffect(() => {
@@ -138,20 +141,21 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
     if (result.type === 'image' && result.outputSize) {
       setOutputDimensions({ width: result.outputSize.width, height: result.outputSize.height });
     } else if (result.type === 'video') {
-      // For video, aspect ratio stays the same
       setOutputDimensions(inputDimensions);
     }
   }, [result, inputDimensions]);
   
-  const handleSourceChange = (paths) => {
-    setSourceInput(paths[0] || null);
+  // Handle source input (MediaUploader passes array of media objects)
+  const handleSourceChange = (media) => {
+    const first = media[0];
+    setSourceInput(first?.path || first || null);
     setResult(null);
     setError(null);
   };
   
   const handleUpscale = async () => {
     if (!sourceInput) {
-      setError('Please select a source image');
+      setError('Please select a source image or video');
       return;
     }
     
@@ -162,15 +166,33 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
     setError(null);
     
     try {
-      const response = await fetch(`${API_URL}/postprocess/upscale`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      let endpoint, payload;
+      
+      if (isVideo) {
+        // Video upscaling - frame by frame
+        endpoint = `${API_URL}/postprocess/upscale/video`;
+        payload = {
           source_path: sourceInput,
           scale: settings.upscaleFactor,
           model: settings.upscaleMethod,
           denoise: settings.denoise,
-        }),
+          output_mode: settings.videoOutputMode,
+        };
+      } else {
+        // Image upscaling
+        endpoint = `${API_URL}/postprocess/upscale`;
+        payload = {
+          source_path: sourceInput,
+          scale: settings.upscaleFactor,
+          model: settings.upscaleMethod,
+          denoise: settings.denoise,
+        };
+      }
+      
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
       });
       
       if (!response.ok) {
@@ -181,17 +203,29 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
       const data = await response.json();
       console.log('[PostProcess] Upscale result:', data);
       
-      setResult({
-        type: 'image',
-        url: data.output_url,
-        path: data.output_path,
-        inputSize: data.input_size,
-        outputSize: data.output_size,
-        scale: data.scale,
-        method: data.method,
-      });
+      if (isVideo) {
+        setResult({
+          type: 'video',
+          url: data.output_url,
+          path: data.output_path,
+          inputSize: data.input_size,
+          outputSize: data.output_size,
+          scale: data.scale,
+          method: data.method,
+          frameCount: data.frame_count,
+        });
+      } else {
+        setResult({
+          type: 'image',
+          url: data.output_url,
+          path: data.output_path,
+          inputSize: data.input_size,
+          outputSize: data.output_size,
+          scale: data.scale,
+          method: data.method,
+        });
+      }
       
-      // Mark progress as complete
       setProgress({ phase: 'Complete', progress: 1 });
       
     } catch (err) {
@@ -244,7 +278,6 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
         method: data.method,
       });
       
-      // Mark progress as complete
       setProgress({ phase: 'Complete', progress: 1 });
       
     } catch (err) {
@@ -271,16 +304,13 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
   };
   
   const canProcess = sourceInput && !processing;
-  
-  // Calculate aspect ratio for preview containers
   const inputAspectRatio = inputDimensions.width / inputDimensions.height;
-  const outputAspectRatio = outputDimensions.width / outputDimensions.height;
+  const inputAspectStyle = { '--preview-aspect': inputAspectRatio };
   
-  // Calculate preview info
   const getInputInfo = () => {
     if (!sourceInput) return null;
     if (activeProcess === 'upscale') {
-      return `${inputDimensions.width}×${inputDimensions.height}`;
+      return `${inputDimensions.width}×${inputDimensions.height}${isVideo ? ' (video)' : ''}`;
     }
     return `${settings.sourceFramerate} fps`;
   };
@@ -290,95 +320,66 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
     if (result.type === 'image') {
       return `${result.outputSize.width}×${result.outputSize.height} (${result.scale}x)`;
     }
+    if (result.frameCount) {
+      return `${result.outputSize?.width || inputDimensions.width}×${result.outputSize?.height || inputDimensions.height} (${result.scale}x, ${result.frameCount} frames)`;
+    }
     return `${result.targetFps} fps (${result.multiplier}x frames)`;
+  };
+  
+  // Format elapsed time
+  const formatTime = (seconds) => {
+    if (seconds < 60) return `${seconds}s`;
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}m ${secs}s`;
   };
   
   return (
     <>
       {/* Preview Area - Side by Side Comparison */}
       <div className="fuk-preview-area">
-        <div className="fuk-preview-container" style={{ 
-          display: 'flex', 
-          gap: '1.5rem', 
-          alignItems: 'center', 
-          justifyContent: 'center',
-          width: '100%',
-          padding: '1.5rem',
-        }}>
+        <div className="fuk-preview-compare">
           {/* Input */}
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem', maxWidth: '45%' }}>
-            <div style={{
-              width: '100%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              paddingBottom: '0.5rem',
-            }}>
-              <h3 style={{ 
-                fontSize: '0.75rem', 
-                textTransform: 'uppercase', 
-                color: '#9ca3af', 
-                letterSpacing: '0.05em',
-                fontWeight: 600,
-              }}>
+          <div className="fuk-preview-pane">
+            <div className="fuk-preview-pane-header">
+              <h3 className="fuk-preview-pane-title">
                 Input
+                {isVideo && <Film className="fuk-icon--sm fuk-ml-2" />}
               </h3>
               {sourceInput && (
-                <span style={{ fontSize: '0.7rem', color: '#6b7280' }}>
-                  {getInputInfo()}
-                </span>
+                <span className="fuk-preview-pane-info">{getInputInfo()}</span>
               )}
             </div>
             
             {sourceInput ? (
-              <div style={{
-                width: 'auto',
-                maxHeight: '400px',
-                borderRadius: '0.5rem',
-                border: '1px solid #374151',
-                overflow: 'hidden',
-                background: '#000',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}>
-                {activeProcess === 'upscale' || sourceInput.match(/\.(png|jpg|jpeg|webp)$/i) ? (
-                  <img
-                    src={buildImageUrl(sourceInput)}
-                    alt="Input"
-                    style={{
-                      maxWidth: '100%',
-                      maxHeight: '400px',
-                      objectFit: 'contain',
-                    }}
-                  />
-                ) : (
+              <div className="fuk-media-frame">
+                {isVideo ? (
                   <video
                     src={buildImageUrl(sourceInput)}
                     controls
                     loop
-                    style={{
-                      maxWidth: '100%',
-                      maxHeight: '400px',
-                      objectFit: 'contain',
-                    }}
+                    className="fuk-preview-media--constrained"
+                  />
+                ) : (
+                  <img
+                    src={buildImageUrl(sourceInput)}
+                    alt="Input"
+                    className="fuk-preview-media--constrained"
                   />
                 )}
               </div>
             ) : (
-              <div className="fuk-card-dashed" style={{ 
-                width: '100%', 
-                aspectRatio: '16/9',
-                maxHeight: '400px',
-              }}>
+              <div 
+                className="fuk-placeholder-card fuk-placeholder-card--100 fuk-placeholder-card--16x9"
+              >
                 <div className="fuk-placeholder">
                   {activeProcess === 'upscale' ? (
-                    <Camera style={{ width: '2rem', height: '2rem', margin: '0 auto 0.5rem', opacity: 0.3 }} />
+                    <Camera className="fuk-placeholder-icon--sm" />
                   ) : (
-                    <Film style={{ width: '2rem', height: '2rem', margin: '0 auto 0.5rem', opacity: 0.3 }} />
+                    <Film className="fuk-placeholder-icon--sm" />
                   )}
-                  <p style={{ color: '#6b7280', fontSize: '0.75rem' }}>
-                    {activeProcess === 'upscale' ? 'Select image to upscale' : 'Select video to interpolate'}
+                  <p className="fuk-placeholder-text">
+                    {activeProcess === 'upscale' ? 'Select image or video to upscale' : 'Select video to interpolate'}
                   </p>
                 </div>
               </div>
@@ -386,82 +387,38 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
           </div>
           
           {/* Arrow */}
-          <div style={{ 
-            fontSize: '2.5rem', 
-            color: processing ? '#a855f7' : '#4b5563',
-            animation: processing ? 'pulse 2s infinite' : 'none',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            gap: '0.5rem',
-          }}>
+          <div className={`fuk-compare-arrow ${processing ? 'fuk-compare-arrow--active' : ''}`}>
             {processing ? (
-              <Loader2 style={{ width: '2rem', height: '2rem', animation: 'spin 1s linear infinite' }} />
+              <Loader2 className="fuk-compare-arrow-icon fuk-compare-arrow-icon--spin" />
             ) : (
               <span>→</span>
             )}
             {processing && progress && (
-              <span style={{ fontSize: '0.7rem', color: '#a855f7' }}>
-                {progress.phase}
-              </span>
+              <span className="fuk-compare-arrow-label">{progress.phase}</span>
             )}
           </div>
           
           {/* Output */}
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem', maxWidth: '45%' }}>
-            <div style={{
-              width: '100%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              paddingBottom: '0.5rem',
-            }}>
-              <h3 style={{ 
-                fontSize: '0.75rem', 
-                textTransform: 'uppercase', 
-                color: '#9ca3af', 
-                letterSpacing: '0.05em',
-                fontWeight: 600,
-              }}>
+          <div className="fuk-preview-pane">
+            <div className="fuk-preview-pane-header">
+              <h3 className="fuk-preview-pane-title">
                 {activeProcess === 'upscale' ? 'Upscaled' : 'Interpolated'}
               </h3>
               {result && (
-                <div style={{ 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  gap: '0.25rem',
-                  fontSize: '0.7rem',
-                }}>
-                  <CheckCircle style={{ width: '0.875rem', height: '0.875rem', color: '#10b981' }} />
-                  <span style={{ color: '#10b981' }}>
-                    {getOutputInfo()}
-                  </span>
+                <div className="fuk-status-complete">
+                  <CheckCircle className="fuk-icon--sm" />
+                  <span>{getOutputInfo()}</span>
                 </div>
               )}
             </div>
             
             {result ? (
-              <div style={{
-                width: 'auto',
-                maxHeight: '400px',
-                borderRadius: '0.5rem',
-                border: '2px solid #10b981',
-                overflow: 'hidden',
-                background: '#000',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                position: 'relative',
-              }}>
+              <div className="fuk-media-frame fuk-media-frame--success">
                 {result.type === 'image' ? (
                   <img
                     src={buildImageUrl(result.url)}
                     alt="Processed"
-                    style={{
-                      maxWidth: '100%',
-                      maxHeight: '400px',
-                      objectFit: 'contain',
-                    }}
+                    className="fuk-preview-media--constrained"
                   />
                 ) : (
                   <video
@@ -469,39 +426,26 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                     controls
                     autoPlay
                     loop
-                    style={{
-                      maxWidth: '100%',
-                      maxHeight: '400px',
-                      objectFit: 'contain',
-                    }}
+                    className="fuk-preview-media--constrained"
                   />
                 )}
-                
-                {/* Method badge */}
-                <div style={{
-                  position: 'absolute',
-                  bottom: '0.5rem',
-                  right: '0.5rem',
-                  padding: '0.25rem 0.5rem',
-                  background: 'rgba(0,0,0,0.7)',
-                  borderRadius: '0.25rem',
-                  fontSize: '0.65rem',
-                  color: '#9ca3af',
-                }}>
+                <span className="fuk-preview-badge fuk-preview-badge--method">
                   {result.method}
-                </div>
+                </span>
               </div>
             ) : (
-              <div className="fuk-card-dashed" style={{ 
-                width: '100%', 
-                aspectRatio: sourceInput ? inputAspectRatio : '16/9',
-                maxHeight: '400px',
-              }}>
+              <div 
+                className="fuk-placeholder-card fuk-placeholder-card--100 fuk-placeholder-card--dynamic"
+                style={sourceInput ? inputAspectStyle : undefined}
+              >
                 <div className="fuk-placeholder">
-                  <Enhance style={{ width: '2rem', height: '2rem', margin: '0 auto 0.5rem', opacity: 0.3 }} />
-                  <p style={{ color: '#6b7280', fontSize: '0.75rem' }}>
-                    {processing ? 'Processing...' : 'Result will appear here'}
+                  <Enhance className="fuk-placeholder-icon--sm" />
+                  <p className="fuk-placeholder-text">
+                    {processing ? `Processing... ${formatTime(elapsedSeconds)}` : 'Result will appear here'}
                   </p>
+                  {processing && isVideo && (
+                    <p className="fuk-placeholder-subtext">Processing video frame-by-frame</p>
+                  )}
                 </div>
               </div>
             )}
@@ -516,14 +460,8 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
           <div className="fuk-card">
             <h3 className="fuk-card-title fuk-mb-3">Process Type</h3>
             
-            <div className="fuk-radio-group" style={{ flexDirection: 'column', gap: '0.75rem' }}>
-              <label className="fuk-radio-option" style={{ 
-                padding: '0.75rem',
-                background: activeProcess === 'upscale' ? 'rgba(168, 85, 247, 0.1)' : 'transparent',
-                border: activeProcess === 'upscale' ? '1px solid #a855f7' : '1px solid #374151',
-                borderRadius: '0.5rem',
-                cursor: 'pointer',
-              }}>
+            <div className="fuk-radio-card-group">
+              <label className={`fuk-radio-card ${activeProcess === 'upscale' ? 'fuk-radio-card--active' : ''}`}>
                 <input
                   type="radio"
                   className="fuk-radio"
@@ -534,24 +472,18 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                     setError(null);
                   }}
                 />
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                  <span className="fuk-radio-label" style={{ fontSize: '0.875rem', fontWeight: 600 }}>
-                    <Camera style={{ width: '1rem', height: '1rem', display: 'inline', marginRight: '0.5rem' }} />
-                    Image Upscaling
+                <div className="fuk-radio-card-content">
+                  <span className="fuk-radio-card-title">
+                    <Camera className="fuk-icon" />
+                    Upscaling
                   </span>
-                  <span style={{ fontSize: '0.7rem', color: '#6b7280' }}>
-                    Increase resolution using AI (Real-ESRGAN)
+                  <span className="fuk-radio-card-desc">
+                    Increase resolution using AI (images & videos)
                   </span>
                 </div>
               </label>
               
-              <label className="fuk-radio-option" style={{ 
-                padding: '0.75rem',
-                background: activeProcess === 'interpolate' ? 'rgba(168, 85, 247, 0.1)' : 'transparent',
-                border: activeProcess === 'interpolate' ? '1px solid #a855f7' : '1px solid #374151',
-                borderRadius: '0.5rem',
-                cursor: 'pointer',
-              }}>
+              <label className={`fuk-radio-card ${activeProcess === 'interpolate' ? 'fuk-radio-card--active' : ''}`}>
                 <input
                   type="radio"
                   className="fuk-radio"
@@ -562,12 +494,12 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                     setError(null);
                   }}
                 />
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                  <span className="fuk-radio-label" style={{ fontSize: '0.875rem', fontWeight: 600 }}>
-                    <Film style={{ width: '1rem', height: '1rem', display: 'inline', marginRight: '0.5rem' }} />
+                <div className="fuk-radio-card-content">
+                  <span className="fuk-radio-card-title">
+                    <Film className="fuk-icon" />
                     Frame Interpolation
                   </span>
-                  <span style={{ fontSize: '0.7rem', color: '#6b7280' }}>
+                  <span className="fuk-radio-card-desc">
                     Generate intermediate frames (RIFE)
                   </span>
                 </div>
@@ -576,13 +508,13 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
             
             {/* Capability indicators */}
             {capabilities && (
-              <div style={{ marginTop: '0.75rem', padding: '0.5rem', background: '#1f2937', borderRadius: '0.375rem' }}>
-                <div style={{ fontSize: '0.65rem', color: '#6b7280', marginBottom: '0.25rem' }}>Available backends:</div>
-                <div style={{ display: 'flex', gap: '0.5rem', fontSize: '0.7rem' }}>
-                  <span style={{ color: capabilities.upscaling?.ncnn_available ? '#10b981' : '#6b7280' }}>
+              <div className="fuk-capability-box">
+                <div className="fuk-capability-label">Available backends:</div>
+                <div className="fuk-capability-list">
+                  <span className={capabilities.upscaling?.ncnn_available ? 'fuk-capability-item--active' : 'fuk-capability-item'}>
                     {capabilities.upscaling?.ncnn_available ? '✓' : '○'} ESRGAN-NCNN
                   </span>
-                  <span style={{ color: capabilities.interpolation?.ncnn_available ? '#10b981' : '#6b7280' }}>
+                  <span className={capabilities.interpolation?.ncnn_available ? 'fuk-capability-item--active' : 'fuk-capability-item'}>
                     {capabilities.interpolation?.ncnn_available ? '✓' : '○'} RIFE-NCNN
                   </span>
                 </div>
@@ -593,35 +525,55 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
           {/* Input Source Card */}
           <div className="fuk-card">
             <h3 className="fuk-card-title fuk-mb-3">
-              {activeProcess === 'upscale' ? 'Image Input' : 'Video Input'}
+              {activeProcess === 'upscale' ? 'Image/Video Input' : 'Video Input'}
             </h3>
             
-            <ImageUploader
-              images={sourceInput ? [sourceInput] : []}
-              onImagesChange={handleSourceChange}
+            <MediaUploader
+              media={sourceInput ? [{ path: sourceInput }] : []}
+              onMediaChange={handleSourceChange}
               disabled={processing}
+              accept={activeProcess === 'interpolate' ? 'videos' : 'all'}
             />
             
-            <p style={{ fontSize: '0.7rem', color: '#9ca3af', marginTop: '0.5rem' }}>
+            <p className="fuk-help-text">
               {activeProcess === 'upscale' 
-                ? 'Drag from History or upload an image to enhance'
+                ? 'Drag from History or upload an image/video to enhance'
                 : 'Drag from History or upload a video to interpolate'
               }
             </p>
             
+            {isVideo && activeProcess === 'upscale' && (
+              <div className="fuk-alert fuk-alert--info fuk-mt-3">
+                <Film className="fuk-alert-icon" />
+                <span className="fuk-alert-text">Video: Processing frame-by-frame</span>
+              </div>
+            )}
+            
             {error && (
-              <div style={{ 
-                marginTop: '0.75rem', 
-                padding: '0.5rem 0.75rem',
-                background: 'rgba(239, 68, 68, 0.1)',
-                border: '1px solid rgba(239, 68, 68, 0.3)',
-                borderRadius: '0.375rem',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-              }}>
-                <AlertCircle style={{ width: '1rem', height: '1rem', color: '#ef4444' }} />
-                <span style={{ fontSize: '0.75rem', color: '#ef4444' }}>{error}</span>
+              <div className="fuk-alert fuk-alert--error fuk-mt-3">
+                <AlertCircle className="fuk-alert-icon" />
+                <span className="fuk-alert-text">{error}</span>
+              </div>
+            )}
+            
+            {/* Video output mode for upscaling */}
+            {isVideo && activeProcess === 'upscale' && (
+              <div className="fuk-form-group-compact fuk-mt-4 fuk-pt-4 fuk-border-top">
+                <label className="fuk-label">Output Format</label>
+                <select
+                  className="fuk-select"
+                  value={settings.videoOutputMode}
+                  onChange={(e) => updateSettings({ videoOutputMode: e.target.value })}
+                  disabled={processing}
+                >
+                  <option value="mp4">MP4 Video</option>
+                  <option value="sequence">Image Sequence</option>
+                </select>
+                <p className="fuk-help-text">
+                  {settings.videoOutputMode === 'mp4' 
+                    ? 'Outputs a single upscaled video' 
+                    : 'Outputs individual frames for EXR workflow'}
+                </p>
               </div>
             )}
           </div>
@@ -660,7 +612,7 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                     </label>
                   ))}
                 </div>
-                <p style={{ fontSize: '0.7rem', color: '#9ca3af', marginTop: '0.25rem' }}>
+                <p className="fuk-help-text--inline">
                   {settings.upscaleFactor}x scale = {settings.upscaleFactor * settings.upscaleFactor}x more pixels
                 </p>
               </div>
@@ -671,8 +623,7 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                   <div className="fuk-input-inline">
                     <input
                       type="range"
-                      className="fuk-range"
-                      style={{ flex: 2 }}
+                      className="fuk-range fuk-input--flex-2"
                       value={settings.denoise}
                       onChange={(e) => updateSettings({ denoise: parseFloat(e.target.value) })}
                       min={0}
@@ -682,8 +633,7 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                     />
                     <input
                       type="number"
-                      className="fuk-input"
-                      style={{ width: '80px' }}
+                      className="fuk-input fuk-input--w-80"
                       value={settings.denoise}
                       onChange={(e) => updateSettings({ denoise: parseFloat(e.target.value) })}
                       step={0.05}
@@ -692,7 +642,7 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                       disabled={processing}
                     />
                   </div>
-                  <p style={{ fontSize: '0.7rem', color: '#9ca3af', marginTop: '0.25rem' }}>
+                  <p className="fuk-help-text--inline">
                     Higher = more noise reduction (may soften details)
                   </p>
                 </div>
@@ -746,18 +696,11 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                 </select>
               </div>
               
-              <div style={{ 
-                marginTop: '0.75rem',
-                padding: '0.5rem 0.75rem',
-                background: '#1f2937',
-                borderRadius: '0.375rem',
-              }}>
-                <div style={{ fontSize: '0.75rem', color: '#d1d5db' }}>
-                  Frame multiplier: <strong style={{ color: '#a855f7' }}>
-                    {Math.round(settings.targetFramerate / settings.sourceFramerate)}x
-                  </strong>
+              <div className="fuk-stats-box">
+                <div className="fuk-stats-primary">
+                  Frame multiplier: <strong>{Math.round(settings.targetFramerate / settings.sourceFramerate)}x</strong>
                 </div>
-                <div style={{ fontSize: '0.65rem', color: '#6b7280', marginTop: '0.25rem' }}>
+                <div className="fuk-stats-secondary">
                   {settings.sourceFramerate} fps → {settings.targetFramerate} fps
                 </div>
               </div>
@@ -776,8 +719,8 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
         onGenerate={handleProcess}
         onCancel={handleCancel}
         canGenerate={canProcess}
-        generateLabel={activeProcess === 'upscale' ? 'Upscale' : 'Interpolate'}
-        generatingLabel={activeProcess === 'upscale' ? 'Upscaling...' : 'Interpolating...'}
+        generateLabel={activeProcess === 'upscale' ? (isVideo ? 'Upscale Video' : 'Upscale') : 'Interpolate'}
+        generatingLabel={activeProcess === 'upscale' ? (isVideo ? 'Upscaling Video...' : 'Upscaling...') : 'Interpolating...'}
       />
     </>
   );

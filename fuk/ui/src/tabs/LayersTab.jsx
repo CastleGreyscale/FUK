@@ -2,15 +2,17 @@
  * Layers Tab
  * Generate and manage AOV layers (Arbitrary Output Variables)
  * Layers: Depth, Normals, Cryptomatte
+ * Supports both images and frame-by-frame video processing
  */
 
-import { useState, useMemo, useCallback } from 'react';
-import { Loader2, CheckCircle, Layers, AlertCircle } from '../components/Icons';
-import ImageUploader from '../components/ImageUploader';
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
+import { Loader2, CheckCircle, Layers, AlertCircle, Film } from '../components/Icons';
+import MediaUploader, { isVideoFile } from '../components/MediaUploader';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { buildImageUrl } from '../utils/constants';
 import Footer from '../components/Footer';
 
+const API_URL = '/api';
 
 const DEFAULT_SETTINGS = {
   // Active layers to generate
@@ -27,7 +29,7 @@ const DEFAULT_SETTINGS = {
   depthColormap: 'inferno',
   
   // Normals settings
-  normalsMethod: 'from_depth',  // 'from_depth' or 'dsine'
+  normalsMethod: 'from_depth',
   normalsDepthModel: 'depth_anything_v2',
   normalsSpace: 'tangent',
   normalsFlipY: false,
@@ -37,6 +39,9 @@ const DEFAULT_SETTINGS = {
   cryptoModel: 'sam2_hiera_large',
   cryptoMaxObjects: 50,
   cryptoMinArea: 500,
+  
+  // Video output mode
+  videoOutputMode: 'mp4',
 };
 
 export default function LayersTab({ config, activeTab, setActiveTab, project }) {
@@ -67,8 +72,25 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
   const [errors, setErrors] = useState({});
   const [elapsedTime, setElapsedTime] = useState(0);
   
-  const handleSourceChange = (paths) => {
-    setSourceInput(paths[0] || null);
+  // Timer ref
+  const timerRef = useRef(null);
+  const mountedRef = useRef(true);
+  
+  // Detect if input is video
+  const isVideo = useMemo(() => isVideoFile(sourceInput), [sourceInput]);
+  
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, []);
+  
+  // Handle source input (MediaUploader passes array of media objects)
+  const handleSourceChange = (media) => {
+    const first = media[0];
+    setSourceInput(first?.path || first || null);
     setGeneratedLayers({});
     setErrors({});
   };
@@ -84,7 +106,7 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
   
   const handleGenerate = async () => {
     if (!sourceInput) {
-      alert('Please select a source image');
+      alert('Please select a source image or video');
       return;
     }
     
@@ -94,36 +116,66 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
     setElapsedTime(0);
     
     const startTime = Date.now();
-    const timer = setInterval(() => {
-      setElapsedTime(Math.floor((Date.now() - startTime) / 1000));
+    timerRef.current = setInterval(() => {
+      if (mountedRef.current) {
+        setElapsedTime(Math.floor((Date.now() - startTime) / 1000));
+      }
     }, 1000);
     
     try {
-      const response = await fetch('/api/layers/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          image_path: sourceInput,
+      let endpoint, payload;
+      
+      if (isVideo) {
+        // Video layers - frame by frame
+        endpoint = `${API_URL}/layers/video/generate`;
+        payload = {
+          video_path: sourceInput,
+          output_mode: settings.videoOutputMode,
           layers: settings.layers,
           
-          // Depth settings
           depth_model: settings.depthModel,
           depth_invert: settings.depthInvert,
           depth_normalize: settings.depthNormalize,
           depth_colormap: settings.depthColormap,
           
-          // Normals settings
           normals_method: settings.normalsMethod,
           normals_depth_model: settings.normalsDepthModel,
           normals_space: settings.normalsSpace,
           normals_flip_y: settings.normalsFlipY,
           normals_intensity: settings.normalsIntensity,
           
-          // Crypto settings
           crypto_model: settings.cryptoModel,
           crypto_max_objects: settings.cryptoMaxObjects,
           crypto_min_area: settings.cryptoMinArea,
-        }),
+        };
+      } else {
+        // Image layers
+        endpoint = `${API_URL}/layers/generate`;
+        payload = {
+          image_path: sourceInput,
+          layers: settings.layers,
+          
+          depth_model: settings.depthModel,
+          depth_invert: settings.depthInvert,
+          depth_normalize: settings.depthNormalize,
+          depth_colormap: settings.depthColormap,
+          
+          normals_method: settings.normalsMethod,
+          normals_depth_model: settings.normalsDepthModel,
+          normals_space: settings.normalsSpace,
+          normals_flip_y: settings.normalsFlipY,
+          normals_intensity: settings.normalsIntensity,
+          
+          crypto_model: settings.cryptoModel,
+          crypto_max_objects: settings.cryptoMaxObjects,
+          crypto_min_area: settings.cryptoMinArea,
+        };
+      }
+      
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
       });
       
       if (!response.ok) {
@@ -133,24 +185,26 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
       
       const result = await response.json();
       
-      // Transform layers result into our display format
       const layers = {};
       if (result.layers) {
         Object.entries(result.layers).forEach(([name, data]) => {
           layers[name] = {
             url: data.url,
             name: name.charAt(0).toUpperCase() + name.slice(1),
-            info: data.model || data.method || (data.num_objects ? `${data.num_objects} objects` : ''),
+            info: isVideo 
+              ? `${data.frame_count || result.frame_count || 0} frames`
+              : (data.model || data.method || (data.num_objects ? `${data.num_objects} objects` : '')),
+            isVideo,
           };
         });
       }
       
-      // Add source/beauty as first layer
       if (result.source) {
         layers.beauty = {
           url: result.source,
           name: 'Beauty (Source)',
           info: 'Original',
+          isVideo,
         };
       }
       
@@ -161,130 +215,101 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
       console.error('Layer generation failed:', err);
       setErrors({ _general: err.message });
     } finally {
-      clearInterval(timer);
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
       setProcessing(false);
     }
   };
   
   const handleCancel = () => {
-    // TODO: Implement actual cancel via AbortController
     setProcessing(false);
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
   };
   
-  // Count enabled layers
   const enabledLayersCount = Object.values(settings.layers).filter(v => v).length;
-  
-  // Check if we have any errors
   const hasErrors = Object.keys(errors).length > 0;
+  
+  // Format elapsed time
+  const formatTime = (seconds) => {
+    if (seconds < 60) return `${seconds}s`;
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}m ${secs}s`;
+  };
   
   return (
     <>
       {/* Preview Area - Grid Layout for Layers */}
       <div className="fuk-preview-area">
-        <div className="fuk-preview-container" style={{ width: '100%', height: '100%', padding: '1rem' }}>
+        <div className="fuk-preview-container fuk-preview-container--padded">
           {Object.keys(generatedLayers).length > 0 ? (
-            <div style={{ 
-              display: 'grid', 
-              gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-              gap: '1rem',
-              width: '100%',
-              height: '100%',
-              alignContent: 'start',
-            }}>
+            <div className="fuk-preview-grid">
               {Object.entries(generatedLayers).map(([layerName, layerData]) => (
-                <div 
-                  key={layerName}
-                  style={{
-                    background: 'rgba(31, 41, 55, 0.5)',
-                    borderRadius: '0.5rem',
-                    border: '1px solid #374151',
-                    overflow: 'hidden',
-                  }}
-                >
-                  <div style={{ 
-                    padding: '0.5rem 0.75rem', 
-                    borderBottom: '1px solid #374151',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                  }}>
+                <div key={layerName} className="fuk-layer-card">
+                  <div className="fuk-layer-card-header">
                     <div>
-                      <span style={{ 
-                        fontSize: '0.75rem', 
-                        fontWeight: 600, 
-                        textTransform: 'uppercase',
-                        color: '#c084fc',
-                        letterSpacing: '0.05em',
-                      }}>
+                      <span className="fuk-layer-card-title">
                         {layerData.name || layerName}
+                        {layerData.isVideo && <Film className="fuk-icon--sm fuk-ml-2" />}
                       </span>
                       {layerData.info && (
-                        <span style={{ 
-                          fontSize: '0.65rem', 
-                          color: '#6b7280',
-                          marginLeft: '0.5rem',
-                        }}>
-                          {layerData.info}
-                        </span>
+                        <span className="fuk-layer-card-info">{layerData.info}</span>
                       )}
                     </div>
-                    <CheckCircle style={{ width: '1rem', height: '1rem', color: '#10b981' }} />
+                    <CheckCircle className="fuk-icon--md fuk-icon--success" />
                   </div>
-                  <div style={{overflow: 'hidden' }}>
-                    <img
-                      src={buildImageUrl(layerData.url)}
-                      alt={layerName}
-                      style={{
-                        width: '100%',
-                        height: '100%',
-                        objectFit: 'contain',
-                      }}
-                    />
+                  <div className="fuk-layer-card-body">
+                    {layerData.isVideo ? (
+                      <video
+                        src={buildImageUrl(layerData.url)}
+                        controls
+                        className="fuk-layer-card-media"
+                      />
+                    ) : (
+                      <img
+                        src={buildImageUrl(layerData.url)}
+                        alt={layerName}
+                        className="fuk-layer-card-media"
+                      />
+                    )}
                   </div>
                 </div>
               ))}
               
               {/* Show errors if any */}
               {hasErrors && (
-                <div style={{
-                  background: 'rgba(239, 68, 68, 0.1)',
-                  borderRadius: '0.5rem',
-                  border: '1px solid rgba(239, 68, 68, 0.3)',
-                  padding: '1rem',
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                    <AlertCircle style={{ width: '1rem', height: '1rem', color: '#ef4444' }} />
-                    <span style={{ color: '#ef4444', fontWeight: 600, fontSize: '0.75rem' }}>
-                      Some layers failed
-                    </span>
+                <div className="fuk-alert fuk-alert--error fuk-alert--block">
+                  <div className="fuk-alert-header">
+                    <AlertCircle className="fuk-alert-icon" />
+                    <span className="fuk-alert-title">Some layers failed</span>
                   </div>
                   {Object.entries(errors).map(([layer, error]) => (
-                    <p key={layer} style={{ fontSize: '0.7rem', color: '#f87171', margin: '0.25rem 0' }}>
-                      {layer}: {error}
+                    <p key={layer} className="fuk-alert-detail">
+                      {layer}: {typeof error === 'string' ? error : JSON.stringify(error)}
                     </p>
                   ))}
                 </div>
               )}
             </div>
           ) : (
-            <div className="fuk-card-dashed" style={{ width: '60%', aspectRatio: '16/9' }}>
+            <div className="fuk-placeholder-card fuk-placeholder-card--full">
               <div className="fuk-placeholder">
-                {processing ? (
-                  <>
-                    <Loader2 style={{ width: '3rem', height: '3rem', margin: '0 auto 1rem', opacity: 0.5 }} className="fuk-spin" />
-                    <p style={{ color: '#c084fc' }}>Generating {enabledLayersCount} layer{enabledLayersCount !== 1 ? 's' : ''}...</p>
-                    <p style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.5rem' }}>
-                      {elapsedTime}s elapsed
-                    </p>
-                  </>
-                ) : (
-                  <>
-                    <Layers style={{ width: '3rem', height: '3rem', margin: '0 auto 1rem', opacity: 0.3 }} />
-                    <p style={{ color: '#6b7280' }}>Select layers and generate</p>
-                    <p style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.5rem' }}>
-                      {enabledLayersCount} layer{enabledLayersCount !== 1 ? 's' : ''} selected
-                    </p>
-                  </>
+                <Layers className="fuk-placeholder-icon" />
+                <p className="fuk-placeholder-text">
+                  {processing 
+                    ? `Generating layers... ${formatTime(elapsedTime)}`
+                    : 'Select source and layers, then click Generate'
+                  }
+                </p>
+                {processing && isVideo && (
+                  <p className="fuk-placeholder-subtext">
+                    Processing video frame-by-frame
+                  </p>
                 )}
               </div>
             </div>
@@ -299,23 +324,52 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
           <div className="fuk-card">
             <h3 className="fuk-card-title fuk-mb-3">Source Input</h3>
             
-            <ImageUploader
-              images={sourceInput ? [sourceInput] : []}
-              onImagesChange={handleSourceChange}
+            <MediaUploader
+              media={sourceInput ? [{ path: sourceInput }] : []}
+              onMediaChange={handleSourceChange}
               disabled={processing}
+              accept="all"
             />
             
-            <p style={{ fontSize: '0.7rem', color: '#9ca3af', marginTop: '0.5rem' }}>
-              Upload image to generate AOV layers from
+            <p className="fuk-help-text">
+              Drag from History or upload an image/video
             </p>
+            
+            {isVideo && (
+              <div className="fuk-alert fuk-alert--info fuk-mt-3">
+                <Film className="fuk-alert-icon" />
+                <span className="fuk-alert-text">Video: Processing frame-by-frame</span>
+              </div>
+            )}
+            
+            {/* Video output mode */}
+            {isVideo && (
+              <div className="fuk-form-group-compact fuk-mt-4 fuk-pt-4 fuk-border-top">
+                <label className="fuk-label">Output Format</label>
+                <select
+                  className="fuk-select"
+                  value={settings.videoOutputMode}
+                  onChange={(e) => updateSettings({ videoOutputMode: e.target.value })}
+                  disabled={processing}
+                >
+                  <option value="mp4">MP4 Video (per layer)</option>
+                  <option value="sequence">Image Sequences</option>
+                </select>
+                <p className="fuk-help-text">
+                  {settings.videoOutputMode === 'mp4' 
+                    ? 'Each layer as separate video' 
+                    : 'Frame sequences for EXR workflow'}
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Layer Selection Card */}
           <div className="fuk-card">
             <h3 className="fuk-card-title fuk-mb-3">Active Layers</h3>
             
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              <label className="fuk-checkbox-group">
+            <div className="fuk-layer-toggle">
+              <label className="fuk-layer-toggle-item">
                 <input
                   type="checkbox"
                   className="fuk-checkbox"
@@ -323,15 +377,13 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
                   onChange={(e) => updateLayer('depth', e.target.checked)}
                   disabled={processing}
                 />
-                <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  <span className="fuk-label" style={{ marginBottom: 0 }}>Depth (Z-Depth)</span>
-                  <span style={{ fontSize: '0.7rem', color: '#6b7280' }}>
-                    Distance from camera for DOF/fog
-                  </span>
+                <div className="fuk-layer-toggle-content">
+                  <span className="fuk-layer-toggle-name">Depth (Z)</span>
+                  <span className="fuk-layer-toggle-desc">Distance from camera</span>
                 </div>
               </label>
               
-              <label className="fuk-checkbox-group">
+              <label className="fuk-layer-toggle-item">
                 <input
                   type="checkbox"
                   className="fuk-checkbox"
@@ -339,15 +391,13 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
                   onChange={(e) => updateLayer('normals', e.target.checked)}
                   disabled={processing}
                 />
-                <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  <span className="fuk-label" style={{ marginBottom: 0 }}>Normals</span>
-                  <span style={{ fontSize: '0.7rem', color: '#6b7280' }}>
-                    Surface orientation for relighting
-                  </span>
+                <div className="fuk-layer-toggle-content">
+                  <span className="fuk-layer-toggle-name">Normals (N)</span>
+                  <span className="fuk-layer-toggle-desc">Surface orientation</span>
                 </div>
               </label>
               
-              <label className="fuk-checkbox-group">
+              <label className="fuk-layer-toggle-item">
                 <input
                   type="checkbox"
                   className="fuk-checkbox"
@@ -355,25 +405,17 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
                   onChange={(e) => updateLayer('crypto', e.target.checked)}
                   disabled={processing}
                 />
-                <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  <span className="fuk-label" style={{ marginBottom: 0 }}>Cryptomatte</span>
-                  <span style={{ fontSize: '0.7rem', color: '#6b7280' }}>
-                    Per-object ID masks via SAM2
-                  </span>
+                <div className="fuk-layer-toggle-content">
+                  <span className="fuk-layer-toggle-name">Cryptomatte</span>
+                  <span className="fuk-layer-toggle-desc">Per-object ID masks</span>
                 </div>
               </label>
             </div>
             
-            <div style={{ 
-              marginTop: '1rem', 
-              padding: '0.75rem', 
-              background: 'rgba(168, 85, 247, 0.1)', 
-              borderRadius: '0.375rem',
-              fontSize: '0.7rem',
-              color: '#c084fc',
-            }}>
-              ℹ️ AOVs export to multi-layer EXR for compositing in Nuke/Fusion
-            </div>
+            <p className="fuk-help-text fuk-mt-3">
+              {enabledLayersCount} layer{enabledLayersCount !== 1 ? 's' : ''} selected
+              {isVideo && ` (× video frames)`}
+            </p>
           </div>
 
           {/* Depth Settings */}
@@ -389,8 +431,8 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
                   onChange={(e) => updateSettings({ depthModel: e.target.value })}
                   disabled={processing}
                 >
-                  <option value="depth_anything_v2">Depth Anything V2 (Recommended)</option>
-                  <option value="depth_anything_v3">Depth Anything V3 (Latest)</option>
+                  <option value="depth_anything_v2">Depth Anything V2 (SOTA)</option>
+                  <option value="depth_anything_v3">Depth Anything V3</option>
                   <option value="midas_large">MiDaS Large</option>
                   <option value="midas_small">MiDaS Small (Fast)</option>
                   <option value="zoedepth">ZoeDepth (Metric)</option>
@@ -423,7 +465,7 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
                     onChange={(e) => updateSettings({ depthNormalize: e.target.checked })}
                     disabled={processing}
                   />
-                  <span className="fuk-label" style={{ marginBottom: 0 }}>Normalize to 0-1 range</span>
+                  <span className="fuk-checkbox-label">Normalize to 0-1 range</span>
                 </label>
               </div>
               
@@ -436,7 +478,7 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
                     onChange={(e) => updateSettings({ depthInvert: e.target.checked })}
                     disabled={processing}
                   />
-                  <span className="fuk-label" style={{ marginBottom: 0 }}>Invert (near = black)</span>
+                  <span className="fuk-checkbox-label">Invert (near = black)</span>
                 </label>
               </div>
             </div>
@@ -478,9 +520,7 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
                   </div>
                   
                   <div className="fuk-form-group-compact">
-                    <label className="fuk-label">
-                      Intensity: {settings.normalsIntensity.toFixed(1)}
-                    </label>
+                    <label className="fuk-label">Intensity: {settings.normalsIntensity.toFixed(1)}</label>
                     <input
                       type="range"
                       className="fuk-slider"
@@ -491,7 +531,7 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
                       onChange={(e) => updateSettings({ normalsIntensity: parseFloat(e.target.value) })}
                       disabled={processing}
                     />
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.65rem', color: '#6b7280' }}>
+                    <div className="fuk-range-labels">
                       <span>Subtle</span>
                       <span>Strong</span>
                     </div>
@@ -522,13 +562,11 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
                     onChange={(e) => updateSettings({ normalsFlipY: e.target.checked })}
                     disabled={processing}
                   />
-                  <span className="fuk-label" style={{ marginBottom: 0 }}>Flip Y (OpenGL → DirectX)</span>
+                  <span className="fuk-checkbox-label">Flip Y (OpenGL → DirectX)</span>
                 </label>
               </div>
               
-              <p style={{ fontSize: '0.7rem', color: '#9ca3af', marginTop: '0.5rem' }}>
-                Normals encoded as RGB (XYZ → RGB)
-              </p>
+              <p className="fuk-help-text">Normals encoded as RGB (XYZ → RGB)</p>
             </div>
           )}
 
@@ -553,9 +591,7 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
               </div>
               
               <div className="fuk-form-group-compact">
-                <label className="fuk-label">
-                  Max Objects: {settings.cryptoMaxObjects}
-                </label>
+                <label className="fuk-label">Max Objects: {settings.cryptoMaxObjects}</label>
                 <input
                   type="range"
                   className="fuk-slider"
@@ -566,16 +602,14 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
                   onChange={(e) => updateSettings({ cryptoMaxObjects: parseInt(e.target.value) })}
                   disabled={processing}
                 />
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.65rem', color: '#6b7280' }}>
+                <div className="fuk-range-labels">
                   <span>10</span>
                   <span>100</span>
                 </div>
               </div>
               
               <div className="fuk-form-group-compact">
-                <label className="fuk-label">
-                  Min Area: {settings.cryptoMinArea}px
-                </label>
+                <label className="fuk-label">Min Area: {settings.cryptoMinArea}px</label>
                 <input
                   type="range"
                   className="fuk-slider"
@@ -586,15 +620,13 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
                   onChange={(e) => updateSettings({ cryptoMinArea: parseInt(e.target.value) })}
                   disabled={processing}
                 />
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.65rem', color: '#6b7280' }}>
+                <div className="fuk-range-labels">
                   <span>Small</span>
                   <span>Large only</span>
                 </div>
               </div>
               
-              <p style={{ fontSize: '0.7rem', color: '#9ca3af', marginTop: '0.5rem' }}>
-                Creates per-object mattes using Segment Anything 2
-              </p>
+              <p className="fuk-help-text">Creates per-object mattes using Segment Anything 2</p>
             </div>
           )}
         </div>
@@ -610,8 +642,8 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
         onGenerate={handleGenerate}
         onCancel={handleCancel}
         canGenerate={!!sourceInput && enabledLayersCount > 0}
-        generateLabel="Generate Layers"
-        generatingLabel="Generating..."
+        generateLabel={isVideo ? "Generate Video Layers" : "Generate Layers"}
+        generatingLabel={isVideo ? "Generating Video Layers..." : "Generating..."}
       />
     </>
   );

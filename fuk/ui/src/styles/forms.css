@@ -1,0 +1,305 @@
+/*
+ * FUK Forms - Form Control Styles
+ * Consolidated form inputs, buttons, and control utilities
+ */
+
+/* ============================================================================
+ * INPUT WIDTH UTILITIES
+ * ========================================================================== */
+
+.fuk-input--w-80 {
+  width: 80px;
+  flex: none;
+}
+
+.fuk-input--w-100 {
+  width: 100px;
+  flex: none;
+}
+
+.fuk-input--flex-1 {
+  flex: 1;
+}
+
+.fuk-input--flex-2 {
+  flex: 2;
+}
+
+/* ============================================================================
+ * INPUT SUFFIX (dimension display, etc)
+ * ========================================================================== */
+
+.fuk-input-suffix {
+  color: #9ca3af;
+  font-size: 0.875rem;
+  min-width: 100px;
+  white-space: nowrap;
+}
+
+/* ============================================================================
+ * CHECKBOX LABEL (standalone text next to checkbox)
+ * ========================================================================== */
+
+.fuk-checkbox-label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #d1d5db;
+}
+
+/* ============================================================================
+ * CARD TITLE VARIANTS
+ * ========================================================================== */
+
+.fuk-card-title--highlight {
+  color: #c084fc;
+}
+
+/* ============================================================================
+ * EMPTY STATE (for disabled/unavailable features)
+ * ========================================================================== */
+
+.fuk-empty-state {
+  padding: 2rem 1rem;
+  text-align: center;
+}
+
+.fuk-empty-state-icon {
+  width: 2rem;
+  height: 2rem;
+  margin: 0 auto 0.5rem;
+  opacity: 0.3;
+}
+
+.fuk-empty-state-text {
+  font-size: 0.75rem;
+  color: #6b7280;
+}
+
+/* ============================================================================
+ * PREPROCESS PREVIEW (for showing last preprocessed image)
+ * ========================================================================== */
+
+.fuk-preprocess-preview {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+}
+
+.fuk-preprocess-preview-thumb {
+  flex: 0 0 120px;
+}
+
+.fuk-preprocess-preview-image {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 0.375rem;
+  border: 1px solid #a855f7;
+}
+
+.fuk-preprocess-preview-info {
+  flex: 1;
+}
+
+.fuk-preprocess-preview-method {
+  font-size: 0.75rem;
+  color: #c084fc;
+  margin-bottom: 0.5rem;
+}
+
+/* ============================================================================
+ * RANGE SLIDER STYLING
+ * ========================================================================== */
+
+.fuk-slider,
+.fuk-range {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
+  width: 100%;
+}
+
+.fuk-slider::-webkit-slider-track,
+.fuk-range::-webkit-slider-track {
+  background-color: #374151;
+  border-radius: 9999px;
+  height: 0.375rem;
+}
+
+.fuk-slider::-webkit-slider-thumb,
+.fuk-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  background-color: #a855f7;
+  border-radius: 50%;
+  height: 1rem;
+  width: 1rem;
+  margin-top: -0.3125rem;
+  border: 2px solid #1f2937;
+}
+
+.fuk-slider::-moz-range-track,
+.fuk-range::-moz-range-track {
+  background-color: #374151;
+  border-radius: 9999px;
+  height: 0.375rem;
+}
+
+.fuk-slider::-moz-range-thumb,
+.fuk-range::-moz-range-thumb {
+  background-color: #a855f7;
+  border-radius: 50%;
+  height: 1rem;
+  width: 1rem;
+  border: 2px solid #1f2937;
+}
+
+.fuk-slider:focus::-webkit-slider-thumb,
+.fuk-range:focus::-webkit-slider-thumb {
+  box-shadow: 0 0 0 2px rgba(168, 85, 247, 0.2);
+}
+
+/* ============================================================================
+ * COMPACT FORM ROW (for EXR settings etc)
+ * ========================================================================== */
+
+.compact-form-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.compact-form-row > label {
+  min-width: 70px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #d1d5db;
+  margin-bottom: 0;
+}
+
+.compact-form-row > select,
+.compact-form-row > input {
+  flex: 1;
+}
+
+.compact-form-row .fuk-select--compact {
+  font-size: 0.75rem;
+  padding: 0.375rem;
+}
+
+/* ============================================================================
+ * LAYER INPUTS GRID (Export tab)
+ * ========================================================================== */
+
+.layer-inputs-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.75rem;
+}
+
+@media (max-width: 1400px) {
+  .layer-inputs-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ============================================================================
+ * SAVE LOCATION ROW (Export tab)
+ * ========================================================================== */
+
+.save-location-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.save-location-row input {
+  flex: 1;
+}
+
+.save-location-row button {
+  flex-shrink: 0;
+}
+
+/* ============================================================================
+ * EXPORT FILENAME INPUT
+ * ========================================================================== */
+
+.export-filename-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.export-filename-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.export-filename-row input {
+  flex: 1;
+}
+
+.export-filename-row .extension {
+  font-size: 0.75rem;
+  color: #6b7280;
+  padding: 0.5rem;
+  background: rgba(31, 41, 55, 0.5);
+  border-radius: 0.25rem;
+}
+
+/* ============================================================================
+ * EXPORT FORMAT CHECKBOXES
+ * ========================================================================== */
+
+.fuk-export-format-group {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.fuk-export-format-item {
+  flex: 1;
+  min-width: 140px;
+}
+
+.fuk-export-format-label {
+  margin-bottom: 0;
+  font-size: 0.75rem;
+}
+
+.fuk-export-format-desc {
+  font-size: 0.6rem;
+  color: #6b7280;
+  display: block;
+}
+
+/* ============================================================================
+ * INPUT READONLY STYLING
+ * ========================================================================== */
+
+.fuk-input--readonly {
+  color: #6b7280;
+  font-style: italic;
+}
+
+.fuk-input--readonly-filled {
+  color: #d1d5db;
+  font-style: normal;
+}
+
+/* ============================================================================
+ * FORM SECTION SPACING
+ * ========================================================================== */
+
+.fuk-form-section {
+  margin-top: 0.75rem;
+}
+
+.fuk-form-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
