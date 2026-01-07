@@ -220,7 +220,7 @@ async def browse_folder():
             return {"path": None, "cancelled": True}
             
     except Exception as e:
-        print(f"[PROJECT] ✗ Folder browser error: {e}", flush=True)
+        print(f"[PROJECT] âœ— Folder browser error: {e}", flush=True)
         return {"error": str(e), "cancelled": True}
 
 
@@ -274,7 +274,7 @@ async def browse_save_location(data: dict = Body(...)):
             return {"path": None, "cancelled": True}
             
     except Exception as e:
-        print(f"[PROJECT] ✗ Save dialog error: {e}", flush=True)
+        print(f"[PROJECT] âœ— Save dialog error: {e}", flush=True)
         return {"error": str(e), "cancelled": True}
 
 
@@ -542,15 +542,38 @@ async def list_generations(
                 has_more = True
                 continue
         
-        # Determine type based on directory name prefix
-        if gen_name.startswith("layers"):
+        # Determine type and subtype based on directory name prefix
+        gen_subtype = None
+        
+        if gen_name.startswith("import"):
+            gen_type = "import"
+        elif gen_name.startswith("layers"):
             gen_type = "layers"
-        elif gen_name.startswith("preprocess"):
+        elif gen_name.startswith("preprocess_video_"):
+            # Video preprocess: preprocess_video_canny_001, preprocess_video_depth_002
             gen_type = "preprocess"
+            gen_subtype = "video"
+            # Extract method from name (e.g., "canny" from "preprocess_video_canny_001")
+            parts = gen_name.split("_")
+            if len(parts) >= 3:
+                method = parts[2]  # preprocess_video_METHOD_###
+                if method in ["canny", "depth", "normals", "openpose", "crypto"]:
+                    gen_subtype = method
+        elif gen_name.startswith("preprocess_"):
+            # Image preprocess: preprocess_canny_001
+            gen_type = "preprocess"
+            parts = gen_name.split("_")
+            if len(parts) >= 2:
+                method = parts[1]  # preprocess_METHOD_###
+                if method in ["canny", "depth", "normals", "openpose", "crypto"]:
+                    gen_subtype = method
         elif gen_name.startswith("video") or gen_name.endswith("_video"):
             gen_type = "video"
         elif gen_name.startswith("upscale"):
             gen_type = "upscale"
+            # Check for video upscale
+            if "_video_" in gen_name or gen_name.startswith("upscale_video"):
+                gen_subtype = "video"
         elif gen_name.startswith("interpolate"):
             gen_type = "interpolate"
         elif gen_name.startswith("export"):
@@ -577,6 +600,10 @@ async def list_generations(
         # Find the main output file based on type
         preview_path = None
         output_path = None
+        is_sequence = False
+        frame_count = 0
+        api_path = None  # Set directly for imports
+        preview_api = None
         
         if gen_type == "video":
             for ext in [".mp4", ".webm"]:
@@ -591,15 +618,75 @@ async def list_generations(
                 output_path = video_files[0]
                 preview_path = output_path
         elif gen_type == "upscale":
-            upscaled_files = list(gen_dir.glob("upscaled*.png")) + list(gen_dir.glob("upscaled*.jpg"))
-            if upscaled_files:
-                output_path = upscaled_files[0]
+            # Check for video upscale first
+            video_files = list(gen_dir.glob("upscaled*.mp4")) + list(gen_dir.glob("*.mp4"))
+            if video_files:
+                output_path = video_files[0]
                 preview_path = output_path
+            else:
+                upscaled_files = list(gen_dir.glob("upscaled*.png")) + list(gen_dir.glob("upscaled*.jpg"))
+                if upscaled_files:
+                    output_path = upscaled_files[0]
+                    preview_path = output_path
         elif gen_type == "preprocess":
-            processed_files = list(gen_dir.glob("processed*.png"))
-            if processed_files:
-                output_path = processed_files[0]
+            # First check for video output (mp4)
+            video_files = list(gen_dir.glob("*.mp4"))
+            if video_files:
+                output_path = video_files[0]
                 preview_path = output_path
+            else:
+                # Check for sequence output (folder with frame_*.png)
+                frame_files = sorted(gen_dir.glob("frame_*.png"))
+                if len(frame_files) > 1:
+                    is_sequence = True
+                    frame_count = len(frame_files)
+                    output_path = gen_dir  # Directory itself is the output
+                    preview_path = frame_files[0]  # First frame as preview
+                else:
+                    # Look for method-specific outputs
+                    method_files = []
+                    for method in ["canny", "depth", "normals", "openpose", "crypto", "processed"]:
+                        method_files.extend(gen_dir.glob(f"{method}*.png"))
+                        method_files.extend(gen_dir.glob(f"{method}*.jpg"))
+                    if method_files:
+                        output_path = method_files[0]
+                        preview_path = output_path
+                    else:
+                        # Fallback to any png
+                        png_files = list(gen_dir.glob("*.png"))
+                        if png_files:
+                            output_path = png_files[0]
+                            preview_path = output_path
+        elif gen_type == "import":
+            # Imported assets - just a reference, read source_path from metadata
+            source_path = metadata.get("source_path")
+            if source_path:
+                source = Path(source_path)
+                if source.exists():
+                    output_path = source
+                    preview_path = source
+                    # Store the actual absolute path - frontend knows how to serve it
+                    api_path = str(source)
+                    preview_api = api_path
+                else:
+                    # Source file was deleted/moved
+                    print(f"[HISTORY]   {gen_name}: import source missing: {source_path}", flush=True)
+                    continue
+            else:
+                # Legacy import with actual files (fallback)
+                for ext in [".mp4", ".mov", ".webm"]:
+                    video_files = list(gen_dir.glob(f"*{ext}"))
+                    if video_files:
+                        output_path = video_files[0]
+                        preview_path = output_path
+                        break
+                if not output_path:
+                    for ext in [".png", ".jpg", ".jpeg", ".exr"]:
+                        img_files = list(gen_dir.glob(f"*{ext}"))
+                        if img_files:
+                            output_path = img_files[0]
+                            preview_path = output_path
+                            break
         elif gen_type == "export":
             exr_files = list(gen_dir.glob("*.exr"))
             if exr_files:
@@ -625,18 +712,30 @@ async def list_generations(
         stat = output_path.stat()
         mtime = datetime.fromtimestamp(stat.st_mtime)
         
-        # Build relative path for API URL
-        rel_path = output_path.relative_to(_cache_root)
-        api_path = f"api/project/cache/{rel_path}"
+        # Build relative path for API URL (skip if already set, e.g., for imports)
+        if not api_path:
+            try:
+                rel_path = output_path.relative_to(_cache_root)
+                api_path = f"api/project/cache/{rel_path}"
+            except ValueError:
+                # File is outside cache (e.g., import reference)
+                # Strip leading slash for the URL path
+                api_path = f"api/project/files{output_path}"
         
         # Preview path
-        preview_rel = preview_path.relative_to(_cache_root) if preview_path else rel_path
-        preview_api = f"api/project/cache/{preview_rel}"
+        if not preview_api:
+            try:
+                preview_rel = preview_path.relative_to(_cache_root) if preview_path else None
+                preview_api = f"api/project/cache/{preview_rel}" if preview_rel else api_path
+            except ValueError:
+                # Preview is outside cache
+                preview_api = f"api/project/files{preview_path}" if preview_path else api_path
         
         generations.append({
             "id": gen_name,
             "name": gen_name,
             "type": gen_type,
+            "subtype": gen_subtype,
             "path": api_path,
             "preview": preview_api,
             "date": mtime.strftime("%Y-%m-%d"),
@@ -646,6 +745,9 @@ async def list_generations(
             "seed": metadata.get("seed"),
             "model": metadata.get("model", ""),
             "pinned": gen_name in pinned_ids,
+            "isSequence": is_sequence,
+            "frameCount": frame_count,
+            "sourcePath": metadata.get("source_path"),  # For imports - shows original location
         })
     
     # Sort: pinned first, then by date
@@ -658,6 +760,94 @@ async def list_generations(
     print(f"[HISTORY] Returning {len(generations)} generations: {types}, hasMore={has_more}", flush=True)
     
     return {"generations": generations, "hasMore": has_more}
+
+
+# ============================================================================
+# Import Asset Registration
+# ============================================================================
+
+@router.post("/import")
+async def register_import(data: dict = Body(...)):
+    """
+    Register an imported asset in history.
+    
+    Creates an import_### directory with metadata pointing to the original file.
+    No copying or symlinking - just a reference. This means:
+    - Zero disk duplication
+    - Re-renders (e.g., Blender depth passes) automatically update
+    - Files served directly from original location
+    
+    Args (in body):
+        path: Source file path (absolute)
+        name: Display name (optional)
+        auto_pin: Whether to auto-pin (default: True)
+    
+    Returns:
+        Import info including the new history ID
+    """
+    source_path = data.get("path")
+    display_name = data.get("name")
+    auto_pin = data.get("auto_pin", True)
+    
+    if not source_path:
+        raise HTTPException(status_code=400, detail="No path provided")
+    
+    source = Path(source_path)
+    if not source.exists():
+        raise HTTPException(status_code=404, detail=f"File not found: {source_path}")
+    
+    # Get project cache directory
+    try:
+        project_cache = get_project_cache_dir()
+    except RuntimeError:
+        raise HTTPException(status_code=400, detail="Project system not initialized")
+    
+    # Create import directory (just for metadata)
+    import_dir = get_generation_output_dir("import")
+    
+    # Determine file name
+    if not display_name:
+        display_name = source.name
+    
+    # Determine media type
+    ext = source.suffix.lower()
+    if ext in ['.mp4', '.mov', '.webm', '.avi', '.mkv']:
+        media_type = "video"
+    elif ext in ['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tiff', '.tif']:
+        media_type = "image"
+    elif ext in ['.exr', '.dpx']:
+        media_type = "exr"
+    else:
+        media_type = "unknown"
+    
+    # Save metadata with reference to original path (no copying!)
+    metadata = {
+        "timestamp": datetime.now().isoformat(),
+        "source_path": str(source),
+        "display_name": display_name,
+        "media_type": media_type,
+        "link_type": "reference",  # Just a pointer, no duplication
+        "imported": True,
+    }
+    
+    metadata_path = import_dir / "metadata.json"
+    with open(metadata_path, 'w') as f:
+        json.dump(metadata, f, indent=2)
+    
+    # Build response - use actual path, frontend will convert for serving
+    import_id = import_dir.name
+    api_path = str(source)  # Actual absolute path
+    
+    print(f"[IMPORT] Registered: {source.name} -> {import_id} (reference only, no copy)", flush=True)
+    
+    return {
+        "success": True,
+        "id": import_id,
+        "path": api_path,
+        "name": display_name,
+        "media_type": media_type,
+        "auto_pin": auto_pin,
+    }
 
 
 def _get_layer_entries(gen_dir: Path, gen_name: str, metadata: dict, pinned_ids: set, cache_root: Path) -> List[dict]:
@@ -774,7 +964,7 @@ async def serve_cache_file(file_path: str):
     print(f"[CACHE] Default cache root: {_default_cache_root}", flush=True)
     
     if not _cache_root and not _default_cache_root:
-        print("[CACHE] ✗ Cache not initialized", flush=True)
+        print("[CACHE] âœ— Cache not initialized", flush=True)
         raise HTTPException(status_code=503, detail="Cache not initialized. Please restart the server.")
     
     # Try current cache root first
@@ -797,7 +987,7 @@ async def serve_cache_file(file_path: str):
             print(f"[CACHE] Found in default cache (fallback): {full_path}", flush=True)
     
     if not full_path:
-        print(f"[CACHE] ✗ File not found in any cache location", flush=True)
+        print(f"[CACHE] âœ— File not found in any cache location", flush=True)
         print(f"[CACHE]   Tried: {tried_paths}", flush=True)
         raise HTTPException(
             status_code=404, 
@@ -813,7 +1003,7 @@ async def serve_cache_file(file_path: str):
             if _default_cache_root:
                 full_path.resolve().relative_to(_default_cache_root.resolve())
         except ValueError:
-            print(f"[CACHE] ✗ Access denied - path escapes cache roots", flush=True)
+            print(f"[CACHE] âœ— Access denied - path escapes cache roots", flush=True)
             raise HTTPException(status_code=403, detail="Access denied")
     
     # Determine content type
@@ -821,7 +1011,7 @@ async def serve_cache_file(file_path: str):
     if content_type is None:
         content_type = "application/octet-stream"
     
-    print(f"[CACHE] ✓ Serving {full_path} as {content_type}", flush=True)
+    print(f"[CACHE] âœ“ Serving {full_path} as {content_type}", flush=True)
     
     return FileResponse(
         path=full_path,
@@ -852,3 +1042,72 @@ def get_cache_root() -> Optional[Path]:
 def get_default_cache_root() -> Optional[Path]:
     """Get the default cache root (original location before any project was opened)"""
     return _default_cache_root
+
+
+# ============================================================================
+# External File Serving (for imports and files outside cache)
+# ============================================================================
+
+@router.get("/files/{file_path:path}")
+async def serve_external_file(file_path: str):
+    """
+    Serve files from absolute paths (for imports and external references).
+    
+    URL: /api/project/files/{absolute_path_without_leading_slash}
+    Example: /api/project/files/home/brad/Projects/projects/fukTests/assets/images/test.png
+    
+    Security: Only serves files from allowed directories (project assets, common media paths)
+    """
+    # Reconstruct absolute path
+    full_path = Path("/" + file_path)
+    
+    print(f"[FILES] Serving request for: {file_path}", flush=True)
+    print(f"[FILES] Resolved to: {full_path}", flush=True)
+    
+    if not full_path.exists():
+        print(f"[FILES] ✗ File not found: {full_path}", flush=True)
+        raise HTTPException(status_code=404, detail=f"File not found: {full_path}")
+    
+    if not full_path.is_file():
+        print(f"[FILES] ✗ Not a file: {full_path}", flush=True)
+        raise HTTPException(status_code=400, detail=f"Not a file: {full_path}")
+    
+    # Security: Check if file is in an allowed location
+    # Allow: project folders, home directory, common media paths
+    allowed_roots = [
+        Path.home(),  # User's home directory
+        Path("/tmp"),  # Temp files
+    ]
+    
+    # Add project folder if loaded
+    if _project_folder:
+        allowed_roots.append(Path(_project_folder))
+    
+    # Check if path is under an allowed root
+    is_allowed = False
+    resolved_path = full_path.resolve()
+    
+    for allowed_root in allowed_roots:
+        try:
+            resolved_path.relative_to(allowed_root.resolve())
+            is_allowed = True
+            break
+        except ValueError:
+            continue
+    
+    if not is_allowed:
+        print(f"[FILES] ✗ Access denied - path not in allowed locations", flush=True)
+        raise HTTPException(status_code=403, detail="Access denied - path not in allowed locations")
+    
+    # Determine content type
+    content_type, _ = mimetypes.guess_type(str(full_path))
+    if content_type is None:
+        content_type = "application/octet-stream"
+    
+    print(f"[FILES] ✓ Serving {full_path} as {content_type}", flush=True)
+    
+    return FileResponse(
+        path=full_path,
+        media_type=content_type,
+        filename=full_path.name
+    )

@@ -9,6 +9,7 @@
 
 import { useState, useId, useCallback } from 'react';
 import { X, Upload, Film, Layers, Image, FolderOpen } from './Icons';
+import { registerImport } from '../utils/historyApi';
 
 const API_URL = '/api';
 
@@ -37,11 +38,12 @@ function getMediaIcon(mediaType) {
 // Build display URL for media
 function buildMediaUrl(path) {
   if (!path) return '';
-  // Handle project-relative paths
+  // Handle project-relative paths (already formatted as API URLs)
   if (path.startsWith('/api/')) return path;
+  if (path.startsWith('api/project/')) return `/${path}`;
   if (path.startsWith('api/')) return `/${path}`;
   // Handle absolute paths that need to go through file serving
-  if (path.startsWith('/')) return `/api/files${path}`;
+  if (path.startsWith('/')) return `/api/project/files${path}`;
   return `/${path}`;
 }
 
@@ -119,7 +121,18 @@ export default function MediaUploader({
           onMediaChange(newMedia.slice(0, 1));
         }
         
-        console.log('✓ Selected media:', newMedia);
+        console.log('[MediaUploader] Selected media:', newMedia);
+
+        // Register imports in history and auto-pin
+        for (const file of data.files) {
+          const result = await registerImport(file.path, file.display_name, true);
+          if (result.success && result.auto_pin && result.id) {
+            // Dispatch event to notify GenerationHistory to add pin and refresh
+            window.dispatchEvent(new CustomEvent('fuk-import-registered', {
+              detail: { id: result.id, autoPin: true }
+            }));
+          }
+        }
       } else if (data.error) {
         throw new Error(data.error);
       }
@@ -172,7 +185,17 @@ export default function MediaUploader({
         onMediaChange(uploadedMedia.slice(0, 1));
       }
       
-      console.log('✓ Uploaded media:', uploadedMedia);
+      console.log('[MediaUploader] Uploaded media:', uploadedMedia);
+
+      // Register uploads in history and auto-pin
+      for (const media of uploadedMedia) {
+        const result = await registerImport(media.path, media.displayName, true);
+        if (result.success && result.auto_pin && result.id) {
+          window.dispatchEvent(new CustomEvent('fuk-import-registered', {
+            detail: { id: result.id, autoPin: true }
+          }));
+        }
+      }
       
     } catch (err) {
       console.error('Upload failed:', err);
@@ -299,7 +322,7 @@ export default function MediaUploader({
       {error && (
         <div className="fuk-upload-error">
           <span>{error}</span>
-          <button onClick={() => setError(null)} className="fuk-upload-error-dismiss">×</button>
+          <button onClick={() => setError(null)} className="fuk-upload-error-dismiss">Ã—</button>
         </div>
       )}
 

@@ -14,50 +14,101 @@ const PinIcon = ({ className, style }) => (
   </svg>
 );
 
+// Import icon (download arrow into folder)
+const ImportIcon = ({ className, style }) => (
+  <svg className={className} style={style} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4 4m0 0l-4-4m4 4V4" />
+  </svg>
+);
+
+// Sequence icon (film strip)
+const SequenceIcon = ({ className, style }) => (
+  <svg className={className} style={style} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <rect x="2" y="4" width="20" height="16" rx="2" strokeWidth={2} />
+    <line x1="6" y1="4" x2="6" y2="20" strokeWidth={1.5} />
+    <line x1="18" y1="4" x2="18" y2="20" strokeWidth={1.5} />
+    <line x1="2" y1="9" x2="6" y2="9" strokeWidth={1.5} />
+    <line x1="2" y1="15" x2="6" y2="15" strokeWidth={1.5} />
+    <line x1="18" y1="9" x2="22" y2="9" strokeWidth={1.5} />
+    <line x1="18" y1="15" x2="22" y2="15" strokeWidth={1.5} />
+  </svg>
+);
+
 // Draggable thumbnail component
 function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned }) {
   const [imageError, setImageError] = useState(false);
   
-  const isVideo = generation.type === 'video' || generation.type === 'interpolate';
+  const isVideo = generation.type === 'video' || generation.type === 'interpolate' || 
+                  (generation.type === 'preprocess' && generation.subtype === 'video');
+  const isSequence = generation.isSequence;
   const previewUrl = buildImageUrl(generation.preview);
   
-  // Get the appropriate icon based on type
+  // Get the appropriate icon based on type and subtype
   const getTypeIcon = () => {
+    // Check for sequence first
+    if (isSequence) return SequenceIcon;
+    
     switch (generation.type) {
       case 'video': return Film;
       case 'interpolate': return Zap;
       case 'upscale': return ArrowUp;
-      case 'preprocess': return Enhance;
+      case 'preprocess': 
+        // Return specific icon for preprocess subtypes
+        if (generation.subtype === 'video') return Film;
+        return Enhance;
       case 'layers': return Layers;
       case 'export': return Download;
+      case 'import': return ImportIcon;
       default: return Camera;
     }
   };
   
-  // Get subtype badge for layers
+  // Get subtype badge for layers and preprocess
   const getSubtypeBadge = () => {
-    if (generation.type === 'layers' && generation.subtype) {
-      const colors = {
-        depth: '#3b82f6',
-        normals: '#a855f7', 
-        crypto: '#f59e0b',
-      };
-      return (
-        <span style={{
-          fontSize: '0.5rem',
-          padding: '0.125rem 0.25rem',
-          borderRadius: '0.125rem',
-          background: colors[generation.subtype] || '#6b7280',
-          color: 'white',
-          marginLeft: '0.25rem',
-          textTransform: 'uppercase',
-          fontWeight: 600,
-        }}>
-          {generation.subtype}
-        </span>
-      );
-    }
-    return null;
+    if (!generation.subtype) return null;
+    
+    const colors = {
+      depth: '#3b82f6',
+      normals: '#a855f7', 
+      crypto: '#f59e0b',
+      canny: '#22c55e',
+      openpose: '#ef4444',
+      video: '#6366f1',
+    };
+    
+    return (
+      <span style={{
+        fontSize: '0.5rem',
+        padding: '0.125rem 0.25rem',
+        borderRadius: '0.125rem',
+        background: colors[generation.subtype] || '#6b7280',
+        color: 'white',
+        marginLeft: '0.25rem',
+        textTransform: 'uppercase',
+        fontWeight: 600,
+      }}>
+        {generation.subtype}
+      </span>
+    );
+  };
+  
+  // Get frame count badge for sequences
+  const getFrameCountBadge = () => {
+    if (!isSequence || !generation.frameCount) return null;
+    
+    return (
+      <span style={{
+        fontSize: '0.5rem',
+        padding: '0.125rem 0.25rem',
+        borderRadius: '0.125rem',
+        background: '#6366f1',
+        color: 'white',
+        marginLeft: '0.25rem',
+        fontWeight: 600,
+      }}>
+        {generation.frameCount}f
+      </span>
+    );
   };
   
   const TypeIcon = getTypeIcon();
@@ -81,11 +132,26 @@ function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned }) {
       className={`gen-history-item ${isPinned ? 'pinned' : ''}`}
       draggable
       onDragStart={handleDragStart}
-      title={`Drag to use as input\n${generation.name}\n${generation.timestamp}`}
+      title={generation.sourcePath 
+        ? `Drag to use as input\n${generation.name}\nSource: ${generation.sourcePath}\n${generation.timestamp}`
+        : `Drag to use as input\n${generation.name}\n${generation.timestamp}`
+      }
     >
       <div className="gen-history-thumb">
         {!imageError ? (
-          isVideo ? (
+          isSequence ? (
+            // Sequence: show first frame as image with sequence indicator
+            <div className="gen-history-sequence">
+              <img 
+                src={previewUrl} 
+                alt={generation.name}
+                onError={() => setImageError(true)}
+              />
+              <div className="gen-history-sequence-overlay">
+                <SequenceIcon />
+              </div>
+            </div>
+          ) : isVideo ? (
             <video 
               src={previewUrl}
               muted
@@ -122,6 +188,7 @@ function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned }) {
         <span className="gen-history-name">
           {generation.name.split('/').pop()}
           {getSubtypeBadge()}
+          {getFrameCountBadge()}
         </span>
         <span className="gen-history-time">{generation.timestamp}</span>
       </div>
@@ -227,6 +294,28 @@ export default function GenerationHistory({ project, collapsed, onToggle }) {
       fetchGenerations(daysLoaded);
     }
   }, [pinnedIds]);
+  
+  // Listen for import registration events (from MediaUploader)
+  useEffect(() => {
+    const handleImportRegistered = (event) => {
+      const { id, autoPin } = event.detail;
+      console.log('[History] Import registered:', id, 'autoPin:', autoPin);
+      
+      // Add to pinned if auto-pin is true
+      if (autoPin && id) {
+        setPinnedIds(prev => {
+          if (prev.includes(id)) return prev;
+          return [...prev, id];
+        });
+      }
+      
+      // Refresh to show the new import
+      fetchGenerations(daysLoaded, true);
+    };
+    
+    window.addEventListener('fuk-import-registered', handleImportRegistered);
+    return () => window.removeEventListener('fuk-import-registered', handleImportRegistered);
+  }, [daysLoaded, fetchGenerations]);
 
   const handleRefresh = () => {
     console.log('[History] Manual refresh clicked');
@@ -306,6 +395,7 @@ export default function GenerationHistory({ project, collapsed, onToggle }) {
             {counts.upscale > 0 && <span className="count-badge upscale"><ArrowUp /> {counts.upscale}</span>}
             {counts.interpolate > 0 && <span className="count-badge interpolate"><Zap /> {counts.interpolate}</span>}
             {counts.export > 0 && <span className="count-badge export"><Download /> {counts.export}</span>}
+            {counts.import > 0 && <span className="count-badge import"><ImportIcon /> {counts.import}</span>}
           </span>
         </div>
         
@@ -394,8 +484,11 @@ export default function GenerationHistory({ project, collapsed, onToggle }) {
       </div>
 
       <div className="gen-history-hint">
-        Drag items to input fields • Click bookmark to pin
+        Drag items to input fields â€¢ Click bookmark to pin
       </div>
     </div>
   );
 }
+
+// NOTE: registerImport has been moved to ../utils/historyApi.js
+// Import it from there: import { registerImport } from '../utils/historyApi'

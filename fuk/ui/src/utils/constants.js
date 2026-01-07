@@ -8,9 +8,9 @@ export const API_URL = '/api';
 // Aspect ratio presets for image generation
 export const ASPECT_RATIOS = [
   { label: '1:1 (Square)', value: '1:1', ratio: 100/100 },      
-  { label: '1.33:1 (Fullscreen)', value: '4:3', ratio: 133/100 },
+  { label: '1.33:1 (Fullscreen)', value: '1.33:1', ratio: 133/100 },
   { label: '1.85:1 (Academy)', value: '1.85:1', ratio: 185/100 },
-  { label: '1.78:1 (Widescreen)', value: '16:9', ratio: 178/100 },
+  { label: '1.78:1 (Widescreen)', value: '1.78:1', ratio: 178/100 },
   { label: '2.39:1 (Anamorphic)', value: '2.39:1', ratio: 239/100 },
   { label: '2.75:1 (Panavision)', value: '2.75:1', ratio: 276/100 },
 ];
@@ -49,7 +49,7 @@ export const DEFAULT_IMAGE_SETTINGS = {
   prompt: '',
   model: 'qwen_image',
   negative_prompt: DEFAULT_NEGATIVE_PROMPT,
-  aspectRatio: '16:9',
+  aspectRatio: '1.78:1',
   width: 1344,
   steps: 20,
   stepsMode: 'preset',
@@ -98,13 +98,27 @@ export function buildImageUrl(path) {
     return `/${path}`;
   }
   
+  // External files endpoint (for imports) - new format
+  if (path.startsWith('api/project/files/')) {
+    return `/${path}`;
+  }
+  
+  // Legacy external files endpoint (for backwards compatibility)
+  if (path.startsWith('api/files/')) {
+    // Convert to new format
+    const absolutePath = path.replace('api/files/', '');
+    return `/api/project/files/${absolutePath}`;
+  }
+  
   // Legacy static cache mount (fallback)
   if (path.startsWith('project-cache/')) {
     return `/${path}`;
   }
   
+  // Absolute paths need to go through api/project/files endpoint
   if (path.startsWith('/')) {
-    return path;
+    // Strip leading slash for URL path segment
+    return `/api/project/files${path}`;
   }
   
   return `/outputs/${path}`;
