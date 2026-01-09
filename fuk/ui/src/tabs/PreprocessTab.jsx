@@ -27,8 +27,8 @@ const DEFAULT_SETTINGS = {
     detect_hand: false,
     detect_face: false,
   },
-  depth: {
-    depth_model: 'depth_anything_v2',
+    depth: {
+    depth_model: 'da3_mono_large',  // Changed from depth_anything_v2
     depth_invert: false,
     depth_normalize: true,
     depth_colormap: 'inferno',
@@ -340,17 +340,24 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
         <>
           <div className="fuk-form-group-compact">
             <label className="fuk-label">Depth Model</label>
-            <select
-              className="fuk-select"
-              value={currentSettings.depth_model}
-              onChange={(e) => setCurrentSettings({ depth_model: e.target.value })}
-            >
-              <option value="depth_anything_v2">Depth Anything V2</option>
-              <option value="depth_anything_v3">Depth Anything V3</option>
-              <option value="midas_small">MiDaS Small (Fast)</option>
-              <option value="midas_large">MiDaS Large</option>
-              <option value="zoedepth">ZoeDepth</option>
-            </select>
+              <select
+                className="fuk-select"
+                value={currentSettings.depth_model}
+                onChange={(e) => setCurrentSettings({ depth_model: e.target.value })}
+              >
+                <optgroup label="Depth Anything V3 (Latest)">
+                  <option value="da3_mono_large">DA3 Mono Large (Best)</option>
+                  <option value="da3_metric_large">DA3 Metric (Real-world scale)</option>
+                  <option value="da3_large">DA3 Large (Multi-view)</option>
+                  <option value="da3_giant">DA3 Giant (Highest quality)</option>
+                </optgroup>
+                <optgroup label="Legacy">
+                  <option value="depth_anything_v2">Depth Anything V2</option>
+                  <option value="midas_large">MiDaS Large</option>
+                  <option value="midas_small">MiDaS Small (Fast)</option>
+                  <option value="zoedepth">ZoeDepth</option>
+                </optgroup>
+              </select>
           </div>
           
           <div className="fuk-form-group-compact">
@@ -394,8 +401,11 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
           </div>
           
           <p className="fuk-help-text fuk-mt-4">
-            {currentSettings.depth_model === 'depth_anything_v2' && '✓ Recommended: Best quality/speed balance'}
-            {currentSettings.depth_model === 'depth_anything_v3' && '⚡ Latest model with improved detail'}
+            {currentSettings.depth_model === 'da3_mono_large' && '✓ Recommended: Latest SOTA for single images'}
+            {currentSettings.depth_model === 'da3_metric_large' && '📏 Metric depth in meters (real-world scale)'}
+            {currentSettings.depth_model === 'da3_large' && '🔄 Supports multi-view consistency'}
+            {currentSettings.depth_model === 'da3_giant' && '🏆 Highest quality, 1.15B params'}
+            {currentSettings.depth_model === 'depth_anything_v2' && '⚡ V2 fallback, great quality'}
             {currentSettings.depth_model === 'midas_small' && '⚡ Fastest processing'}
             {currentSettings.depth_model === 'midas_large' && 'Good quality, widely compatible'}
             {currentSettings.depth_model === 'zoedepth' && 'Metric depth estimation'}

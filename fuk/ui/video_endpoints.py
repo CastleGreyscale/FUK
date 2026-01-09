@@ -12,6 +12,7 @@ Import and register these routes in the main server file.
 
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
+from fuk.core.preprocessors.depth_video_batch import VideoDepthBatchProcessor
 from pydantic import BaseModel, Field
 from pathlib import Path
 from typing import Optional, Dict, Any, List
@@ -248,6 +249,7 @@ def setup_video_routes(
                     "low_threshold": request.low_threshold,
                     "high_threshold": request.high_threshold,
                 }
+                batch_processed = False
                     
             elif request.method == "depth":
                 depth_model_map = {
@@ -255,22 +257,79 @@ def setup_video_routes(
                     "midas_large": DepthModel.MIDAS_LARGE,
                     "depth_anything_v2": DepthModel.DEPTH_ANYTHING_V2,
                     "depth_anything_v3": DepthModel.DEPTH_ANYTHING_V3,
+                    "da3_mono_large": DepthModel.DA3_MONO_LARGE,
+                    "da3_metric_large": DepthModel.DA3_METRIC_LARGE,
+                    "da3_large": DepthModel.DA3_LARGE,
+                    "da3_giant": DepthModel.DA3_GIANT,
                     "zoedepth": DepthModel.ZOEDEPTH,
                 }
                 depth_model = depth_model_map.get(request.depth_model, DepthModel.DEPTH_ANYTHING_V2)
                 
-                def frame_processor(inp, out):
-                    return preprocessor_manager.depth(
-                        image_path=inp,
-                        output_path=out,
-                        model=depth_model,
+                # Check if we should use batch processing (DA3 models only)
+                use_batch = depth_model in [
+                    DepthModel.DEPTH_ANYTHING_V3,
+                    DepthModel.DA3_MONO_LARGE,
+                    DepthModel.DA3_METRIC_LARGE,
+                    DepthModel.DA3_LARGE,
+                    DepthModel.DA3_GIANT,
+                ]
+                
+                if use_batch:
+                    # Use batch processor for DA3 models (temporal consistency)
+                    log.info("VideoPreprocess", "Using BATCH processing for DA3 (temporal consistency)")
+                    
+                    # Initialize depth model
+                    from fuk.core.preprocessors.depth import DepthPreprocessor
+                    depth_processor = DepthPreprocessor(model_type=depth_model)
+        
+                    
+                    # Create batch processor
+                    batch_processor = VideoDepthBatchProcessor()
+                    
+                    # Process with batch inference (includes timing)
+                    start_time = time.time()
+                    
+                    result = batch_processor.process_video_batch(
+                        video_path=input_path,
+                        output_path=output_path,
+                        depth_model=depth_processor,
+                        model_type=depth_model,
                         invert=request.depth_invert,
                         normalize=request.depth_normalize,
                         colormap=request.depth_colormap,
-                        exact_output=True,  # Use exact path for video frames
+                        process_res=504,  # DA3 default
+                        process_res_method="upper_bound_resize",  # DA3 default
+                        output_mode="mp4" if output_mode == OutputMode.MP4 else "sequence",
                     )
-                processor_kwargs = {"depth_model": request.depth_model}
                     
+                    elapsed = time.time() - start_time
+                    log.timing("VideoPreprocess", start_time, f"Complete (batch) - {result.get('frame_count', 0)} frames")
+                    
+                    # Build response
+                    if output_mode == OutputMode.SEQUENCE:
+                        url_data = build_sequence_response(output_path, result, gen_dir)
+                    else:
+                        url_data = build_video_response(output_path, result)
+                    
+                    processor_kwargs = {"depth_model": request.depth_model}
+                    
+                    # Set flag to skip common video_processor call
+                    batch_processed = True
+                
+                else:
+                    # Frame-by-frame for other models (V2, MiDaS, ZoeDepth)
+                    def frame_processor(inp, out):
+                        return preprocessor_manager.depth(
+                            image_path=inp,
+                            output_path=out,
+                            model=depth_model,
+                            invert=request.depth_invert,
+                            normalize=request.depth_normalize,
+                            colormap=request.depth_colormap,
+                            exact_output=True,
+                        )
+                    processor_kwargs = {"depth_model": request.depth_model}
+                    batch_processed = False  
             elif request.method == "normals":
                 normals_method_map = {
                     "from_depth": NormalsMethod.FROM_DEPTH,
@@ -281,6 +340,10 @@ def setup_video_routes(
                     "midas_large": DepthModel.MIDAS_LARGE,
                     "depth_anything_v2": DepthModel.DEPTH_ANYTHING_V2,
                     "depth_anything_v3": DepthModel.DEPTH_ANYTHING_V3,
+                    "da3_mono_large": DepthModel.DA3_MONO_LARGE,
+                    "da3_metric_large": DepthModel.DA3_METRIC_LARGE,
+                    "da3_large": DepthModel.DA3_LARGE,
+                    "da3_giant": DepthModel.DA3_GIANT,
                     "zoedepth": DepthModel.ZOEDEPTH,
                 }
                 
@@ -300,6 +363,7 @@ def setup_video_routes(
                         exact_output=True,  # Use exact path for video frames
                     )
                 processor_kwargs = {"normals_method": request.normals_method}
+                batch_processed = False
                     
             elif request.method == "openpose":
                 def frame_processor(inp, out):
@@ -316,6 +380,7 @@ def setup_video_routes(
                     "detect_hand": request.detect_hand,
                     "detect_face": request.detect_face,
                 }
+                batch_processed = False
                     
             elif request.method == "crypto":
                 sam_model_map = {
@@ -337,27 +402,29 @@ def setup_video_routes(
                         exact_output=True,  # Use exact path for video frames
                     )
                 processor_kwargs = {"crypto_model": request.crypto_model}
+                batch_processed = False
             else:
                 raise HTTPException(status_code=400, detail=f"Unknown method: {request.method}")
             
-            # Process video
-            start_time = time.time()
-            
-            result = video_processor.process_video(
-                input_video=input_path,
-                output_path=output_path,
-                frame_processor=frame_processor,
-                output_mode=output_mode,
-            )
-            
-            elapsed = time.time() - start_time
-            log.timing("VideoPreprocess", start_time, f"Complete - {result.get('frame_count', 0)} frames")
-            
-            # Build response based on output mode
-            if output_mode == OutputMode.SEQUENCE:
-                url_data = build_sequence_response(output_path, result, gen_dir)
-            else:
-                url_data = build_video_response(output_path, result)
+            # Process video (skip if already batch processed)
+            if not batch_processed:
+                start_time = time.time()
+                
+                result = video_processor.process_video(
+                    input_video=input_path,
+                    output_path=output_path,
+                    frame_processor=frame_processor,
+                    output_mode=output_mode,
+                )
+                
+                elapsed = time.time() - start_time
+                log.timing("VideoPreprocess", start_time, f"Complete - {result.get('frame_count', 0)} frames")
+                
+                # Build response based on output mode
+                if output_mode == OutputMode.SEQUENCE:
+                    url_data = build_sequence_response(output_path, result, gen_dir)
+                else:
+                    url_data = build_video_response(output_path, result)
             
             # Save metadata
             save_generation_metadata(
@@ -561,6 +628,10 @@ def setup_video_routes(
                     "midas_large": DepthModel.MIDAS_LARGE,
                     "depth_anything_v2": DepthModel.DEPTH_ANYTHING_V2,
                     "depth_anything_v3": DepthModel.DEPTH_ANYTHING_V3,
+                    "da3_mono_large": DepthModel.DA3_MONO_LARGE,
+                    "da3_metric_large": DepthModel.DA3_METRIC_LARGE,
+                    "da3_large": DepthModel.DA3_LARGE,
+                    "da3_giant": DepthModel.DA3_GIANT,
                     "zoedepth": DepthModel.ZOEDEPTH,
                 }
                 depth_model = depth_model_map.get(request.depth_model, DepthModel.DEPTH_ANYTHING_V2)
@@ -587,6 +658,10 @@ def setup_video_routes(
                     "midas_large": DepthModel.MIDAS_LARGE,
                     "depth_anything_v2": DepthModel.DEPTH_ANYTHING_V2,
                     "depth_anything_v3": DepthModel.DEPTH_ANYTHING_V3,
+                    "da3_mono_large": DepthModel.DA3_MONO_LARGE,
+                    "da3_metric_large": DepthModel.DA3_METRIC_LARGE,
+                    "da3_large": DepthModel.DA3_LARGE,
+                    "da3_giant": DepthModel.DA3_GIANT,
                     "zoedepth": DepthModel.ZOEDEPTH,
                 }
                 normals_method = normals_method_map.get(request.normals_method, NormalsMethod.FROM_DEPTH)

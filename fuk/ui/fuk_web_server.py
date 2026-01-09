@@ -522,10 +522,12 @@ class PreprocessRequest(BaseModel):
     detect_face: bool = False
     
     # Depth parameters
-    depth_model: str = "depth_anything_v2"
+    depth_model: str = "da3_mono_large"
     depth_invert: bool = False
     depth_normalize: bool = True
     depth_colormap: Optional[str] = "inferno"
+    depth_process_res: int = 756  # NEW - higher res for better quality
+    depth_process_res_method: str = "lower_bound_resize"  # NEW
 
 # ============================================================================
 # Progress Tracking
@@ -1509,21 +1511,21 @@ class PreprocessRequest(BaseModel):
     detect_body: bool = True
     detect_hand: bool = False
     detect_face: bool = False
-    
-    # Depth parameters
-    depth_model: str = "depth_anything_v2"
+
+    # Depth Parameters 
+    depth_model: str = "da3_mono_large"  # Changed from depth_anything_v2
     depth_invert: bool = False
     depth_normalize: bool = True
     depth_colormap: Optional[str] = "inferno"
     
     # Normals parameters
     normals_method: str = "from_depth"  # 'from_depth' or 'dsine'
-    normals_depth_model: str = "depth_anything_v2"
+    normals_depth_model: str = "da3_mono_large"  # Changed from depth_anything_v2
     normals_space: str = "tangent"  # 'tangent', 'world', 'object'
     normals_flip_y: bool = False
     normals_flip_x: bool = False
     normals_intensity: float = 1.0
-    
+
     # Crypto/SAM parameters
     crypto_model: str = "sam2_hiera_large"  # 'sam2_hiera_tiny', 'sam2_hiera_small', 'sam2_hiera_base_plus', 'sam2_hiera_large'
     crypto_max_objects: int = 50
@@ -1592,11 +1594,20 @@ async def preprocess_image(request: PreprocessRequest):
         elif request.method == "depth":
             # Map string to enum
             depth_model_map = {
+                # DA3 models (new)
+                "da3_mono_large": DepthModel.DA3_MONO_LARGE,
+                "da3_metric_large": DepthModel.DA3_METRIC_LARGE,
+                "da3_large": DepthModel.DA3_LARGE,
+                "da3_giant": DepthModel.DA3_GIANT,
+                # V2
+                "depth_anything_v2": DepthModel.DEPTH_ANYTHING_V2,
+                # MiDaS
                 "midas_small": DepthModel.MIDAS_SMALL,
                 "midas_large": DepthModel.MIDAS_LARGE,
-                "depth_anything_v2": DepthModel.DEPTH_ANYTHING_V2,
-                "depth_anything_v3": DepthModel.DEPTH_ANYTHING_V3,
+                # ZoeDepth
                 "zoedepth": DepthModel.ZOEDEPTH,
+                # Backwards compatibility
+                "depth_anything_v3": DepthModel.DA3_MONO_LARGE,
             }
             
             depth_model = depth_model_map.get(

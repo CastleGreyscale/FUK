@@ -414,7 +414,7 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
             
             <p className="fuk-help-text fuk-mt-3">
               {enabledLayersCount} layer{enabledLayersCount !== 1 ? 's' : ''} selected
-              {isVideo && ` (× video frames)`}
+              {isVideo && ` (Ã— video frames)`}
             </p>
           </div>
 
@@ -431,8 +431,12 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
                   onChange={(e) => updateSettings({ depthModel: e.target.value })}
                   disabled={processing}
                 >
-                  <option value="depth_anything_v2">Depth Anything V2 (SOTA)</option>
-                  <option value="depth_anything_v3">Depth Anything V3</option>
+                  <option value="depth_anything_v2">Depth Anything V2</option>
+                  <option value="depth_anything_v3">Depth Anything V3 (Mono Large)</option>
+                  <option value="da3_mono_large">DA3 Mono Large</option>
+                  <option value="da3_metric_large">DA3 Metric Large</option>
+                  <option value="da3_large">DA3 Large (Multi-view)</option>
+                  <option value="da3_giant">DA3 Giant</option>
                   <option value="midas_large">MiDaS Large</option>
                   <option value="midas_small">MiDaS Small (Fast)</option>
                   <option value="zoedepth">ZoeDepth (Metric)</option>
@@ -512,10 +516,18 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
                       onChange={(e) => updateSettings({ normalsDepthModel: e.target.value })}
                       disabled={processing}
                     >
-                      <option value="depth_anything_v2">Depth Anything V2</option>
-                      <option value="depth_anything_v3">Depth Anything V3</option>
-                      <option value="midas_large">MiDaS Large</option>
-                      <option value="zoedepth">ZoeDepth</option>
+                      <optgroup label="Depth Anything V3 (Latest)">
+                        <option value="da3_mono_large">DA3 Mono Large (Best)</option>
+                        <option value="da3_metric_large">DA3 Metric (Real-world scale)</option>
+                        <option value="da3_large">DA3 Large (Multi-view)</option>
+                        <option value="da3_giant">DA3 Giant (Highest quality)</option>
+                      </optgroup>
+                      <optgroup label="Legacy">
+                        <option value="depth_anything_v2">Depth Anything V2</option>
+                        <option value="midas_large">MiDaS Large</option>
+                        <option value="midas_small">MiDaS Small (Fast)</option>
+                        <option value="zoedepth">ZoeDepth</option>
+                      </optgroup>
                     </select>
                   </div>
                   
@@ -562,11 +574,11 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
                     onChange={(e) => updateSettings({ normalsFlipY: e.target.checked })}
                     disabled={processing}
                   />
-                  <span className="fuk-checkbox-label">Flip Y (OpenGL → DirectX)</span>
+                  <span className="fuk-checkbox-label">Flip Y (OpenGL â†’ DirectX)</span>
                 </label>
               </div>
               
-              <p className="fuk-help-text">Normals encoded as RGB (XYZ → RGB)</p>
+              <p className="fuk-help-text">Normals encoded as RGB (XYZ â†’ RGB)</p>
             </div>
           )}
 

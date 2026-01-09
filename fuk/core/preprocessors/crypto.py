@@ -2,7 +2,7 @@
 """
 Cryptomatte / Instance Segmentation Preprocessor
 
-Uses SAM2 (Segment Anything Model 2) for instance segmentation,
+Uses SAM2/SAM2.1 (Segment Anything Model 2) for instance segmentation,
 then converts to cryptomatte-style ID mattes for compositing.
 
 Good for:
@@ -40,10 +40,18 @@ SAM_CHECKPOINT_NAMES = {
     SAMModel.LARGE: ["sam2.1_hiera_large.pt", "sam2_hiera_large.pt"],
 }
 
+# Config file mapping - SAM2.1 configs
+SAM_CONFIG_NAMES = {
+    SAMModel.TINY: "configs/sam2.1/sam2.1_hiera_t.yaml",
+    SAMModel.SMALL: "configs/sam2.1/sam2.1_hiera_s.yaml",
+    SAMModel.BASE: "configs/sam2.1/sam2.1_hiera_b+.yaml",
+    SAMModel.LARGE: "configs/sam2.1/sam2.1_hiera_l.yaml",
+}
+
 
 class CryptoPreprocessor(BasePreprocessor):
     """
-    Instance segmentation using SAM2, output as cryptomatte-style ID mattes
+    Instance segmentation using SAM2/SAM2.1, output as cryptomatte-style ID mattes
     
     Generates:
     - ID matte image (colored visualization)
@@ -62,6 +70,7 @@ class CryptoPreprocessor(BasePreprocessor):
         self.model_size = model_size
         self.predictor = None
         self.mask_generator = None
+        self._sam_version = None  # 'sam2' or 'sam2.1'
         print(f"Crypto preprocessor initialized: {model_size.value} on {self.device}")
     
     def _initialize(self):
@@ -81,14 +90,24 @@ class CryptoPreprocessor(BasePreprocessor):
             
             # Find checkpoint
             checkpoint_path = self._find_sam_checkpoint()
-            config_path = self._find_sam_config()
+            config_name = self._find_sam_config()
             
             if not checkpoint_path:
                 raise FileNotFoundError("SAM2 checkpoint not found")
             
+            # Detect version from checkpoint name
+            if "sam2.1" in checkpoint_path.name:
+                self._sam_version = "sam2.1"
+            else:
+                self._sam_version = "sam2"
+            
+            print(f"  Version: {self._sam_version}")
+            print(f"  Checkpoint: {checkpoint_path}")
+            print(f"  Config: {config_name}")
+            
             # Build model
             sam2 = build_sam2(
-                config_file=config_path,  # Hydra config name, not a file path
+                config_file=config_name,
                 ckpt_path=str(checkpoint_path),
                 device=self.device
             )
@@ -104,7 +123,7 @@ class CryptoPreprocessor(BasePreprocessor):
                 min_mask_region_area=100,     # Minimum mask size
             )
             
-            print("✓ SAM2 loaded")
+            print(f"✓ SAM2 ({self._sam_version}) loaded")
             
         except ImportError as e:
             raise ImportError(
@@ -119,19 +138,26 @@ class CryptoPreprocessor(BasePreprocessor):
     
     def _find_sam_checkpoint(self) -> Optional[Path]:
         """Find SAM2 checkpoint file (supports both sam2 and sam2.1 naming)"""
-        vendor_path = self._get_vendor_path("segment-anything-2")
         
         # Get possible checkpoint names for this model size
         checkpoint_names = SAM_CHECKPOINT_NAMES.get(self.model_size, [])
         
+        # Search directories - prioritize user's model directory
         search_dirs = [
-            vendor_path / "checkpoints",
-            vendor_path,
+            # User's dedicated SAM model directory
+            Path.home() / "ai" / "models" / "sam",
+            # Vendor directory
+            self._get_vendor_path("segment-anything-2") / "checkpoints",
+            self._get_vendor_path("segment-anything-2"),
+            # General model directories
             Path.home() / "ai" / "models" / "sam2",
+            Path.home() / "ai" / "models" / "checkpoints",
         ]
         
         # Search for any matching checkpoint
         for search_dir in search_dirs:
+            if not search_dir.exists():
+                continue
             for checkpoint_name in checkpoint_names:
                 path = search_dir / checkpoint_name
                 if path.exists():
@@ -151,14 +177,7 @@ class CryptoPreprocessor(BasePreprocessor):
         """Get SAM2 config name for Hydra (not a file path)"""
         # SAM2 uses Hydra - we need to pass the config NAME, not a path
         # The config is resolved relative to sam2/configs/
-        config_names = {
-            SAMModel.TINY: "configs/sam2.1/sam2.1_hiera_t.yaml",
-            SAMModel.SMALL: "configs/sam2.1/sam2.1_hiera_s.yaml",
-            SAMModel.BASE: "configs/sam2.1/sam2.1_hiera_b+.yaml",
-            SAMModel.LARGE: "configs/sam2.1/sam2.1_hiera_l.yaml",
-        }
-        
-        config_name = config_names.get(self.model_size)
+        config_name = SAM_CONFIG_NAMES.get(self.model_size)
         print(f"  Using config: {config_name}")
         return config_name
     
@@ -200,7 +219,7 @@ class CryptoPreprocessor(BasePreprocessor):
         h, w = image.shape[:2]
         
         # Generate masks
-        print(f"Segmenting image ({w}x{h})...")
+        print(f"Segmenting image ({w}x{h}) with {self._sam_version or 'SAM2'}...")
         masks = self.mask_generator.generate(image_rgb)
         
         # Filter and sort masks
@@ -220,6 +239,7 @@ class CryptoPreprocessor(BasePreprocessor):
                 'mode': 'id_matte',
                 'num_objects': len(masks),
                 'max_objects': max_objects,
+                'sam_version': self._sam_version,
             }
             final_output = self._make_unique_path(output_path, params, exact_output=exact_output)
             cv2.imwrite(str(final_output), cv2.cvtColor(id_matte, cv2.COLOR_RGB2BGR))
@@ -244,6 +264,7 @@ class CryptoPreprocessor(BasePreprocessor):
             "output_path": outputs.get('id_matte', outputs.get('layers', [None])[0]),
             "method": "crypto",
             "num_objects": len(masks),
+            "sam_version": self._sam_version,
             "outputs": outputs,
             "parameters": {
                 'max_objects': max_objects,
@@ -328,3 +349,7 @@ class CryptoPreprocessor(BasePreprocessor):
         # TODO: Implement point-based segmentation using SAM2Predictor
         
         return self.process(image_path, output_path, **kwargs)
+    
+    def get_version(self) -> str:
+        """Get the loaded SAM version"""
+        return self._sam_version or "unknown"
