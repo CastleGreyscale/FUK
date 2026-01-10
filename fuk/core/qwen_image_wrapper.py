@@ -1,4 +1,19 @@
 # core/qwen_image_wrapper.py
+"""
+Qwen Image Generation Wrapper
+
+Flow:
+1. UI reads defaults.json for initial form values
+2. User adjusts settings, clicks Generate
+3. Server receives request with user params
+4. This wrapper:
+   - Loads tool config from configs/tools/musubi-qwen.json
+   - Maps generic param names to musubi CLI args
+   - Applies always-on flags (fp8_scaled, vae_enable_tiling)
+   - Builds and executes command
+5. Returns results to server for UI update
+"""
+
 import sys
 import os
 
@@ -9,7 +24,7 @@ if hasattr(sys.stdout, 'reconfigure'):
 
 from pathlib import Path
 import subprocess
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict, Any
 from enum import Enum
 import json
 import time
@@ -43,110 +58,247 @@ def _log(category: str, message: str, level: str = "info"):
 class QwenModel(Enum):
     IMAGE = "qwen_image"
     EDIT_2509 = "qwen_image_2509_edit"
-        
+
 
 class QwenImageGenerator:
-    """Wrapper for Qwen image generation via musubi-tuner backend"""
+    """
+    Wrapper for Qwen image generation via musubi-tuner backend.
     
-    def __init__(self, config_path: Path, musubi_vendor_path: Path, defaults_path: Optional[Path] = None):
-        self.musubi_path = musubi_vendor_path
-        self.config = self._load_config(config_path)
-        self.defaults = self._load_config(defaults_path) if defaults_path else {}
-        _log("QWEN", f"Initialized with musubi path: {musubi_vendor_path}")
+    Reads tool-specific settings from configs/tools/musubi-qwen.json
+    """
+    
+    def __init__(
+        self, 
+        models_config_path: Path,
+        tool_config_path: Path,
+        defaults_config_path: Path,
+        musubi_vendor_path: Path
+    ):
+        """
+        Initialize the generator with config paths.
         
-    def _load_config(self, config_path: Path):
-        with open(config_path) as f:
+        Args:
+            models_config_path: Path to models.json (model paths, LoRAs)
+            tool_config_path: Path to configs/tools/musubi-qwen.json
+            defaults_config_path: Path to defaults.json (user defaults)
+            musubi_vendor_path: Path to musubi-tuner vendor directory
+        """
+        self.musubi_path = musubi_vendor_path
+        self.models_config = self._load_json(models_config_path)
+        self.tool_config = self._load_json(tool_config_path)
+        self.defaults_config = self._load_json(defaults_config_path)
+        
+        # Cache commonly accessed config values
+        self.arg_mapping = self.tool_config.get("arg_mapping", {})
+        self.cli_flags = self.tool_config.get("cli_flags", {})
+        self.performance = self.tool_config.get("performance", {})
+        
+        _log("QWEN", f"Initialized with musubi path: {musubi_vendor_path}")
+        _log("QWEN", f"Tool config loaded: {len(self.arg_mapping)} arg mappings")
+    
+    def _load_json(self, path: Path) -> dict:
+        """Load JSON config file"""
+        with open(path) as f:
             return json.load(f)
     
-    def generate(self,
-                prompt: str,
-                output_path: Path,
-                model: QwenModel = QwenModel.IMAGE,
-                control_image: Optional[Path] = None,
-                image_size: Tuple[int, int] = (1024, 1024),
-                seed: Optional[int] = None,
-                lora: Optional[str] = None,
-                lora_multiplier: float = 1.0,
-                infer_steps: int = 20,
-                guidance_scale: float = 4.0,
-                blocks_to_swap: int = 10,
-                negative_prompt: Optional[str] = None,
-                flow_shift: Optional[float] = None,
-                **kwargs) -> Path:
+    def _get_default(self, key: str, fallback: Any = None) -> Any:
+        """Get default value from defaults.json image section"""
+        return self.defaults_config.get("image", {}).get(key, fallback)
+    
+    def _get_lora_info(self, lora_name: str) -> dict:
+        """Get LoRA info including path, trigger, and multiplier"""
+        loras = self.models_config.get("loras", {})
+        if lora_name in loras:
+            lora_info = loras[lora_name]
+            # Handle both old (string path) and new (dict) formats
+            if isinstance(lora_info, str):
+                return {"path": lora_info, "trigger": "", "multiplier": 1.0}
+            return lora_info
+        # If not found in config, treat as direct path
+        return {"path": lora_name, "trigger": "", "multiplier": 1.0}
+    
+    def generate(
+        self,
+        prompt: str,
+        output_path: Path,
+        model: QwenModel = QwenModel.IMAGE,
+        # Size params (UI sends width + aspect_ratio, server calculates height)
+        width: int = None,
+        height: int = None,
+        # Generation params
+        seed: Optional[int] = None,
+        infer_steps: int = None,
+        guidance_scale: float = None,
+        flow_shift: Optional[float] = None,
+        blocks_to_swap: int = None,
+        negative_prompt: Optional[str] = None,
+        # LoRA
+        lora: Optional[str] = None,
+        lora_multiplier: float = None,
+        # Control image for edit mode
+        control_image: Optional[Path] = None,
+        **kwargs
+    ) -> Dict[str, Any]:
         """
         Generate image using musubi-tuner backend.
         
-        If negative_prompt is None, will use default from config.
-        If flow_shift is None, musubi will use its dynamic calculation based on resolution.
-        Lower flow_shift (e.g., 2.1) gives more natural results, higher (3.0+) gives more detail.
+        All parameters fall back to defaults.json if not specified.
+        Tool-specific flags come from configs/tools/musubi-qwen.json.
+        
+        Returns:
+            Dict with output_path, seed_used, and metadata
         """
         start_time = time.time()
         
-        # Use default negative prompt if not specified
-        if negative_prompt is None:
-            negative_prompt = self.defaults.get("negative_prompt", "")
+        # Apply defaults for any unspecified params
+        width = width or self._get_default("width", 1344)
+        height = height or width  # Square if not specified
+        infer_steps = infer_steps if infer_steps is not None else self._get_default("infer_steps", 20)
+        guidance_scale = guidance_scale if guidance_scale is not None else self._get_default("guidance_scale", 2.1)
+        flow_shift = flow_shift if flow_shift is not None else self._get_default("flow_shift", 2.1)
+        blocks_to_swap = blocks_to_swap if blocks_to_swap is not None else self._get_default("blocks_to_swap", 0)
+        negative_prompt = negative_prompt or self._get_default("negative_prompt", "")
+        lora_multiplier = lora_multiplier if lora_multiplier is not None else self._get_default("lora_multiplier", 1.0)
+        
+        # Build generation params dict
+        params = {
+            "prompt": prompt,
+            "negative_prompt": negative_prompt,
+            "width": height,
+            "height": width,
+            "infer_steps": infer_steps,
+            "guidance_scale": guidance_scale,
+            "flow_shift": flow_shift,
+            "blocks_to_swap": blocks_to_swap,
+            "seed": seed,
+        }
+        
+        # Add LoRA if specified
+        if lora:
+            lora_info = self._get_lora_info(lora)
+            params["lora_path"] = lora_info["path"]
+            # Use provided multiplier or LoRA's default
+            params["lora_multiplier"] = lora_multiplier if lora_multiplier != 1.0 else lora_info.get("multiplier", 1.0)
+            
+            # Auto-append trigger word if present and not already in prompt
+            trigger = lora_info.get("trigger", "")
+            if trigger and trigger.lower() not in prompt.lower():
+                params["prompt"] = f"{trigger}, {prompt}"
+                _log("QWEN", f"Auto-appended LoRA trigger: {trigger}")
+        
+        # Add control image for edit mode
+        if control_image:
+            params["control_image"] = str(control_image)
         
         # ====== LOGGING ======
-        print("\n" + "=" * 70)
-        print(f"  QWEN IMAGE GENERATION")
-        print("=" * 70, flush=True)
+        self._log_generation_start(model, params)
         
-        print(f"\n  Parameters:")
-        print(f"    model: {model.value}")
-        print(f"    prompt: {prompt[:80]}..." if len(prompt) > 80 else f"    prompt: {prompt}")
-        print(f"    negative_prompt: {negative_prompt[:50]}..." if len(negative_prompt) > 50 else f"    negative_prompt: {negative_prompt}")
-        print(f"    image_size: {image_size[0]}x{image_size[1]}")
-        print(f"    seed: {seed}")
-        print(f"    infer_steps: {infer_steps}")
-        print(f"    guidance_scale: {guidance_scale}")
-        print(f"    flow_shift: {flow_shift if flow_shift else 'auto'}")
-        print(f"    blocks_to_swap: {blocks_to_swap}")
-        
-        if control_image:
-            print(f"\n  Control Image:")
-            print(f"    path: {control_image}")
-            print(f"    exists: {control_image.exists() if isinstance(control_image, Path) else 'unknown'}")
-        
-        if lora:
-            print(f"\n  LoRA:")
-            print(f"    lora: {lora}")
-            print(f"    multiplier: {lora_multiplier}")
-        
-        print(f"\n  Output:")
-        print(f"    path: {output_path}")
-        
-        cmd = self._build_command(
-            prompt=prompt,
-            output_path=output_path,
-            model=model,
-            control_image=control_image,
-            image_size=image_size,
-            seed=seed,
-            lora=lora,
-            lora_multiplier=lora_multiplier,
-            infer_steps=infer_steps,
-            guidance_scale=guidance_scale,
-            blocks_to_swap=blocks_to_swap,
-            negative_prompt=negative_prompt,
-            flow_shift=flow_shift,
-            **kwargs
-        )
+        # Build command using tool config
+        cmd = self._build_command(model, output_path, params)
         
         # Log the command
-        print("\n  Command:")
-        for i, part in enumerate(cmd):
-            if part.startswith('--'):
-                print(f"    {part}", end='')
-            elif i > 0 and cmd[i-1].startswith('--'):
-                print(f" {part}")
-            else:
-                print(f"    {part}")
-        print("\n" + "=" * 70 + "\n")
+        self._log_command(cmd)
         
+        # Execute
         _log("QWEN", f"Working directory: {self.musubi_path}")
+        result = self._execute(cmd)
         
-        # Stream output in real-time
-        # Run from musubi-tuner directory so module imports work correctly
+        # Find and rename output file
+        final_output = self._finalize_output(output_path)
+        
+        elapsed = time.time() - start_time
+        _log("QWEN", f"Generation complete in {elapsed:.1f}s ({elapsed/60:.1f} min)", "success")
+        
+        return {
+            "output_path": str(final_output),
+            "seed_used": seed,
+            "elapsed_seconds": elapsed,
+            "params": params,
+        }
+    
+    def _build_command(self, model: QwenModel, output_path: Path, params: dict) -> list:
+        """
+        Build musubi command using tool config mappings.
+        
+        Reads arg_mapping from musubi-qwen.json to translate generic
+        param names to musubi-specific CLI args.
+        """
+        # Get model paths from models.json
+        model_config = self.models_config["models"][model.value]
+        
+        _log("QWEN", f"Model config for {model.value}:")
+        _log("QWEN", f"  DIT: {model_config['dit']}")
+        _log("QWEN", f"  VAE: {model_config['vae']}")
+        _log("QWEN", f"  Text Encoder: {model_config['text_encoder']}")
+        
+        # Start with script path
+        script = self.tool_config.get("script", "qwen_image_generate_image.py")
+        cmd = ["python", str(self.musubi_path / script)]
+        
+        # Add model paths (these use direct mapping, not arg_mapping)
+        cmd.extend(["--dit", model_config["dit"]])
+        cmd.extend(["--vae", model_config["vae"]])
+        cmd.extend(["--text_encoder", model_config["text_encoder"]])
+        
+        # Add output directory
+        cmd.extend(["--save_path", str(output_path.parent)])
+        
+        # Map params using arg_mapping from tool config
+        mapping = self.arg_mapping
+        
+        # Prompt
+        if "prompt" in params and "positive_prompt" in mapping:
+            cmd.extend([mapping["positive_prompt"], params["prompt"]])
+        
+        # Negative prompt  
+        if params.get("negative_prompt") and "negative_prompt" in mapping:
+            cmd.extend([mapping["negative_prompt"], params["negative_prompt"]])
+        
+        # Image size - musubi uses --image_size W H
+        if "size" in mapping:
+            cmd.extend([mapping["size"], str(params["width"]), str(params["height"])])
+        
+        # Standard generation params
+        param_keys = ["infer_steps", "guidance_scale", "blocks_to_swap"]
+        for key in param_keys:
+            if key in params and params[key] is not None and key in mapping:
+                cmd.extend([mapping[key], str(params[key])])
+        
+        # Flow shift (optional - musubi calculates dynamically if not set)
+        if params.get("flow_shift") is not None and "flow_shift" in mapping:
+            cmd.extend([mapping["flow_shift"], str(params["flow_shift"])])
+        
+        # Seed
+        if params.get("seed") is not None and "seed" in mapping:
+            cmd.extend([mapping["seed"], str(params["seed"])])
+        
+        # LoRA
+        if params.get("lora_path") and "lora_path" in mapping:
+            cmd.extend([mapping["lora_path"], params["lora_path"]])
+            cmd.extend([mapping["lora_multiplier"], str(params.get("lora_multiplier", 1.0))])
+        
+        # Control image (edit mode)
+        if params.get("control_image"):
+            # Add conditional flags for edit mode
+            conditional = self.cli_flags.get("conditional", {})
+            if "edit_mode" in conditional:
+                cmd.extend(conditional["edit_mode"])
+            if "control_image" in mapping:
+                cmd.extend([mapping["control_image"], params["control_image"]])
+        
+        # Add always-on flags from tool config
+        always_flags = self.cli_flags.get("always", [])
+        cmd.extend(always_flags)
+        
+        # Add output type
+        defaults_override = self.tool_config.get("defaults_override", {})
+        if "output_type" in defaults_override:
+            cmd.extend(["--output_type", defaults_override["output_type"]])
+        
+        return cmd
+    
+    def _execute(self, cmd: list) -> int:
+        """Execute command with real-time output streaming"""
         process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
@@ -180,7 +332,10 @@ class QwenImageGenerator:
             _log("QWEN", f"Generation failed with code {process.returncode}", "error")
             raise RuntimeError(f"Musubi generation failed with code {process.returncode}")
         
-        # Find the generated file (musubi auto-names it)
+        return process.returncode
+    
+    def _finalize_output(self, output_path: Path) -> Path:
+        """Find generated file and rename to expected output path"""
         save_dir = output_path.parent
         generated_files = sorted(save_dir.glob("*.png"), key=lambda p: p.stat().st_mtime)
         
@@ -188,70 +343,77 @@ class QwenImageGenerator:
             _log("QWEN", "No output file found after generation!", "error")
             raise RuntimeError("No output file found after generation")
         
-        latest_file = generated_files[-1]  # most recent
+        latest_file = generated_files[-1]
         _log("QWEN", f"Found generated file: {latest_file}")
         
-        # Rename to our desired output_path if different
         if latest_file != output_path:
             latest_file.rename(output_path)
             _log("QWEN", f"Renamed to: {output_path}")
         
-        elapsed = time.time() - start_time
-        _log("QWEN", f"Generation complete in {elapsed:.1f}s ({elapsed/60:.1f} min)", "success")
-        
         return output_path
+    
+    def _log_generation_start(self, model: QwenModel, params: dict):
+        """Log generation parameters"""
+        print("\n" + "=" * 70)
+        print(f"  QWEN IMAGE GENERATION")
+        print("=" * 70, flush=True)
+        
+        print(f"\n  Parameters:")
+        print(f"    model: {model.value}")
+        
+        prompt = params.get("prompt", "")
+        print(f"    prompt: {prompt[:80]}..." if len(prompt) > 80 else f"    prompt: {prompt}")
+        
+        neg = params.get("negative_prompt", "")
+        print(f"    negative_prompt: {neg[:50]}..." if len(neg) > 50 else f"    negative_prompt: {neg}")
+        
+        print(f"    size: {params.get('width')}x{params.get('height')}")
+        print(f"    seed: {params.get('seed')}")
+        print(f"    infer_steps: {params.get('infer_steps')}")
+        print(f"    guidance_scale: {params.get('guidance_scale')}")
+        print(f"    flow_shift: {params.get('flow_shift', 'auto')}")
+        print(f"    blocks_to_swap: {params.get('blocks_to_swap')}")
+        
+        if params.get("control_image"):
+            print(f"\n  Control Image:")
+            print(f"    path: {params['control_image']}")
+        
+        if params.get("lora_path"):
+            print(f"\n  LoRA:")
+            print(f"    path: {params['lora_path']}")
+            print(f"    multiplier: {params.get('lora_multiplier', 1.0)}")
+    
+    def _log_command(self, cmd: list):
+        """Log the built command"""
+        print("\n  Command:")
+        for i, part in enumerate(cmd):
+            if part.startswith('--'):
+                print(f"    {part}", end='')
+            elif i > 0 and cmd[i-1].startswith('--'):
+                print(f" {part}")
+            else:
+                print(f"    {part}")
+        print("\n" + "=" * 70 + "\n")
 
-    def _build_command(self, prompt, output_path, model, control_image, 
-                       image_size, seed, lora, lora_multiplier, infer_steps, 
-                       guidance_scale, blocks_to_swap, negative_prompt, flow_shift, **kwargs):
+
+# Factory function for easy initialization
+def create_generator(
+    config_dir: Path,
+    vendor_dir: Path
+) -> QwenImageGenerator:
+    """
+    Create QwenImageGenerator with standard config paths.
+    
+    Args:
+        config_dir: Directory containing models.json, defaults.json, and tools/
+        vendor_dir: Directory containing musubi-tuner
         
-        # Get model-specific config
-        model_config = self.config["models"][model.value]
-        
-        _log("QWEN", f"Model config for {model.value}:")
-        _log("QWEN", f"  DIT: {model_config['dit']}")
-        _log("QWEN", f"  VAE: {model_config['vae']}")
-        _log("QWEN", f"  Text Encoder: {model_config['text_encoder']}")
-        
-        # Musubi saves to directory, we'll need to find the file after
-        save_dir = output_path.parent
-        
-        cmd = [
-            "python", 
-            str(self.musubi_path / "qwen_image_generate_image.py"),
-            "--dit", model_config["dit"],
-            "--vae", model_config["vae"],
-            "--text_encoder", model_config["text_encoder"],
-            "--prompt", prompt,
-            "--negative_prompt", negative_prompt,
-            "--output_type", "images",
-            "--save_path", str(save_dir),
-            "--image_size", str(image_size[0]), str(image_size[1]),
-            "--infer_steps", str(infer_steps),
-            "--guidance_scale", str(guidance_scale),
-            "--blocks_to_swap", str(blocks_to_swap),
-            "--fp8_scaled",
-            "--vae_enable_tiling"
-        ]
-        
-        # Add flow_shift if specified (otherwise musubi uses dynamic calculation)
-        if flow_shift is not None:
-            cmd.extend(["--flow_shift", str(flow_shift)])
-        
-        # Edit mode for control images
-        if control_image:
-            cmd.extend(["--edit", "--control_image_path", str(control_image)])
-            _log("QWEN", f"Edit mode enabled with control image: {control_image}")
-        
-        if seed is not None:
-            cmd.extend(["--seed", str(seed)])
-        
-        if lora:
-            lora_path = self.config["loras"].get(lora, lora)
-            cmd.extend([
-                "--lora_weight", lora_path,
-                "--lora_multiplier", str(lora_multiplier)
-            ])
-            _log("QWEN", f"LoRA: {lora_path} @ {lora_multiplier}x")
-        
-        return cmd
+    Returns:
+        Configured QwenImageGenerator instance
+    """
+    return QwenImageGenerator(
+        models_config_path=config_dir / "models.json",
+        tool_config_path=config_dir / "tools" / "musubi-qwen.json",
+        defaults_config_path=config_dir / "defaults.json",
+        musubi_vendor_path=vendor_dir / "musubi-tuner"
+    )

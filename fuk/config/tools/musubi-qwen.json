@@ -1,0 +1,65 @@
+{
+  "_comment": "musubi-tuner Qwen image generation - Repo-specific flags and settings",
+  "_repo": "https://github.com/kohya-ss/musubi-tuner",
+  
+  "script": "qwen_image_generate_image.py",
+  
+  "performance": {
+    "fp8_scaled": true,
+    "vae_enable_tiling": true,
+    "blocks_to_swap_default": 0
+  },
+
+  "cli_flags": {
+    "_comment": "Flags to always include regardless of user settings",
+    "always": [
+      "--fp8_scaled",
+      "--vae_enable_tiling"
+    ],
+    "conditional": {
+      "_comment": "Flags added based on conditions",
+      "edit_mode": ["--edit"]
+    }
+  },
+
+  "arg_mapping": {
+    "_comment": "Map generic FUK param names to musubi CLI args",
+    "positive_prompt": "--prompt",
+    "negative_prompt": "--negative_prompt",
+    "size": "--image_size",
+    "infer_steps": "--infer_steps",
+    "guidance_scale": "--guidance_scale",
+    "flow_shift": "--flow_shift",
+    "blocks_to_swap": "--blocks_to_swap",
+    "seed": "--seed",
+    "lora_path": "--lora_weight",
+    "lora_multiplier": "--lora_multiplier",
+    "control_image": "--control_image_path",
+    "dit": "--dit",
+    "vae": "--vae",
+    "text_encoder": "--text_encoder",
+    "output_dir": "--save_path",
+    "output_type": "--output_type"
+  },
+
+  "defaults_override": {
+    "_comment": "Tool-specific defaults that override user defaults when appropriate",
+    "output_type": "images"
+  },
+
+  "vram_profiles": {
+    "_comment": "VRAM-based automatic settings",
+    "24gb": {
+      "blocks_to_swap": 0,
+      "fp8_scaled": true
+    },
+    "16gb": {
+      "blocks_to_swap": 10,
+      "fp8_scaled": true
+    },
+    "12gb": {
+      "blocks_to_swap": 20,
+      "fp8_scaled": true
+    }
+  }
+}

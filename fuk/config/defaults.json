@@ -1,30 +1,94 @@
 {
-  "comment": "Default values for FUK generation pipeline",
-  
-  "negative_prompt": "blurry, low quality, distorted, deformed, ugly, bad anatomy, worst quality, low resolution, jpeg artifacts, watermark, signature, username, text",
-  
-  "image_size": [1024, 1024],
-  "infer_steps": 20,
-  
-  "_guidance_scale_note": "Lower values (2.5-3.5) often look more natural and less CG. Qwen uses flow matching, not traditional denoise, so guidance_scale is the main control for output 'strength'.",
-  "guidance_scale": 2.1,
-  
-  "_flow_shift_note": "Controls timestep scheduling (equivalent to ModelSamplingDiscrete in ComfyUI). Lower (2.0-2.2) = more natural/photorealistic. Higher (2.5-3.0+) = more detail/sharper. Set to null to use musubi's dynamic calculation based on resolution.",
-  "flow_shift": 2.1,
-  
-  "blocks_to_swap": 0,
-  "lora_multiplier": 1.0,
-  
-  "seed": null,
-  
-  "format": {
+  "_comment": "FUK User Defaults - Per-tab generation settings and project preferences",
+
+  "aspect_ratios": {
+    "_comment": "Aspect ratio presets - label maps to ratio for height calculation",
+    "Square": 1.0,
+    "Fullscreen": 1.33,
+    "Academy": 1.85,
+    "Widescreen": 1.78,
+    "Anamorphic": 2.39,
+    "Panavision": 2.75
+  },
+
+  "image": {
+    "positive_prompt": "",
+    "negative_prompt": "blurry, low quality, distorted, deformed, ugly, bad anatomy, worst quality, low resolution, jpeg artifacts, watermark, signature, username, text",
+    "width": 1344,
+    "aspect_ratio": "Widescreen",
+    "infer_steps": 20,
+    "guidance_scale": 2.1,
+    "flow_shift": 2.1,
+    "blocks_to_swap": 0,
+    "lora_multiplier": 1.0,
+    "seed": null
+  },
+
+  "video": {
+    "positive_prompt": "",
+    "negative_prompt": "blurry, low quality, distorted, deformed, ugly, bad anatomy, worst quality, low resolution, jpeg artifacts, watermark, signature, username, text",
+    "size": [832, 480],
+    "length": 81,
+    "infer_steps": 20,
+    "guidance_scale": 5.0,
+    "flow_shift": 5.0,
+    "blocks_to_swap": 0,
+    "lora_multiplier": 1.0,
+    "seed": null
+  },
+
+  "preprocess": {
+    "depth": {
+      "model": "da3_mono_large",
+      "invert": false,
+      "normalize": true,
+      "colormap": "inferno"
+    },
+    "normals": {
+      "method": "depth_gradient",
+      "depth_model": "da3_mono_large",
+      "blur_radius": 3,
+      "normalize": true
+    },
+    "canny": {
+      "low_threshold": 100,
+      "high_threshold": 200
+    },
+    "openpose": {
+      "include_hands": true,
+      "include_face": true
+    },
+    "crypto": {
+      "model": "sam2",
+      "mode": "auto",
+      "points_per_side": 32,
+      "pred_iou_thresh": 0.86,
+      "stability_score_thresh": 0.92
+    }
+  },
+
+  "postprocess": {
+    "upscale": {
+      "model": "real_esrgan_x4",
+      "scale": 4
+    },
+    "interpolate": {
+      "model": "rife",
+      "multiplier": 2
+    }
+  },
+
+  "export": {
     "output_format": "png",
     "create_exr": true,
-    "exr_linear": true
+    "exr_linear": true,
+    "include_metadata": true
   },
-  
-  "metadata": {
-    "save_metadata": true,
-    "include_timestamp": true
+
+  "project": {
+    "shot_label": "shot",
+    "versioning": "DATE",
+    "autosave_interval": 30,
+    "cache_cleanup_days": 7
   }
 }

@@ -1,0 +1,106 @@
+{
+  "_comment": "musubi-tuner Wan video generation - Repo-specific flags and settings",
+  "_repo": "https://github.com/kohya-ss/musubi-tuner",
+  
+  "script": "wan_generate_video.py",
+  
+  "performance": {
+    "fp8": true,
+    "fp8_scaled": true,
+    "fp8_t5": true,
+    "vae_cache_cpu": false,
+    "attn_mode": "torch",
+    "blocks_to_swap_default": 0
+  },
+
+  "cli_flags": {
+    "always": [],
+    "conditional": {
+      "fp8": ["--fp8"],
+      "fp8_scaled": ["--fp8_scaled"],
+      "fp8_t5": ["--fp8_t5"],
+      "vae_cache_cpu": ["--vae_cache_cpu"]
+    }
+  },
+
+  "arg_mapping": {
+    "task": "--task",
+    "positive_prompt": "--prompt",
+    "negative_prompt": "--negative_prompt",
+    "size": "--video_size",
+    "length": "--video_length",
+    "infer_steps": "--infer_steps",
+    "guidance_scale": "--guidance_scale",
+    "flow_shift": "--flow_shift",
+    "blocks_to_swap": "--blocks_to_swap",
+    "seed": "--seed",
+    "lora_path": "--lora_weight",
+    "lora_multiplier": "--lora_multiplier",
+    "image_path": "--image_path",
+    "end_image_path": "--end_image_path",
+    "control_path": "--control_path",
+    "attn_mode": "--attn_mode",
+    "dit": "--dit",
+    "vae": "--vae",
+    "t5": "--t5",
+    "clip": "--clip",
+    "output_dir": "--save_path",
+    "output_type": "--output_type"
+  },
+
+  "defaults_override": {
+    "output_type": "both"
+  },
+
+  "video_length_constraint": {
+    "_comment": "video_length must be 4n+1",
+    "formula": "4n+1",
+    "valid_examples": [5, 9, 13, 17, 21, 25, 33, 41, 49, 57, 65, 81, 97]
+  },
+
+  "task_requirements": {
+    "_comment": "Which inputs each task type requires",
+    "t2v": {
+      "required": ["prompt"],
+      "optional": ["negative_prompt"]
+    },
+    "i2v": {
+      "required": ["prompt", "image_path"],
+      "optional": ["negative_prompt"],
+      "models_need_clip": true
+    },
+    "flf2v": {
+      "required": ["prompt", "image_path", "end_image_path"],
+      "optional": ["negative_prompt"],
+      "models_need_clip": true
+    },
+    "fc": {
+      "required": ["prompt", "control_path"],
+      "optional": ["negative_prompt", "image_path"]
+    }
+  },
+
+  "vram_profiles": {
+    "24gb": {
+      "blocks_to_swap": 0,
+      "fp8": true,
+      "fp8_scaled": true,
+      "fp8_t5": true,
+      "vae_cache_cpu": false
+    },
+    "16gb": {
+      "blocks_to_swap": 20,
+      "fp8": true,
+      "fp8_scaled": true,
+      "fp8_t5": true,
+      "vae_cache_cpu": true
+    },
+    "12gb": {
+      "blocks_to_swap": 35,
+      "fp8": true,
+      "fp8_scaled": true,
+      "fp8_t5": true,
+      "vae_cache_cpu": true
+    }
+  }
+}

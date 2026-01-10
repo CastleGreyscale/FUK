@@ -9,14 +9,35 @@ Provides REST API endpoints for:
 - File serving
 - Generation history
 """
+
 import sys
 import os
+from pathlib import Path
 
 # Force unbuffered output for real-time logging
 os.environ['PYTHONUNBUFFERED'] = '1'
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(line_buffering=True)
 
+    # Determine base directory (where this script is located)
+BASE_DIR = Path(__file__).parent
+
+## Paths
+UI_DIR = Path(__file__).parent          # fuk/ui/
+ROOT_DIR = UI_DIR.parent                 # fuk/
+CONFIG_DIR = ROOT_DIR / "config"         # fuk/config/
+VENDOR_DIR = ROOT_DIR / "vendor"         # fuk/vendor/
+sys.path.insert(0, str(ROOT_DIR))   # Add fuk/ to path
+
+OUTPUT_ROOTS = [
+    ROOT_DIR / "outputs",
+    ROOT_DIR.parent / "outputs",
+    Path("outputs"),
+]
+
+
+
+from pathlib import Path
 from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,12 +47,12 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 from file_browser_endpoints import setup_file_browser_routes
 from video_endpoints import setup_video_routes
+from core.qwen_image_wrapper import create_generator, QwenModel
 import json
 import asyncio
 import uuid
 from datetime import datetime
 from enum import Enum
-import sys
 import time
 import traceback
 from project_endpoints import (
@@ -43,6 +64,7 @@ from project_endpoints import (
     get_cache_root,
     get_default_cache_root
 )
+
 
 # ============================================================================
 # Logging Utility
@@ -185,33 +207,7 @@ except ImportError as e:
 # Configuration
 # ============================================================================
 
-# Determine base directory (where this script is located)
-BASE_DIR = Path(__file__).parent
 
-# Look for config in multiple possible locations
-CONFIG_PATHS = [
-    BASE_DIR / "config" / "models.json",
-    BASE_DIR.parent / "config" / "models.json",
-    Path("config/models.json"),
-]
-
-DEFAULTS_PATHS = [
-    BASE_DIR / "config" / "defaults.json",
-    BASE_DIR.parent / "config" / "defaults.json",
-    Path("config/defaults.json"),
-]
-
-MUSUBI_PATHS = [
-    BASE_DIR / "vendor" / "musubi-tuner",
-    BASE_DIR.parent / "vendor" / "musubi-tuner",
-    Path("vendor/musubi-tuner"),
-]
-
-OUTPUT_ROOTS = [
-    BASE_DIR / "outputs",
-    BASE_DIR.parent / "outputs",
-    Path("outputs"),
-]
 
 # Find first existing path for each
 def find_path(paths, name):
@@ -225,12 +221,24 @@ def find_path(paths, name):
     raise FileNotFoundError(f"{name} not found")
 
 try:
-    CONFIG_PATH = find_path(CONFIG_PATHS, "models.json")
-    DEFAULTS_PATH = find_path(DEFAULTS_PATHS, "defaults.json")
-    MUSUBI_PATH = find_path(MUSUBI_PATHS, "musubi-tuner")
-    OUTPUT_ROOT = OUTPUT_ROOTS[0]  # Use first option, create if needed
+    # Verify required config paths exist
+    if not CONFIG_DIR.exists():
+        raise FileNotFoundError(f"Config directory not found: {CONFIG_DIR}")
+    if not (CONFIG_DIR / "models.json").exists():
+        raise FileNotFoundError(f"models.json not found in {CONFIG_DIR}")
+    if not (CONFIG_DIR / "defaults.json").exists():
+        raise FileNotFoundError(f"defaults.json not found in {CONFIG_DIR}")
+    if not (VENDOR_DIR / "musubi-tuner").exists():
+        raise FileNotFoundError(f"musubi-tuner not found in {VENDOR_DIR}")
+    
+    print(f"[STARTUP] Config directory: {CONFIG_DIR}", flush=True)
+    print(f"[STARTUP] Vendor directory: {VENDOR_DIR}", flush=True)
+    
+    # Output directory (use first option, create if needed)
+    OUTPUT_ROOT = OUTPUT_ROOTS[0]
     OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
     print(f"[STARTUP] Output directory: {OUTPUT_ROOT}", flush=True)
+    
 except FileNotFoundError as e:
     print(f"\nError: {e}", flush=True)
     print("\nPlease ensure your project has the following structure:", flush=True)
@@ -239,15 +247,23 @@ except FileNotFoundError as e:
     print("  vendor/musubi-tuner/", flush=True)
     sys.exit(1)
 
-# Ensure paths exist
-OUTPUT_ROOT.mkdir(exist_ok=True)
+# Ensure output subdirs exist
 (OUTPUT_ROOT / "image").mkdir(exist_ok=True)
 (OUTPUT_ROOT / "video").mkdir(exist_ok=True)
-(OUTPUT_ROOT / "uploads").mkdir(exist_ok=True)  # For user-uploaded control images
+(OUTPUT_ROOT / "uploads").mkdir(exist_ok=True)
+
 
 # Cache directory for project-aware outputs
-CACHE_ROOT = BASE_DIR / "cache"
+CACHE_ROOT = ROOT_DIR / "cache"
 CACHE_ROOT.mkdir(exist_ok=True)
+
+# Initialize image generator
+image_generator = create_generator(
+    config_dir=CONFIG_DIR,
+    vendor_dir=VENDOR_DIR
+)
+
+print("[STARTUP] ✓ Image generator initialized", flush=True)
 
 # ============================================================================
 # Global State
@@ -283,12 +299,11 @@ app.mount("/project-cache", StaticFiles(directory=str(CACHE_ROOT)), name="projec
 active_generations: Dict[str, Dict[str, Any]] = {}
 
 # Load defaults
-with open(DEFAULTS_PATH) as f:
+with open(CONFIG_DIR / "defaults.json") as f:
     DEFAULTS = json.load(f)
 
-# Initialize generators
-image_generator = QwenImageGenerator(CONFIG_PATH, MUSUBI_PATH, DEFAULTS_PATH)
-video_generator = WanVideoGenerator(CONFIG_PATH, MUSUBI_PATH, DEFAULTS_PATH)
+
+
 image_manager = ImageGenerationManager(OUTPUT_ROOT / "image")
 video_manager = VideoGenerationManager(OUTPUT_ROOT / "video")
 preprocessor_manager = PreprocessorManager(OUTPUT_ROOT / "preprocessed")
@@ -441,6 +456,7 @@ def resolve_input_path(path_str: str) -> Optional[Path]:
 # Request/Response Models
 # ============================================================================
 
+
 class ImageGenerationRequest(BaseModel):
     prompt: str
     model: str = "qwen_image"
@@ -579,13 +595,13 @@ def clear_vram():
             allocated = torch.cuda.memory_allocated() / (1024**3)  # GB
             reserved = torch.cuda.memory_reserved() / (1024**3)    # GB
             
-            print(f"  VRAM - Allocated: {allocated:.2f}GB, Reserved: {reserved:.2f}GB")
-            print(f"  ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬ ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“ VRAM cleared")
+            print(f"VRAM - Allocated: {allocated:.2f}GB, Reserved: {reserved:.2f}GB")
+            print(f"VRAM cleared")
         else:
-            print(f"  ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬ ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚  CUDA not available, skipping VRAM clear")
+            print(f"CUDA not available, skipping VRAM clear")
             
     except Exception as e:
-        print(f"  ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬ ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚  VRAM clear failed: {e}")
+        print(f"VRAM clear failed: {e}")
 
 # ============================================================================
 # File Upload
@@ -676,12 +692,11 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
     
     try:
         print("\n" + "="*80)
-        print(f"ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ Starting Image Generation: {generation_id}")
+        print(f"Starting Image Generation: {generation_id}")
         print("="*80)
         print(f"Prompt: {request.prompt}")
         print(f"Model: {request.model}")
-        print(f"Size: {request.width}x{request.height} (WÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬ ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚ ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂH)")
-        print(f"  ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬ ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ Musubi receives: {request.height}x{request.width} (HÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬ ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚ ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂW)")
+        print(f"Size: {request.width}x{request.height}")
         print(f"Steps: {request.steps}")
         print(f"Guidance: {request.guidance_scale}")
         print(f"Flow Shift: {request.flow_shift}")
@@ -695,10 +710,8 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
         active_generations[generation_id]["phase"] = "initialization"
         active_generations[generation_id]["total_steps"] = request.steps
         active_generations[generation_id]["current_step"] = 0
-        print(f"[{generation_id}] Status: initialization")
         
         # Create generation directory
-        print(f"[{generation_id}] Creating generation directory...")
         gen_dir = get_generation_output_dir("img_gen")
         paths = build_output_paths(gen_dir)
         print(f"[{generation_id}] Output directory: {gen_dir}")
@@ -706,160 +719,41 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
         active_generations[generation_id]["gen_dir"] = str(gen_dir)
         active_generations[generation_id]["phase"] = "generating"
         
-        print(f"[{generation_id}] Output directory: {gen_dir}")
-        
         # Map model string to enum
         model = QwenModel.IMAGE if request.model == "qwen_image" else QwenModel.EDIT_2509
-        print(f"[{generation_id}] Using model: {model}")
-        
-        # Generate with progress callback
-        print(f"[{generation_id}] Calling musubi generator...")
-        print(f"[{generation_id}] This may take several minutes depending on your hardware...")
-        
-        # Create a wrapper that updates progress
-        def progress_callback(phase: str, current: int, total: int):
-            """Update progress in active_generations"""
-            if generation_id in active_generations:
-                progress = current / total if total > 0 else 0
-                active_generations[generation_id].update({
-                    "phase": phase,
-                    "current_step": current,
-                    "total_steps": total,
-                    "progress": progress,
-                    "updated_at": datetime.now().isoformat()
-                })
-                print(f"[{generation_id}] Progress: {phase} {current}/{total} ({progress*100:.1f}%)")
-        
-        # Generate - we need to pass the progress callback through
-        # For now, we'll manually track by monitoring the subprocess
-        import subprocess
-        import re
-        
-        # Build the musubi command manually to capture output
-        model_config = image_generator.config["models"][request.model]
-        save_dir = paths["generated_png"].parent
-        
-        cmd = [
-            "python",
-            str(image_generator.musubi_path / "qwen_image_generate_image.py"),
-            "--dit", model_config["dit"],
-            "--vae", model_config["vae"],
-            "--text_encoder", model_config["text_encoder"],
-            "--prompt", request.prompt,
-            "--negative_prompt", request.negative_prompt or image_generator.defaults.get("negative_prompt", ""),
-            "--output_type", "images",
-            "--save_path", str(save_dir),
-            "--image_size", str(request.height), str(request.width),  # Musubi expects HEIGHT, WIDTH
-            "--infer_steps", str(request.steps),
-            "--guidance_scale", str(request.guidance_scale),
-            "--blocks_to_swap", str(request.blocks_to_swap),
-            "--fp8_scaled",
-            "--vae_enable_tiling"
-        ]
-        
-        if request.flow_shift is not None:
-            cmd.extend(["--flow_shift", str(request.flow_shift)])
         
         # Handle control images for edit mode
-        # Support both single image (backward compat) and multiple images
-        control_images = []
+        control_image = None
         if request.control_image_paths:
-            control_images = [resolve_input_path(path) for path in request.control_image_paths]
+            resolved = resolve_input_path(request.control_image_paths[0])
+            if resolved and resolved.exists():
+                control_image = resolved
+                print(f"[{generation_id}] Control image: {control_image}")
         elif request.control_image_path:
-            control_images = [resolve_input_path(request.control_image_path)]
+            resolved = resolve_input_path(request.control_image_path)
+            if resolved and resolved.exists():
+                control_image = resolved
+                print(f"[{generation_id}] Control image: {control_image}")
         
-        # Filter out None values
-        control_images = [p for p in control_images if p is not None]
-        
-        if control_images:
-            cmd.append("--edit")
-            for img_path in control_images:
-                if img_path.exists():
-                    cmd.extend(["--control_image_path", str(img_path)])
-                    print(f"[{generation_id}] Control image found: {img_path}", flush=True)
-                else:
-                    print(f"[{generation_id}] WARNING: Control image not found: {img_path}", flush=True)
-            
-            print(f"[{generation_id}] Using {len(control_images)} control image(s)", flush=True)
-        
-        if request.seed is not None:
-            cmd.extend(["--seed", str(request.seed)])
-        
-        if request.lora:
-            lora_path = image_generator.config["loras"].get(request.lora, request.lora)
-            cmd.extend([
-                "--lora_weight", lora_path,
-                "--lora_multiplier", str(request.lora_multiplier)
-            ])
-        
-        # Run with real-time output parsing
-        # IMPORTANT: Run from musubi-tuner directory so imports work
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-            universal_newlines=True,
-            cwd=str(image_generator.musubi_path)  # Run from musubi directory
+        # Generate using the wrapper
+        result = image_generator.generate(
+            prompt=request.prompt,
+            output_path=paths["generated_png"],
+            model=model,
+            width=request.width,
+            height=request.height,
+            seed=request.seed,
+            infer_steps=request.steps,
+            guidance_scale=request.guidance_scale,
+            flow_shift=request.flow_shift,
+            blocks_to_swap=request.blocks_to_swap,
+            negative_prompt=request.negative_prompt,
+            lora=request.lora,
+            lora_multiplier=request.lora_multiplier,
+            control_image=control_image,
         )
         
-        # Patterns to match step progress from musubi output
-        # Pattern 1: "100%|ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬ ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¹ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬ ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¹ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬ ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¹ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬ ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¹ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬ ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¹ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬ ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¹ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬ ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¹ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬ ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¹ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬ ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¹ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬ ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¹ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ | 20/20 [00:45<00:00,  2.27s/it]"
-        tqdm_pattern = re.compile(r'(\d+)/(\d+)\s+\[')
-        # Pattern 2: "Step 5/20" or "step 5/20"
-        step_pattern = re.compile(r'step\s+(\d+)/(\d+)', re.IGNORECASE)
-        # Pattern 3: Just numbers like "5/20"
-        simple_pattern = re.compile(r'^\s*(\d+)/(\d+)')
-        
-        for line in iter(process.stdout.readline, ''):
-            if not line:
-                break
-            
-            # Print to console
-            print(line.rstrip())
-            
-            # Try to extract step progress with multiple patterns
-            current = None
-            total = None
-            
-            # Try tqdm pattern first (most common in musubi)
-            match = tqdm_pattern.search(line)
-            if match:
-                current = int(match.group(1))
-                total = int(match.group(2))
-            else:
-                # Try step pattern
-                match = step_pattern.search(line)
-                if match:
-                    current = int(match.group(1))
-                    total = int(match.group(2))
-                else:
-                    # Try simple pattern
-                    match = simple_pattern.search(line)
-                    if match:
-                        current = int(match.group(1))
-                        total = int(match.group(2))
-            
-            # Update progress if we found a match
-            if current is not None and total is not None:
-                progress_callback("denoising", current, total)
-        
-        process.wait()
-        
-        if process.returncode != 0:
-            raise RuntimeError(f"Musubi generation failed with code {process.returncode}")
-        
-        # Find the generated file
-        generated_files = sorted(save_dir.glob("*.png"), key=lambda p: p.stat().st_mtime)
-        if not generated_files:
-            raise RuntimeError("No output file found after generation")
-        
-        latest_file = generated_files[-1]
-        if latest_file != paths["generated_png"]:
-            latest_file.rename(paths["generated_png"])
-        
-        print(f"[{generation_id}] ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬ ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“ Generation complete!")
+        print(f"[{generation_id}] Generation complete!")
         
         outputs = {
             "png": get_project_relative_url(paths["generated_png"])
@@ -869,53 +763,48 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
         # Convert to EXR if requested
         if request.output_format in ["exr", "both"]:
             active_generations[generation_id]["phase"] = "converting_to_exr"
-            print(f"[{generation_id}] Status: converting to EXR...")
+            print(f"[{generation_id}] Converting to EXR...")
             
             FormatConverter.png_to_exr_32bit(
                 paths["generated_png"],
                 paths["generated_exr"],
-                linear=True )
+                linear=True
+            )
             outputs["exr"] = get_project_relative_url(paths["generated_exr"])
             print(f"[{generation_id}] EXR saved: {paths['generated_exr']}")
         
         # Save metadata
-        print(f"[{generation_id}] Saving metadata...")
         save_generation_metadata(
             gen_dir=gen_dir,
             prompt=request.prompt,
             model=request.model,
-            seed=request.seed or 0,
+            seed=result.get("seed_used") or request.seed or 0,
             image_size=(request.width, request.height),
             infer_steps=request.steps,
             guidance_scale=request.guidance_scale,
-            negative_prompt=request.negative_prompt or DEFAULTS.get("negative_prompt", ""),
+            negative_prompt=request.negative_prompt or "",
             flow_shift=request.flow_shift,
             lora=request.lora,
             lora_multiplier=request.lora_multiplier,
-            control_image=str(request.control_image_path) if request.control_image_path else None
+            control_image=str(control_image) if control_image else None
         )
-        print(f"[{generation_id}] Metadata saved")
         
         # Mark complete
         active_generations[generation_id].update({
             "status": "complete",
             "phase": "complete",
             "progress": 1.0,
-            "outputs": outputs,  # This now has the correct URL format
-            "seed_used": request.seed,  # Include the seed that was used
+            "outputs": outputs,
+            "seed_used": result.get("seed_used") or request.seed,
             "completed_at": datetime.now().isoformat()
         })
         
-        
         print("\n" + "="*80)
         print(f"Generation Complete: {generation_id}")
-        print(f"   Output PNG: {outputs['png']}")
-        print(f"Output directory: {gen_dir}")
-        print(f"Files: {', '.join(outputs.keys())}")
+        print(f"Output: {outputs['png']}")
         print("="*80 + "\n")
         
         # Clear VRAM
-        print(f"[{generation_id}] Clearing VRAM...")
         clear_vram()
         
     except Exception as e:
@@ -927,10 +816,8 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
         print(f"Generation Failed: {e}")
         import traceback
         traceback.print_exc()
-
-        # Clear VRAM even on failure
-        print(f"[{generation_id}] Clearing VRAM after failure...")
         clear_vram()
+
 
 @app.post("/api/generate/image", response_model=GenerationResponse)
 async def generate_image(request: ImageGenerationRequest, background_tasks: BackgroundTasks):
@@ -938,7 +825,6 @@ async def generate_image(request: ImageGenerationRequest, background_tasks: Back
     
     generation_id = str(uuid.uuid4())
     
-    # Initialize tracking
     active_generations[generation_id] = {
         "id": generation_id,
         "type": "image",
@@ -949,7 +835,6 @@ async def generate_image(request: ImageGenerationRequest, background_tasks: Back
         "created_at": datetime.now().isoformat()
     }
     
-    # Start background generation
     background_tasks.add_task(run_image_generation, generation_id, request)
     
     return GenerationResponse(
@@ -957,7 +842,6 @@ async def generate_image(request: ImageGenerationRequest, background_tasks: Back
         status="queued",
         message="Image generation started"
     )
-
 # ============================================================================
 # Video Generation
 # ============================================================================
@@ -1050,7 +934,7 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
                 exr_dir = video_manager.export_latent_to_exr(
                     gen_dir=gen_dir,
                     task=request.task,
-                    config_path=CONFIG_PATH,
+                    config_path=CONFIG_DIR,
                     musubi_path=MUSUBI_PATH,
                     linear=True
                 )
@@ -1378,7 +1262,7 @@ async def get_defaults():
 @app.get("/api/config/models")
 async def get_models():
     """Get available models"""
-    with open(CONFIG_PATH) as f:
+    with open(CONFIG_DIR / "models.json") as f:
         config = json.load(f)
     
     return {
@@ -2749,9 +2633,6 @@ if __name__ == "__main__":
     print("\n" + "="*60)
     print("FUK Generation Web Server")
     print("="*60)
-    print(f"Output directory: {OUTPUT_ROOT.absolute()}")
-    print(f"Musubi path: {MUSUBI_PATH.absolute()}")
-    print(f"Config: {CONFIG_PATH.absolute()}")
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
