@@ -5,8 +5,11 @@
 
 /* ============================================================================
  * CSS MODULE IMPORTS
- * Order matters: base → components → utilities
+ * Order matters: variables -> base -> components -> utilities
  * ========================================================================== */
+
+/* Design tokens and variables */
+@import './variables.css';
 
 /* Base styles and core layout */
 @import './fuk-ui.css';
@@ -66,27 +69,27 @@ body {
 .fuk-image-uploader {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: var(--spacing-md);
 }
 
 .fuk-dropzone {
-  border: 2px dashed #374151;
-  border-radius: 0.5rem;
-  padding: 1rem;
+  border: var(--border-width-thick) dashed var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-lg);
   text-align: center;
-  transition: all 0.2s;
+  transition: all var(--transition-base);
   cursor: pointer;
 }
 
 .fuk-dropzone:hover,
 .fuk-dropzone.drag-over {
-  border-color: #a855f7;
+  border-color: var(--color-accent);
   background-color: rgba(168, 85, 247, 0.1);
 }
 
 /* Internal drag from Generation History */
 .fuk-dropzone.drag-over-internal {
-  border-color: #10b981;
+  border-color: var(--color-success-800);
   background-color: rgba(16, 185, 129, 0.1);
 }
 
@@ -94,24 +97,24 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.25rem;
-  color: #9ca3af;
-  font-size: 0.75rem;
+  gap: var(--spacing-xs);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
 }
 
 .fuk-thumbnail-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
-  gap: 0.5rem;
-  margin-top: 0.5rem;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-sm);
 }
 
 .fuk-thumbnail {
   position: relative;
   aspect-ratio: 1;
-  border-radius: 0.25rem;
+  border-radius: var(--radius-sm);
   overflow: hidden;
-  border: 1px solid #374151;
+  border: var(--border-width) solid var(--color-border);
 }
 
 .fuk-thumbnail img {
@@ -135,7 +138,7 @@ body {
   justify-content: center;
   color: white;
   padding: 0;
-  transition: background 0.2s;
+  transition: background var(--transition-base);
 }
 
 .fuk-thumbnail-remove:hover {
@@ -149,7 +152,7 @@ body {
   left: 2px;
   background: rgba(16, 185, 129, 0.9);
   border: none;
-  border-radius: 0.25rem;
+  border-radius: var(--radius-sm);
   width: 16px;
   height: 16px;
   display: flex;
@@ -162,11 +165,11 @@ body {
 .fuk-thumbnail-error {
   width: 100%;
   height: 100%;
-  background: #1f2937;
+  background: var(--color-surface);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #4b5563;
+  color: var(--color-gray-600);
   font-size: 1.5rem;
 }
 
@@ -175,9 +178,9 @@ body {
  * ========================================================================== */
 
 .fuk-preview-media--video {
-  border-radius: 0.5rem;
-  border: 1px solid #374151;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  border-radius: var(--radius-lg);
+  border: var(--border-width) solid var(--color-border);
+  box-shadow: var(--shadow-lg);
 }
 
 /* ============================================================================
@@ -185,7 +188,7 @@ body {
  * ========================================================================== */
 
 .fuk-input-separator {
-  color: #9ca3af;
+  color: var(--color-text-muted);
   flex-shrink: 0;
 }
 
@@ -194,7 +197,7 @@ body {
  * ========================================================================== */
 
 .fuk-seed-display {
-  color: #a855f7;
+  color: var(--color-accent);
 }
 
 /* ============================================================================
@@ -202,21 +205,21 @@ body {
  * ========================================================================== */
 
 .fuk-icon-sm {
-  width: 1rem;
-  height: 1rem;
+  width: var(--icon-md);
+  height: var(--icon-md);
 }
 
 .fuk-icon-md {
-  width: 1.25rem;
-  height: 1.25rem;
+  width: var(--icon-lg);
+  height: var(--icon-lg);
 }
 
 .fuk-icon-lg {
-  width: 1.5rem;
-  height: 1.5rem;
+  width: var(--icon-xl);
+  height: var(--icon-xl);
 }
 
 .fuk-icon-xl {
-  width: 2rem;
-  height: 2rem;
+  width: var(--icon-2xl);
+  height: var(--icon-2xl);
 }

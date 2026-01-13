@@ -4,35 +4,8 @@
  */
 
 import { useState } from 'react';
-import { Save, Loader2, AlertCircle, CheckCircle } from './Icons';
+import { Save, Loader2, AlertCircle, CheckCircle, Folder, FilePlus, Plus, ChevronDown } from './Icons';
 
-// Folder icon
-const Folder = ({ className, style }) => (
-  <svg className={className} style={style} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-  </svg>
-);
-
-// Plus icon
-const Plus = ({ className, style }) => (
-  <svg className={className} style={style} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-  </svg>
-);
-
-// File plus icon
-const FilePlus = ({ className, style }) => (
-  <svg className={className} style={style} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-  </svg>
-);
-
-// Chevron down icon
-const ChevronDown = ({ className, style }) => (
-  <svg className={className} style={style} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-  </svg>
-);
 
 export default function ProjectBar({
   projectFolder,
@@ -40,7 +13,7 @@ export default function ProjectBar({
   shots,
   currentShotVersions,
   hasUnsavedChanges,
-  isSaving,  // NEW: actual saving in progress
+  isSaving,
   isLoading,
   hasFiles,
   onBrowseFolder,
@@ -91,9 +64,9 @@ export default function ProjectBar({
           disabled={isLoading}
         >
           {isLoading ? (
-            <Loader2 className="animate-spin" style={{ width: '1rem', height: '1rem' }} />
+            <Loader2 className="fuk-icon--md animate-spin" />
           ) : (
-            <Folder style={{ width: '1rem', height: '1rem' }} />
+            <Folder className="fuk-icon--md" />
           )}
           {isLoading ? 'Opening...' : 'Open Project Folder'}
         </button>
@@ -113,9 +86,9 @@ export default function ProjectBar({
           onClick={onBrowseFolder}
           title={projectFolder}
         >
-          <Folder style={{ width: '1rem', height: '1rem' }} />
+          <Folder className="fuk-icon--md" />
           <span className="fuk-project-folder-name">{getFolderDisplayName()}</span>
-          <ChevronDown style={{ width: '0.75rem', height: '0.75rem', opacity: 0.5 }} />
+          <ChevronDown className="fuk-project-chevron" />
         </button>
 
         <span className="fuk-project-separator">/</span>
@@ -146,12 +119,12 @@ export default function ProjectBar({
             className="fuk-btn fuk-btn-new-project"
             onClick={() => setShowNewProjectDialog(true)}
           >
-            <FilePlus style={{ width: '1rem', height: '1rem' }} />
+            <FilePlus className="fuk-icon--md" />
             New Project File
           </button>
         )}
 
-        <span className="fuk-project-hint" style={{ marginLeft: '1rem' }}>
+        <span className="fuk-project-hint fuk-project-hint--spaced">
           No project files found. Create one to get started.
         </span>
       </div>
@@ -162,20 +135,20 @@ export default function ProjectBar({
     <div className="fuk-project-bar">
       {/* Project Folder Button */}
       <button 
-        className="fuk-project-folder-btn"
+        className="fuk-project-select"
         onClick={onBrowseFolder}
         title={projectFolder}
         disabled={isLoading}
       >
         {isLoading ? (
-          <Loader2 className="animate-spin" style={{ width: '1rem', height: '1rem' }} />
+          <Loader2 className="fuk-icon--md animate-spin" />
         ) : (
-          <Folder style={{ width: '1rem', height: '1rem' }} />
+          <Folder className="fuk-icon--md" />
         )}
         <span className="fuk-project-folder-name">{getFolderDisplayName()}</span>
-        <ChevronDown style={{ width: '0.75rem', height: '0.75rem', opacity: 0.5 }} />
+        <ChevronDown className="fuk-project-chevron" />
       </button>
-
+      
       <span className="fuk-project-separator">/</span>
 
       {/* Shot Selector */}
@@ -222,7 +195,7 @@ export default function ProjectBar({
               onClick={() => setShowNewShotInput(true)}
               title="New Shot"
             >
-              <Plus style={{ width: '0.875rem', height: '0.875rem' }} />
+              <Plus className="fuk-project-add-icon" />
             </button>
           )}
         </div>
@@ -257,7 +230,7 @@ export default function ProjectBar({
       {/* Autosave Status Indicator */}
       {isSaving ? (
         <span className="fuk-autosave-indicator fuk-autosave-pending" title="Saving...">
-          <Loader2 className="animate-spin" style={{ width: '0.875rem', height: '0.875rem' }} />
+          <Loader2 className="fuk-autosave-icon animate-spin" />
           <span>Saving...</span>
         </span>
       ) : hasUnsavedChanges ? (
@@ -266,7 +239,7 @@ export default function ProjectBar({
         </span>
       ) : currentFileInfo && (
         <span className="fuk-autosave-indicator fuk-autosave-saved" title="All changes saved">
-          <CheckCircle style={{ width: '0.875rem', height: '0.875rem' }} />
+          <CheckCircle className="fuk-autosave-icon" />
           <span>Saved</span>
         </span>
       )}
@@ -278,7 +251,7 @@ export default function ProjectBar({
         disabled={isLoading || !currentFileInfo}
         title="Save as new version"
       >
-        <Plus style={{ width: '1rem', height: '1rem' }} />
+        <Plus className="fuk-icon--md" />
         Version Up
       </button>
 
@@ -290,9 +263,9 @@ export default function ProjectBar({
         title="Save current version"
       >
         {isLoading ? (
-          <Loader2 className="animate-spin" style={{ width: '1rem', height: '1rem' }} />
+          <Loader2 className="fuk-icon--md animate-spin" />
         ) : (
-          <Save style={{ width: '1rem', height: '1rem' }} />
+          <Save className="fuk-icon--md" />
         )}
         Save
       </button>

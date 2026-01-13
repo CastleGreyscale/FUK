@@ -250,77 +250,105 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
       {/* Settings Area */}
       <div className="fuk-settings-area">
         <div className="fuk-settings-grid">
-          {/* Prompt Card */}
-          <div className="fuk-card">
-            <h3 className="fuk-card-title fuk-mb-3">Prompt</h3>
-            
-            <div className="fuk-form-group-compact">
-              <textarea
-                className="fuk-textarea"
-                value={formData.prompt}
-                onChange={(e) => setFormData({...formData, prompt: e.target.value})}
-                placeholder="A cinematic shot of..."
-                rows={3}
-              />
-            </div>
-            
-            <div className="fuk-form-group-compact">
-              <label className="fuk-label">Negative Prompt</label>
-              <textarea
-                className="fuk-textarea"
-                value={formData.negative_prompt}
-                onChange={(e) => setFormData({...formData, negative_prompt: e.target.value})}
-                placeholder="blurry, low quality..."
-                rows={2}
-              />
-            </div>
-          </div>
-
-          {/* Dimensions Card */}
-          <div className="fuk-card">
-            <h3 className="fuk-card-title fuk-mb-3">Dimensions</h3>
-            
-            <div className="fuk-form-group-compact">
-              <label className="fuk-label">Aspect Ratio</label>
-              <select
-                className="fuk-select"
-                value={formData.aspectRatio}
-                onChange={(e) => setFormData({...formData, aspectRatio: e.target.value})}
-              >
-                {ASPECT_RATIOS.map(ar => (
-                  <option key={ar.value} value={ar.value}>{ar.label}</option>
-                ))}
-              </select>
-            </div>
-            
-            <div className="fuk-form-group-compact">
-              <label className="fuk-label">Width (Height auto-calculated)</label>
-              <div className="fuk-input-inline">
-                <input
-                  type="number"
-                  className="fuk-input"
-                  value={formData.width || ''}
-                  onChange={(e) => {
-                    const val = e.target.value === '' ? '' : parseInt(e.target.value);
-                    const dims = calculateDimensions(formData.aspectRatio, val || 1024);
-                    setFormData({...formData, width: val, height: dims.height});
-                  }}
-                  onBlur={(e) => {
-                    const val = parseInt(e.target.value) || 1024;
-                    const clamped = Math.max(512, Math.min(2048, val));
-                    const dims = calculateDimensions(formData.aspectRatio, clamped);
-                    setFormData({...formData, width: clamped, height: dims.height});
-                  }}
-                  step={64}
-                  min={512}
-                  max={2048}
-                  placeholder="1024"
-                />
-                <span className="fuk-input-suffix">
-                  = {dims.width}x{dims.height}
-                </span>
+          {/* Preprocessed Image Card */}
+          {project?.projectState?.lastState?.lastPreprocessedImage && formData.model === 'qwen_image_2509_edit' && (
+            <div className="fuk-card">
+              <h3 className="fuk-card-title fuk-card-title--highlight fuk-mb-3">
+                Last Preprocessed Image
+              </h3>
+              
+              <div className="fuk-preprocess-preview">
+                <div className="fuk-preprocess-preview-thumb">
+                  <img
+                    src={project.projectState.lastState.lastPreprocessedImage}
+                    alt="Preprocessed"
+                    className="fuk-preprocess-preview-image"
+                  />
+                </div>
+                
+                <div className="fuk-preprocess-preview-info">
+                  <div className="fuk-preprocess-preview-method">
+                    <strong>Method:</strong> {project.projectState.lastState.lastPreprocessedMethod || 'unknown'}
+                  </div>
+                  
+                  <button
+                    className="fuk-btn fuk-btn-secondary"
+                    onClick={() => {
+                      const preprocessedUrl = project.projectState.lastState.lastPreprocessedImage;
+                      const path = preprocessedUrl.replace(/^\/outputs\//, '').replace(/^\//, '');
+                      
+                      if (!formData.control_image_paths.includes(path)) {
+                        setFormData(prev => ({
+                          ...prev,
+                          control_image_paths: [...prev.control_image_paths, path]
+                        }));
+                      }
+                    }}
+                    disabled={generating}
+                  >
+                    <Pipeline className="fuk-icon--md" />
+                    Use as Control Image
+                  </button>
+                  
+                  <p className="fuk-help-text">From Pre-Processors tab</p>
+                </div>
               </div>
             </div>
+          )}
+
+          {/* Image Tools Card */}
+          <div className="fuk-card">
+            <h3 className="fuk-card-title fuk-mb-3">Image Tools</h3>
+            
+            {formData.model === 'qwen_image_2509_edit' ? (
+              <>
+                <div className="fuk-form-group-compact">
+                  <label className="fuk-label">
+                    Control Images ({formData.control_image_paths.length})
+                  </label>
+                  <MediaUploader
+                    images={formData.control_image_paths}
+                    onImagesChange={handleImagesChange}
+                    disabled={generating}
+                  />
+                </div>
+                
+                <div className="fuk-form-group-compact fuk-mt-4">
+                  <label className="fuk-label">Edit Strength</label>
+                  <div className="fuk-input-inline">
+                    <input
+                      type="range"
+                      className="fuk-input fuk-input--flex-2"
+                      value={formData.edit_strength || 0.7}
+                      onChange={(e) => setFormData({...formData, edit_strength: parseFloat(e.target.value)})}
+                      min={0}
+                      max={1}
+                      step={0.05}
+                    />
+                    <input
+                      type="number"
+                      className="fuk-input fuk-input--w-80"
+                      value={formData.edit_strength || 0.7}
+                      onChange={(e) => setFormData({...formData, edit_strength: parseFloat(e.target.value)})}
+                      step={0.05}
+                      min={0}
+                      max={1}
+                    />
+                  </div>
+                </div>
+                
+                <p className="fuk-help-text">
+                  Upload one or more images to guide the generation.
+                </p>
+              </>
+            ) : (
+              <div className="fuk-empty-state">
+                <Camera className="fuk-empty-state-icon" />
+                <p className="fuk-empty-state-text">
+                  Select "Qwen Edit 2509" model<br />to enable image editing tools
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Model & LoRA Card */}
@@ -381,7 +409,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
               </div>
             )}
           </div>
-
+          
           {/* Generation Settings Card */}
           <div className="fuk-card">
             <h3 className="fuk-card-title fuk-mb-3">Generation</h3>
@@ -492,106 +520,82 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
             />
           </div>
 
-          {/* Preprocessed Image Card */}
-          {project?.projectState?.lastState?.lastPreprocessedImage && formData.model === 'qwen_image_2509_edit' && (
-            <div className="fuk-card">
-              <h3 className="fuk-card-title fuk-card-title--highlight fuk-mb-3">
-                Last Preprocessed Image
-              </h3>
-              
-              <div className="fuk-preprocess-preview">
-                <div className="fuk-preprocess-preview-thumb">
-                  <img
-                    src={project.projectState.lastState.lastPreprocessedImage}
-                    alt="Preprocessed"
-                    className="fuk-preprocess-preview-image"
-                  />
-                </div>
-                
-                <div className="fuk-preprocess-preview-info">
-                  <div className="fuk-preprocess-preview-method">
-                    <strong>Method:</strong> {project.projectState.lastState.lastPreprocessedMethod || 'unknown'}
-                  </div>
-                  
-                  <button
-                    className="fuk-btn fuk-btn-secondary"
-                    onClick={() => {
-                      const preprocessedUrl = project.projectState.lastState.lastPreprocessedImage;
-                      const path = preprocessedUrl.replace(/^\/outputs\//, '').replace(/^\//, '');
-                      
-                      if (!formData.control_image_paths.includes(path)) {
-                        setFormData(prev => ({
-                          ...prev,
-                          control_image_paths: [...prev.control_image_paths, path]
-                        }));
-                      }
-                    }}
-                    disabled={generating}
-                  >
-                    <Pipeline className="fuk-icon--md" />
-                    Use as Control Image
-                  </button>
-                  
-                  <p className="fuk-help-text">From Pre-Processors tab</p>
-                </div>
+          {/* Prompt Card */}
+          <div className="fuk-card">
+            <h3 className="fuk-card-title fuk-mb-3">Prompt</h3>
+            
+            <div className="fuk-form-group-compact">
+              <textarea
+                className="fuk-textarea"
+                value={formData.prompt}
+                onChange={(e) => setFormData({...formData, prompt: e.target.value})}
+                placeholder="A cinematic shot of..."
+                rows={3}
+              />
+            </div>
+            
+            <div className="fuk-form-group-compact">
+              <label className="fuk-label">Negative Prompt</label>
+              <textarea
+                className="fuk-textarea"
+                value={formData.negative_prompt}
+                onChange={(e) => setFormData({...formData, negative_prompt: e.target.value})}
+                placeholder="blurry, low quality..."
+                rows={2}
+              />
+            </div>
+          </div>
+
+          {/* Dimensions Card */}
+          <div className="fuk-card">
+            <h3 className="fuk-card-title fuk-mb-3">Dimensions</h3>
+            
+            <div className="fuk-form-group-compact">
+              <label className="fuk-label">Aspect Ratio</label>
+              <select
+                className="fuk-select"
+                value={formData.aspectRatio}
+                onChange={(e) => setFormData({...formData, aspectRatio: e.target.value})}
+              >
+                {ASPECT_RATIOS.map(ar => (
+                  <option key={ar.value} value={ar.value}>{ar.label}</option>
+                ))}
+              </select>
+            </div>
+            
+            <div className="fuk-form-group-compact">
+              <label className="fuk-label">Width (Height auto-calculated)</label>
+              <div className="fuk-input-inline">
+                <input
+                  type="number"
+                  className="fuk-input"
+                  value={formData.width || ''}
+                  onChange={(e) => {
+                    const val = e.target.value === '' ? '' : parseInt(e.target.value);
+                    const dims = calculateDimensions(formData.aspectRatio, val || 1024);
+                    setFormData({...formData, width: val, height: dims.height});
+                  }}
+                  onBlur={(e) => {
+                    const val = parseInt(e.target.value) || 1024;
+                    const clamped = Math.max(512, Math.min(2048, val));
+                    const dims = calculateDimensions(formData.aspectRatio, clamped);
+                    setFormData({...formData, width: clamped, height: dims.height});
+                  }}
+                  step={64}
+                  min={512}
+                  max={2048}
+                  placeholder="1024"
+                />
+                <span className="fuk-input-suffix">
+                  = {dims.width}x{dims.height}
+                </span>
               </div>
             </div>
-          )}
-
-          {/* Image Tools Card */}
-          <div className="fuk-card">
-            <h3 className="fuk-card-title fuk-mb-3">Image Tools</h3>
-            
-            {formData.model === 'qwen_image_2509_edit' ? (
-              <>
-                <div className="fuk-form-group-compact">
-                  <label className="fuk-label">
-                    Control Images ({formData.control_image_paths.length})
-                  </label>
-                  <MediaUploader
-                    images={formData.control_image_paths}
-                    onImagesChange={handleImagesChange}
-                    disabled={generating}
-                  />
-                </div>
-                
-                <div className="fuk-form-group-compact fuk-mt-4">
-                  <label className="fuk-label">Edit Strength</label>
-                  <div className="fuk-input-inline">
-                    <input
-                      type="range"
-                      className="fuk-input fuk-input--flex-2"
-                      value={formData.edit_strength || 0.7}
-                      onChange={(e) => setFormData({...formData, edit_strength: parseFloat(e.target.value)})}
-                      min={0}
-                      max={1}
-                      step={0.05}
-                    />
-                    <input
-                      type="number"
-                      className="fuk-input fuk-input--w-80"
-                      value={formData.edit_strength || 0.7}
-                      onChange={(e) => setFormData({...formData, edit_strength: parseFloat(e.target.value)})}
-                      step={0.05}
-                      min={0}
-                      max={1}
-                    />
-                  </div>
-                </div>
-                
-                <p className="fuk-help-text">
-                  Upload one or more images to guide the generation.
-                </p>
-              </>
-            ) : (
-              <div className="fuk-empty-state">
-                <Camera className="fuk-empty-state-icon" />
-                <p className="fuk-empty-state-text">
-                  Select "Qwen Edit 2509" model<br />to enable image editing tools
-                </p>
-              </div>
-            )}
           </div>
+
+
+
+        
         </div>
       </div>
 

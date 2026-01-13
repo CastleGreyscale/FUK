@@ -456,6 +456,62 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
       {/* Settings Area */}
       <div className="fuk-settings-area">
         <div className="fuk-settings-grid">
+                    {/* Input Source Card */}
+          <div className="fuk-card">
+            <h3 className="fuk-card-title fuk-mb-3">
+              {activeProcess === 'upscale' ? 'Image/Video Input' : 'Video Input'}
+            </h3>
+            
+            <MediaUploader
+              media={sourceInput ? [{ path: sourceInput }] : []}
+              onMediaChange={handleSourceChange}
+              disabled={processing}
+              accept={activeProcess === 'interpolate' ? 'videos' : 'all'}
+            />
+            
+            <p className="fuk-help-text">
+              {activeProcess === 'upscale' 
+                ? 'Drag from History or upload an image/video to enhance'
+                : 'Drag from History or upload a video to interpolate'
+              }
+            </p>
+            
+            {isVideo && activeProcess === 'upscale' && (
+              <div className="fuk-alert fuk-alert--info fuk-mt-3">
+                <Film className="fuk-alert-icon" />
+                <span className="fuk-alert-text">Video: Processing frame-by-frame</span>
+              </div>
+            )}
+            
+            {error && (
+              <div className="fuk-alert fuk-alert--error fuk-mt-3">
+                <AlertCircle className="fuk-alert-icon" />
+                <span className="fuk-alert-text">{error}</span>
+              </div>
+            )}
+            
+            {/* Video output mode for upscaling */}
+            {isVideo && activeProcess === 'upscale' && (
+              <div className="fuk-form-group-compact fuk-mt-4 fuk-pt-4 fuk-border-top">
+                <label className="fuk-label">Output Format</label>
+                <select
+                  className="fuk-select"
+                  value={settings.videoOutputMode}
+                  onChange={(e) => updateSettings({ videoOutputMode: e.target.value })}
+                  disabled={processing}
+                >
+                  <option value="mp4">MP4 Video</option>
+                  <option value="sequence">Image Sequence</option>
+                </select>
+                <p className="fuk-help-text">
+                  {settings.videoOutputMode === 'mp4' 
+                    ? 'Outputs a single upscaled video' 
+                    : 'Outputs individual frames for EXR workflow'}
+                </p>
+              </div>
+            )}
+          </div>
+
           {/* Process Type Selection */}
           <div className="fuk-card">
             <h3 className="fuk-card-title fuk-mb-3">Process Type</h3>
@@ -518,62 +574,6 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                     {capabilities.interpolation?.ncnn_available ? '✓' : '○'} RIFE-NCNN
                   </span>
                 </div>
-              </div>
-            )}
-          </div>
-
-          {/* Input Source Card */}
-          <div className="fuk-card">
-            <h3 className="fuk-card-title fuk-mb-3">
-              {activeProcess === 'upscale' ? 'Image/Video Input' : 'Video Input'}
-            </h3>
-            
-            <MediaUploader
-              media={sourceInput ? [{ path: sourceInput }] : []}
-              onMediaChange={handleSourceChange}
-              disabled={processing}
-              accept={activeProcess === 'interpolate' ? 'videos' : 'all'}
-            />
-            
-            <p className="fuk-help-text">
-              {activeProcess === 'upscale' 
-                ? 'Drag from History or upload an image/video to enhance'
-                : 'Drag from History or upload a video to interpolate'
-              }
-            </p>
-            
-            {isVideo && activeProcess === 'upscale' && (
-              <div className="fuk-alert fuk-alert--info fuk-mt-3">
-                <Film className="fuk-alert-icon" />
-                <span className="fuk-alert-text">Video: Processing frame-by-frame</span>
-              </div>
-            )}
-            
-            {error && (
-              <div className="fuk-alert fuk-alert--error fuk-mt-3">
-                <AlertCircle className="fuk-alert-icon" />
-                <span className="fuk-alert-text">{error}</span>
-              </div>
-            )}
-            
-            {/* Video output mode for upscaling */}
-            {isVideo && activeProcess === 'upscale' && (
-              <div className="fuk-form-group-compact fuk-mt-4 fuk-pt-4 fuk-border-top">
-                <label className="fuk-label">Output Format</label>
-                <select
-                  className="fuk-select"
-                  value={settings.videoOutputMode}
-                  onChange={(e) => updateSettings({ videoOutputMode: e.target.value })}
-                  disabled={processing}
-                >
-                  <option value="mp4">MP4 Video</option>
-                  <option value="sequence">Image Sequence</option>
-                </select>
-                <p className="fuk-help-text">
-                  {settings.videoOutputMode === 'mp4' 
-                    ? 'Outputs a single upscaled video' 
-                    : 'Outputs individual frames for EXR workflow'}
-                </p>
               </div>
             )}
           </div>

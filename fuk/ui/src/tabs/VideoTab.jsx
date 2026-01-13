@@ -340,32 +340,51 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
       {/* Settings Area */}
       <div className="fuk-settings-area">
         <div className="fuk-settings-grid">
-          {/* Prompt Card */}
+          {/* Input Images Card */}
           <div className="fuk-card">
-            <h3 className="fuk-card-title fuk-mb-3">Prompt</h3>
+            <h3 className="fuk-card-title fuk-mb-3">Input Images</h3>
             
-            <div className="fuk-form-group-compact">
-              <textarea
-                className="fuk-textarea"
-                value={formData.prompt}
-                onChange={(e) => setFormData({...formData, prompt: e.target.value})}
-                placeholder="A cinematic video of..."
-                rows={3}
-              />
-            </div>
-            
-            <div className="fuk-form-group-compact">
-              <label className="fuk-label">Negative Prompt</label>
-              <textarea
-                className="fuk-textarea"
-                value={formData.negative_prompt}
-                onChange={(e) => setFormData({...formData, negative_prompt: e.target.value})}
-                placeholder="blurry, low quality..."
-                rows={2}
-              />
-            </div>
+            {requiresStartImage ? (
+              <>
+                <div className="fuk-form-group-compact">
+                  <label className="fuk-label">
+                    Start Image <span className="fuk-label-required">(Required)</span>
+                  </label>
+                  <MediaUploader
+                    images={formData.image_path ? [formData.image_path] : []}
+                    onImagesChange={handleStartImageChange}
+                    disabled={generating}
+                  />
+                  {formData.source_width && (
+                    <p className="fuk-help-text">
+                      Detected: {formData.source_width} × {formData.source_height}
+                    </p>
+                  )}
+                </div>
+                
+                {requiresEndImage && (
+                  <div className="fuk-form-group-compact fuk-mt-4">
+                    <label className="fuk-label">
+                      End Image <span className="fuk-label-required">(Required for FLF2V)</span>
+                    </label>
+                    <MediaUploader
+                      images={formData.end_image_path ? [formData.end_image_path] : []}
+                      onImagesChange={handleEndImageChange}
+                      disabled={generating}
+                    />
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="fuk-empty-state">
+                <Film className="fuk-empty-state-icon" />
+                <p className="fuk-empty-state-text">
+                  Select an I2V or FLF2V model<br />to enable image inputs
+                </p>
+              </div>
+            )}
           </div>
-
+          
           {/* Video Settings Card */}
           <div className="fuk-card">
             <h3 className="fuk-card-title fuk-mb-3">Video Settings</h3>
@@ -555,53 +574,33 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
             />
           </div>
 
-          {/* Input Images Card */}
+          {/* Prompt Card */}
           <div className="fuk-card">
-            <h3 className="fuk-card-title fuk-mb-3">Input Images</h3>
+            <h3 className="fuk-card-title fuk-mb-3">Prompt</h3>
             
-            {requiresStartImage ? (
-              <>
-                <div className="fuk-form-group-compact">
-                  <label className="fuk-label">
-                    Start Image <span className="fuk-label-required">(Required)</span>
-                  </label>
-                  <MediaUploader
-                    images={formData.image_path ? [formData.image_path] : []}
-                    onImagesChange={handleStartImageChange}
-                    disabled={generating}
-                  />
-                  {formData.source_width && (
-                    <p className="fuk-help-text">
-                      Detected: {formData.source_width} × {formData.source_height}
-                    </p>
-                  )}
-                </div>
-                
-                {requiresEndImage && (
-                  <div className="fuk-form-group-compact fuk-mt-4">
-                    <label className="fuk-label">
-                      End Image <span className="fuk-label-required">(Required for FLF2V)</span>
-                    </label>
-                    <MediaUploader
-                      images={formData.end_image_path ? [formData.end_image_path] : []}
-                      onImagesChange={handleEndImageChange}
-                      disabled={generating}
-                    />
-                  </div>
-                )}
-              </>
-            ) : (
-              <div className="fuk-empty-state">
-                <Film className="fuk-empty-state-icon" />
-                <p className="fuk-empty-state-text">
-                  Select an I2V or FLF2V model<br />to enable image inputs
-                </p>
-              </div>
-            )}
+            <div className="fuk-form-group-compact">
+              <textarea
+                className="fuk-textarea"
+                value={formData.prompt}
+                onChange={(e) => setFormData({...formData, prompt: e.target.value})}
+                placeholder="A cinematic video of..."
+                rows={3}
+              />
+            </div>
+            
+            <div className="fuk-form-group-compact">
+              <label className="fuk-label">Negative Prompt</label>
+              <textarea
+                className="fuk-textarea"
+                value={formData.negative_prompt}
+                onChange={(e) => setFormData({...formData, negative_prompt: e.target.value})}
+                placeholder="blurry, low quality..."
+                rows={2}
+              />
+            </div>
           </div>
         </div>
       </div>
-
       {/* Footer */}
       <Footer
         activeTab={activeTab}
