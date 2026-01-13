@@ -25,14 +25,15 @@
   },
 
   "video": {
+    "task": "i2v-A14B",
     "positive_prompt": "",
     "negative_prompt": "blurry, low quality, distorted, deformed, ugly, bad anatomy, worst quality, low resolution, jpeg artifacts, watermark, signature, username, text",
-    "size": [832, 480],
-    "length": 81,
+    "length": 41,
+    "scale_factor": 1.0,
     "infer_steps": 20,
     "guidance_scale": 5.0,
-    "flow_shift": 5.0,
-    "blocks_to_swap": 0,
+    "flow_shift": 2.1,
+    "blocks_to_swap": 5,
     "lora_multiplier": 1.0,
     "seed": null
   },
@@ -52,7 +53,9 @@
     },
     "canny": {
       "low_threshold": 100,
-      "high_threshold": 200
+      "high_threshold": 200,
+      "blur_kernel": 5,
+      "invert": false
     },
     "openpose": {
       "include_hands": true,

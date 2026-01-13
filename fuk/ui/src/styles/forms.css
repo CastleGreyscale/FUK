@@ -303,3 +303,106 @@
   flex-direction: column;
   gap: 0.5rem;
 }
+
+/*
+ * FUK Forms Additions - New Video Tab Styles
+ * Add these to forms.css
+ */
+
+/* ============================================================================
+ * INPUT WARNING STATE
+ * ========================================================================== */
+
+.fuk-input--warning {
+  border-color: #f59e0b !important;
+  background: rgba(245, 158, 11, 0.1);
+}
+
+.fuk-input--warning:focus {
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.2);
+}
+
+/* ============================================================================
+ * INPUT RESULT DISPLAY (shows calculated value next to input)
+ * ========================================================================== */
+
+.fuk-input-result {
+  color: #9ca3af;
+  font-size: 0.75rem;
+  white-space: nowrap;
+  padding-left: 0.5rem;
+}
+
+/* ============================================================================
+ * HELP TEXT
+ * ========================================================================== */
+
+.fuk-help-text {
+  font-size: 0.7rem;
+  color: #6b7280;
+  margin-top: 0.25rem;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.fuk-help-text--warning {
+  color: #f59e0b;
+}
+
+.fuk-help-text--info {
+  color: #60a5fa;
+}
+
+.fuk-help-text--success {
+  color: #10b981;
+}
+
+/* ============================================================================
+ * LABEL MODIFIERS
+ * ========================================================================== */
+
+.fuk-label-required {
+  color: #f87171;
+  font-size: 0.65rem;
+}
+
+.fuk-label-description {
+  color: #6b7280;
+  font-weight: 400;
+  font-size: 0.65rem;
+}
+
+/* ============================================================================
+ * PLACEHOLDER SUBTEXT
+ * ========================================================================== */
+
+.fuk-placeholder-subtext {
+  font-size: 0.65rem;
+  color: #6b7280;
+  margin-top: 0.25rem;
+}
+
+/* ============================================================================
+ * INPUT INLINE WITH RESULT
+ * ========================================================================== */
+
+.fuk-input-inline {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.fuk-input-inline .fuk-select {
+  flex: 0 0 auto;
+  min-width: 100px;
+}
+
+.fuk-input-inline .fuk-input {
+  flex: 0 0 100px;
+}
+
+.fuk-input-separator {
+  color: #6b7280;
+  font-size: 0.875rem;
+}

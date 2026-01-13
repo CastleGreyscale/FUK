@@ -3,13 +3,16 @@
 Preprocessor Manager
 
 Central orchestrator for all preprocessing operations.
-Handles lazy loading, caching, and unified interface.
+Handles lazy loading, caching, config-based defaults, and unified interface.
+
+Refactored to use centralized config system.
 """
 
 from pathlib import Path
 from typing import Dict, Any, Optional
+import json
 
-from .canny import CannyPreprocessor
+from .canny import CannyPreprocessor, create_canny_preprocessor
 from .openpose import OpenPosePreprocessor
 from .depth import DepthPreprocessor, DepthModel
 from .normals import NormalsPreprocessor, NormalsMethod
@@ -24,11 +27,11 @@ class PreprocessorManager:
     Each preprocessor is only initialized when first used.
     
     Usage:
-        manager = PreprocessorManager(output_dir)
+        manager = PreprocessorManager(output_dir, config_dir=Path("config"))
         
-        # Simple methods
-        result = manager.canny(image_path, output_path, low_threshold=100)
-        result = manager.depth(image_path, output_path, model=DepthModel.DEPTH_ANYTHING_V2)
+        # Simple methods - defaults from config
+        result = manager.canny(image_path, output_path)
+        result = manager.depth(image_path, output_path)
         result = manager.normals(image_path, output_path)
         result = manager.crypto(image_path, output_path)
         
@@ -39,25 +42,57 @@ class PreprocessorManager:
     def __init__(
         self,
         output_dir: Optional[Path] = None,
-        config_path: Optional[Path] = None
+        config_dir: Optional[Path] = None,
+        config_path: Optional[Path] = None  # Legacy support
     ):
         """
         Initialize the preprocessor manager
         
         Args:
             output_dir: Default output directory for preprocessed images
-            config_path: Path to config file (for model auto-download)
+            config_dir: Directory containing defaults.json and other configs
+            config_path: Legacy - path to config file (deprecated, use config_dir)
         """
         self.output_dir = Path(output_dir) if output_dir else Path("outputs/preprocessed")
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Config directory for defaults
+        self.config_dir = Path(config_dir) if config_dir else None
         self.config_path = Path(config_path) if config_path else None
         
-        # Lazy-loaded preprocessors
-        self._canny = CannyPreprocessor()
+        # Load all defaults once
+        self._defaults = self._load_defaults()
+        
+        # Lazy-loaded preprocessors (None until first use)
+        self._canny: Optional[CannyPreprocessor] = None
         self._openpose: Optional[OpenPosePreprocessor] = None
         self._depth_cache: Dict[DepthModel, DepthPreprocessor] = {}
         self._normals_cache: Dict[str, NormalsPreprocessor] = {}
         self._crypto_cache: Dict[SAMModel, CryptoPreprocessor] = {}
+    
+    def _load_defaults(self) -> Dict[str, Any]:
+        """Load preprocessor defaults from config"""
+        defaults = {
+            "canny": {},
+            "openpose": {},
+            "depth": {},
+            "normals": {},
+            "crypto": {},
+        }
+        
+        if self.config_dir:
+            defaults_path = self.config_dir / "defaults.json"
+            if defaults_path.exists():
+                try:
+                    with open(defaults_path) as f:
+                        all_defaults = json.load(f)
+                    preprocess_defaults = all_defaults.get("preprocess", {})
+                    defaults.update(preprocess_defaults)
+                    print(f"[PreprocessorManager] Loaded defaults from {defaults_path}")
+                except Exception as e:
+                    print(f"[PreprocessorManager] Warning: Could not load defaults: {e}")
+        
+        return defaults
     
     # =========================================================================
     # Canny Edge Detection
@@ -67,16 +102,16 @@ class PreprocessorManager:
         self,
         image_path: Path,
         output_path: Optional[Path] = None,
-        low_threshold: int = 100,
-        high_threshold: int = 200,
-        blur_kernel: int = 5,
-        invert: bool = False,
+        low_threshold: Optional[int] = None,
+        high_threshold: Optional[int] = None,
+        blur_kernel: Optional[int] = None,
+        invert: Optional[bool] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
         Apply Canny edge detection
         
-        Fast, no model loading required.
+        Fast, no model loading required. Defaults from config/defaults.json.
         
         Args:
             image_path: Input image path
@@ -86,6 +121,10 @@ class PreprocessorManager:
             blur_kernel: Gaussian blur kernel size
             invert: Invert output (white background)
         """
+        # Lazy init with config defaults
+        if self._canny is None:
+            self._canny = CannyPreprocessor(defaults=self._defaults.get("canny", {}))
+        
         output_path = output_path or self.output_dir / f"{Path(image_path).stem}_canny.png"
         output_path.parent.mkdir(parents=True, exist_ok=True)
         
@@ -99,6 +138,35 @@ class PreprocessorManager:
             **kwargs
         )
     
+    def canny_video(
+        self,
+        video_path: Path,
+        output_path: Path,
+        output_mode: str = "mp4",
+        progress_callback=None,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """
+        Apply Canny edge detection to video
+        
+        Args:
+            video_path: Input video path
+            output_path: Output path
+            output_mode: "mp4" or "sequence"
+            progress_callback: Optional progress callback
+            **kwargs: Canny parameters (low_threshold, high_threshold, etc.)
+        """
+        if self._canny is None:
+            self._canny = CannyPreprocessor(defaults=self._defaults.get("canny", {}))
+        
+        return self._canny.process_video(
+            video_path=Path(video_path),
+            output_path=output_path,
+            output_mode=output_mode,
+            progress_callback=progress_callback,
+            **kwargs
+        )
+    
     # =========================================================================
     # OpenPose Pose Estimation
     # =========================================================================
@@ -107,9 +175,9 @@ class PreprocessorManager:
         self,
         image_path: Path,
         output_path: Optional[Path] = None,
-        detect_body: bool = True,
-        detect_hand: bool = False,
-        detect_face: bool = False,
+        detect_body: Optional[bool] = None,
+        detect_hand: Optional[bool] = None,
+        detect_face: Optional[bool] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -126,6 +194,12 @@ class PreprocessorManager:
         """
         if self._openpose is None:
             self._openpose = OpenPosePreprocessor(config_path=self.config_path)
+        
+        # Apply defaults
+        openpose_defaults = self._defaults.get("openpose", {})
+        detect_body = detect_body if detect_body is not None else openpose_defaults.get("include_body", True)
+        detect_hand = detect_hand if detect_hand is not None else openpose_defaults.get("include_hands", False)
+        detect_face = detect_face if detect_face is not None else openpose_defaults.get("include_face", False)
         
         output_path = output_path or self.output_dir / f"{Path(image_path).stem}_pose.png"
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -147,16 +221,16 @@ class PreprocessorManager:
         self,
         image_path: Path,
         output_path: Optional[Path] = None,
-        model: DepthModel = DepthModel.DEPTH_ANYTHING_V2,
-        invert: bool = False,
-        normalize: bool = True,
-        colormap: Optional[str] = "inferno",
+        model: Optional[DepthModel] = None,
+        invert: Optional[bool] = None,
+        normalize: Optional[bool] = None,
+        colormap: Optional[str] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
         Apply depth estimation
         
-        Caches depth models by type for reuse.
+        Caches depth models by type for reuse. Defaults from config.
         
         Args:
             image_path: Input image
@@ -166,6 +240,24 @@ class PreprocessorManager:
             normalize: Normalize to [0, 1]
             colormap: Apply colormap (None for grayscale)
         """
+        # Apply defaults
+        depth_defaults = self._defaults.get("depth", {})
+        
+        if model is None:
+            model_name = depth_defaults.get("model", "depth_anything_v2")
+            # Map config names to enum
+            model_map = {
+                "depth_anything_v2": DepthModel.DEPTH_ANYTHING_V2,
+                "da2_vit_large": DepthModel.DEPTH_ANYTHING_V2,
+                "da3_mono_large": DepthModel.DA3_MONO_LARGE,
+                "midas": DepthModel.MIDAS,
+            }
+            model = model_map.get(model_name, DepthModel.DEPTH_ANYTHING_V2)
+        
+        invert = invert if invert is not None else depth_defaults.get("invert", False)
+        normalize = normalize if normalize is not None else depth_defaults.get("normalize", True)
+        colormap = colormap if colormap is not None else depth_defaults.get("colormap", "inferno")
+        
         # Cache depth processors by model type
         if model not in self._depth_cache:
             self._depth_cache[model] = DepthPreprocessor(
@@ -207,12 +299,12 @@ class PreprocessorManager:
         self,
         image_path: Path,
         output_path: Optional[Path] = None,
-        method: NormalsMethod = NormalsMethod.FROM_DEPTH,
-        depth_model: DepthModel = DepthModel.DEPTH_ANYTHING_V2,
-        space: str = "tangent",
-        flip_y: bool = False,
-        flip_x: bool = False,
-        intensity: float = 1.0,
+        method: Optional[NormalsMethod] = None,
+        depth_model: Optional[DepthModel] = None,
+        space: Optional[str] = None,
+        flip_y: Optional[bool] = None,
+        flip_x: Optional[bool] = None,
+        intensity: Optional[float] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -228,6 +320,31 @@ class PreprocessorManager:
             flip_x: Flip X component
             intensity: Normal intensity (affects depth-derived)
         """
+        # Apply defaults
+        normals_defaults = self._defaults.get("normals", {})
+        
+        if method is None:
+            method_name = normals_defaults.get("method", "depth_gradient")
+            method_map = {
+                "depth_gradient": NormalsMethod.FROM_DEPTH,
+                "from_depth": NormalsMethod.FROM_DEPTH,
+                "dsine": NormalsMethod.DSINE,
+            }
+            method = method_map.get(method_name, NormalsMethod.FROM_DEPTH)
+        
+        if depth_model is None:
+            dm_name = normals_defaults.get("depth_model", "da3_mono_large")
+            dm_map = {
+                "depth_anything_v2": DepthModel.DEPTH_ANYTHING_V2,
+                "da3_mono_large": DepthModel.DA3_MONO_LARGE,
+            }
+            depth_model = dm_map.get(dm_name, DepthModel.DA3_MONO_LARGE)
+        
+        space = space if space is not None else normals_defaults.get("space", "tangent")
+        flip_y = flip_y if flip_y is not None else normals_defaults.get("flip_y", False)
+        flip_x = flip_x if flip_x is not None else normals_defaults.get("flip_x", False)
+        intensity = intensity if intensity is not None else normals_defaults.get("intensity", 1.0)
+        
         cache_key = f"{method.value}_{depth_model.value}"
         
         if cache_key not in self._normals_cache:
@@ -277,10 +394,10 @@ class PreprocessorManager:
         self,
         image_path: Path,
         output_path: Optional[Path] = None,
-        model: SAMModel = SAMModel.LARGE,
-        max_objects: int = 50,
-        min_area: int = 500,
-        output_mode: str = "id_matte",
+        model: Optional[SAMModel] = None,
+        max_objects: Optional[int] = None,
+        min_area: Optional[int] = None,
+        output_mode: Optional[str] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -296,6 +413,24 @@ class PreprocessorManager:
             min_area: Minimum mask area in pixels
             output_mode: 'id_matte', 'layers', or 'both'
         """
+        # Apply defaults
+        crypto_defaults = self._defaults.get("crypto", {})
+        
+        if model is None:
+            model_name = crypto_defaults.get("model", "sam2_large")
+            model_map = {
+                "sam2": SAMModel.LARGE,
+                "sam2_large": SAMModel.LARGE,
+                "sam2_base": SAMModel.BASE,
+                "sam2_small": SAMModel.SMALL,
+                "sam2_tiny": SAMModel.TINY,
+            }
+            model = model_map.get(model_name, SAMModel.LARGE)
+        
+        max_objects = max_objects if max_objects is not None else crypto_defaults.get("max_objects", 50)
+        min_area = min_area if min_area is not None else crypto_defaults.get("min_area", 500)
+        output_mode = output_mode if output_mode is not None else crypto_defaults.get("output_mode", "id_matte")
+        
         if model not in self._crypto_cache:
             self._crypto_cache[model] = CryptoPreprocessor(
                 model_size=model,
@@ -406,3 +541,27 @@ class PreprocessorManager:
                 results['crypto'] = {'error': str(e)}
         
         return results
+
+
+# ============================================================================
+# Factory Function
+# ============================================================================
+
+def create_preprocessor_manager(
+    output_dir: Optional[Path] = None,
+    config_dir: Optional[Path] = None,
+) -> PreprocessorManager:
+    """
+    Factory function to create a PreprocessorManager with config
+    
+    Args:
+        output_dir: Default output directory
+        config_dir: Directory containing defaults.json
+        
+    Returns:
+        Configured PreprocessorManager instance
+    """
+    return PreprocessorManager(
+        output_dir=output_dir,
+        config_dir=config_dir,
+    )

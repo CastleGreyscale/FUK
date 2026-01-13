@@ -8,7 +8,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Camera, Loader2, CheckCircle, X, Pipeline } from '../../src/components/Icons';
 import TabButton from '../components/TabButton';
 import ProgressBar from '../components/ProgressBar';
-import ImageUploader from '../components/ImageUploader';
+import MediaUploader from '../components/MediaUploader';
 import SeedControl from '../components/SeedControl';
 import { useGeneration } from '../hooks/useGeneration';
 import { useLocalStorage } from '../../src/hooks/useLocalStorage';
@@ -548,7 +548,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                   <label className="fuk-label">
                     Control Images ({formData.control_image_paths.length})
                   </label>
-                  <ImageUploader
+                  <MediaUploader
                     images={formData.control_image_paths}
                     onImagesChange={handleImagesChange}
                     disabled={generating}

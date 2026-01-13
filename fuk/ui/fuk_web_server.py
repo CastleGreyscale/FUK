@@ -47,7 +47,8 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 from file_browser_endpoints import setup_file_browser_routes
 from video_endpoints import setup_video_routes
-from core.qwen_image_wrapper import create_generator, QwenModel
+from core.qwen_image_wrapper import create_generator as create_image_generator, QwenModel
+from core.wan_video_wrapper import create_video_generator, WanTask
 import json
 import asyncio
 import uuid
@@ -62,7 +63,8 @@ from project_endpoints import (
     get_project_relative_url,
     save_generation_metadata,
     get_cache_root,
-    get_default_cache_root
+    get_default_cache_root,
+    cleanup_failed_generation
 )
 
 
@@ -105,15 +107,15 @@ class FukLogger:
     
     @classmethod
     def success(cls, category: str, message: str):
-        print(f"{cls.COLORS['green']}[{cls.timestamp()}] Ã¢Å“â€œ [{category}] {message}{cls.COLORS['end']}")
+        print(f"{cls.COLORS['green']}[{cls.timestamp()}] ÃƒÂ¢Ã…â€œÃ¢â‚¬Å“ [{category}] {message}{cls.COLORS['end']}")
     
     @classmethod
     def warning(cls, category: str, message: str):
-        print(f"{cls.COLORS['yellow']}[{cls.timestamp()}] Ã¢Å¡  [{category}] {message}{cls.COLORS['end']}")
+        print(f"{cls.COLORS['yellow']}[{cls.timestamp()}] ÃƒÂ¢Ã…Â¡  [{category}] {message}{cls.COLORS['end']}")
     
     @classmethod
     def error(cls, category: str, message: str):
-        print(f"{cls.COLORS['red']}[{cls.timestamp()}] Ã¢Å“â€” [{category}] {message}{cls.COLORS['end']}")
+        print(f"{cls.COLORS['red']}[{cls.timestamp()}] ÃƒÂ¢Ã…â€œÃ¢â‚¬â€ [{category}] {message}{cls.COLORS['end']}")
     
     @classmethod
     def params(cls, title: str, params: Dict[str, Any]):
@@ -151,7 +153,7 @@ class FukLogger:
             mins = int(elapsed // 60)
             secs = elapsed % 60
             time_str = f"{mins}m {secs:.1f}s"
-        print(f"{cls.COLORS['green']}[{cls.timestamp()}] Ã¢ÂÂ± [{category}] {message} ({time_str}){cls.COLORS['end']}")
+        print(f"{cls.COLORS['green']}[{cls.timestamp()}] ÃƒÂ¢Ã‚ÂÃ‚Â± [{category}] {message} ({time_str}){cls.COLORS['end']}")
     
     @classmethod
     def exception(cls, category: str, e: Exception):
@@ -186,7 +188,7 @@ try:
     from core.format_convert import FormatConverter
     from core.preprocessors import PreprocessorManager, DepthModel, NormalsMethod, SAMModel
     from core.postprocessors import PostProcessorManager
-    print("[STARTUP] Ã¢Å“â€œ Loaded modules from core/")
+    print("[STARTUP] ÃƒÂ¢Ã…â€œÃ¢â‚¬Å“ Loaded modules from core/")
 except ImportError as e:
     print(f"\n{'='*60}")
     print("ERROR: Cannot import FUK modules from core/")
@@ -250,20 +252,32 @@ except FileNotFoundError as e:
 # Ensure output subdirs exist
 (OUTPUT_ROOT / "image").mkdir(exist_ok=True)
 (OUTPUT_ROOT / "video").mkdir(exist_ok=True)
-(OUTPUT_ROOT / "uploads").mkdir(exist_ok=True)
+# Uploads removed - files stay in place
 
 
 # Cache directory for project-aware outputs
 CACHE_ROOT = ROOT_DIR / "cache"
 CACHE_ROOT.mkdir(exist_ok=True)
 
+# ============================================================================
+# Initialize Generators
+# ============================================================================
+
 # Initialize image generator
-image_generator = create_generator(
+image_generator = create_image_generator(
     config_dir=CONFIG_DIR,
     vendor_dir=VENDOR_DIR
 )
 
-print("[STARTUP] ✓ Image generator initialized", flush=True)
+print("[STARTUP] âœ“ Image generator initialized", flush=True)
+
+
+# Initialize video generator
+video_generator = create_video_generator(
+    config_dir=CONFIG_DIR,
+    vendor_dir=VENDOR_DIR
+)
+print("[STARTUP] âœ“ Video generator initialized", flush=True)
 
 # ============================================================================
 # Global State
@@ -289,8 +303,7 @@ app.add_middleware(
 # Serve outputs directory as static files
 app.mount("/outputs", StaticFiles(directory=str(OUTPUT_ROOT)), name="outputs")
 
-# Serve uploads directory for control image previews
-app.mount("/uploads", StaticFiles(directory=str(OUTPUT_ROOT / "uploads")), name="uploads")
+# Uploads removed - files stay in place
 
 # Serve project cache directory
 app.mount("/project-cache", StaticFiles(directory=str(CACHE_ROOT)), name="project-cache")
@@ -306,7 +319,10 @@ with open(CONFIG_DIR / "defaults.json") as f:
 
 image_manager = ImageGenerationManager(OUTPUT_ROOT / "image")
 video_manager = VideoGenerationManager(OUTPUT_ROOT / "video")
-preprocessor_manager = PreprocessorManager(OUTPUT_ROOT / "preprocessed")
+preprocessor_manager = PreprocessorManager(
+output_dir=OUTPUT_ROOT / "preprocessed",
+config_dir=CONFIG_DIR
+)
 postprocessor_manager = PostProcessorManager(OUTPUT_ROOT / "postprocessed")
 
 # ============================================================================
@@ -319,10 +335,10 @@ def resolve_input_path(path_str: str) -> Optional[Path]:
     
     Handles:
     - Already absolute paths -> return as-is
+    - URL paths: api/project/files/... -> extract absolute path for external files
     - URL paths: api/project/cache/... -> project cache / relative
     - URL paths: project-cache/... -> project cache / relative (legacy)
-    - Relative paths: uploads/... -> OUTPUT_ROOT/uploads/...
-    - Other relative paths -> OUTPUT_ROOT/path
+    - Other relative paths -> project cache or OUTPUT_ROOT
     
     Falls back to checking BOTH project cache and default cache when files
     aren't found at the expected location.
@@ -340,7 +356,7 @@ def resolve_input_path(path_str: str) -> Optional[Path]:
     print(f"[PATH] Default cache: {default_cache}", flush=True)
     
     if cache_root is None:
-        print(f"[PATH] ÃƒÂ¢Ã…Â¡Ã‚ ÃƒÂ¯Ã‚Â¸Ã‚Â  WARNING: No project cache set! Is a project loaded?", flush=True)
+        print(f"[PATH] ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã‚Â¡Ãƒâ€š ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¸Ãƒâ€šÃ‚Â  WARNING: No project cache set! Is a project loaded?", flush=True)
     
     p = Path(path_str)
     
@@ -375,17 +391,17 @@ def resolve_input_path(path_str: str) -> Optional[Path]:
             resolved = cache_root / relative
             print(f"[PATH] Project cache path: {resolved}", flush=True)
             if resolved.exists():
-                print(f"[PATH] ÃƒÂ¢Ã…â€œÃ¢â‚¬Å“ File exists in project cache", flush=True)
+                print(f"[PATH] ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ File exists in project cache", flush=True)
                 return resolved
             else:
-                print(f"[PATH] ÃƒÂ¢Ã…Â¡Ã‚ ÃƒÂ¯Ã‚Â¸Ã‚Â  File NOT found in project cache, checking default...", flush=True)
+                print(f"[PATH] ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã‚Â¡Ãƒâ€š ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¸Ãƒâ€šÃ‚Â  File NOT found in project cache, checking default...", flush=True)
         
         # Fall back to default cache
         if default_cache:
             default_resolved = default_cache / relative
             print(f"[PATH] Default cache path: {default_resolved}", flush=True)
             if default_resolved.exists():
-                print(f"[PATH] ÃƒÂ¢Ã…â€œÃ¢â‚¬Å“ File found in default cache (fallback)", flush=True)
+                print(f"[PATH] ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ File found in default cache (fallback)", flush=True)
                 return default_resolved
         
         # If still not found, return project cache path (for creation) or default
@@ -424,12 +440,7 @@ def resolve_input_path(path_str: str) -> Optional[Path]:
         print(f"[PATH] -> From default cache (legacy URL): {resolved}", flush=True)
         return resolved
     
-    # Uploads directory
-    if path_str.startswith('uploads/'):
-        resolved = OUTPUT_ROOT / path_str
-        print(f"[PATH] -> From uploads: {resolved}", flush=True)
-        return resolved
-    
+
     # Other relative path - try various locations
     resolved = OUTPUT_ROOT / path_str
     if resolved.exists():
@@ -490,11 +501,9 @@ class VideoGenerationRequest(BaseModel):
     control_path: Optional[str] = None
     lora: Optional[str] = None
     lora_multiplier: float = 1.0
-    blocks_to_swap: int = 15
-    fp8: bool = True
-    fp8_scaled: bool = False
-    fp8_t5: bool = True
+    blocks_to_swap: int = 0
     export_exr: bool = False
+    # Removed: fp8, fp8_scaled, fp8_t5 - now in tool config
     
 class GenerationResponse(BaseModel):
     generation_id: str
@@ -602,86 +611,6 @@ def clear_vram():
             
     except Exception as e:
         print(f"VRAM clear failed: {e}")
-
-# ============================================================================
-# File Upload
-# ============================================================================
-
-@app.post("/api/upload/control_image")
-async def upload_control_image(file: UploadFile = File(...)):
-    """Upload a control image for edit mode"""
-    
-    # Validate file type
-    if not file.content_type.startswith('image/'):
-        raise HTTPException(status_code=400, detail="File must be an image")
-    
-    # Generate unique filename
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    file_ext = Path(file.filename).suffix
-    unique_filename = f"control_{timestamp}_{uuid.uuid4().hex[:8]}{file_ext}"
-    
-    # Save to uploads directory
-    upload_path = OUTPUT_ROOT / "uploads" / unique_filename
-    
-    try:
-        # Read and save file
-        contents = await file.read()
-        with open(upload_path, 'wb') as f:
-            f.write(contents)
-        
-        # Return relative path for client
-        relative_path = f"uploads/{unique_filename}"
-        
-        print(f" Uploaded control image: {relative_path}")
-        
-        return {
-            "path": relative_path,
-            "filename": unique_filename,
-            "size": len(contents)
-        }
-        
-    except Exception as e:
-        print(f"Upload failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
-
-@app.post("/api/upload/media")
-async def upload_media(file: UploadFile = File(...)):
-    """
-    Upload media file (image or video)
-    """
-    try:
-        # Read file
-        contents = await file.read()
-        
-        # Create uploads directory
-        upload_dir = OUTPUT_ROOT / "uploads"
-        upload_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Generate unique filename
-        import uuid
-        ext = Path(file.filename).suffix
-        unique_filename = f"{uuid.uuid4().hex[:12]}{ext}"
-        file_path = upload_dir / unique_filename
-        
-        # Save file
-        with open(file_path, "wb") as f:
-            f.write(contents)
-        
-        # Build relative path for API
-        relative_path = f"api/project/cache/uploads/{unique_filename}"
-        
-        log.success("Upload", f"Saved: {file_path}")
-        
-        return {
-            "path": relative_path,
-            "filename": unique_filename,
-            "size": len(contents),
-            "media_type": "video" if ext.lower() in ['.mp4', '.mov', '.avi', '.mkv', '.webm'] else "image"
-        }
-        
-    except Exception as e:
-        log.exception("Upload", e)
-        raise HTTPException(status_code=500, detail=str(e))
 
 # ============================================================================
 # Image Generation
@@ -816,6 +745,14 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
         print(f"Generation Failed: {e}")
         import traceback
         traceback.print_exc()
+
+        # Clean up failed generation directory
+        gen_dir = active_generations[generation_id].get("gen_dir")
+        if gen_dir:
+            cleanup_failed_generation(gen_dir, reason=str(e))
+
+        # Clear VRAM even on failure
+        print(f"[{generation_id}] Clearing VRAM after failure...")
         clear_vram()
 
 
@@ -842,6 +779,7 @@ async def generate_image(request: ImageGenerationRequest, background_tasks: Back
         status="queued",
         message="Image generation started"
     )
+
 # ============================================================================
 # Video Generation
 # ============================================================================
@@ -866,7 +804,7 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
         active_generations[generation_id]["gen_dir"] = str(gen_dir)
         active_generations[generation_id]["phase"] = "generating"
         
-        # Resolve image paths using the path resolver (handles URL paths)
+        # Resolve image paths
         image_path_abs = resolve_input_path(request.image_path)
         end_image_path_abs = resolve_input_path(request.end_image_path)
         control_path_abs = resolve_input_path(request.control_path)
@@ -876,13 +814,12 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
         print(f"[VIDEO]   end_image_path: {request.end_image_path} -> {end_image_path_abs}", flush=True)
         print(f"[VIDEO]   control_path: {request.control_path} -> {control_path_abs}", flush=True)
         
-        # Copy control inputs if provided
+        # Copy control inputs for reference
         if image_path_abs:
-            # Copy to gen_dir for reference
             control_dir = gen_dir / "control"
             control_dir.mkdir(exist_ok=True)
             
-            if image_path_abs and image_path_abs.exists():
+            if image_path_abs.exists():
                 import shutil
                 shutil.copy(image_path_abs, control_dir / "start_image.png")
             
@@ -895,28 +832,26 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
         # Map task string to enum
         task_enum = WanTask(request.task)
         
-        # Generate video (pass absolute paths to musubi)
-        video_generator.generate_video(
+        # Generate video using the wrapper
+        result = video_generator.generate_video(
             prompt=request.prompt,
             output_path=paths["generated_mp4"],
             task=task_enum,
-            video_size=(request.width, request.height),
+            width=request.width,
+            height=request.height,
             video_length=request.video_length,
             seed=request.seed,
-            image_path=image_path_abs,
-            end_image_path=end_image_path_abs,
-            control_path=control_path_abs,
             infer_steps=request.steps,
             guidance_scale=request.guidance_scale,
             flow_shift=request.flow_shift,
-            negative_prompt=request.negative_prompt,
             blocks_to_swap=request.blocks_to_swap,
-            fp8=request.fp8,
-            fp8_scaled=request.fp8_scaled,
-            fp8_t5=request.fp8_t5,
+            negative_prompt=request.negative_prompt,
+            image_path=image_path_abs,
+            end_image_path=end_image_path_abs,
+            control_path=control_path_abs,
             lora=request.lora,
             lora_multiplier=request.lora_multiplier,
-            progress_callback=progress_cb
+            progress_callback=progress_cb,
         )
         
         # Build outputs with project-relative URLs
@@ -928,14 +863,13 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
         if request.export_exr:
             active_generations[generation_id]["phase"] = "exporting_exr"
             
-            # Check if latent exists for lossless export
             latent_path = gen_dir / "latent.safetensors"
             if latent_path.exists():
                 exr_dir = video_manager.export_latent_to_exr(
                     gen_dir=gen_dir,
                     task=request.task,
-                    config_path=CONFIG_DIR,
-                    musubi_path=MUSUBI_PATH,
+                    config_path=CONFIG_DIR / "models.json",
+                    musubi_path=VENDOR_DIR / "musubi-tuner",
                     linear=True
                 )
             else:
@@ -947,15 +881,15 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
             
             outputs["exr_sequence"] = get_project_relative_url(exr_dir)
         
-        # Save metadata using project function
+        # Save metadata
         save_generation_metadata(
             gen_dir=gen_dir,
             prompt=request.prompt,
             model=request.task,
-            seed=request.seed or 0,
+            seed=result.get("seed_used") or request.seed or 0,
             image_size=(request.width, request.height),
             video_length=request.video_length,
-            negative_prompt=request.negative_prompt or DEFAULTS.get("negative_prompt", ""),
+            negative_prompt=request.negative_prompt or "",
             guidance_scale=request.guidance_scale,
             flow_shift=request.flow_shift,
             infer_steps=request.steps,
@@ -971,9 +905,12 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
             "phase": "complete",
             "progress": 1.0,
             "outputs": outputs,
-            "seed_used": request.seed,
+            "seed_used": result.get("seed_used") or request.seed,
             "completed_at": datetime.now().isoformat()
         })
+        
+        # Clear VRAM
+        clear_vram()
         
     except Exception as e:
         active_generations[generation_id].update({
@@ -984,6 +921,17 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
         print(f"Generation {generation_id} failed: {e}")
         import traceback
         traceback.print_exc()
+
+        # Clean up failed generation directory
+        gen_dir = active_generations[generation_id].get("gen_dir")
+        if gen_dir:
+            cleanup_failed_generation(gen_dir, reason=str(e))
+
+        # Clear VRAM even on failure (if not already done by wrapper)
+        try:
+            clear_vram()
+        except:
+            pass
 
 @app.post("/api/generate/video", response_model=GenerationResponse)
 async def generate_video(request: VideoGenerationRequest, background_tasks: BackgroundTasks):
@@ -1032,7 +980,7 @@ async def cancel_generation(generation_id: str):
     gen["phase"] = "cancelled"
     gen["cancelled_at"] = datetime.now().isoformat()
     
-    print(f"\nÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬ ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚  Generation Cancelled: {generation_id}")
+    print(f"\nGeneration Cancelled: {generation_id}")
     print(f"Note: Backend process may still be running (musubi doesn't support mid-generation cancellation)")
     
     # Clear VRAM
@@ -1040,6 +988,11 @@ async def cancel_generation(generation_id: str):
     clear_vram()
     
     return {"message": "Generation marked as cancelled"}
+
+    # Clean up cancelled generation directory
+    gen_dir = gen.get("gen_dir")
+    if gen_dir:
+        cleanup_failed_generation(gen_dir, reason="cancelled by user")
 
 # ============================================================================
 # Status & Progress
@@ -1751,7 +1704,7 @@ async def upscale_image(request: UpscaleRequest):
         # Build URL using project-relative path (IMPORTANT!)
         output_url = get_project_relative_url(output_path)
         
-        print(f"ÃƒÂ¢Ã…â€œÃ¢â‚¬Å“ Upscaled: {input_width}x{input_height} -> {output_width}x{output_height}")
+        print(f"ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ Upscaled: {input_width}x{input_height} -> {output_width}x{output_height}")
         print(f"  Output URL: {output_url}")
         
         return {
@@ -1766,7 +1719,7 @@ async def upscale_image(request: UpscaleRequest):
         }
         
     except Exception as e:
-        print(f"ÃƒÂ¢Ã…â€œÃ¢â‚¬â€ Upscaling failed: {e}")
+        print(f"ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Upscaling failed: {e}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
@@ -1826,7 +1779,7 @@ async def interpolate_video(request: InterpolateRequest):
         output_url = get_project_relative_url(output_path)
         
         multiplier = result.get("multiplier", round(request.target_fps / request.source_fps))
-        print(f"ÃƒÂ¢Ã…â€œÃ¢â‚¬Å“ Interpolated: {request.source_fps}fps -> {request.target_fps}fps ({multiplier}x)")
+        print(f"ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ Interpolated: {request.source_fps}fps -> {request.target_fps}fps ({multiplier}x)")
         print(f"  Output URL: {output_url}")
         
         return {
@@ -1841,7 +1794,7 @@ async def interpolate_video(request: InterpolateRequest):
         }
         
     except Exception as e:
-        print(f"ÃƒÂ¢Ã…â€œÃ¢â‚¬â€ Interpolation failed: {e}")
+        print(f"ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Interpolation failed: {e}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
@@ -2085,7 +2038,7 @@ async def preprocess_image(request: PreprocessRequest):
         return result
         
     except Exception as e:
-        print(f"ÃƒÂ¢Ã…â€œÃ¢â‚¬â€ Preprocessing failed: {e}")
+        print(f"ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Preprocessing failed: {e}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
@@ -2431,6 +2384,27 @@ class ExportEXRRequest(BaseModel):
     filename: Optional[str] = None  # Custom filename (without extension)
     export_path: Optional[str] = None  # Custom save directory (empty = use project cache)
 
+class ExportEXRSequenceRequest(BaseModel):
+    """Request to export video layers to EXR sequence"""
+    layers: Dict[str, Optional[str]]  # layer_name -> video_path (MP4) or None
+    
+    # EXR settings
+    bit_depth: int = 32  # 16 or 32
+    compression: str = "ZIP"
+    color_space: str = "Linear"  # 'Linear' or 'sRGB'
+    
+    # Export mode
+    multi_layer: bool = True  # Each frame is multi-layer EXR
+    single_files: bool = False  # Also export separate sequences per layer
+    
+    # Output naming and location
+    filename: str = "export"  # Base filename for sequence
+    export_path: Optional[str] = None  # Custom save directory (empty = use project cache)
+    
+    # Sequence-specific
+    start_frame: int = 1  # First frame number
+    filename_pattern: Optional[str] = None  # e.g. "{name}.{frame:04d}.exr"
+
 
 @app.post("/api/export/exr")
 async def export_to_exr(request: ExportEXRRequest):
@@ -2562,6 +2536,152 @@ async def export_to_exr(request: ExportEXRRequest):
         
     except Exception as e:
         log.exception("Export", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/export/exr/sequence")
+async def export_video_to_exr_sequence(request: ExportEXRSequenceRequest):
+    """
+    Export video AOV layers to EXR image sequence
+    
+    Takes video files (MP4) for each layer and exports as frame-by-frame
+    multi-layer EXR sequence.
+    
+    Output: {filename}.0001.exr, {filename}.0002.exr, ...
+    Each frame contains all AOVs (beauty RGB, depth Z, normals N.XYZ, crypto)
+    """
+    try:
+        log.header("EXR SEQUENCE EXPORT")
+        log.info("SeqExport", f"Layers: {list(k for k, v in request.layers.items() if v)}")
+        log.info("SeqExport", f"Bit Depth: {request.bit_depth}")
+        log.info("SeqExport", f"Start Frame: {request.start_frame}")
+        
+        # Import exporter
+        from core.exr_exporter import EXRExporter
+        
+        # Determine output location
+        custom_export = bool(request.export_path)
+        
+        if custom_export:
+            export_dir = Path(request.export_path)
+            if not export_dir.exists():
+                export_dir.mkdir(parents=True, exist_ok=True)
+            gen_dir = export_dir
+            log.info("SeqExport", f"Custom export path: {export_dir}")
+        else:
+            gen_dir = get_generation_output_dir("export_exr_seq")
+            export_dir = gen_dir
+            log.info("SeqExport", f"Cache path: {gen_dir}")
+        
+        # Resolve layer paths (video files)
+        resolved_layers = {}
+        for layer_name, layer_path in request.layers.items():
+            if layer_path is None:
+                continue
+            
+            resolved_path = resolve_input_path(layer_path)
+            if resolved_path and resolved_path.exists():
+                resolved_layers[layer_name] = str(resolved_path)
+                log.info("SeqExport", f"  {layer_name}: {resolved_path.name}")
+            else:
+                log.warning("SeqExport", f"  {layer_name}: not found ({layer_path})")
+        
+        if not resolved_layers:
+            raise HTTPException(status_code=400, detail="No valid video layers to export")
+        
+        exporter = EXRExporter()
+        
+        # Build filename pattern
+        base_filename = request.filename or "export"
+        filename_pattern = request.filename_pattern or f"{base_filename}.{{frame:04d}}.exr"
+        
+        # Export video sequence
+        if request.multi_layer:
+            result = exporter.export_video_sequence(
+                layers=resolved_layers,
+                output_dir=export_dir,
+                filename_pattern=filename_pattern,
+                bit_depth=request.bit_depth,
+                compression=request.compression,
+                linear=(request.color_space == "Linear"),
+                start_frame=request.start_frame,
+            )
+            
+            log.success("SeqExport", f"Exported {result['frame_count']} frames")
+            
+            results = {
+                "success": True,
+                "output_dir": str(export_dir),
+                "frame_count": result["frame_count"],
+                "start_frame": result["start_frame"],
+                "end_frame": result["end_frame"],
+                "total_size": result["total_size"],
+                "total_size_mb": result["total_size_mb"],
+                "filename_pattern": filename_pattern,
+                "layers_included": result["layers_included"],
+                "custom_export": custom_export,
+            }
+            
+            # Add URL for cache exports
+            if not custom_export:
+                results["url"] = get_project_relative_url(export_dir)
+            
+        else:
+            # Single files mode - export separate sequence per layer
+            results = {
+                "success": True,
+                "output_dir": str(export_dir),
+                "layers": {},
+                "custom_export": custom_export,
+            }
+            
+            total_frames = 0
+            for layer_name, layer_path in resolved_layers.items():
+                layer_pattern = f"{base_filename}_{layer_name}.{{frame:04d}}.exr"
+                
+                layer_result = exporter.export_video_sequence(
+                    layers={layer_name: layer_path},
+                    output_dir=export_dir,
+                    filename_pattern=layer_pattern,
+                    bit_depth=request.bit_depth,
+                    compression=request.compression,
+                    linear=(request.color_space == "Linear") if layer_name == "beauty" else False,
+                    start_frame=request.start_frame,
+                )
+                
+                results["layers"][layer_name] = {
+                    "frame_count": layer_result["frame_count"],
+                    "pattern": layer_pattern,
+                }
+                total_frames = max(total_frames, layer_result["frame_count"])
+            
+            results["frame_count"] = total_frames
+        
+        # Save metadata (only in project cache)
+        if not custom_export:
+            save_generation_metadata(
+                gen_dir=gen_dir,
+                prompt=f"EXR Sequence Export ({len(resolved_layers)} layers)",
+                model="exr_sequence_export",
+                seed=None,
+                image_size=(0, 0),
+                source_image=None,
+                parameters={
+                    "layers": list(resolved_layers.keys()),
+                    "bit_depth": request.bit_depth,
+                    "compression": request.compression,
+                    "color_space": request.color_space,
+                    "filename": base_filename,
+                    "frame_count": results.get("frame_count", 0),
+                    "start_frame": request.start_frame,
+                },
+            )
+        
+        log.success("SeqExport", "EXR sequence export complete")
+        
+        return results
+        
+    except Exception as e:
+        log.exception("SeqExport", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 

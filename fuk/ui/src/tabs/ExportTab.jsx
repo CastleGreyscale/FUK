@@ -1,10 +1,11 @@
 /**
  * Export Tab
  * Export AOV layers to multi-layer EXR for compositing
+ * Supports both single image and video sequence export
  */
 
 import { useState, useMemo, useCallback } from 'react';
-import { Save, Loader2, CheckCircle, Download, AlertCircle } from '../components/Icons';
+import { Save, Loader2, CheckCircle, Download, AlertCircle, Film } from '../components/Icons';
 import InlineImageInput from '../components/InlineImageInput';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { buildImageUrl, API_URL } from '../utils/constants';
@@ -27,6 +28,16 @@ const DEFAULT_SETTINGS = {
   exrColorSpace: 'Linear',
   exportFilename: 'export',
   exportPath: '',
+  // Video sequence settings
+  sequenceStartFrame: 1,
+  sequencePattern: '{name}.{frame:04d}',
+};
+
+// Helper to check if a path is a video file
+const isVideoPath = (path) => {
+  if (!path) return false;
+  const ext = path.split('.').pop()?.toLowerCase();
+  return ['mp4', 'mov', 'avi', 'webm', 'mkv'].includes(ext);
 };
 
 export default function ExportTab({ config, activeTab, setActiveTab, project }) {
@@ -58,11 +69,19 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
     crypto: null,
   });
   
+  // Video mode - auto-detected from dropped layers
+  const [isVideoMode, setIsVideoMode] = useState(false);
+  
   // UI state
   const [exporting, setExporting] = useState(false);
   const [exportResult, setExportResult] = useState(null);
   const [error, setError] = useState(null);
   const [elapsedTime, setElapsedTime] = useState(0);
+  
+  // Detect if any layer is a video
+  const hasVideoLayers = useMemo(() => {
+    return Object.values(layers).some(path => isVideoPath(path));
+  }, [layers]);
   
   const updateLayer = (layerName, path) => {
     setLayers(prev => ({
@@ -71,7 +90,52 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
     }));
     setExportResult(null);
     setError(null);
+    
+    // Auto-detect video mode when a video is added
+    if (isVideoPath(path)) {
+      setIsVideoMode(true);
+    }
   };
+  
+  // Handle layers pack drop - populate all layer inputs at once
+  const handleLayersPackDrop = useCallback((genData) => {
+    console.log('[ExportTab] Layers pack detected:', genData.metadata);
+    
+    // Check if this is a video layers pack
+    const isVideo = genData.metadata?.is_video || false;
+    
+    // Populate all available layers
+    const newLayers = { ...layers };
+    const availableLayers = genData.metadata.available_layers || {};
+    
+    // Get layers from available_layers (includes beauty if present)
+    if (availableLayers.beauty) {
+      newLayers.beauty = availableLayers.beauty;
+    }
+    if (availableLayers.depth) {
+      newLayers.depth = availableLayers.depth;
+    }
+    if (availableLayers.normals) {
+      newLayers.normals = availableLayers.normals;
+    }
+    if (availableLayers.crypto) {
+      newLayers.crypto = availableLayers.crypto;
+    }
+    
+    // Fallback: if no beauty in available_layers, try preview path
+    if (!newLayers.beauty && genData.preview) {
+      if (genData.preview.includes('source.mp4') || genData.preview.includes('source.png')) {
+        newLayers.beauty = genData.preview;
+      }
+    }
+    
+    setLayers(newLayers);
+    setIsVideoMode(isVideo);
+    setExportResult(null);
+    setError(null);
+    
+    console.log('[ExportTab] Populated layers:', newLayers, 'video mode:', isVideo);
+  }, [layers]);
   
   const updateExport = (exportName, enabled) => {
     updateSettings({
@@ -89,29 +153,37 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title: 'Save EXR Export',
-          defaultName: `${settings.exportFilename}.exr`,
-          fileTypes: [['EXR Files', '*.exr'], ['All Files', '*.*']],
+          title: isVideoMode ? 'Select Output Directory' : 'Save EXR Export',
+          defaultName: isVideoMode ? '' : `${settings.exportFilename}.exr`,
+          fileTypes: isVideoMode 
+            ? [['All Files', '*.*']]
+            : [['EXR Files', '*.exr'], ['All Files', '*.*']],
+          directory: isVideoMode,
         }),
       });
       
       const data = await response.json();
       
       if (data.path && !data.cancelled) {
-        // Extract directory and filename
-        const lastSlash = Math.max(data.path.lastIndexOf('/'), data.path.lastIndexOf('\\'));
-        const dir = data.path.substring(0, lastSlash);
-        let filename = data.path.substring(lastSlash + 1);
-        
-        // Remove .exr extension if present
-        if (filename.toLowerCase().endsWith('.exr')) {
-          filename = filename.slice(0, -4);
+        if (isVideoMode) {
+          // For video, the path is a directory
+          updateSettings({ exportPath: data.path });
+        } else {
+          // For single image, extract directory and filename
+          const lastSlash = Math.max(data.path.lastIndexOf('/'), data.path.lastIndexOf('\\'));
+          const dir = data.path.substring(0, lastSlash);
+          let filename = data.path.substring(lastSlash + 1);
+          
+          // Remove .exr extension if present
+          if (filename.toLowerCase().endsWith('.exr')) {
+            filename = filename.slice(0, -4);
+          }
+          
+          updateSettings({
+            exportPath: dir,
+            exportFilename: filename,
+          });
         }
-        
-        updateSettings({
-          exportPath: dir,
-          exportFilename: filename,
-        });
       }
     } catch (err) {
       console.error('Browse failed:', err);
@@ -119,8 +191,8 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
   };
   
   const handleExport = async () => {
-    if (!layers.beauty) {
-      setError('Please add at least a Beauty pass to export');
+    if (!layers.beauty && !layers.depth && !layers.normals && !layers.crypto) {
+      setError('Please add at least one layer to export');
       return;
     }
     
@@ -140,24 +212,35 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
     }, 1000);
     
     try {
-      const response = await fetch(`${API_URL}/export/exr`, {
+      // Choose endpoint based on video mode
+      const endpoint = isVideoMode ? `${API_URL}/export/exr/sequence` : `${API_URL}/export/exr`;
+      
+      const payload = {
+        layers: {
+          beauty: layers.beauty,
+          depth: layers.depth,
+          normals: layers.normals,
+          crypto: layers.crypto,
+        },
+        bit_depth: settings.exrBitDepth,
+        compression: settings.exrCompression,
+        color_space: settings.exrColorSpace,
+        multi_layer: settings.exports.multiLayerEXR,
+        single_files: settings.exports.singleLayerEXRs,
+        filename: settings.exportFilename,
+        export_path: settings.exportPath,
+      };
+      
+      // Add video-specific options
+      if (isVideoMode) {
+        payload.start_frame = settings.sequenceStartFrame;
+        payload.filename_pattern = `${settings.exportFilename}.{frame:04d}.exr`;
+      }
+      
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          layers: {
-            beauty: layers.beauty,
-            depth: layers.depth,
-            normals: layers.normals,
-            crypto: layers.crypto,
-          },
-          bit_depth: settings.exrBitDepth,
-          compression: settings.exrCompression,
-          color_space: settings.exrColorSpace,
-          multi_layer: settings.exports.multiLayerEXR,
-          single_files: settings.exports.singleLayerEXRs,
-          filename: settings.exportFilename,
-          export_path: settings.exportPath,
-        }),
+        body: JSON.stringify(payload),
       });
       
       if (!response.ok) {
@@ -178,10 +261,11 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
   };
   
   const availableLayersCount = Object.values(layers).filter(v => v !== null).length;
-  const canExport = layers.beauty && (settings.exports.multiLayerEXR || settings.exports.singleLayerEXRs);
+  const canExport = availableLayersCount > 0 && (settings.exports.multiLayerEXR || settings.exports.singleLayerEXRs);
   
   // Get the largest layer for main preview
   const mainPreview = layers.beauty || layers.depth || layers.normals || layers.crypto;
+  const mainPreviewIsVideo = isVideoPath(mainPreview);
   
   return (
     <>
@@ -192,62 +276,68 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
           <div className="fuk-preview-main">
             {mainPreview ? (
               <div className="fuk-media-frame">
-                <img
-                  src={buildImageUrl(mainPreview)}
-                  alt="Preview"
-                  className="fuk-preview-media fuk-preview-media--constrained"
-                />
+                {mainPreviewIsVideo ? (
+                  <video
+                    src={buildImageUrl(mainPreview)}
+                    controls
+                    muted
+                    loop
+                    className="fuk-media-preview"
+                  />
+                ) : (
+                  <img
+                    src={buildImageUrl(mainPreview)}
+                    alt="Preview"
+                    className="fuk-preview-media fuk-preview-media--constrained"
+                  />
+                )}
               </div>
             ) : (
               <div className="fuk-placeholder-card fuk-placeholder-card--60 fuk-placeholder-card--16x9">
-                <div className="fuk-placeholder">
-                  <Download className="fuk-placeholder-icon fuk-placeholder-icon--faded" />
-                  <p className="fuk-placeholder-text">Add layers to preview</p>
-                </div>
+                <Download className="fuk-placeholder-icon fuk-placeholder-icon--faded" />
+                <p>Drag layers from History to export</p>
               </div>
             )}
           </div>
           
-          {/* Layer thumbnails row */}
-          {availableLayersCount > 0 && (
-            <div className="fuk-thumb-strip">
-              {Object.entries(layers).map(([name, path]) => path && (
-                <div key={name} className="fuk-thumb-item">
-                  <div className={`fuk-thumb-frame ${name === 'beauty' ? 'fuk-thumb-frame--primary' : ''}`}>
-                    <img
-                      src={buildImageUrl(path)}
-                      alt={name}
-                    />
-                  </div>
-                  <span className={`fuk-thumb-label ${name === 'beauty' ? 'fuk-thumb-label--primary' : ''}`}>
-                    {name}
-                  </span>
-                </div>
-              ))}
+          {/* Video Mode Indicator */}
+          {isVideoMode && (
+            <div className="fuk-video-mode-badge">
+              <Film className="fuk-icon fuk-icon--sm" />
+              <span>Video Sequence Export</span>
             </div>
           )}
           
-          {/* Export result */}
+          {/* Export Result */}
           {exportResult && (
             <div className="fuk-result-banner fuk-result-banner--success">
               <div className="fuk-result-content">
                 <CheckCircle className="fuk-icon fuk-icon--lg" />
                 <span className="fuk-result-text">
-                  Exported to: {exportResult.saved_path || exportResult.multi_layer?.url || 'cache'}
+                  {isVideoMode 
+                    ? `Exported ${exportResult.frame_count} frames`
+                    : 'Export Complete'}
                 </span>
               </div>
-              {exportResult.multi_layer?.url && (
-                <a
-                  href={`/${exportResult.multi_layer.url}`}
-                  download
-                  className="fuk-download-btn"
-                >
-                  Download EXR
-                </a>
+              {exportResult.output_path && (
+                <p className="fuk-text-sm fuk-text-muted fuk-mt-1">
+                  {exportResult.output_path}
+                </p>
+              )}
+              {exportResult.output_dir && (
+                <p className="fuk-text-sm fuk-text-muted fuk-mt-1">
+                  {exportResult.output_dir}
+                </p>
+              )}
+              {exportResult.total_size_mb && (
+                <p className="fuk-text-sm fuk-text-muted">
+                  Total size: {exportResult.total_size_mb.toFixed(2)} MB
+                </p>
               )}
             </div>
           )}
           
+          {/* Error */}
           {error && (
             <div className="fuk-result-banner fuk-result-banner--error">
               <div className="fuk-result-content fuk-result-content--error">
@@ -258,13 +348,16 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
           )}
         </div>
       </div>
-
-      {/* Settings Area */}
+      
+      {/* Sidebar */}
       <div className="fuk-settings-area">
         <div className="fuk-settings-grid">
-          {/* Layer Inputs - Compact Grid */}
+          {/* Layer Inputs */}
           <div className="fuk-card">
-            <h3 className="fuk-card-title fuk-mb-3">Layer Inputs</h3>
+            <h3 className="fuk-card-title fuk-mb-3">
+              AOV Layers
+              {isVideoMode && <span className="fuk-badge fuk-badge--info fuk-ml-2">Video</span>}
+            </h3>
             
             <div className="layer-inputs-grid">
               <InlineImageInput
@@ -272,6 +365,7 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
                 required
                 value={layers.beauty}
                 onChange={(path) => updateLayer('beauty', path)}
+                onLayersPackDrop={handleLayersPackDrop}
                 disabled={exporting}
                 placeholder="Beauty pass"
               />
@@ -280,6 +374,7 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
                 label="Depth"
                 value={layers.depth}
                 onChange={(path) => updateLayer('depth', path)}
+                onLayersPackDrop={handleLayersPackDrop}
                 disabled={exporting}
                 placeholder="Depth map"
               />
@@ -288,6 +383,7 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
                 label="Normals"
                 value={layers.normals}
                 onChange={(path) => updateLayer('normals', path)}
+                onLayersPackDrop={handleLayersPackDrop}
                 disabled={exporting}
                 placeholder="Normal map"
               />
@@ -296,6 +392,7 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
                 label="Crypto"
                 value={layers.crypto}
                 onChange={(path) => updateLayer('crypto', path)}
+                onLayersPackDrop={handleLayersPackDrop}
                 disabled={exporting}
                 placeholder="Cryptomatte"
               />
@@ -311,7 +408,9 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
             <h3 className="fuk-card-title fuk-mb-3">Save Location</h3>
             
             <div className="export-filename-group">
-              <label className="fuk-label">Filename</label>
+              <label className="fuk-label">
+                {isVideoMode ? 'Sequence Name' : 'Filename'}
+              </label>
               <div className="export-filename-row">
                 <input
                   type="text"
@@ -321,9 +420,31 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
                   placeholder="export"
                   disabled={exporting}
                 />
-                <span className="extension">.exr</span>
+                <span className="extension">
+                  {isVideoMode ? '.####.exr' : '.exr'}
+                </span>
               </div>
+              {isVideoMode && (
+                <p className="fuk-help-text fuk-help-text--sm fuk-help-text--inline">
+                  Output: {settings.exportFilename}.0001.exr, {settings.exportFilename}.0002.exr, ...
+                </p>
+              )}
             </div>
+            
+            {/* Video-specific: Start Frame */}
+            {isVideoMode && (
+              <div className="fuk-form-section">
+                <label className="fuk-label">Start Frame</label>
+                <input
+                  type="number"
+                  className="fuk-input fuk-input--compact"
+                  value={settings.sequenceStartFrame}
+                  onChange={(e) => updateSettings({ sequenceStartFrame: parseInt(e.target.value) || 1 })}
+                  min={0}
+                  disabled={exporting}
+                />
+              </div>
+            )}
             
             <div className="fuk-form-section">
               <label className="fuk-label">Export To</label>
@@ -364,7 +485,9 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
                 />
                 <div>
                   <span className="fuk-export-format-label">Multi-Layer</span>
-                  <span className="fuk-export-format-desc">All AOVs in one file</span>
+                  <span className="fuk-export-format-desc">
+                    {isVideoMode ? 'All AOVs per frame' : 'All AOVs in one file'}
+                  </span>
                 </div>
               </label>
               
@@ -378,7 +501,9 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
                 />
                 <div>
                   <span className="fuk-export-format-label">Separate Files</span>
-                  <span className="fuk-export-format-desc">One file per AOV</span>
+                  <span className="fuk-export-format-desc">
+                    {isVideoMode ? 'One sequence per AOV' : 'One file per AOV'}
+                  </span>
                 </div>
               </label>
             </div>
@@ -477,8 +602,11 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
         onGenerate={handleExport}
         onCancel={() => setExporting(false)}
         canGenerate={canExport}
-        generateLabel={`Export EXR${settings.exportFilename ? ` (${settings.exportFilename})` : ''}`}
-        generatingLabel="Exporting..."
+        generateLabel={isVideoMode 
+          ? `Export Sequence${settings.exportFilename ? ` (${settings.exportFilename})` : ''}`
+          : `Export EXR${settings.exportFilename ? ` (${settings.exportFilename})` : ''}`
+        }
+        generatingLabel={isVideoMode ? "Exporting Sequence..." : "Exporting..."}
       />
     </>
   );

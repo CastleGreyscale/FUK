@@ -1,10 +1,13 @@
 /**
  * Media Uploader Component
  * Handles images, videos, and image sequences with:
- * - Native file dialog via tkinter backend
- * - Drag and drop from browser
+ * - Native file dialog via tkinter backend (primary method)
+ * - Drag and drop from history panel (passes paths directly)
  * - Image sequence detection (render.####.exr)
  * - Thumbnail previews for all media types
+ * 
+ * NOTE: Drag-drop from desktop is disabled - use Browse button for local files.
+ * This keeps files in-place without copying/uploading.
  */
 
 import { useState, useId, useCallback } from 'react';
@@ -50,6 +53,8 @@ function buildMediaUrl(path) {
 export default function MediaUploader({ 
   media,              // Array of media objects: [{path, displayName, mediaType, ...}]
   onMediaChange,      // Callback when media changes
+  images,             // LEGACY: Array of string paths (for backward compat with ImageUploader)
+  onImagesChange,     // LEGACY: Callback with string paths (for backward compat)
   disabled = false,
   multiple = true,    // Allow multiple files
   accept = 'all',     // 'all', 'images', 'videos', 'exr'
@@ -64,8 +69,13 @@ export default function MediaUploader({
   const reactId = useId();
   const inputId = providedId || `media-upload-${reactId}`;
   
+  // Backward compatibility: handle both object and string array formats
+  const isLegacyMode = !!images || !!onImagesChange;
+  const rawMedia = media || images || [];
+  const handleChange = onMediaChange || onImagesChange;
+  
   // Normalize media to array of objects
-  const normalizedMedia = (media || []).map(item => {
+  const normalizedMedia = rawMedia.map(item => {
     if (typeof item === 'string') {
       return {
         path: item,
@@ -78,8 +88,21 @@ export default function MediaUploader({
       mediaType: item.mediaType || getMediaType(item.path),
     };
   });
+  
+  // Helper to call onChange with correct format
+  const callOnChange = useCallback((newMedia) => {
+    if (isLegacyMode) {
+      // Legacy mode: return array of string paths
+      const paths = newMedia.map(item => typeof item === 'string' ? item : item.path);
+      handleChange(paths);
+    } else {
+      // New mode: return array of objects
+      handleChange(newMedia);
+    }
+  }, [isLegacyMode, handleChange]);
 
-  // Open native file dialog via backend
+  // Open native file dialog via backend (PRIMARY METHOD)
+  // Returns absolute paths - no upload/copy needed
   const handleBrowse = useCallback(async () => {
     if (disabled || loading) return;
     
@@ -106,7 +129,7 @@ export default function MediaUploader({
       
       if (data.success && data.files?.length > 0) {
         const newMedia = data.files.map(f => ({
-          path: f.path,
+          path: f.path,  // Absolute path - file stays in place
           displayName: f.display_name,
           mediaType: f.media_type,
           firstFrame: f.first_frame,
@@ -116,12 +139,12 @@ export default function MediaUploader({
         }));
         
         if (multiple) {
-          onMediaChange([...normalizedMedia, ...newMedia]);
+          callOnChange([...normalizedMedia, ...newMedia]);
         } else {
-          onMediaChange(newMedia.slice(0, 1));
+          callOnChange(newMedia.slice(0, 1));
         }
         
-        console.log('[MediaUploader] Selected media:', newMedia);
+        console.log('[MediaUploader] Selected media (absolute paths):', newMedia);
 
         // Register imports in history and auto-pin
         for (const file of data.files) {
@@ -144,77 +167,22 @@ export default function MediaUploader({
     } finally {
       setLoading(false);
     }
-  }, [disabled, loading, multiple, detectSequences, accept, normalizedMedia, onMediaChange]);
-
-  // Handle file input change (fallback for systems without tkinter)
-  const handleFileInput = useCallback(async (e) => {
-    const files = Array.from(e.target.files || []);
-    if (files.length === 0) return;
-    
-    setLoading(true);
-    setError(null);
-    
-    try {
-      // Upload files to server
-      const uploadedMedia = [];
-      
-      for (const file of files) {
-        const formData = new FormData();
-        formData.append('file', file);
-        
-        const response = await fetch(`${API_URL}/upload/media`, {
-          method: 'POST',
-          body: formData,
-        });
-        
-        if (!response.ok) {
-          throw new Error(`Upload failed: ${response.statusText}`);
-        }
-        
-        const data = await response.json();
-        uploadedMedia.push({
-          path: data.path,
-          displayName: file.name,
-          mediaType: getMediaType(file.name),
-        });
-      }
-      
-      if (multiple) {
-        onMediaChange([...normalizedMedia, ...uploadedMedia]);
-      } else {
-        onMediaChange(uploadedMedia.slice(0, 1));
-      }
-      
-      console.log('[MediaUploader] Uploaded media:', uploadedMedia);
-
-      // Register uploads in history and auto-pin
-      for (const media of uploadedMedia) {
-        const result = await registerImport(media.path, media.displayName, true);
-        if (result.success && result.auto_pin && result.id) {
-          window.dispatchEvent(new CustomEvent('fuk-import-registered', {
-            detail: { id: result.id, autoPin: true }
-          }));
-        }
-      }
-      
-    } catch (err) {
-      console.error('Upload failed:', err);
-      setError(err.message);
-    } finally {
-      setLoading(false);
-      e.target.value = '';  // Reset input
-    }
-  }, [multiple, normalizedMedia, onMediaChange]);
+  }, [disabled, loading, multiple, detectSequences, accept, normalizedMedia, callOnChange]);
 
   // Handle drag and drop
+  // Only accepts drops from history panel (paths) - NOT desktop files
   const handleDrop = useCallback(async (e) => {
     e.preventDefault();
     setDragOver(false);
     
     if (disabled) return;
     
-    // Check for path data (drag from history panel)
+    // Check for path data (drag from history panel or other FUK components)
     const pathData = e.dataTransfer.getData('text/plain');
+    const fukGenData = e.dataTransfer.getData('application/x-fuk-generation');
+    console.log('[MediaUploader] Drop received:', { pathData, hasFukData: !!fukGenData });
+    
+    // Accept drag from history (has path data starting with / or api/)
     if (pathData && (pathData.startsWith('/') || pathData.startsWith('api/'))) {
       const newItem = {
         path: pathData,
@@ -222,36 +190,35 @@ export default function MediaUploader({
         mediaType: getMediaType(pathData),
       };
       
-      if (multiple) {
-        onMediaChange([...normalizedMedia, newItem]);
-      } else {
-        onMediaChange([newItem]);
+      // If we have full generation data, use it for richer info
+      if (fukGenData) {
+        try {
+          const genData = JSON.parse(fukGenData);
+          newItem.displayName = genData.name || newItem.displayName;
+          newItem.mediaType = genData.type || newItem.mediaType;
+        } catch (e) {
+          // Ignore parse errors
+        }
       }
+      
+      if (multiple) {
+        callOnChange([...normalizedMedia, newItem]);
+      } else {
+        callOnChange([newItem]);
+      }
+      
+      console.log('[MediaUploader] Dropped from history:', newItem);
       return;
     }
     
-    // Handle file drops
+    // Desktop file drops are not supported - show helpful message
     const files = Array.from(e.dataTransfer.files);
-    if (files.length === 0) return;
-    
-    // Filter to accepted types
-    const acceptedFiles = files.filter(f => {
-      const ext = '.' + f.name.toLowerCase().split('.').pop();
-      if (accept === 'images') return IMAGE_EXTENSIONS.includes(ext);
-      if (accept === 'videos') return VIDEO_EXTENSIONS.includes(ext);
-      if (accept === 'exr') return ext === '.exr' || ext === '.dpx';
-      return IMAGE_EXTENSIONS.includes(ext) || VIDEO_EXTENSIONS.includes(ext);
-    });
-    
-    if (acceptedFiles.length === 0) {
-      setError('No supported media files found');
+    if (files.length > 0) {
+      setError('Desktop drag-drop not supported. Click to browse and select files.');
+      console.log('[MediaUploader] Desktop drop blocked - use Browse button');
       return;
     }
-    
-    // Create synthetic event for file handler
-    const syntheticEvent = { target: { files: acceptedFiles, value: '' } };
-    handleFileInput(syntheticEvent);
-  }, [disabled, multiple, accept, normalizedMedia, onMediaChange, handleFileInput]);
+  }, [disabled, multiple, normalizedMedia, callOnChange]);
 
   const handleDragOver = (e) => {
     e.preventDefault();
@@ -263,22 +230,12 @@ export default function MediaUploader({
   };
 
   const handleRemove = (index) => {
-    onMediaChange(normalizedMedia.filter((_, i) => i !== index));
-  };
-
-  // Build accept string for file input
-  const getAcceptString = () => {
-    switch (accept) {
-      case 'images': return IMAGE_EXTENSIONS.join(',');
-      case 'videos': return VIDEO_EXTENSIONS.join(',');
-      case 'exr': return '.exr,.dpx';
-      default: return [...IMAGE_EXTENSIONS, ...VIDEO_EXTENSIONS].join(',');
-    }
+    callOnChange(normalizedMedia.filter((_, i) => i !== index));
   };
 
   return (
     <div className="fuk-media-uploader">
-      {/* Drop Zone */}
+      {/* Drop Zone - Click opens native browse, drag accepts history items */}
       <div 
         className={`fuk-dropzone ${dragOver ? 'fuk-dropzone--dragover' : ''} ${disabled ? 'fuk-dropzone--disabled' : ''}`}
         onDrop={handleDrop}
@@ -286,17 +243,6 @@ export default function MediaUploader({
         onDragLeave={handleDragLeave}
         onClick={handleBrowse}
       >
-        {/* Hidden file input as fallback */}
-        <input
-          type="file"
-          accept={getAcceptString()}
-          multiple={multiple}
-          onChange={handleFileInput}
-          disabled={disabled || loading}
-          style={{ display: 'none' }}
-          id={inputId}
-        />
-        
         <div className="fuk-dropzone-content">
           {loading ? (
             <>
@@ -310,7 +256,7 @@ export default function MediaUploader({
               <span className="fuk-dropzone-hint">
                 {normalizedMedia.length > 0 
                   ? `${normalizedMedia.length} item${normalizedMedia.length !== 1 ? 's' : ''} selected`
-                  : 'Supports images, videos, and sequences'
+                  : 'Click to browse or drag from history'
                 }
               </span>
             </>
@@ -322,7 +268,7 @@ export default function MediaUploader({
       {error && (
         <div className="fuk-upload-error">
           <span>{error}</span>
-          <button onClick={() => setError(null)} className="fuk-upload-error-dismiss">Ã—</button>
+          <button onClick={() => setError(null)} className="fuk-upload-error-dismiss">×</button>
         </div>
       )}
 

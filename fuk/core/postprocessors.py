@@ -265,6 +265,22 @@ class RealESRGANUpscaler:
         
         return {"output_path": str(output_path), "scale": scale, "method": "torch"}
     
+    def cleanup(self):
+        """Clean up models and free VRAM"""
+        if self.torch_model is not None:
+            print("[Upscaler] Cleaning up torch model...")
+            del self.torch_model
+            self.torch_model = None
+            
+            # Force GPU memory cleanup
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+            
+            import gc
+            gc.collect()
+            print("[Upscaler] ✓ Cleanup complete")
+    
     def upscale_lanczos(
         self,
         input_path: Path,
@@ -313,28 +329,35 @@ class RealESRGANUpscaler:
         
         print(f"[Upscaler] Upscaling {input_path.name} by {scale}x using {model}")
         
-        # Route to appropriate backend
-        if model == "lanczos":
+        try:
+            # Route to appropriate backend
+            if model == "lanczos":
+                return self.upscale_lanczos(input_path, output_path, scale, progress_callback)
+            
+            # Try NCNN first (fastest, best quality, no VRAM cleanup needed)
+            if self.ncnn_binary:
+                try:
+                    return self.upscale_ncnn(input_path, output_path, scale, 
+                                             denoise=denoise, progress_callback=progress_callback)
+                except Exception as e:
+                    print(f"[Upscaler] NCNN failed: {e}")
+            
+            # Try torch model (needs VRAM cleanup)
+            try:
+                result = self.upscale_torch(input_path, output_path, scale,
+                                          denoise=denoise, progress_callback=progress_callback)
+                return result
+            except Exception as e:
+                print(f"[Upscaler] Torch Real-ESRGAN not available: {e}")
+            
+            # Final fallback to Lanczos
+            print(f"[Upscaler] Using Lanczos fallback (install realesrgan-ncnn-vulkan for AI upscaling)")
             return self.upscale_lanczos(input_path, output_path, scale, progress_callback)
         
-        # Try NCNN first (fastest, best quality)
-        if self.ncnn_binary:
-            try:
-                return self.upscale_ncnn(input_path, output_path, scale, 
-                                         denoise=denoise, progress_callback=progress_callback)
-            except Exception as e:
-                print(f"[Upscaler] NCNN failed: {e}")
-        
-        # Try torch model
-        try:
-            return self.upscale_torch(input_path, output_path, scale,
-                                      denoise=denoise, progress_callback=progress_callback)
-        except Exception as e:
-            print(f"[Upscaler] Torch Real-ESRGAN not available: {e}")
-        
-        # Final fallback to Lanczos
-        print(f"[Upscaler] Using Lanczos fallback (install realesrgan-ncnn-vulkan for AI upscaling)")
-        return self.upscale_lanczos(input_path, output_path, scale, progress_callback)
+        finally:
+            # Always clean up VRAM after processing
+            if self.torch_model is not None:
+                self.cleanup()
 
 
 # ============================================================================
@@ -955,6 +978,12 @@ class PostProcessorManager:
                 "target_fps": [24, 30, 60],
             }
         }
+    
+    def cleanup(self):
+        """Clean up all loaded models and free VRAM"""
+        if self._upscaler is not None:
+            self._upscaler.cleanup()
+        # Interpolator uses NCNN which doesn't need cleanup
 
 
 # ============================================================================

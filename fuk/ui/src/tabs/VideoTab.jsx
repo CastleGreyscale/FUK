@@ -1,12 +1,17 @@
 /**
  * Video Generation Tab
- * Wan video generation with I2V, T2V, FLF2V support
- * Refactored: All inline styles moved to CSS classes
+ * Wan video generation with I2V, FLF2V support
+ * 
+ * Features:
+ * - Auto-reads dimensions from input image
+ * - Scale factor for VRAM management
+ * - Manual frame entry with 4n+1 validation
+ * - Duration feedback
  */
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Film, FukMonogram, Loader2, CheckCircle, X, Camera, Pipeline } from '../../src/components/Icons';
-import ImageUploader from '../components/ImageUploader';
+import { Film, Loader2, CheckCircle, X, Camera, AlertCircle } from '../../src/components/Icons';
+import MediaUploader from '../components/MediaUploader.jsx';
 import SeedControl from '../components/SeedControl';
 import { useGeneration } from '../hooks/useGeneration';
 import { useLocalStorage } from '../../src/hooks/useLocalStorage';
@@ -14,7 +19,6 @@ import { useSavedSeeds } from '../hooks/useSavedSeeds';
 import { startVideoGeneration } from '../../src/utils/api';
 import { formatTime } from '../utils/helpers.js';
 import { 
-  VIDEO_LENGTHS,
   DEFAULT_VIDEO_SETTINGS, 
   buildImageUrl, 
   SEED_MODES, 
@@ -22,17 +26,48 @@ import {
 } from '../../src/utils/constants';
 import Footer from '../components/Footer';
 
+
+// Scale factor presets for VRAM management
+const SCALE_FACTORS = [
+  { label: '100%', value: 1.0 },
+  { label: '75%', value: 0.75 },
+  { label: '50%', value: 0.5 },
+  { label: '25%', value: 0.25 },
+];
+
+// Round to nearest valid 4n+1 frame count
+function roundToValid4n1(frames) {
+  // Find n such that 4n+1 is closest to frames
+  const n = Math.round((frames - 1) / 4);
+  return Math.max(5, 4 * n + 1); // Minimum 5 frames
+}
+
+// Get duration string from frame count (assuming 24fps output)
+function getFrameDuration(frames, fps = 24) {
+  const seconds = frames / fps;
+  if (seconds < 1) {
+    return `${Math.round(seconds * 1000)}ms`;
+  }
+  return `${seconds.toFixed(2)}s`;
+}
+
 export default function VideoTab({ config, activeTab, setActiveTab, project }) {
-  const defaults = config?.defaults || {};
+  const defaults = config?.defaults?.video || config?.defaults || {};
   
   // Build initial defaults by merging config with hardcoded defaults
   const initialDefaults = useMemo(() => ({
     ...DEFAULT_VIDEO_SETTINGS,
+    task: 'i2v-A14B', // Default to Wan 2.2
     negative_prompt: defaults.negative_prompt || DEFAULT_VIDEO_SETTINGS.negative_prompt,
     guidance_scale: defaults.guidance_scale ?? DEFAULT_VIDEO_SETTINGS.guidance_scale,
     flow_shift: defaults.flow_shift ?? DEFAULT_VIDEO_SETTINGS.flow_shift,
     lora_multiplier: defaults.lora_multiplier ?? DEFAULT_VIDEO_SETTINGS.lora_multiplier,
     blocks_to_swap: defaults.blocks_to_swap ?? DEFAULT_VIDEO_SETTINGS.blocks_to_swap,
+    video_length: defaults.length ?? DEFAULT_VIDEO_SETTINGS.video_length,
+    // New fields
+    scale_factor: 1.0,
+    source_width: null,  // From input image
+    source_height: null, // From input image
   }), [defaults]);
   
   // Fallback localStorage for when no project is loaded
@@ -65,6 +100,14 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
       setLocalFormData(newData);
     }
   }, [project?.isProjectLoaded, project?.updateTabState, setLocalFormData]);
+
+  // Frame input state (for controlled input before validation)
+  const [frameInput, setFrameInput] = useState(String(formData.video_length || 81));
+  
+  // Sync frame input when formData changes externally
+  useEffect(() => {
+    setFrameInput(String(formData.video_length || 81));
+  }, [formData.video_length]);
 
   // Generation state
   const {
@@ -117,6 +160,57 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
       }
     }
   }, [result, project?.updateLastState, setFormData]);
+
+  // Load image dimensions when image_path changes
+  useEffect(() => {
+    if (formData.image_path) {
+      const img = new Image();
+      img.onload = () => {
+        // Round to nearest 64 for model compatibility
+        const width = Math.round(img.width / 64) * 64;
+        const height = Math.round(img.height / 64) * 64;
+        
+        setFormData(prev => ({
+          ...prev,
+          source_width: width,
+          source_height: height,
+          // Update output dimensions with scale factor
+          width: Math.round(width * prev.scale_factor / 64) * 64,
+          height: Math.round(height * prev.scale_factor / 64) * 64,
+        }));
+      };
+      img.onerror = () => {
+        console.warn('Could not load image for dimension detection');
+      };
+      img.src = buildImageUrl(formData.image_path);
+    }
+  }, [formData.image_path, setFormData]);
+
+  // Update output dimensions when scale factor changes
+  const handleScaleChange = (newScale) => {
+    const sourceW = formData.source_width || 832;
+    const sourceH = formData.source_height || 480;
+    
+    setFormData(prev => ({
+      ...prev,
+      scale_factor: newScale,
+      width: Math.round(sourceW * newScale / 64) * 64 || 832,
+      height: Math.round(sourceH * newScale / 64) * 64 || 480,
+    }));
+  };
+
+  // Handle frame input change with validation
+  const handleFrameInputChange = (value) => {
+    setFrameInput(value);
+  };
+
+  // Validate and round frames on blur
+  const handleFrameInputBlur = () => {
+    const parsed = parseInt(frameInput) || 81;
+    const valid = roundToValid4n1(parsed);
+    setFrameInput(String(valid));
+    setFormData(prev => ({ ...prev, video_length: valid }));
+  };
 
   // Determine the seed to use based on mode
   const getEffectiveSeed = useCallback(() => {
@@ -173,12 +267,16 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
     setFormData(prev => ({ ...prev, end_image_path: paths[0] || null }));
   };
 
-  // Check if task requires start image
+  // Check if task requires images
   const requiresStartImage = formData.task.includes('i2v') || formData.task.includes('flf2v');
   const requiresEndImage = formData.task.includes('flf2v');
   
+  // Calculate whether current frame input is valid
+  const currentFrameValid = (parseInt(frameInput) - 1) % 4 === 0;
+  const validFrameCount = roundToValid4n1(parseInt(frameInput) || 81);
+  
   // Calculate CSS variable for dynamic aspect ratio
-  const aspectRatioStyle = { '--preview-aspect': `${formData.width} / ${formData.height}` };
+  const aspectRatioStyle = { '--preview-aspect': `${formData.width || 832} / ${formData.height || 480}` };
 
   return (
     <>
@@ -198,7 +296,7 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
                 <div className="fuk-preview-info-row">
                   <span>{formData.width}×{formData.height}</span>
                   <span>•</span>
-                  <span>{formData.video_length} frames</span>
+                  <span>{formData.video_length} frames ({getFrameDuration(formData.video_length)})</span>
                   <span>•</span>
                   <span>{formData.steps} steps</span>
                   {result?.outputs?.mp4 && (
@@ -227,7 +325,11 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
               <div className="fuk-placeholder">
                 <Film className="fuk-placeholder-icon" />
                 <p className="fuk-placeholder-text">
-                  {formData.width} × {formData.height} × {formData.video_length} frames
+                  {formData.width || '---'} × {formData.height || '---'} × {formData.video_length} frames
+                  <br />
+                  <span className="fuk-placeholder-subtext">
+                    {formData.source_width ? `Source: ${formData.source_width}×${formData.source_height}` : 'Upload image to set dimensions'}
+                  </span>
                 </p>
               </div>
             </div>
@@ -269,57 +371,77 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
             <h3 className="fuk-card-title fuk-mb-3">Video Settings</h3>
             
             <div className="fuk-form-group-compact">
-              <label className="fuk-label">Task / Model</label>
+              <label className="fuk-label">Model</label>
               <select
                 className="fuk-select"
                 value={formData.task}
                 onChange={(e) => setFormData({...formData, task: e.target.value})}
               >
-                <option value="t2v-14B">T2V (Text to Video)</option>
-                <option value="i2v-14B">I2V (Image to Video)</option>
-                <option value="flf2v-14B">FLF2V (First+Last Frame)</option>
-                <option value="i2v-14B-FC">I2V Fun Control</option>
+                <option value="i2v-A14B">Wan 2.2 I2V (Recommended)</option>
+                <option value="i2v-14B">Wan 2.1 I2V</option>
+                <option value="flf2v-14B">Wan 2.1 FLF2V (First+Last Frame)</option>
+                <option value="i2v-14B-FC">Wan 2.1 I2V Fun Control</option>
               </select>
             </div>
             
+            {/* Resolution from input + scale factor */}
             <div className="fuk-form-group-compact">
-              <label className="fuk-label">Dimensions</label>
+              <label className="fuk-label">
+                Resolution 
+                {formData.source_width && (
+                  <span className="fuk-label-description">
+                    (from {formData.source_width}×{formData.source_height})
+                  </span>
+                )}
+              </label>
+              <div className="fuk-input-inline">
+                <select
+                  className="fuk-select"
+                  value={formData.scale_factor}
+                  onChange={(e) => handleScaleChange(parseFloat(e.target.value))}
+                >
+                  {SCALE_FACTORS.map(sf => (
+                    <option key={sf.value} value={sf.value}>{sf.label}</option>
+                  ))}
+                </select>
+                <span className="fuk-input-result">
+                  → {formData.width || '---'} × {formData.height || '---'}
+                </span>
+              </div>
+              {!formData.source_width && (
+                <p className="fuk-help-text fuk-help-text--warning">
+                  <AlertCircle className="fuk-icon--sm" />
+                  Upload a start image to auto-detect dimensions
+                </p>
+              )}
+            </div>
+            
+            {/* Frame count with duration feedback */}
+            <div className="fuk-form-group-compact">
+              <label className="fuk-label">
+                Frames
+                <span className="fuk-label-description">(must be 4n+1)</span>
+              </label>
               <div className="fuk-input-inline">
                 <input
                   type="number"
-                  className="fuk-input"
-                  value={formData.width || ''}
-                  onChange={(e) => setFormData({...formData, width: parseInt(e.target.value) || 832})}
-                  step={64}
-                  min={512}
-                  max={1920}
-                  placeholder="832"
+                  className={`fuk-input ${!currentFrameValid ? 'fuk-input--warning' : ''}`}
+                  value={frameInput}
+                  onChange={(e) => handleFrameInputChange(e.target.value)}
+                  onBlur={handleFrameInputBlur}
+                  min={5}
+                  max={241}
+                  step={4}
                 />
-                <span className="fuk-input-separator">×</span>
-                <input
-                  type="number"
-                  className="fuk-input"
-                  value={formData.height || ''}
-                  onChange={(e) => setFormData({...formData, height: parseInt(e.target.value) || 480})}
-                  step={64}
-                  min={512}
-                  max={1080}
-                  placeholder="480"
-                />
+                <span className="fuk-input-result">
+                  ≈ {getFrameDuration(formData.video_length)} @ 24fps
+                </span>
               </div>
-            </div>
-            
-            <div className="fuk-form-group-compact">
-              <label className="fuk-label">Video Length (must be 4n+1)</label>
-              <select
-                className="fuk-select"
-                value={formData.video_length}
-                onChange={(e) => setFormData({...formData, video_length: parseInt(e.target.value)})}
-              >
-                {VIDEO_LENGTHS.map(len => (
-                  <option key={len.value} value={len.value}>{len.label}</option>
-                ))}
-              </select>
+              {!currentFrameValid && (
+                <p className="fuk-help-text fuk-help-text--info">
+                  Will round to {validFrameCount} frames ({getFrameDuration(validFrameCount)})
+                </p>
+              )}
             </div>
           </div>
 
@@ -441,19 +563,26 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
               <>
                 <div className="fuk-form-group-compact">
                   <label className="fuk-label">
-                    Start Image {formData.task.includes('i2v') ? '(Required)' : ''}
+                    Start Image <span className="fuk-label-required">(Required)</span>
                   </label>
-                  <ImageUploader
+                  <MediaUploader
                     images={formData.image_path ? [formData.image_path] : []}
                     onImagesChange={handleStartImageChange}
                     disabled={generating}
                   />
+                  {formData.source_width && (
+                    <p className="fuk-help-text">
+                      Detected: {formData.source_width} × {formData.source_height}
+                    </p>
+                  )}
                 </div>
                 
                 {requiresEndImage && (
                   <div className="fuk-form-group-compact fuk-mt-4">
-                    <label className="fuk-label">End Image (Required for FLF2V)</label>
-                    <ImageUploader
+                    <label className="fuk-label">
+                      End Image <span className="fuk-label-required">(Required for FLF2V)</span>
+                    </label>
+                    <MediaUploader
                       images={formData.end_image_path ? [formData.end_image_path] : []}
                       onImagesChange={handleEndImageChange}
                       disabled={generating}
@@ -465,7 +594,7 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
               <div className="fuk-empty-state">
                 <Film className="fuk-empty-state-icon" />
                 <p className="fuk-empty-state-text">
-                  Select I2V or FLF2V task<br />to enable image inputs
+                  Select an I2V or FLF2V model<br />to enable image inputs
                 </p>
               </div>
             )}

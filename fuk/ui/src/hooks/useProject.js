@@ -92,8 +92,20 @@ export function useProject() {
       
       if (result.path) {
         console.log('[Project] Folder selected:', result.path);
+        
+        // Tell backend about the folder change (updates _project_folder and _cache_root)
+        await setProjectFolder(result.path);
+        
         setProjectFolderLocal(result.path);
         setSavedProjectFolder(result.path);
+        
+        // Get config
+        try {
+          const config = await getProjectConfig();
+          setProjectConfig(config);
+        } catch (e) {
+          console.warn('[Project] Could not load config, using defaults');
+        }
         
         // Load project files
         await refreshProjectFiles();
@@ -186,14 +198,36 @@ export function useProject() {
     
     try {
       console.log('[Project] Loading file:', filename);
-      const data = await loadProject(filename);
+      const response = await loadProject(filename);
+      
+      // Handle new response format with comprehensive info
+      const data = response.data || response;  // Backwards compatible
       const merged = mergeWithDefaults(data);
       
       setProjectState(merged);
       setCurrentFilename(filename);
       setHasUnsavedChanges(false);
       
+      // Log cache information
+      if (response.projectCache) {
+        console.log('[Project] Project cache:', response.projectCache);
+      }
+      if (response.projectInfo) {
+        console.log('[Project] Project info:', response.projectInfo);
+      }
+      
       console.log('[Project] File loaded successfully');
+      
+      // Dispatch custom event to notify other components that project changed
+      window.dispatchEvent(new CustomEvent('fuk-project-changed', {
+        detail: {
+          filename,
+          projectInfo: response.projectInfo,
+          projectCache: response.projectCache,
+          timestamp: Date.now(),
+        }
+      }));
+      
       return merged;
     } catch (err) {
       console.error('[Project] Failed to load file:', err);

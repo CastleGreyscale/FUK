@@ -8,7 +8,9 @@
     "fp8": true,
     "fp8_scaled": true,
     "fp8_t5": true,
-    "vae_cache_cpu": false,
+    "vae_cache_cpu": true,
+    "cpu_noise": true,
+    "lazy_loading": true,
     "attn_mode": "torch",
     "blocks_to_swap_default": 0
   },
@@ -19,7 +21,9 @@
       "fp8": ["--fp8"],
       "fp8_scaled": ["--fp8_scaled"],
       "fp8_t5": ["--fp8_t5"],
-      "vae_cache_cpu": ["--vae_cache_cpu"]
+      "vae_cache_cpu": ["--vae_cache_cpu"],
+      "cpu_noise": ["--cpu_noise"],
+      "lazy_loading": ["--lazy_loading"]
     }
   },
 
@@ -41,6 +45,7 @@
     "control_path": "--control_path",
     "attn_mode": "--attn_mode",
     "dit": "--dit",
+    "dit_high_noise": "--dit_high_noise",
     "vae": "--vae",
     "t5": "--t5",
     "clip": "--clip",
@@ -69,6 +74,13 @@
       "optional": ["negative_prompt"],
       "models_need_clip": true
     },
+    "i2v-A14B": {
+      "_comment": "Wan 2.2 I2V - uses dual DIT (low/high noise), no CLIP",
+      "required": ["prompt", "image_path"],
+      "optional": ["negative_prompt"],
+      "models_need_clip": false,
+      "models_need_dit_high_noise": true
+    },
     "flf2v": {
       "required": ["prompt", "image_path", "end_image_path"],
       "optional": ["negative_prompt"],
@@ -86,7 +98,7 @@
       "fp8": true,
       "fp8_scaled": true,
       "fp8_t5": true,
-      "vae_cache_cpu": false
+      "vae_cache_cpu": true
     },
     "16gb": {
       "blocks_to_swap": 20,

@@ -42,6 +42,7 @@ function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned }) {
                   (generation.type === 'preprocess' && generation.subtype === 'video');
   const isSequence = generation.isSequence;
   const previewUrl = buildImageUrl(generation.preview);
+  const displayName = generation.name || generation.id || 'Unknown';
   
   // Get the appropriate icon based on type and subtype
   const getTypeIcon = () => {
@@ -114,8 +115,13 @@ function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned }) {
   const TypeIcon = getTypeIcon();
   
   const handleDragStart = (e) => {
-    e.dataTransfer.setData('text/plain', generation.path);
-    e.dataTransfer.setData('application/x-fuk-generation', JSON.stringify(generation));
+    // Use preview URL for the path (API returns 'preview' not 'path')
+    const dragPath = generation.path || generation.preview;
+    e.dataTransfer.setData('text/plain', dragPath);
+    e.dataTransfer.setData('application/x-fuk-generation', JSON.stringify({
+      ...generation,
+      path: dragPath,  // Ensure path is included
+    }));
     e.dataTransfer.effectAllowed = 'copy';
     
     const img = e.target.cloneNode(true);
@@ -133,8 +139,8 @@ function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned }) {
       draggable
       onDragStart={handleDragStart}
       title={generation.sourcePath 
-        ? `Drag to use as input\n${generation.name}\nSource: ${generation.sourcePath}\n${generation.timestamp}`
-        : `Drag to use as input\n${generation.name}\n${generation.timestamp}`
+        ? `Drag to use as input\n${displayName}\nSource: ${generation.sourcePath}\n${generation.timestamp}`
+        : `Drag to use as input\n${displayName}\n${generation.timestamp}`
       }
     >
       <div className="gen-history-thumb">
@@ -144,7 +150,7 @@ function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned }) {
             <div className="gen-history-sequence">
               <img 
                 src={previewUrl} 
-                alt={generation.name}
+                alt={displayName}
                 onError={() => setImageError(true)}
               />
               <div className="gen-history-sequence-overlay">
@@ -163,7 +169,7 @@ function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned }) {
           ) : (
             <img 
               src={previewUrl} 
-              alt={generation.name}
+              alt={displayName}
               onError={() => setImageError(true)}
             />
           )
@@ -186,7 +192,7 @@ function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned }) {
       
       <div className="gen-history-info">
         <span className="gen-history-name">
-          {generation.name.split('/').pop()}
+          {displayName.split('/').pop()}
           {getSubtypeBadge()}
           {getFrameCountBadge()}
         </span>
@@ -311,11 +317,27 @@ export default function GenerationHistory({ project, collapsed, onToggle }) {
       
       // Refresh to show the new import
       fetchGenerations(daysLoaded, true);
+
+      
+
     };
-    
+
     window.addEventListener('fuk-import-registered', handleImportRegistered);
     return () => window.removeEventListener('fuk-import-registered', handleImportRegistered);
   }, [daysLoaded, fetchGenerations]);
+
+  useEffect(() => {
+    const handleProjectChange = (event) => {
+      console.log('[History] Project changed, refreshing...', event.detail);
+      setGenerations([]);
+      setDaysLoaded(1);
+      fetchGenerations(1, true);
+    };
+    
+    window.addEventListener('fuk-project-changed', handleProjectChange);
+    return () => window.removeEventListener('fuk-project-changed', handleProjectChange);
+  }, [fetchGenerations]);
+
 
   const handleRefresh = () => {
     console.log('[History] Manual refresh clicked');
@@ -347,7 +369,7 @@ export default function GenerationHistory({ project, collapsed, onToggle }) {
   const unpinnedGenerations = generations.filter(g => !pinnedIds.includes(g.id));
 
   const handleDelete = async (generation) => {
-    if (!confirm(`Delete ${generation.name}?`)) return;
+    if (!confirm(`Delete ${generation.name || generation.id}?`)) return;
     
     try {
       const res = await fetch(`${API_URL}/project/generations/${encodeURIComponent(generation.id)}`, {
@@ -484,7 +506,7 @@ export default function GenerationHistory({ project, collapsed, onToggle }) {
       </div>
 
       <div className="gen-history-hint">
-        Drag items to input fields â€¢ Click bookmark to pin
+        Drag items to input fields Ã¢â‚¬Â¢ Click bookmark to pin
       </div>
     </div>
   );

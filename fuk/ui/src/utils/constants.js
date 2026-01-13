@@ -15,15 +15,6 @@ export const ASPECT_RATIOS = [
   { label: '2.75:1 (Panavision)', value: '2.75:1', ratio: 276/100 },
 ];
 
-// Video length presets (must be 4n+1)
-export const VIDEO_LENGTHS = [
-  { label: '1 sec (25 frames)', value: 25 },
-  { label: '2 sec (49 frames)', value: 49 },
-  { label: '3 sec (81 frames)', value: 81 },
-  { label: '4 sec (97 frames)', value: 97 },
-  { label: '5 sec (121 frames)', value: 121 },
-];
-
 // Step presets
 export const STEP_PRESETS = [20, 40];
 
@@ -56,8 +47,8 @@ export const DEFAULT_IMAGE_SETTINGS = {
   guidance_scale: 2.1,
   flow_shift: 2.1,
   seed: null,
-  seedMode: SEED_MODES.RANDOM,  // Default to random
-  lastUsedSeed: null,           // Track last seed used for saving
+  seedMode: SEED_MODES.RANDOM,
+  lastUsedSeed: null,
   lora: null,
   lora_multiplier: 1.0,
   blocks_to_swap: 10,
@@ -68,12 +59,16 @@ export const DEFAULT_IMAGE_SETTINGS = {
 
 export const DEFAULT_VIDEO_SETTINGS = {
   prompt: '',
-  task: 'i2v-14B',
+  task: 'i2v-A14B',  // Wan 2.2 as default
   negative_prompt: DEFAULT_NEGATIVE_PROMPT,
-  width: 832,
-  height: 480,
-  video_length: 81,
+  width: null,       // Auto from input image
+  height: null,      // Auto from input image
+  source_width: null,  // Original input dimensions
+  source_height: null,
+  scale_factor: 1.0,   // Resolution scale (1.0 = 100%)
+  video_length: 61,    // ~2.5 seconds @ 24fps
   steps: 20,
+  stepsMode: 'preset',
   guidance_scale: 5.0,
   flow_shift: 5.0,
   seed: null,

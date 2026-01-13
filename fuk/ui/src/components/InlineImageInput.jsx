@@ -4,13 +4,13 @@
  */
 
 import { useState, useId } from 'react';
-import { uploadControlImage } from '../utils/api';
 import { X, Upload } from './Icons';
 import { buildImageUrl } from '../utils/constants';
 
 export default function InlineImageInput({ 
   value,           // Single path string or null
   onChange,        // (path: string | null) => void
+  onLayersPackDrop, // Optional: (genData) => void - for handling layers packs
   disabled = false,
   label,           // Optional label
   required = false,
@@ -22,21 +22,9 @@ export default function InlineImageInput({
   const inputId = useId();
 
   const handleUpload = async (files) => {
-    if (!files || files.length === 0) return;
-    
-    setUploading(true);
-    
-    try {
-      const file = files[0]; // Single file only
-      const data = await uploadControlImage(file);
-      onChange(data.path);
-      console.log('✓ Uploaded:', data.path);
-    } catch (error) {
-      console.error('Upload failed:', error);
-      alert(`Failed to upload: ${error.message}`);
-    } finally {
-      setUploading(false);
-    }
+    // Upload functionality disabled - files must be referenced from project
+    console.log('[InlineImageInput] File upload not supported');
+    alert('Please drag images from the history panel.\nDirect file uploads are not supported.');
   };
 
   const handleRemove = (e) => {
@@ -48,7 +36,28 @@ export default function InlineImageInput({
     e.preventDefault();
     setDragOver(false);
     
-    // Check for internal drag (from history)
+    // Check for layers pack FIRST (if handler provided)
+    if (onLayersPackDrop) {
+      const fukGenData = e.dataTransfer.getData('application/x-fuk-generation');
+      if (fukGenData) {
+        try {
+          const genData = JSON.parse(fukGenData);
+          console.log('[InlineImageInput] Received generation data:', genData);
+          console.log('[InlineImageInput] Type:', genData.type, 'Has metadata:', !!genData.metadata, 'Has available_layers:', !!genData.metadata?.available_layers);
+          
+          // Check if it's a layers pack with available_layers
+          if (genData.type === 'layers' && genData.metadata?.available_layers) {
+            console.log('[InlineImageInput] Layers pack detected, delegating to handler');
+            onLayersPackDrop(genData);
+            return; // Don't process as single image
+          }
+        } catch (err) {
+          console.error('[InlineImageInput] Failed to parse generation data:', err);
+        }
+      }
+    }
+    
+    // Check for internal drag (from history) - single image/video
     const internalPath = e.dataTransfer.getData('text/plain');
     if (internalPath && internalPath.startsWith('api/')) {
       onChange(internalPath);

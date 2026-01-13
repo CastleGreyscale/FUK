@@ -1,6 +1,9 @@
 """
 Project Endpoints and Cache Management
 Handles project-aware output directories and file serving
+
+IMPORTANT: All tkinter dialogs run via subprocess to avoid blocking
+the FastAPI event loop. See file_browser.py for the subprocess handler.
 """
 
 from fastapi import APIRouter, HTTPException, Body, Query
@@ -10,8 +13,9 @@ from typing import Optional, Dict, Any, List
 import json
 import mimetypes
 from datetime import datetime, timedelta
-import tkinter as tk
-from tkinter import filedialog
+import subprocess
+import sys
+import os
 
 # Will be set by main server
 _project_folder = None
@@ -22,6 +26,79 @@ _default_cache_root = None  # Original cache root before any project is opened
 router = APIRouter(prefix="/api/project", tags=["project"])
 
 
+# ============================================================================
+# Subprocess-based Dialog Helpers (avoid tkinter/asyncio conflicts)
+# ============================================================================
+
+def _get_file_browser_script() -> Path:
+    """Get path to file_browser.py script"""
+    this_dir = Path(__file__).parent
+    
+    candidates = [
+        this_dir / "file_browser.py",
+        this_dir.parent / "core" / "file_browser.py",
+        this_dir.parent / "file_browser.py",
+    ]
+    
+    for path in candidates:
+        if path.exists():
+            return path
+    
+    raise FileNotFoundError(
+        "file_browser.py not found. Expected locations:\n" +
+        "\n".join(f"  - {p}" for p in candidates)
+    )
+
+def _run_dialog_subprocess(args: List[str], timeout: int = 300) -> Dict[str, Any]:
+    """
+    Run file_browser.py as subprocess for dialog operations.
+    This avoids tkinter/asyncio conflicts that cause the server to hang.
+    
+    Args:
+        args: Arguments to pass to file_browser.py
+        timeout: Max seconds to wait
+        
+    Returns:
+        Parsed JSON response from script
+    """
+    script_path = _get_file_browser_script()
+    cmd = [sys.executable, str(script_path)] + args
+    
+    try:
+        # Run with display environment for tkinter
+        env = os.environ.copy()
+        if 'DISPLAY' not in env:
+            env['DISPLAY'] = ':0'
+        
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=env,
+        )
+        
+        if result.returncode != 0:
+            error_msg = result.stderr or "Unknown error"
+            return {"success": False, "error": error_msg, "cancelled": True}
+        
+        # Parse JSON output
+        try:
+            return json.loads(result.stdout)
+        except json.JSONDecodeError as e:
+            return {"success": False, "error": f"Invalid response: {e}", "cancelled": True}
+            
+    except subprocess.TimeoutExpired:
+        return {"success": False, "error": "Dialog timed out", "cancelled": True}
+    except FileNotFoundError:
+        return {"success": False, "error": "file_browser.py not found", "cancelled": True}
+    except Exception as e:
+        return {"success": False, "error": str(e), "cancelled": True}
+
+# ============================================================================
+# Initialization
+# ============================================================================
+
 def initialize_project_system(cache_root: Path):
     """Initialize the project system with cache root"""
     global _cache_root, _default_cache_root
@@ -29,7 +106,6 @@ def initialize_project_system(cache_root: Path):
     _default_cache_root = Path(cache_root)  # Remember the default location
     _cache_root.mkdir(exist_ok=True, parents=True)
     print(f"[PROJECT] Initialized cache root: {_cache_root}", flush=True)
-
 
 def get_current_project_info() -> Optional[Dict[str, str]]:
     """Get current project name, shot, and version from loaded state"""
@@ -42,6 +118,88 @@ def get_current_project_info() -> Optional[Dict[str, str]]:
         "shot": project_info.get("shot", "01"),
         "version": project_info.get("version", "unnamed"),
     }
+
+
+def ensure_project_loaded():
+    """
+    Ensure a project is loaded. If not, try to:
+    1. Load the most recent project file in the folder
+    2. If no files exist, create a default project
+    
+    Returns True if a project is loaded, False otherwise.
+    """
+    global _project_state
+    
+    # Already have a loaded project
+    if _project_state:
+        return True
+    
+    # No project folder set
+    if not _project_folder:
+        print("[PROJECT] No project folder set, cannot auto-load", flush=True)
+        return False
+    
+    # Look for project files in the folder
+    project_files = sorted(_project_folder.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    
+    if project_files:
+        # Load the most recent project file
+        latest_file = project_files[0]
+        print(f"[PROJECT] Auto-loading most recent project: {latest_file.name}", flush=True)
+        
+        try:
+            with open(latest_file) as f:
+                _project_state = json.load(f)
+            print(f"[PROJECT] ✓ Auto-loaded: {latest_file.name}", flush=True)
+            return True
+        except Exception as e:
+            print(f"[PROJECT] Failed to auto-load {latest_file.name}: {e}", flush=True)
+            return False
+    else:
+        # No project files exist, create a default one
+        print("[PROJECT] No project files found, creating default project", flush=True)
+        
+        try:
+            # Get folder name for project name
+            folder_name = _project_folder.name
+            now = datetime.now()
+            version = now.strftime("%y%m%d")
+            filename = f"{folder_name}_shot01_{version}.json"
+            file_path = _project_folder / filename
+            
+            # Create default project state
+            state = {
+                "meta": {
+                    "version": "1.0",
+                    "createdAt": now.isoformat(),
+                    "updatedAt": now.isoformat(),
+                    "fukVersion": "1.0.0",
+                },
+                "project": {
+                    "name": folder_name,
+                    "shot": "01",
+                    "version": version,
+                },
+                "tabs": {
+                    "image": {},
+                    "video": {},
+                    "preprocess": {},
+                },
+                "assets": {},
+                "lastState": {},
+                "notes": "",
+            }
+            
+            with open(file_path, 'w') as f:
+                json.dump(state, f, indent=2)
+            
+            _project_state = state
+            print(f"[PROJECT] ✓ Created default project: {filename}", flush=True)
+            return True
+            
+        except Exception as e:
+            print(f"[PROJECT] Failed to create default project: {e}", flush=True)
+            return False
 
 
 def get_project_cache_dir() -> Path:
@@ -69,7 +227,6 @@ def get_project_cache_dir() -> Path:
     
     cache_dir.mkdir(exist_ok=True, parents=True)
     return cache_dir
-
 
 def get_generation_output_dir(gen_type: str = "img_gen") -> Path:
     """
@@ -110,7 +267,6 @@ def get_generation_output_dir(gen_type: str = "img_gen") -> Path:
     
     return gen_dir
 
-
 def build_output_paths(gen_dir: Path) -> Dict[str, Path]:
     """
     Build standard output paths for a generation directory
@@ -127,6 +283,57 @@ def build_output_paths(gen_dir: Path) -> Dict[str, Path]:
         "control": gen_dir / "control",
     }
 
+def cleanup_failed_generation(gen_dir: Path, reason: str = "generation failed") -> bool:
+    """
+    Clean up a failed generation directory.
+    
+    Removes the entire generation directory and all its contents when a generation
+    fails, keeping the cache folder clean from partial/broken outputs.
+    
+    Args:
+        gen_dir: Path to the generation directory to clean up
+        reason: Reason for cleanup (for logging)
+    
+    Returns:
+        True if cleanup succeeded, False otherwise
+    """
+    import shutil
+    
+    if not gen_dir:
+        print(f"[CLEANUP] No directory provided, skipping cleanup", flush=True)
+        return False
+    
+    gen_dir = Path(gen_dir)
+    
+    if not gen_dir.exists():
+        print(f"[CLEANUP] Directory doesn't exist: {gen_dir}", flush=True)
+        return False
+    
+    # Safety check - only delete directories within cache root
+    if _cache_root:
+        try:
+            gen_dir.resolve().relative_to(_cache_root.resolve())
+        except ValueError:
+            print(f"[CLEANUP] âœ— Refusing to delete - path outside cache: {gen_dir}", flush=True)
+            return False
+    
+    try:
+        # List contents before deleting for logging
+        contents = list(gen_dir.iterdir()) if gen_dir.is_dir() else []
+        content_names = [f.name for f in contents[:5]]
+        if len(contents) > 5:
+            content_names.append(f"... and {len(contents) - 5} more")
+        
+        shutil.rmtree(gen_dir)
+        print(f"[CLEANUP] âœ“ Removed failed generation: {gen_dir.name}", flush=True)
+        print(f"[CLEANUP]   Reason: {reason}", flush=True)
+        if content_names:
+            print(f"[CLEANUP]   Deleted: {', '.join(content_names)}", flush=True)
+        return True
+        
+    except Exception as e:
+        print(f"[CLEANUP] âœ— Failed to clean up {gen_dir}: {e}", flush=True)
+        return False
 
 def get_project_relative_url(file_path: Path) -> str:
     """
@@ -152,7 +359,6 @@ def get_project_relative_url(file_path: Path) -> str:
     except ValueError:
         # If file is not in cache, return as-is (might be in outputs/)
         return str(file_path)
-
 
 def save_generation_metadata(
     gen_dir: Path,
@@ -191,43 +397,43 @@ def save_generation_metadata(
     
     return metadata_path
 
-
 # ============================================================================
 # FastAPI Routes for Project Management
 # ============================================================================
 
 @router.post("/browse-folder")
 async def browse_folder():
-    """Open native folder browser dialog"""
-    print("[PROJECT] Opening folder browser...", flush=True)
-    try:
-        root = tk.Tk()
-        root.withdraw()  # Hide main window
-        root.attributes('-topmost', True)  # Bring to front
-        
-        folder = filedialog.askdirectory(
-            title="Select FUK Project Folder (Projects/Fuk/)",
-            mustexist=True
-        )
-        
-        root.destroy()
-        
-        if folder:
-            print(f"[PROJECT] User selected: {folder}", flush=True)
-            return {"path": folder, "cancelled": False}
+    """
+    Open native folder browser dialog.
+    
+    Uses subprocess to avoid tkinter/asyncio conflicts.
+    """
+    print("[PROJECT] Opening folder browser via subprocess...", flush=True)
+    
+    result = _run_dialog_subprocess([
+        "directory",
+        "--title", "Select FUK Project Folder (Projects/Fuk/)",
+    ])
+    
+    if result.get("success") and result.get("directory"):
+        folder = result["directory"]
+        print(f"[PROJECT] User selected: {folder}", flush=True)
+        return {"path": folder, "cancelled": False}
+    else:
+        error = result.get("error", "")
+        if error:
+            print(f"[PROJECT] Dialog error: {error}", flush=True)
         else:
             print("[PROJECT] User cancelled folder selection", flush=True)
-            return {"path": None, "cancelled": True}
-            
-    except Exception as e:
-        print(f"[PROJECT] âœ— Folder browser error: {e}", flush=True)
-        return {"error": str(e), "cancelled": True}
-
+        return {"path": None, "cancelled": True, "error": error if error else None}
 
 @router.post("/browse-save")
 async def browse_save_location(data: dict = Body(...)):
     """
     Open native save file dialog.
+    
+    Note: This still uses tkinter directly since file_browser.py
+    doesn't have a save dialog. Consider adding one if this causes issues.
     
     Args (in body):
         title: Dialog title
@@ -241,42 +447,61 @@ async def browse_save_location(data: dict = Body(...)):
     """
     print("[PROJECT] Opening save dialog...", flush=True)
     
-    try:
-        root = tk.Tk()
-        root.withdraw()
-        root.attributes('-topmost', True)
+    # For save dialogs, we need to use tkinter directly for now
+    # Run in a thread to avoid blocking
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+    
+    def run_save_dialog():
+        import tkinter as tk
+        from tkinter import filedialog
         
-        # Parse file types
-        file_types = data.get('fileTypes', [['All Files', '*.*']])
-        tk_filetypes = [(desc, pattern) for desc, pattern in file_types]
-        
-        # Get initial directory
-        initial_dir = data.get('initialDir')
-        if not initial_dir and _project_folder:
-            initial_dir = str(_project_folder)
-        
-        # Open save dialog
-        file_path = filedialog.asksaveasfilename(
-            title=data.get('title', 'Save File'),
-            initialfile=data.get('defaultName', ''),
-            initialdir=initial_dir,
-            filetypes=tk_filetypes,
-            defaultextension='.exr',
-        )
-        
-        root.destroy()
-        
-        if file_path:
-            print(f"[PROJECT] User selected save location: {file_path}", flush=True)
-            return {"path": file_path, "cancelled": False}
-        else:
-            print("[PROJECT] User cancelled save dialog", flush=True)
-            return {"path": None, "cancelled": True}
+        try:
+            root = tk.Tk()
+            root.withdraw()
+            root.attributes('-topmost', True)
             
-    except Exception as e:
-        print(f"[PROJECT] âœ— Save dialog error: {e}", flush=True)
-        return {"error": str(e), "cancelled": True}
-
+            # Parse file types
+            file_types = data.get('fileTypes', [['All Files', '*.*']])
+            tk_filetypes = [(desc, pattern) for desc, pattern in file_types]
+            
+            # Get initial directory
+            initial_dir = data.get('initialDir')
+            if not initial_dir and _project_folder:
+                initial_dir = str(_project_folder)
+            
+            # Open save dialog
+            file_path = filedialog.asksaveasfilename(
+                title=data.get('title', 'Save File'),
+                initialfile=data.get('defaultName', ''),
+                initialdir=initial_dir,
+                filetypes=tk_filetypes,
+                defaultextension='.exr',
+            )
+            
+            root.destroy()
+            
+            if file_path:
+                return {"path": file_path, "cancelled": False}
+            else:
+                return {"path": None, "cancelled": True}
+                
+        except Exception as e:
+            return {"error": str(e), "cancelled": True}
+    
+    # Run in thread pool to avoid blocking event loop
+    loop = asyncio.get_event_loop()
+    with ThreadPoolExecutor() as pool:
+        result = await loop.run_in_executor(pool, run_save_dialog)
+    
+    if result.get("path"):
+        print(f"[PROJECT] User selected save location: {result['path']}", flush=True)
+    elif result.get("error"):
+        print(f"[PROJECT] Save dialog error: {result['error']}", flush=True)
+    else:
+        print("[PROJECT] User cancelled save dialog", flush=True)
+    
+    return result
 
 @router.post("/set-folder")
 async def set_folder(data: dict = Body(...)):
@@ -300,8 +525,16 @@ async def set_folder(data: dict = Body(...)):
     print(f"[PROJECT] Set project folder: {folder}", flush=True)
     print(f"[PROJECT] Cache root updated to: {_cache_root}", flush=True)
     
-    return {"folder": str(folder), "success": True, "cacheRoot": str(_cache_root)}
-
+    # AUTO-LOAD OR CREATE PROJECT
+    ensure_project_loaded()
+    
+    return {
+        "folder": str(folder), 
+        "success": True, 
+        "cacheRoot": str(_cache_root),
+        "projectLoaded": _project_state is not None,
+        "projectInfo": get_current_project_info()
+    }
 
 @router.get("/current")
 async def get_current():
@@ -311,7 +544,6 @@ async def get_current():
         "folder": str(_project_folder) if _project_folder else None,
         "projectInfo": get_current_project_info()
     }
-
 
 @router.get("/list")
 async def list_files():
@@ -335,7 +567,6 @@ async def list_files():
         "folder": str(_project_folder)
     }
 
-
 @router.get("/load/{filename}")
 async def load_file(filename: str):
     """Load a project file"""
@@ -355,10 +586,23 @@ async def load_file(filename: str):
         global _project_state
         _project_state = data
         
-        return data
+        # Get the new project-specific cache directory
+        project_cache = get_project_cache_dir()
+        
+        print(f"[PROJECT] Loaded: {filename}", flush=True)
+        print(f"[PROJECT] Cache directory: {project_cache}", flush=True)
+        
+        # Return comprehensive info for UI to refresh
+        return {
+            "success": True,
+            "data": data,
+            "projectInfo": get_current_project_info(),
+            "cacheRoot": str(_cache_root) if _cache_root else None,
+            "projectCache": str(project_cache),
+            "filename": filename,
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to load file: {str(e)}")
-
 
 @router.post("/save/{filename}")
 async def save_file(filename: str, state: dict = Body(...)):
@@ -376,10 +620,11 @@ async def save_file(filename: str, state: dict = Body(...)):
         global _project_state
         _project_state = state
         
+        print(f"[PROJECT] Saved: {filename}", flush=True)
+        
         return {"success": True, "path": str(file_path)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
-
 
 @router.post("/new")
 async def create_new(data: dict = Body(...)):
@@ -438,10 +683,11 @@ async def create_new(data: dict = Body(...)):
         global _project_state
         _project_state = state
         
+        print(f"[PROJECT] Created new project: {filename}", flush=True)
+        
         return {"success": True, "filename": filename, "path": str(file_path)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to create file: {str(e)}")
-
 
 @router.get("/config")
 async def get_config():
@@ -450,7 +696,6 @@ async def get_config():
         "versionFormat": "date",  # or "sequential"
         "cacheFolder": str(_cache_root) if _cache_root else None,
     }
-
 
 @router.get("/cache-info")
 async def get_cache_info():
@@ -477,7 +722,6 @@ async def get_cache_info():
         "generations": counts,
     }
 
-
 @router.get("/generations")
 async def list_generations(
     days: int = Query(default=1, description="Number of days to load (0 = all)"),
@@ -500,90 +744,51 @@ async def list_generations(
     
     try:
         project_cache = get_project_cache_dir()
-        print(f"[HISTORY] Project cache dir: {project_cache}", flush=True)
-    except RuntimeError as e:
-        print(f"[HISTORY] Error getting project cache: {e}", flush=True)
+    except RuntimeError:
         return {"generations": [], "error": "Project system not initialized", "hasMore": False}
     
     if not project_cache.exists():
-        print(f"[HISTORY] Project cache doesn't exist: {project_cache}", flush=True)
         return {"generations": [], "hasMore": False}
     
     # Parse pinned IDs
     pinned_ids = set(p.strip() for p in pinned.split(",") if p.strip())
     
-    # Calculate date cutoff
+    # Calculate cutoff time
     if days > 0:
-        cutoff_date = datetime.now() - timedelta(days=days)
+        cutoff = datetime.now() - timedelta(days=days)
     else:
-        cutoff_date = None
+        cutoff = None
     
     generations = []
     has_more = False
     
-    # Scan all generation directories
-    dirs = list(project_cache.iterdir())
-    print(f"[HISTORY] Found {len(dirs)} items in cache", flush=True)
-    
-    for gen_dir in sorted(dirs, key=lambda p: p.stat().st_mtime if p.is_dir() else 0, reverse=True):
+    # Scan generation directories
+    for gen_dir in sorted(project_cache.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
         if not gen_dir.is_dir():
             continue
         
-        gen_name = gen_dir.name
-        dir_mtime = datetime.fromtimestamp(gen_dir.stat().st_mtime)
+        # Skip non-generation directories
+        if not any(gen_dir.name.startswith(prefix) for prefix in ["img_gen_", "video_", "video_layers_", "preprocess_", "layers_", "interpolate_", "upscale_", "import_"]):
+            continue
         
-        # Check if within date range (unless pinned)
-        is_pinned = gen_name in pinned_ids
-        if cutoff_date and dir_mtime < cutoff_date and not is_pinned:
-            # Check for any pinned sub-items (for layers)
-            has_pinned_child = any(f"{gen_name}/{prefix}" in pinned_ids 
-                                   for prefix in ["depth", "normals", "crypto"])
-            if not has_pinned_child:
-                has_more = True
-                continue
+        # Get path relative to cache root for URL building
+        try:
+            rel_path = gen_dir.relative_to(_cache_root)
+        except ValueError:
+            rel_path = Path(gen_dir.name)
         
-        # Determine type and subtype based on directory name prefix
-        gen_subtype = None
+        # Get modification time
+        mtime = datetime.fromtimestamp(gen_dir.stat().st_mtime)
         
-        if gen_name.startswith("import"):
-            gen_type = "import"
-        elif gen_name.startswith("layers"):
-            gen_type = "layers"
-        elif gen_name.startswith("preprocess_video_"):
-            # Video preprocess: preprocess_video_canny_001, preprocess_video_depth_002
-            gen_type = "preprocess"
-            gen_subtype = "video"
-            # Extract method from name (e.g., "canny" from "preprocess_video_canny_001")
-            parts = gen_name.split("_")
-            if len(parts) >= 3:
-                method = parts[2]  # preprocess_video_METHOD_###
-                if method in ["canny", "depth", "normals", "openpose", "crypto"]:
-                    gen_subtype = method
-        elif gen_name.startswith("preprocess_"):
-            # Image preprocess: preprocess_canny_001
-            gen_type = "preprocess"
-            parts = gen_name.split("_")
-            if len(parts) >= 2:
-                method = parts[1]  # preprocess_METHOD_###
-                if method in ["canny", "depth", "normals", "openpose", "crypto"]:
-                    gen_subtype = method
-        elif gen_name.startswith("video") or gen_name.endswith("_video"):
-            gen_type = "video"
-        elif gen_name.startswith("upscale"):
-            gen_type = "upscale"
-            # Check for video upscale
-            if "_video_" in gen_name or gen_name.startswith("upscale_video"):
-                gen_subtype = "video"
-        elif gen_name.startswith("interpolate"):
-            gen_type = "interpolate"
-        elif gen_name.startswith("export"):
-            gen_type = "export"
-        else:
-            gen_type = "image"
+        # Check if within date range or pinned (check both full path and just dir name for backwards compat)
+        is_pinned = str(rel_path) in pinned_ids or gen_dir.name in pinned_ids
+        if cutoff and mtime < cutoff and not is_pinned:
+            has_more = True
+            continue
         
-        # Load metadata if available
-        metadata = {}
+        # Load metadata if exists
         metadata_path = gen_dir / "metadata.json"
+        metadata = {}
         if metadata_path.exists():
             try:
                 with open(metadata_path) as f:
@@ -591,180 +796,301 @@ async def list_generations(
             except:
                 pass
         
-        # Special handling for layers - create entry for EACH layer file
-        if gen_type == "layers":
-            layer_entries = _get_layer_entries(gen_dir, gen_name, metadata, pinned_ids, _cache_root)
-            generations.extend(layer_entries)
-            continue
+        # Find preview image/video
+        preview = None
+        gen_type = "unknown"
+        source_path = None  # For imports
         
-        # Find the main output file based on type
-        preview_path = None
-        output_path = None
-        is_sequence = False
-        frame_count = 0
-        api_path = None  # Set directly for imports
-        preview_api = None
-        
-        if gen_type == "video":
-            for ext in [".mp4", ".webm"]:
-                candidate = gen_dir / f"generated{ext}"
-                if candidate.exists():
-                    output_path = candidate
-                    preview_path = candidate
-                    break
-        elif gen_type == "interpolate":
-            video_files = list(gen_dir.glob("interpolated*.mp4")) + list(gen_dir.glob("interpolated*.webm"))
-            if video_files:
-                output_path = video_files[0]
-                preview_path = output_path
-        elif gen_type == "upscale":
-            # Check for video upscale first
-            video_files = list(gen_dir.glob("upscaled*.mp4")) + list(gen_dir.glob("*.mp4"))
-            if video_files:
-                output_path = video_files[0]
-                preview_path = output_path
-            else:
-                upscaled_files = list(gen_dir.glob("upscaled*.png")) + list(gen_dir.glob("upscaled*.jpg"))
-                if upscaled_files:
-                    output_path = upscaled_files[0]
-                    preview_path = output_path
-        elif gen_type == "preprocess":
-            # First check for video output (mp4)
-            video_files = list(gen_dir.glob("*.mp4"))
-            if video_files:
-                output_path = video_files[0]
-                preview_path = output_path
-            else:
-                # Check for sequence output (folder with frame_*.png)
-                frame_files = sorted(gen_dir.glob("frame_*.png"))
-                if len(frame_files) > 1:
-                    is_sequence = True
-                    frame_count = len(frame_files)
-                    output_path = gen_dir  # Directory itself is the output
-                    preview_path = frame_files[0]  # First frame as preview
+        # Handle imports specially - they reference external files
+        if gen_dir.name.startswith("import_") and metadata.get("source_path"):
+            source_path = metadata["source_path"]
+            # Strip leading slash for URL path
+            preview = f"api/project/files{source_path}"
+            gen_type = metadata.get("media_type", "import")
+        # Standard generation outputs
+        elif (gen_dir / "generated.png").exists():
+            preview = f"api/project/cache/{rel_path}/generated.png"
+            gen_type = "image"
+        elif (gen_dir / "generated.mp4").exists():
+            preview = f"api/project/cache/{rel_path}/generated.mp4"
+            gen_type = "video"
+        # Preprocessor outputs (processed_*.png)
+        elif (gen_dir / "preprocessed.png").exists():
+            preview = f"api/project/cache/{rel_path}/preprocessed.png"
+            gen_type = "preprocess"
+        # Layers outputs (depth, normals, crypto) - both image and video
+        elif gen_dir.name.startswith("layers_") or gen_dir.name.startswith("video_layers_"):
+            is_video_layers = gen_dir.name.startswith("video_layers_")
+            
+            # Check for layer files (depth, normals, crypto)
+            # Handle both simple names (depth.png) and hashed names (depth_abc123_456.png)
+            layer_files = []
+            available_layers = {}  # Track all available layers
+            
+            for layer_name in ["depth", "normals", "crypto"]:
+                # Priority: video > EXR > PNG
+                # Check for exact match first, then pattern match
+                found = False
+                
+                # Video
+                if (gen_dir / f"{layer_name}.mp4").exists():
+                    layer_files.append((f"{layer_name}.mp4", layer_name))
+                    available_layers[layer_name] = f"api/project/cache/{rel_path}/{layer_name}.mp4"
+                    found = True
+                elif list(gen_dir.glob(f"{layer_name}_*.mp4")):
+                    matches = list(gen_dir.glob(f"{layer_name}_*.mp4"))
+                    layer_files.append((matches[0].name, layer_name))
+                    available_layers[layer_name] = f"api/project/cache/{rel_path}/{matches[0].name}"
+                    found = True
+                
+                # EXR
+                if not found:
+                    if (gen_dir / f"{layer_name}.exr").exists():
+                        layer_files.append((f"{layer_name}.exr", layer_name))
+                        available_layers[layer_name] = f"api/project/cache/{rel_path}/{layer_name}.exr"
+                        found = True
+                    elif list(gen_dir.glob(f"{layer_name}_*.exr")):
+                        matches = list(gen_dir.glob(f"{layer_name}_*.exr"))
+                        layer_files.append((matches[0].name, layer_name))
+                        available_layers[layer_name] = f"api/project/cache/{rel_path}/{matches[0].name}"
+                        found = True
+                
+                # PNG
+                if not found:
+                    if (gen_dir / f"{layer_name}.png").exists():
+                        layer_files.append((f"{layer_name}.png", layer_name))
+                        available_layers[layer_name] = f"api/project/cache/{rel_path}/{layer_name}.png"
+                    elif list(gen_dir.glob(f"{layer_name}_*.png")):
+                        matches = list(gen_dir.glob(f"{layer_name}_*.png"))
+                        layer_files.append((matches[0].name, layer_name))
+                        available_layers[layer_name] = f"api/project/cache/{rel_path}/{matches[0].name}"
+            
+            # Determine preview and type
+            # For video layers, check for source.mp4 first, then source.png
+            # For image layers, check source.png
+            preview_found = False
+            
+            if is_video_layers and (gen_dir / "source.mp4").exists():
+                preview = f"api/project/cache/{rel_path}/source.mp4"
+                available_layers["beauty"] = preview  # Include source as beauty
+                gen_type = "layers"
+                metadata["available_layers"] = available_layers
+                metadata["layer_count"] = len(available_layers)
+                metadata["is_video"] = True
+                preview_found = True
+            elif (gen_dir / "source.png").exists():
+                preview = f"api/project/cache/{rel_path}/source.png"
+                available_layers["beauty"] = preview  # Include source as beauty
+                gen_type = "layers"
+                # Store available layers in metadata for UI
+                metadata["available_layers"] = available_layers
+                metadata["layer_count"] = len(available_layers)
+                metadata["is_video"] = is_video_layers
+                preview_found = True
+            
+            # For video layers without source file, try to get source from metadata
+            if not preview_found and is_video_layers and metadata.get("source_image"):
+                source_path = metadata["source_image"]
+                # Convert to API path if it's an absolute path
+                if source_path.startswith("/"):
+                    available_layers["beauty"] = f"api/project/files{source_path}"
+                elif source_path.startswith("api/"):
+                    available_layers["beauty"] = source_path
                 else:
-                    # Look for method-specific outputs
-                    method_files = []
-                    for method in ["canny", "depth", "normals", "openpose", "crypto", "processed"]:
-                        method_files.extend(gen_dir.glob(f"{method}*.png"))
-                        method_files.extend(gen_dir.glob(f"{method}*.jpg"))
-                    if method_files:
-                        output_path = method_files[0]
-                        preview_path = output_path
-                    else:
-                        # Fallback to any png
-                        png_files = list(gen_dir.glob("*.png"))
-                        if png_files:
-                            output_path = png_files[0]
-                            preview_path = output_path
-        elif gen_type == "import":
-            # Imported assets - just a reference, read source_path from metadata
-            source_path = metadata.get("source_path")
-            if source_path:
-                source = Path(source_path)
-                if source.exists():
-                    output_path = source
-                    preview_path = source
-                    # Store the actual absolute path - frontend knows how to serve it
-                    api_path = str(source)
-                    preview_api = api_path
-                else:
-                    # Source file was deleted/moved
-                    print(f"[HISTORY]   {gen_name}: import source missing: {source_path}", flush=True)
-                    continue
-            else:
-                # Legacy import with actual files (fallback)
-                for ext in [".mp4", ".mov", ".webm"]:
-                    video_files = list(gen_dir.glob(f"*{ext}"))
-                    if video_files:
-                        output_path = video_files[0]
-                        preview_path = output_path
-                        break
-                if not output_path:
-                    for ext in [".png", ".jpg", ".jpeg", ".exr"]:
-                        img_files = list(gen_dir.glob(f"*{ext}"))
-                        if img_files:
-                            output_path = img_files[0]
-                            preview_path = output_path
-                            break
-        elif gen_type == "export":
-            exr_files = list(gen_dir.glob("*.exr"))
-            if exr_files:
-                output_path = exr_files[0]
-            png_files = list(gen_dir.glob("*.png"))
-            if png_files:
-                preview_path = png_files[0]
-            elif exr_files:
-                preview_path = exr_files[0]
+                    # Try to resolve as relative to cache
+                    available_layers["beauty"] = f"api/project/cache/{source_path}"
+            
+            if not preview_found and layer_files:
+                # Fallback to first layer as preview if source missing
+                preview_file, layer_type = layer_files[0]
+                preview = f"api/project/cache/{rel_path}/{preview_file}"
+                gen_type = "layers"
+                metadata["available_layers"] = available_layers
+                metadata["layer_count"] = len(available_layers)
+                metadata["is_video"] = is_video_layers
+                preview_found = True
+            
+            if not preview_found:
+                # No layers found at all, skip this directory
+                continue
         else:
-            for ext in [".png", ".jpg", ".jpeg"]:
-                candidate = gen_dir / f"generated{ext}"
-                if candidate.exists():
-                    output_path = candidate
-                    preview_path = candidate
-                    break
+            # Look for pattern-based outputs
+            # Preprocessors: processed_*.png
+            processed_files = list(gen_dir.glob("processed_*.png"))
+            if processed_files:
+                preview_file = processed_files[0].name
+                preview = f"api/project/cache/{rel_path}/{preview_file}"
+                gen_type = "preprocess"
+            # Interpolation: interpolated_*.mp4
+            elif list(gen_dir.glob("interpolated_*.mp4")):
+                interp_files = list(gen_dir.glob("interpolated_*.mp4"))
+                preview_file = interp_files[0].name
+                preview = f"api/project/cache/{rel_path}/{preview_file}"
+                gen_type = "video"
+            # Upscaling: upscaled_*.png
+            elif list(gen_dir.glob("upscaled_*.png")):
+                upscaled_files = list(gen_dir.glob("upscaled_*.png"))
+                preview_file = upscaled_files[0].name
+                preview = f"api/project/cache/{rel_path}/{preview_file}"
+                gen_type = "image"
+            # Fallback: find any image or video
+            else:
+                image_exts = ['.png', '.jpg', '.jpeg', '.webp', '.exr']
+                video_exts = ['.mp4', '.mov', '.webm', '.avi']
+                
+                # Try to find any image
+                for ext in image_exts:
+                    image_files = list(gen_dir.glob(f"*{ext}"))
+                    if image_files:
+                        # Skip source.png if it exists, prefer other images
+                        for img in image_files:
+                            if img.name != "source.png":
+                                preview = f"api/project/cache/{rel_path}/{img.name}"
+                                gen_type = "image"
+                                break
+                        if preview:
+                            break
+                
+                # If no image, try video
+                if not preview:
+                    for ext in video_exts:
+                        video_files = list(gen_dir.glob(f"*{ext}"))
+                        if video_files:
+                            preview = f"api/project/cache/{rel_path}/{video_files[0].name}"
+                            gen_type = "video"
+                            break
         
-        if not output_path:
-            print(f"[HISTORY]   {gen_name}: no output file found, skipping", flush=True)
-            continue
-        
-        # Get file stats
-        stat = output_path.stat()
-        mtime = datetime.fromtimestamp(stat.st_mtime)
-        
-        # Build relative path for API URL (skip if already set, e.g., for imports)
-        if not api_path:
-            try:
-                rel_path = output_path.relative_to(_cache_root)
-                api_path = f"api/project/cache/{rel_path}"
-            except ValueError:
-                # File is outside cache (e.g., import reference)
-                # Strip leading slash for the URL path
-                api_path = f"api/project/files{output_path}"
-        
-        # Preview path
-        if not preview_api:
-            try:
-                preview_rel = preview_path.relative_to(_cache_root) if preview_path else None
-                preview_api = f"api/project/cache/{preview_rel}" if preview_rel else api_path
-            except ValueError:
-                # Preview is outside cache
-                preview_api = f"api/project/files{preview_path}" if preview_path else api_path
-        
-        generations.append({
-            "id": gen_name,
-            "name": gen_name,
+        # Build generation object
+        gen_obj = {
+            "id": str(rel_path),  # Use full relative path as ID
+            "name": metadata.get("display_name"),  # For imports
             "type": gen_type,
-            "subtype": gen_subtype,
-            "path": api_path,
-            "preview": preview_api,
+            "preview": preview,
+            "path": preview,  # Alias for drag-drop compatibility
+            "sourcePath": source_path,  # Original path for imports
             "date": mtime.strftime("%Y-%m-%d"),
             "timestamp": mtime.strftime("%H:%M:%S"),
-            "size": stat.st_size,
             "prompt": metadata.get("prompt", ""),
             "seed": metadata.get("seed"),
             "model": metadata.get("model", ""),
-            "pinned": gen_name in pinned_ids,
-            "isSequence": is_sequence,
-            "frameCount": frame_count,
-            "sourcePath": metadata.get("source_path"),  # For imports - shows original location
-        })
-    
-    # Sort: pinned first, then by date
-    generations.sort(key=lambda g: (not g.get("pinned", False), g["date"], g["timestamp"]), reverse=True)
-    
-    # Summary
-    types = {}
-    for g in generations:
-        types[g['type']] = types.get(g['type'], 0) + 1
-    print(f"[HISTORY] Returning {len(generations)} generations: {types}, hasMore={has_more}", flush=True)
+            "pinned": is_pinned,
+        }
+        
+        # Include metadata for special types that need extra data
+        # Layers need available_layers for drag-to-export functionality
+        if gen_type == "layers" and metadata.get("available_layers"):
+            gen_obj["metadata"] = {
+                "available_layers": metadata["available_layers"],
+                "layer_count": metadata.get("layer_count", len(metadata["available_layers"])),
+                "is_video": metadata.get("is_video", False),
+            }
+        
+        generations.append(gen_obj)
     
     return {"generations": generations, "hasMore": has_more}
 
-
-# ============================================================================
-# Import Asset Registration
-# ============================================================================
+@router.get("/generations/layers")
+async def list_layer_generations(
+    days: int = Query(default=7, description="Number of days to load"),
+    pinned: str = Query(default="", description="Comma-separated list of pinned IDs")
+):
+    """
+    List layer generations (depth, normals, crypto) in the project cache.
+    Returns entries for the Layers history panel.
+    """
+    print(f"[HISTORY] Fetching layer generations (days={days})", flush=True)
+    
+    if not _cache_root:
+        return []
+    
+    try:
+        project_cache = get_project_cache_dir()
+    except RuntimeError:
+        return []
+    
+    if not project_cache.exists():
+        return []
+    
+    pinned_ids = set(p.strip() for p in pinned.split(",") if p.strip())
+    
+    if days > 0:
+        cutoff = datetime.now() - timedelta(days=days)
+    else:
+        cutoff = None
+    
+    entries = []
+    
+    # Look for layer outputs in preprocess directories
+    layer_types = {
+        "depth.mp4": ("depth", "Depth Video"),
+        "depth.png": ("depth", "Depth"),
+        "depth.exr": ("depth", "Depth EXR"),
+        "normals.mp4": ("normals", "Normals Video"),
+        "normals.png": ("normals", "Normals"),
+        "normals.exr": ("normals", "Normals EXR"),
+        "crypto.mp4": ("crypto", "Cryptomatte Video"),
+        "crypto.png": ("crypto", "Cryptomatte"),
+        "crypto.exr": ("crypto", "Cryptomatte EXR"),
+    }
+    
+    for gen_dir in sorted(project_cache.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+        if not gen_dir.is_dir():
+            continue
+        
+        if not gen_dir.name.startswith("preprocess_") and not gen_dir.name.startswith("layers_"):
+            continue
+        
+        # Get path relative to cache root for URL building
+        try:
+            rel_path = gen_dir.relative_to(_cache_root)
+        except ValueError:
+            rel_path = Path(gen_dir.name)
+        
+        # Check for layer files
+        for filename, (layer_type, label) in layer_types.items():
+            layer_path = gen_dir / filename
+            if not layer_path.exists():
+                continue
+            
+            stat = layer_path.stat()
+            mtime = datetime.fromtimestamp(stat.st_mtime)
+            
+            # Date filter - use full relative path for IDs
+            layer_id = f"{rel_path}/{layer_type}"
+            is_pinned = layer_id in pinned_ids or f"{gen_dir.name}/{layer_type}" in pinned_ids
+            if cutoff and mtime < cutoff and not is_pinned:
+                continue
+            
+            # Load metadata
+            metadata_path = gen_dir / "metadata.json"
+            metadata = {}
+            if metadata_path.exists():
+                try:
+                    with open(metadata_path) as f:
+                        metadata = json.load(f)
+                except:
+                    pass
+            
+            api_path = f"api/project/cache/{rel_path}/{filename}"
+            
+            entries.append({
+                "id": layer_id,
+                "name": f"{rel_path}/{label}",
+                "type": "layers",
+                "subtype": layer_type,
+                "path": api_path,
+                "preview": api_path,
+                "date": mtime.strftime("%Y-%m-%d"),
+                "timestamp": mtime.strftime("%H:%M:%S"),
+                "size": stat.st_size,
+                "prompt": metadata.get("prompt", ""),
+                "seed": metadata.get("seed"),
+                "model": metadata.get("model", ""),
+                "pinned": is_pinned,
+                "parentDir": str(rel_path),
+            })
+    
+    return entries
 
 @router.post("/import")
 async def register_import(data: dict = Body(...)):
@@ -834,9 +1160,15 @@ async def register_import(data: dict = Body(...)):
     with open(metadata_path, 'w') as f:
         json.dump(metadata, f, indent=2)
     
-    # Build response - use actual path, frontend will convert for serving
-    import_id = import_dir.name
-    api_path = str(source)  # Actual absolute path
+    # Build the import ID (relative path from cache root)
+    try:
+        rel_path = import_dir.relative_to(_cache_root)
+        import_id = str(rel_path)
+    except ValueError:
+        import_id = import_dir.name
+    
+    # Build API path for serving
+    api_path = f"api/project/files{source}"  # Use files endpoint for external paths
     
     print(f"[IMPORT] Registered: {source.name} -> {import_id} (reference only, no copy)", flush=True)
     
@@ -849,77 +1181,31 @@ async def register_import(data: dict = Body(...)):
         "auto_pin": auto_pin,
     }
 
-
-def _get_layer_entries(gen_dir: Path, gen_name: str, metadata: dict, pinned_ids: set, cache_root: Path) -> List[dict]:
-    """
-    Create separate history entries for each layer file in a layers directory.
-    
-    Returns list of generation entries for depth, normals, crypto files.
-    """
-    entries = []
-    
-    # Layer type mapping
-    layer_types = {
-        "depth_": ("depth", "Depth"),
-        "normals_": ("normals", "Normals"),
-        "crypto_": ("crypto", "Crypto"),
-    }
-    
-    for prefix, (layer_type, label) in layer_types.items():
-        layer_files = list(gen_dir.glob(f"{prefix}*.png"))
-        
-        for layer_file in layer_files:
-            stat = layer_file.stat()
-            mtime = datetime.fromtimestamp(stat.st_mtime)
-            
-            rel_path = layer_file.relative_to(cache_root)
-            api_path = f"api/project/cache/{rel_path}"
-            
-            # Create unique ID for this specific layer
-            layer_id = f"{gen_name}/{layer_type}"
-            
-            entries.append({
-                "id": layer_id,
-                "name": f"{gen_name}/{label}",
-                "type": "layers",
-                "subtype": layer_type,  # depth, normals, or crypto
-                "path": api_path,
-                "preview": api_path,
-                "date": mtime.strftime("%Y-%m-%d"),
-                "timestamp": mtime.strftime("%H:%M:%S"),
-                "size": stat.st_size,
-                "prompt": metadata.get("prompt", ""),
-                "seed": metadata.get("seed"),
-                "model": metadata.get("model", ""),
-                "pinned": layer_id in pinned_ids,
-                "parentDir": gen_name,
-            })
-    
-    return entries
-
-
 @router.delete("/generations/{gen_id:path}")
 async def delete_generation(gen_id: str):
     """Delete a generation directory or specific layer file"""
     if not _cache_root:
         raise HTTPException(status_code=400, detail="No project loaded")
     
+    # gen_id is now relative to _cache_root, e.g.:
+    # - "fuktest_shot08_260110/video_002" 
+    # - "fuktest_shot08_260110/preprocess_001/depth" (layer-specific)
+    
+    # For layer-specific IDs, remove the layer type suffix to get the directory
+    # Layer IDs end with /depth, /normals, /crypto
+    layer_suffixes = ['/depth', '/normals', '/crypto']
+    dir_id = gen_id
+    for suffix in layer_suffixes:
+        if gen_id.endswith(suffix):
+            dir_id = gen_id[:-len(suffix)]
+            break
+    
+    # Build path relative to cache root
+    gen_dir = _cache_root / dir_id
+    
+    # Security check - must be within cache root
     try:
-        project_cache = get_project_cache_dir()
-    except RuntimeError:
-        raise HTTPException(status_code=400, detail="Project system not initialized")
-    
-    # Check if it's a layer-specific ID (contains /)
-    if "/" in gen_id:
-        # It's a specific layer - just delete that file? Or the whole dir?
-        # For now, delete the whole layers directory
-        gen_id = gen_id.split("/")[0]
-    
-    gen_dir = project_cache / gen_id
-    
-    # Security check
-    try:
-        gen_dir.resolve().relative_to(project_cache.resolve())
+        gen_dir.resolve().relative_to(_cache_root.resolve())
     except ValueError:
         raise HTTPException(status_code=403, detail="Invalid generation ID")
     
@@ -933,16 +1219,14 @@ async def delete_generation(gen_id: str):
     import shutil
     try:
         shutil.rmtree(gen_dir)
-        print(f"[HISTORY] Deleted generation: {gen_id}", flush=True)
-        return {"success": True, "deleted": gen_id}
+        print(f"[HISTORY] Deleted generation: {dir_id}", flush=True)
+        return {"success": True, "deleted": dir_id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to delete: {str(e)}")
-
 
 def setup_project_routes(app):
     """Setup project routes on FastAPI app"""
     app.include_router(router)
-
 
 # ============================================================================
 # Dynamic File Serving (replaces static mount for project cache)
@@ -959,12 +1243,7 @@ async def serve_cache_file(file_path: str):
     URL: /api/project/cache/{relative_path}
     Example: /api/project/cache/fuktest_shot01_251229/img_gen_001/generated.png
     """
-    print(f"[CACHE] Serving request for: {file_path}", flush=True)
-    print(f"[CACHE] Current cache root: {_cache_root}", flush=True)
-    print(f"[CACHE] Default cache root: {_default_cache_root}", flush=True)
-    
     if not _cache_root and not _default_cache_root:
-        print("[CACHE] âœ— Cache not initialized", flush=True)
         raise HTTPException(status_code=503, detail="Cache not initialized. Please restart the server.")
     
     # Try current cache root first
@@ -976,7 +1255,6 @@ async def serve_cache_file(file_path: str):
         tried_paths.append(str(candidate))
         if candidate.exists() and candidate.is_file():
             full_path = candidate
-            print(f"[CACHE] Found in project cache: {full_path}", flush=True)
     
     # Fall back to default cache if not found
     if not full_path and _default_cache_root and _default_cache_root != _cache_root:
@@ -984,11 +1262,8 @@ async def serve_cache_file(file_path: str):
         tried_paths.append(str(candidate))
         if candidate.exists() and candidate.is_file():
             full_path = candidate
-            print(f"[CACHE] Found in default cache (fallback): {full_path}", flush=True)
     
     if not full_path:
-        print(f"[CACHE] âœ— File not found in any cache location", flush=True)
-        print(f"[CACHE]   Tried: {tried_paths}", flush=True)
         raise HTTPException(
             status_code=404, 
             detail=f"File not found: {file_path}. Tried: {', '.join(tried_paths)}"
@@ -1003,15 +1278,12 @@ async def serve_cache_file(file_path: str):
             if _default_cache_root:
                 full_path.resolve().relative_to(_default_cache_root.resolve())
         except ValueError:
-            print(f"[CACHE] âœ— Access denied - path escapes cache roots", flush=True)
             raise HTTPException(status_code=403, detail="Access denied")
     
     # Determine content type
     content_type, _ = mimetypes.guess_type(str(full_path))
     if content_type is None:
         content_type = "application/octet-stream"
-    
-    print(f"[CACHE] âœ“ Serving {full_path} as {content_type}", flush=True)
     
     return FileResponse(
         path=full_path,
@@ -1032,17 +1304,11 @@ async def debug_project_state():
 
 def get_cache_root() -> Optional[Path]:
     """Get current cache root (for external use)"""
-    global _cache_root
-    # Add debug logging
-    if _cache_root is None:
-        print(f"[PROJECT] get_cache_root() -> None (no project loaded)", flush=True)
     return _cache_root
-
 
 def get_default_cache_root() -> Optional[Path]:
     """Get the default cache root (original location before any project was opened)"""
     return _default_cache_root
-
 
 # ============================================================================
 # External File Serving (for imports and files outside cache)
@@ -1061,19 +1327,13 @@ async def serve_external_file(file_path: str):
     # Reconstruct absolute path
     full_path = Path("/" + file_path)
     
-    print(f"[FILES] Serving request for: {file_path}", flush=True)
-    print(f"[FILES] Resolved to: {full_path}", flush=True)
-    
     if not full_path.exists():
-        print(f"[FILES] ✗ File not found: {full_path}", flush=True)
         raise HTTPException(status_code=404, detail=f"File not found: {full_path}")
     
     if not full_path.is_file():
-        print(f"[FILES] ✗ Not a file: {full_path}", flush=True)
         raise HTTPException(status_code=400, detail=f"Not a file: {full_path}")
     
     # Security: Check if file is in an allowed location
-    # Allow: project folders, home directory, common media paths
     allowed_roots = [
         Path.home(),  # User's home directory
         Path("/tmp"),  # Temp files
@@ -1096,15 +1356,12 @@ async def serve_external_file(file_path: str):
             continue
     
     if not is_allowed:
-        print(f"[FILES] ✗ Access denied - path not in allowed locations", flush=True)
         raise HTTPException(status_code=403, detail="Access denied - path not in allowed locations")
     
     # Determine content type
     content_type, _ = mimetypes.guess_type(str(full_path))
     if content_type is None:
         content_type = "application/octet-stream"
-    
-    print(f"[FILES] ✓ Serving {full_path} as {content_type}", flush=True)
     
     return FileResponse(
         path=full_path,

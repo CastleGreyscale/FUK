@@ -37,26 +37,32 @@
       "vae": "/home/brad/ai/models/vae/wan_2.1_vae.safetensors",
       "t5": "/home/brad/ai/models/clip/models_t5_umt5-xxl-enc-bf16.pth",
       "clip": "/home/brad/ai/models/clip/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth"
+    },    
+    "i2v-A14B": {
+      "dit": "/home/brad/ai/models/checkpoints/wan2.2_i2v_low_noise_14B_fp16.safetensors",
+      "dit_high_noise": "/home/brad/ai/models/checkpoints/wan2.2_i2v_high_noise_14B_fp16.safetensors",
+      "vae": "/home/brad/ai/models/vae/wan_2.1_vae.safetensors",
+      "t5": "/home/brad/ai/models/clip/models_t5_umt5-xxl-enc-bf16.pth"
     }
   },
 
   "loras": {
     "noir_qwen": {
       "path": "/home/brad/ai/models/loras/noir.safetensors",
-      "trigger": "noir style, high contrast shadows",
-      "multiplier": 0.8,
+      "trigger": "noir style",
+      "multiplier": 1.2,
       "target": "qwen"
     },
     "western_qwen": {
       "path": "/home/brad/ai/models/loras/spaghetti_western.safetensors",
       "trigger": "spaghetti western style",
-      "multiplier": 1.0,
+      "multiplier": 1.4,
       "target": "qwen"
     },
     "italian_horror_qwen": {
       "path": "/home/brad/ai/models/loras/italy_horror.safetensors",
-      "trigger": "italian horror, giallo",
-      "multiplier": 0.9,
+      "trigger": "italian horror",
+      "multiplier": 1.7,
       "target": "qwen"
     }
   },

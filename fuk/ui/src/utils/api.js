@@ -69,25 +69,6 @@ export async function cancelGeneration(generationId) {
 }
 
 /**
- * Upload control image
- */
-export async function uploadControlImage(file) {
-  const formData = new FormData();
-  formData.append('file', file);
-  
-  const res = await fetch(`${API_URL}/upload/control_image`, {
-    method: 'POST',
-    body: formData
-  });
-  
-  if (!res.ok) {
-    throw new Error(`Upload failed: ${res.statusText}`);
-  }
-  
-  return res.json();
-}
-
-/**
  * Create SSE connection for progress updates
  */
 export function createProgressStream(generationId, onProgress, onComplete, onError) {
