@@ -27,6 +27,19 @@ function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned }) {
   
   // Get the processing type icon (if applicable)
   const getProcessingIcon = () => {
+    // Check if this is an upscaled or interpolated item based on path/name
+    const path = generation.path || generation.preview || '';
+    const name = generation.name || generation.id || '';
+    
+    // Check directory name or path for processing type
+    if (path.includes('upscale_') || name.includes('upscale')) {
+      return ArrowUp;
+    }
+    if (path.includes('interpolate_') || name.includes('interpolate')) {
+      return Zap;
+    }
+    
+    // Otherwise use the type field
     switch (generation.type) {
       case 'layers': return Layers;
       case 'preprocess': return Enhance;
@@ -41,6 +54,23 @@ function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned }) {
       default: 
         return null;
     }
+  };
+  
+  // Get the display type for CSS classes (matches detection logic)
+  const getProcessingType = () => {
+    const path = generation.path || generation.preview || '';
+    const name = generation.name || generation.id || '';
+    
+    // Check directory name or path for processing type
+    if (path.includes('upscale_') || name.includes('upscale')) {
+      return 'upscale';
+    }
+    if (path.includes('interpolate_') || name.includes('interpolate')) {
+      return 'interpolate';
+    }
+    
+    // Otherwise use the type field
+    return generation.type;
   };
   
   // Get subtype badge for layers and preprocess
@@ -93,6 +123,21 @@ function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned }) {
   
   const ContentTypeIcon = getContentTypeIcon();
   const ProcessingIcon = getProcessingIcon();
+  const processingType = getProcessingType();
+  
+  // Debug logging - show detection results
+  const path = generation.path || generation.preview || '';
+  console.log('Generation DEBUG:', {
+    id: generation.id,
+    type: generation.type,
+    computedType: processingType,
+    subtype: generation.subtype,
+    path: path,
+    name: generation.name,
+    hasUpscaleInPath: path.includes('upscale_'),
+    hasInterpolateInPath: path.includes('interpolate_'),
+    ProcessingIcon: ProcessingIcon?.name || 'none',
+  });
   
   const handleDragStart = (e) => {
     // Use preview URL for the path (API returns 'preview' not 'path')
@@ -176,7 +221,7 @@ function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned }) {
         
         {/* Processing type badge (if applicable) */}
         {ProcessingIcon && (
-          <div className={`gen-history-type-badge processing ${generation.type} ${generation.subtype || ''}`}>
+          <div className={`gen-history-type-badge processing ${getProcessingType()} ${generation.subtype || ''}`}>
             <ProcessingIcon />
           </div>
         )}

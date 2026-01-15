@@ -39,7 +39,7 @@
   background-color: var(--color-transparent);
   border: 1px solid var(--color-border);
   border-radius: 0.375rem;
-  color: #d1d5db;
+  color: var(--color-text-primary);
   font-size: 0.875rem;
   cursor: pointer;
   transition: all 0.2s;
@@ -250,7 +250,7 @@
   align-items: center;
   gap: 0.375rem;
   padding: 0.5rem 0.75rem;
-  background-color: rgba(55, 65, 81, 0.5);
+  background-color: var(--color-transparent);
   border: 1px solid #374151;
   border-radius: 0.375rem;
   color: #d1d5db;

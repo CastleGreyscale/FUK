@@ -55,6 +55,14 @@
   --color-info-500: #3b82f6;
   --color-info-600: #2563eb;
   
+  /* Badge Color */
+  --color-image: #2563eb;
+  --color-video: #eba625;
+  --color-upscale: #25eb50;
+  --color-interpolate: #eb25cd;
+  --color-preprocess: #b325eb;
+  --color-layers: #25dbeb;
+
   /* ============================================================================
    * SEMANTIC COLOR ASSIGNMENTS
    * ========================================================================== */
@@ -78,6 +86,13 @@
 
   --color-button: linear-gradient(to right, #a855f7, #8b5cf6);
   --color-gradient-button-gen-disabled: linear-gradient(to bottom right, #01c00e, #016d01);
+
+  --color-image-badge: var(--color-image);
+  --color-video-badge: var(--color-video);
+  --color-upscale-badge: var(--color-upscale);
+  --color-interpolate-badge: var(--color-interpolate);
+  --color-preprocess-badge: var(--color-preprocess);
+  --color-layers-badge: var(--color-layers);
   
   /* ============================================================================
    * SPACING
@@ -157,6 +172,7 @@
   --icon-2xl: 2rem;      /* 32px */
   --icon-3xl: 3rem;      /* 48px */
   --icon-base: 1rem;
+
   /* ============================================================================
    * COMPONENT-SPECIFIC
    * ========================================================================== */
@@ -168,12 +184,12 @@
   
   /* Inputs */
   --input-padding: 0.5rem 0.75rem;
-  --input-bg: var(--color-gray-800);
+  --input-bg: var(--color-gray-900);
   --input-border: var(--color-gray-700);
   --input-focus-border: var(--color-accent);
   
   /* Cards */
   --card-padding: 1rem;
-  --card-bg: rgba(31, 41, 55, 0.5);
+  --card-bg: var(--color-transparent);
   --card-border: var(--color-gray-700);
 }

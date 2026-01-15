@@ -11,7 +11,7 @@
  */
 
 import { useState, useId, useCallback } from 'react';
-import { X, Upload, Film, Layers, Image, FolderOpen } from './Icons';
+import { X, Film, Layers, Image, FolderOpen } from './Icons';
 import { registerImport } from '../utils/historyApi';
 
 const API_URL = '/api';

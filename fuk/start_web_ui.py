@@ -21,7 +21,6 @@ def main():
     # Verify project structure
     required = {
         "core/": project_root / "core",
-        "utils/": project_root / "utils",
         "ui/": ui_dir,
         "config/": project_root / "config",
         "vendor/musubi-tuner/": project_root / "vendor" / "musubi-tuner"

@@ -4,7 +4,7 @@
  */
 
 import { useState } from 'react';
-import { Save, Loader2, AlertCircle, CheckCircle, Folder, FilePlus, Plus, ChevronDown } from './Icons';
+import { Save, Loader2, CheckCircle, Folder, FilePlus, Plus, ChevronDown } from './Icons';
 
 
 export default function ProjectBar({

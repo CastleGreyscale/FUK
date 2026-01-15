@@ -67,7 +67,7 @@
 .gen-history-title svg {
   width: var(--icon-base);
   height: var(--icon-base);
-  color: var(--color-text-secondary);
+  /*color: var(--color-text-secondary);*/
 }
 
 .gen-history-counts {
@@ -307,7 +307,7 @@
   position: absolute;
   top: 0.125rem;
   left: 0.125rem;
-  background: rgba(0, 0, 0, 0.7);
+  /*background: rgba(0, 0, 0, 0.7);*/
   padding: 0.125rem;
   border-radius: var(--radius-sm);
   display: flex;
@@ -326,11 +326,16 @@
   width: 0.625rem;
   height: 0.625rem;
 }
-
+/*
 /* Content badge colors (neutral gray) - higher specificity */
-.gen-history-item .gen-history-thumb .gen-history-type-badge.content svg {
-  color: var(--color-text-secondary);
+.gen-history-item .gen-history-thumb .gen-history-type-badge.content.image svg {
+  color: var(--color-image-badge);
 }
+
+.gen-history-item .gen-history-thumb .gen-history-type-badge.content.video svg {
+  color: var(--color-video-badge);
+}
+
 
 /* Processing badge type-specific colors - higher specificity */
 .gen-history-item .gen-history-thumb .gen-history-type-badge.processing.preprocess svg { 
@@ -338,11 +343,11 @@
 }
 
 .gen-history-item .gen-history-thumb .gen-history-type-badge.processing.upscale svg { 
-  color: var(--color-success-800); 
+  color: var(--color-upscale-badge); 
 }
 
 .gen-history-item .gen-history-thumb .gen-history-type-badge.processing.interpolate svg { 
-  color: #ec4899; 
+  color: var(--color-interpolate-badge); 
 }
 
 .gen-history-item .gen-history-thumb .gen-history-type-badge.processing.export svg { 
@@ -355,7 +360,7 @@
 
 /* Layer subtype colors (processing badge) - higher specificity */
 .gen-history-item .gen-history-thumb .gen-history-type-badge.processing.layers svg { 
-  color: #f59e0b; 
+  color: var(--color-layers-badge); 
 }
 
 .gen-history-item .gen-history-thumb .gen-history-type-badge.processing.layers.depth svg { 
