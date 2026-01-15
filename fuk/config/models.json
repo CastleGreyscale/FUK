@@ -51,19 +51,25 @@
       "path": "/home/brad/ai/models/loras/noir.safetensors",
       "trigger": "noir style",
       "multiplier": 1.2,
-      "target": "qwen"
+      "target": "qwen_image"
     },
     "western_qwen": {
       "path": "/home/brad/ai/models/loras/spaghetti_western.safetensors",
       "trigger": "spaghetti western style",
       "multiplier": 1.4,
-      "target": "qwen"
+      "target": "qwen_image"
     },
     "italian_horror_qwen": {
       "path": "/home/brad/ai/models/loras/italy_horror.safetensors",
       "trigger": "italian horror",
       "multiplier": 1.7,
-      "target": "qwen"
+      "target": "qwen_image"
+    },
+    "italian_horror_qwen_edit": {
+      "path": "/home/brad/ai/models/loras/italianhorror_qwen_edit.safetensors",
+      "trigger": "italian_horror",
+      "multiplier": 1.7,
+      "target": "qwen_image_2509_edit"
     }
   },
 

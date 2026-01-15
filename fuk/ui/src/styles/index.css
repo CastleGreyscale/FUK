@@ -12,16 +12,20 @@
 @import './variables.css';
 
 /* Base styles and core layout */
-@import './fuk-ui.css';
+@import './layout.css';
 
 /* Component-specific styles */
+@import './components.css';
 @import './project-bar.css';
-@import './generation-history.css';
 @import './inline-image-input.css';
 @import './tabs.css';
 @import './forms.css';
 @import './media-uploader.css';
 @import './sequence-styles.css';
+@import './seed-control.css';
+@import './placeholders.css';
+@import './generation-history.css';
+@import './animations.css';
 
 /* ============================================================================
  * GLOBAL RESETS
@@ -40,27 +44,6 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* ============================================================================
- * ANIMATIONS
- * ========================================================================== */
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
-}
-
-.animate-spin {
-  animation: spin 1s linear infinite;
-}
-
-.animate-pulse {
-  animation: pulse 2s infinite;
-}
 
 /* ============================================================================
  * IMAGE UPLOADER COMPONENT

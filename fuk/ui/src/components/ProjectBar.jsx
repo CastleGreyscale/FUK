@@ -146,7 +146,7 @@ export default function ProjectBar({
           <Folder className="fuk-icon--md" />
         )}
         <span className="fuk-project-folder-name">{getFolderDisplayName()}</span>
-        <ChevronDown className="fuk-project-chevron" />
+
       </button>
       
       <span className="fuk-project-separator">/</span>

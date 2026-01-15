@@ -959,7 +959,20 @@ async def list_generations(
                             preview = f"api/project/cache/{rel_path}/{video_files[0].name}"
                             gen_type = "video"
                             break
-        
+        # Check for video thumbnail (extract filename from preview URL)
+        thumbnail_url = None
+        if preview and gen_type == "video":
+            # Extract filename from preview URL (e.g., "api/project/cache/xxx/upscaled_4x.mp4" -> "upscaled_4x.mp4")
+            preview_filename = preview.split("/")[-1] if "/" in preview else preview
+            thumb_candidates = [
+                gen_dir / preview_filename.replace('.mp4', '.thumb.jpg'),
+                gen_dir / "thumbnail.jpg",
+            ]
+            for thumb in thumb_candidates:
+                if thumb.exists():
+                    thumbnail_url = f"api/project/cache/{rel_path}/{thumb.name}"
+                    break
+
         # Build generation object
         gen_obj = {
             "id": str(rel_path),  # Use full relative path as ID
@@ -974,6 +987,7 @@ async def list_generations(
             "seed": metadata.get("seed"),
             "model": metadata.get("model", ""),
             "pinned": is_pinned,
+            "thumbnailUrl": thumbnail_url,  # ADD THIS
         }
         
         # Include metadata for special types that need extra data

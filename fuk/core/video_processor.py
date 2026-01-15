@@ -127,6 +127,55 @@ class VideoProcessor:
             "codec": video_stream.get("codec_name", "unknown"),
         }
     
+    def extract_thumbnail(
+        self,
+        video_path: Path,
+        output_path: Path = None,
+        quality: int = 5
+    ) -> Optional[Path]:
+        """
+        Extract first frame as thumbnail image
+        
+        Args:
+            video_path: Input video
+            output_path: Output thumbnail path (default: video_path.thumb.jpg)
+            quality: JPEG quality (2-31, lower is better, 5 is good balance)
+            
+        Returns:
+            Path to thumbnail if successful, None otherwise
+        """
+        video_path = Path(video_path)
+        if output_path is None:
+            output_path = video_path.with_suffix('.thumb.jpg')
+        else:
+            output_path = Path(output_path)
+        
+        if not self.ffmpeg_path:
+            print(f"[VideoProcessor] Cannot extract thumbnail - FFmpeg not found")
+            return None
+        
+        cmd = [
+            str(self.ffmpeg_path),
+            "-y",
+            "-i", str(video_path),
+            "-vframes", "1",
+            "-q:v", str(quality),
+            str(output_path)
+        ]
+        
+        print(f"[VideoProcessor] Extracting thumbnail: {output_path.name}")
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            print(f"[VideoProcessor] Thumbnail extraction failed: {result.stderr}")
+            return None
+        
+        if output_path.exists():
+            print(f"[VideoProcessor] Thumbnail created: {output_path} ({output_path.stat().st_size} bytes)")
+            return output_path
+        
+        return None
+    
     def extract_frames(
         self,
         video_path: Path,

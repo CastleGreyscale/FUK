@@ -6,7 +6,7 @@
  */
 
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
-import { Loader2, CheckCircle, Layers, AlertCircle, Film } from '../components/Icons';
+import {CheckCircle, Layers, AlertCircle, Film } from '../components/Icons';
 import MediaUploader, { isVideoFile } from '../components/MediaUploader';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { buildImageUrl } from '../utils/constants';
@@ -268,6 +268,7 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
                       <video
                         src={buildImageUrl(layerData.url)}
                         controls
+                        preload="metadata"
                         className="fuk-layer-card-media"
                       />
                     ) : (

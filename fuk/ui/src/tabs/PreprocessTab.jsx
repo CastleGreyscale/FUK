@@ -5,8 +5,7 @@
  */
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Pipeline, Loader2, CheckCircle, Camera, Film, AlertCircle, Folder } from '../components/Icons';
-import TabButton from '../components/TabButton';
+import { Pipeline, CheckCircle, Camera, Film, AlertCircle, Folder } from '../components/Icons';
 import MediaUploader, { isVideoFile } from '../components/MediaUploader';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { buildImageUrl } from '../utils/constants';

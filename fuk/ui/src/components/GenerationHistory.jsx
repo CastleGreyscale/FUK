@@ -4,35 +4,10 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { Film, Camera, Clock, Trash2, RefreshCw, ChevronDown, ChevronRight, Enhance, Zap, ArrowUp, Layers, Download } from './Icons';
+import { Film, Camera, Clock, Trash2, RefreshCw, ChevronDown, ChevronRight, Enhance, Zap, ArrowUp, Layers, Download, PinIcon, ImportIcon, SequenceIcon } from './Icons';
 import { buildImageUrl, API_URL } from '../utils/constants';
 
-// Pin icon (bookmark style)
-const PinIcon = ({ className, style }) => (
-  <svg className={className} style={style} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
-  </svg>
-);
 
-// Import icon (download arrow into folder)
-const ImportIcon = ({ className, style }) => (
-  <svg className={className} style={style} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4 4m0 0l-4-4m4 4V4" />
-  </svg>
-);
-
-// Sequence icon (film strip)
-const SequenceIcon = ({ className, style }) => (
-  <svg className={className} style={style} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <rect x="2" y="4" width="20" height="16" rx="2" strokeWidth={2} />
-    <line x1="6" y1="4" x2="6" y2="20" strokeWidth={1.5} />
-    <line x1="18" y1="4" x2="18" y2="20" strokeWidth={1.5} />
-    <line x1="2" y1="9" x2="6" y2="9" strokeWidth={1.5} />
-    <line x1="2" y1="15" x2="6" y2="15" strokeWidth={1.5} />
-    <line x1="18" y1="9" x2="22" y2="9" strokeWidth={1.5} />
-    <line x1="18" y1="15" x2="22" y2="15" strokeWidth={1.5} />
-  </svg>
-);
 
 // Draggable thumbnail component
 function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned }) {
@@ -44,23 +19,27 @@ function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned }) {
   const previewUrl = buildImageUrl(generation.preview);
   const displayName = generation.name || generation.id || 'Unknown';
   
-  // Get the appropriate icon based on type and subtype
-  const getTypeIcon = () => {
-    // Check for sequence first
+  // Get the primary content type icon (Camera or Film)
+  const getContentTypeIcon = () => {
     if (isSequence) return SequenceIcon;
-    
+    return isVideo ? Film : Camera;
+  };
+  
+  // Get the processing type icon (if applicable)
+  const getProcessingIcon = () => {
     switch (generation.type) {
-      case 'video': return Film;
-      case 'interpolate': return Zap;
-      case 'upscale': return ArrowUp;
-      case 'preprocess': 
-        // Return specific icon for preprocess subtypes
-        if (generation.subtype === 'video') return Film;
-        return Enhance;
       case 'layers': return Layers;
+      case 'preprocess': return Enhance;
+      case 'upscale': return ArrowUp;
+      case 'interpolate': return Zap;
       case 'export': return Download;
       case 'import': return ImportIcon;
-      default: return Camera;
+      // Basic image/video types don't need a processing badge
+      case 'image':
+      case 'video':
+        return null;
+      default: 
+        return null;
     }
   };
   
@@ -112,7 +91,8 @@ function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned }) {
     );
   };
   
-  const TypeIcon = getTypeIcon();
+  const ContentTypeIcon = getContentTypeIcon();
+  const ProcessingIcon = getProcessingIcon();
   
   const handleDragStart = (e) => {
     // Use preview URL for the path (API returns 'preview' not 'path')
@@ -162,8 +142,18 @@ function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned }) {
               src={previewUrl}
               muted
               loop
-              onMouseEnter={(e) => e.target.play()}
-              onMouseLeave={(e) => { e.target.pause(); e.target.currentTime = 0; }}
+              preload="none"
+              onMouseEnter={(e) => {
+                // Load and play only on hover
+                if (e.target.readyState === 0) {
+                  e.target.load();
+                }
+                e.target.play().catch(() => {});
+              }}
+              onMouseLeave={(e) => { 
+                e.target.pause(); 
+                e.target.currentTime = 0;
+              }}
               onError={() => setImageError(true)}
             />
           ) : (
@@ -175,13 +165,21 @@ function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned }) {
           )
         ) : (
           <div className="gen-history-thumb-error">
-            <TypeIcon />
+            <ContentTypeIcon />
           </div>
         )}
         
-        <div className={`gen-history-type-badge ${generation.type} ${generation.subtype || ''}`}>
-          <TypeIcon />
+        {/* Content type badge (Camera/Film) */}
+        <div className={`gen-history-type-badge content ${isVideo ? 'video' : 'image'}`}>
+          <ContentTypeIcon />
         </div>
+        
+        {/* Processing type badge (if applicable) */}
+        {ProcessingIcon && (
+          <div className={`gen-history-type-badge processing ${generation.type} ${generation.subtype || ''}`}>
+            <ProcessingIcon />
+          </div>
+        )}
         
         {isPinned && (
           <div className="gen-history-pinned-badge">

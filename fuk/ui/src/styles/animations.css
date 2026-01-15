@@ -1,0 +1,23 @@
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+@keyframes pulse-generating {
+  0%, 100% { box-shadow: 0 2px 8px var(--color-primary); }
+  50% { box-shadow: 0 4px 20px var(--color-secondary); }
+}
+
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+.animate-pulse {
+  animation: pulse 2s infinite;
+}

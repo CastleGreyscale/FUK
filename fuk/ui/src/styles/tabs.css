@@ -732,27 +732,6 @@
   height: 3rem;
 }
 
-/* ============================================================================
- * ANIMATION UTILITIES
- * ========================================================================== */
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
-}
-
-.fuk-spin {
-  animation: spin 1s linear infinite;
-}
-
-.fuk-pulse {
-  animation: pulse 2s infinite;
-}
 
 /* ============================================================================
  * EXPORT RESULT BANNER

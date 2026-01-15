@@ -523,7 +523,13 @@ def setup_video_routes(
                 frame_processor=frame_processor,
                 output_mode=output_mode,
             )
-            
+
+            # Generate thumbnail for the upscaled video
+            if output_mode == OutputMode.MP4 and output_path.exists():
+                thumb_path = output_path.with_suffix('.thumb.jpg')
+                video_processor.extract_thumbnail(output_path, thumb_path)
+
+
             elapsed = time.time() - start_time
             log.timing("VideoUpscale", start_time, f"Complete - {result.get('frame_count', 0)} frames")
             

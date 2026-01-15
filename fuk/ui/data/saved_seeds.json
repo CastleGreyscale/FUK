@@ -12,5 +12,22 @@
       "note": "",
       "timestamp": "2026-01-10T07:12:24.314341"
     }
+  ],
+  "qwen_image_2509_edit": [
+    {
+      "seed": 14831351940,
+      "note": "italianhorror_03",
+      "timestamp": "2026-01-14T08:22:54.508804"
+    },
+    {
+      "seed": 2674395943,
+      "note": "italianhorror02",
+      "timestamp": "2026-01-14T08:07:56.122455"
+    },
+    {
+      "seed": 838655114,
+      "note": "italian_horror01",
+      "timestamp": "2026-01-14T08:03:25.005363"
+    }
   ]
 }

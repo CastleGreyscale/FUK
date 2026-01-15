@@ -4,10 +4,8 @@
  * Refactored: All inline styles moved to CSS classes
  */
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Camera, Loader2, CheckCircle, X, Pipeline } from '../../src/components/Icons';
-import TabButton from '../components/TabButton';
-import ProgressBar from '../components/ProgressBar';
+import { useEffect, useCallback, useMemo, useRef } from 'react';
+import { Camera, CheckCircle, X, Pipeline } from '../../src/components/Icons';
 import MediaUploader from '../components/MediaUploader';
 import SeedControl from '../components/SeedControl';
 import { useGeneration } from '../hooks/useGeneration';

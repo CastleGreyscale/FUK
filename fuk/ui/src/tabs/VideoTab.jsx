@@ -10,7 +10,7 @@
  */
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Film, Loader2, CheckCircle, X, Camera, AlertCircle } from '../../src/components/Icons';
+import { Film, CheckCircle, AlertCircle } from '../../src/components/Icons';
 import MediaUploader from '../components/MediaUploader.jsx';
 import SeedControl from '../components/SeedControl';
 import { useGeneration } from '../hooks/useGeneration';

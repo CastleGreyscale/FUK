@@ -174,3 +174,45 @@ export const Folder = ({ className, style }) => (
     <path d="M2 10h20"/>
   </svg>
 );
+
+// Plus icon
+export const Plus = ({ className, style }) => (
+  <svg className={className} style={style} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+  </svg>
+);
+
+// File plus icon
+export const FilePlus = ({ className, style }) => (
+  <svg className={className} style={style} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+  </svg>
+);
+
+
+// Pin icon (bookmark style)
+export const PinIcon = ({ className, style }) => (
+  <svg className={className} style={style} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+  </svg>
+);
+
+// Import icon (download arrow into folder)
+export const ImportIcon = ({ className, style }) => (
+  <svg className={className} style={style} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4 4m0 0l-4-4m4 4V4" />
+  </svg>
+);
+
+// Sequence icon (film strip)
+export const SequenceIcon = ({ className, style }) => (
+  <svg className={className} style={style} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <rect x="2" y="4" width="20" height="16" rx="2" strokeWidth={2} />
+    <line x1="6" y1="4" x2="6" y2="20" strokeWidth={1.5} />
+    <line x1="18" y1="4" x2="18" y2="20" strokeWidth={1.5} />
+    <line x1="2" y1="9" x2="6" y2="9" strokeWidth={1.5} />
+    <line x1="2" y1="15" x2="6" y2="15" strokeWidth={1.5} />
+    <line x1="18" y1="9" x2="22" y2="9" strokeWidth={1.5} />
+    <line x1="18" y1="15" x2="22" y2="15" strokeWidth={1.5} />
+  </svg>
+);

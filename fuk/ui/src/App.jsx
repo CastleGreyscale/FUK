@@ -3,7 +3,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import {Loader2, AlertCircle, Pipeline, Enhance, Save, FukMonogram } from './components/Icons';
+import {Loader2, AlertCircle, FukMonogram } from './components/Icons';
 import ProjectBar from './components/ProjectBar';
 import ImageTab from './tabs/ImageTab';
 import VideoTab from './tabs/VideoTab';

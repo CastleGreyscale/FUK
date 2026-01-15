@@ -1,9 +1,16 @@
-/* Generation History Panel Styles */
+/**
+ * Generation History Panel Styles
+ * Compact horizontal history with drag-and-drop thumbnails
+ */
+
+/* ============================================================================
+ * PANEL CONTAINER
+ * ========================================================================== */
 
 .gen-history-panel {
   background: var(--color-transparent);
-  border-radius: 0.5rem;
-  border: 1px solid #2d2d44;
+  border-radius: var(--radius-lg);
+  border: var(--border-width) solid var(--color-border-light);
   display: flex;
   flex-direction: column;
   max-height: 400px; /* Limit height to ~2 rows */
@@ -12,58 +19,62 @@
 
 .gen-history-collapsed {
   background: var(--color-transparent);
-  border-radius: 0.5rem;
-  border: 1px solid var(--color-border);
-  padding: 0.5rem 1rem;
+  border-radius: var(--radius-lg);
+  border: var(--border-width) solid var(--color-border-light);
+  padding: var(--spacing-sm) var(--spacing-lg);
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--spacing-sm);
   cursor: pointer;
-  color: var(--color-text-secondary);
-  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
   transition: all var(--transition-base);
 }
 
 .gen-history-collapsed:hover {
-  background: var(--color-accent-hover);
-  color: #e5e7eb;
+  background: var(--color-surface-hover);
+  color: var(--color-text-primary);
 }
 
 .gen-history-collapsed svg {
-  width: 0.875rem;
-  height: 0.875rem;
+  width: var(--icon-base);
+  height: var(--icon-base);
 }
+
+/* ============================================================================
+ * HEADER
+ * ========================================================================== */
 
 .gen-history-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.5rem 0.75rem;
-  border-bottom: 1px solid var(--color-border);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-bottom: var(--border-width) solid var(--color-border-light);
   flex-shrink: 0;
 }
 
 .gen-history-title {
   display: flex;
   align-items: center;
-  gap: 0.375rem;
-  font-size: 0.75rem;
+  gap: var(--spacing-xs);
+  font-size: var(--font-size-sm);
   font-weight: 500;
-  color: #e5e7eb;
+  color: var(--color-text-primary);
   cursor: pointer;
 }
 
 .gen-history-title svg {
-  width: 0.875rem;
-  height: 0.875rem;
-  color: #6b7280;
+  width: var(--icon-base);
+  height: var(--icon-base);
+  color: var(--color-text-secondary);
 }
 
 .gen-history-counts {
   display: flex;
   align-items: center;
-  gap: 0.375rem;
-  margin-left: 0.375rem;
+  gap: var(--spacing-xs);
+  margin-left: var(--spacing-xs);
 }
 
 .count-badge {
@@ -71,9 +82,9 @@
   align-items: center;
   gap: 0.125rem;
   font-size: 0.6rem;
-  padding: 0.0625rem 0.25rem;
-  border-radius: 0.1875rem;
-  background: #252542;
+  padding: 0.0625rem var(--spacing-xs);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-hover);
 }
 
 .count-badge svg {
@@ -81,67 +92,69 @@
   height: 0.625rem;
 }
 
+/* Type-specific colors */
 .count-badge.image { color: #3b82f6; }
 .count-badge.video { color: #f59e0b; }
-.count-badge.preprocess { color: #a855f7; }
+.count-badge.preprocess { color: var(--color-accent); }
 .count-badge.layers { color: #f59e0b; }
-.count-badge.upscale { color: #10b981; }
+.count-badge.upscale { color: var(--color-success-800); }
 .count-badge.interpolate { color: #ec4899; }
 .count-badge.export { color: #22c55e; }
 
 .gen-history-header-actions {
   display: flex;
   align-items: center;
-  gap: 0.375rem;
+  gap: var(--spacing-xs);
 }
 
 .gen-history-days-label {
   font-size: 0.6rem;
-  color: #6b7280;
-  padding: 0.125rem 0.375rem;
-  background: #252542;
-  border-radius: 0.25rem;
+  color: var(--color-text-secondary);
+  padding: 0.125rem var(--spacing-xs);
+  background: var(--color-surface-hover);
+  border-radius: var(--radius-md);
 }
 
 .gen-history-refresh {
   background: transparent;
   border: none;
-  padding: 0.25rem;
-  color: #6b7280;
+  padding: var(--spacing-xs);
+  color: var(--color-text-secondary);
   cursor: pointer;
-  border-radius: 0.25rem;
+  border-radius: var(--radius-md);
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: all var(--transition-base);
 }
 
 .gen-history-refresh:hover {
-  background: #252542;
-  color: #e5e7eb;
+  background: var(--color-surface-hover);
+  color: var(--color-text-primary);
 }
 
 .gen-history-refresh svg {
-  width: 0.875rem;
-  height: 0.875rem;
+  width: var(--icon-base);
+  height: var(--icon-base);
 }
 
 .gen-history-refresh svg.spinning {
   animation: spin 1s linear infinite;
 }
 
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
+
+
+/* ============================================================================
+ * CONTENT AREA
+ * ========================================================================== */
 
 .gen-history-content {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 0.375rem;
+  padding: var(--spacing-xs);
 }
 
-/* Custom scrollbar */
 .gen-history-content::-webkit-scrollbar {
   width: 4px;
 }
@@ -151,51 +164,59 @@
 }
 
 .gen-history-content::-webkit-scrollbar-thumb {
-  background: #4b5563;
-  border-radius: 2px;
+  background: var(--color-gray-600);
+  border-radius: var(--radius-xs);
 }
 
 .gen-history-content::-webkit-scrollbar-thumb:hover {
-  background: #6b7280;
+  background: var(--color-gray-500);
 }
 
 .gen-history-loading,
 .gen-history-error,
 .gen-history-empty {
-  padding: 1rem;
+  padding: var(--spacing-lg);
   text-align: center;
-  color: #6b7280;
-  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
 }
 
 .gen-history-error {
-  color: #ef4444;
+  color: var(--color-error-500);
 }
 
 .gen-history-error button {
-  margin-top: 0.375rem;
-  padding: 0.25rem 0.5rem;
-  background: #374151;
+  margin-top: var(--spacing-xs);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background: var(--color-surface-hover);
   border: none;
-  border-radius: 0.25rem;
-  color: #e5e7eb;
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
   cursor: pointer;
   font-size: 0.65rem;
+  transition: background var(--transition-base);
 }
 
-/* Sections */
+.gen-history-error button:hover {
+  background: var(--color-surface);
+}
+
+/* ============================================================================
+ * SECTIONS (Pinned, Recent)
+ * ========================================================================== */
+
 .gen-history-section {
-  margin-bottom: 0.5rem;
+  margin-bottom: var(--spacing-sm);
 }
 
 .gen-history-section-label {
   display: flex;
   align-items: center;
-  gap: 0.25rem;
+  gap: var(--spacing-xs);
   font-size: 0.6rem;
-  color: #6b7280;
-  padding: 0.125rem 0.25rem;
-  margin-bottom: 0.25rem;
+  color: var(--color-text-secondary);
+  padding: 0.125rem var(--spacing-xs);
+  margin-bottom: var(--spacing-xs);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
@@ -212,25 +233,29 @@
 .gen-history-grid {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.375rem;
+  gap: var(--spacing-xs);
 }
+
+/* ============================================================================
+ * THUMBNAIL ITEMS - 16:9 ASPECT RATIO
+ * ========================================================================== */
 
 .gen-history-item {
   position: relative;
-  background: #252542;
-  border-radius: 0.375rem;
+  background: var(--color-surface-hover);
+  border-radius: var(--radius-md);
   overflow: hidden;
   cursor: grab;
-  transition: all 0.2s;
-  border: 2px solid transparent;
-  width: 80px;
+  transition: all var(--transition-base);
+  border: var(--border-width-thick) solid transparent;
+  width: 100px; /* Wider to accommodate 16:9 */
   flex-shrink: 0;
 }
 
 .gen-history-item:hover {
   border-color: #3b82f6;
   transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--shadow-md);
 }
 
 .gen-history-item.pinned {
@@ -245,11 +270,12 @@
   cursor: grabbing;
 }
 
+/* CHANGED: aspect-ratio from 1 (square) to 16 / 9 */
 .gen-history-thumb {
   position: relative;
-  aspect-ratio: 1;
+  aspect-ratio: 16 / 9;
   overflow: hidden;
-  background: #1a1a2e;
+  background: var(--color-surface);
 }
 
 .gen-history-thumb img,
@@ -265,13 +291,17 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #4b5563;
+  color: var(--color-gray-600);
 }
 
 .gen-history-thumb-error svg {
-  width: 1.5rem;
-  height: 1.5rem;
+  width: var(--icon-xl);
+  height: var(--icon-xl);
 }
+
+/* ============================================================================
+ * BADGES & OVERLAYS
+ * ========================================================================== */
 
 .gen-history-type-badge {
   position: absolute;
@@ -279,31 +309,66 @@
   left: 0.125rem;
   background: rgba(0, 0, 0, 0.7);
   padding: 0.125rem;
-  border-radius: 0.1875rem;
+  border-radius: var(--radius-sm);
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
+/* Processing badge appears below content badge */
+.gen-history-type-badge.processing {
+  top: auto;
+  bottom: 0.125rem;
+  left: 0.125rem;
+}
+
 .gen-history-type-badge svg {
   width: 0.625rem;
   height: 0.625rem;
-  color: #e5e7eb;
 }
 
-/* Type-specific badge colors */
-.gen-history-type-badge.image svg { color: #3b82f6; }
-.gen-history-type-badge.video svg { color: #f59e0b; }
-.gen-history-type-badge.preprocess svg { color: #a855f7; }
-.gen-history-type-badge.upscale svg { color: #10b981; }
-.gen-history-type-badge.interpolate svg { color: #ec4899; }
-.gen-history-type-badge.export svg { color: #22c55e; }
+/* Content badge colors (neutral gray) - higher specificity */
+.gen-history-item .gen-history-thumb .gen-history-type-badge.content svg {
+  color: var(--color-text-secondary);
+}
 
-/* Layer subtype colors */
-.gen-history-type-badge.layers svg { color: #f59e0b; }
-.gen-history-type-badge.layers.depth svg { color: #3b82f6; }
-.gen-history-type-badge.layers.normals svg { color: #a855f7; }
-.gen-history-type-badge.layers.crypto svg { color: #f59e0b; }
+/* Processing badge type-specific colors - higher specificity */
+.gen-history-item .gen-history-thumb .gen-history-type-badge.processing.preprocess svg { 
+  color: var(--color-accent); 
+}
+
+.gen-history-item .gen-history-thumb .gen-history-type-badge.processing.upscale svg { 
+  color: var(--color-success-800); 
+}
+
+.gen-history-item .gen-history-thumb .gen-history-type-badge.processing.interpolate svg { 
+  color: #ec4899; 
+}
+
+.gen-history-item .gen-history-thumb .gen-history-type-badge.processing.export svg { 
+  color: #22c55e; 
+}
+
+.gen-history-item .gen-history-thumb .gen-history-type-badge.processing.import svg { 
+  color: #6366f1; 
+}
+
+/* Layer subtype colors (processing badge) - higher specificity */
+.gen-history-item .gen-history-thumb .gen-history-type-badge.processing.layers svg { 
+  color: #f59e0b; 
+}
+
+.gen-history-item .gen-history-thumb .gen-history-type-badge.processing.layers.depth svg { 
+  color: #3b82f6; 
+}
+
+.gen-history-item .gen-history-thumb .gen-history-type-badge.processing.layers.normals svg { 
+  color: var(--color-accent); 
+}
+
+.gen-history-item .gen-history-thumb .gen-history-type-badge.processing.layers.crypto svg { 
+  color: #f59e0b; 
+}
 
 .gen-history-pinned-badge {
   position: absolute;
@@ -311,25 +376,30 @@
   right: 0.125rem;
   background: rgba(251, 191, 36, 0.9);
   padding: 0.125rem;
-  border-radius: 0.1875rem;
+  border-radius: var(--radius-sm);
 }
 
 .gen-history-pinned-badge svg {
   width: 0.5rem;
   height: 0.5rem;
-  color: #1a1a2e;
+  color: var(--color-surface);
 }
 
+/* ============================================================================
+ * INFO TEXT
+ * ========================================================================== */
+
 .gen-history-info {
-  padding: 0.25rem 0.375rem;
+  padding: var(--spacing-xs) var(--spacing-xs);
   display: flex;
   flex-direction: column;
   gap: 0.0625rem;
+  background: var(--color-surface);
 }
 
 .gen-history-name {
   font-size: 0.55rem;
-  color: #e5e7eb;
+  color: var(--color-text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -339,10 +409,13 @@
 
 .gen-history-time {
   font-size: 0.5rem;
-  color: #6b7280;
+  color: var(--color-text-secondary);
 }
 
-/* Action buttons overlay */
+/* ============================================================================
+ * ACTION BUTTONS OVERLAY
+ * ========================================================================== */
+
 .gen-history-actions-overlay {
   position: absolute;
   top: 0;
@@ -352,7 +425,7 @@
   gap: 0.125rem;
   padding: 0.125rem;
   opacity: 0;
-  transition: opacity 0.2s;
+  transition: opacity var(--transition-base);
 }
 
 .gen-history-item:hover .gen-history-actions-overlay {
@@ -363,13 +436,13 @@
 .gen-history-delete {
   background: rgba(0, 0, 0, 0.7);
   border: none;
-  padding: 0.25rem;
-  border-radius: 0.1875rem;
+  padding: var(--spacing-xs);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s;
+  transition: all var(--transition-base);
 }
 
 .gen-history-pin svg,
@@ -379,21 +452,21 @@
 }
 
 .gen-history-pin {
-  color: #6b7280;
+  color: var(--color-text-secondary);
 }
 
 .gen-history-pin:hover {
   background: rgba(251, 191, 36, 0.9);
-  color: #1a1a2e;
+  color: var(--color-surface);
 }
 
 .gen-history-pin.active {
   background: rgba(251, 191, 36, 0.9);
-  color: #1a1a2e;
+  color: var(--color-surface);
 }
 
 .gen-history-delete {
-  color: #6b7280;
+  color: var(--color-text-secondary);
 }
 
 .gen-history-delete:hover {
@@ -401,28 +474,31 @@
   color: white;
 }
 
-/* Load more */
+/* ============================================================================
+ * LOAD MORE
+ * ========================================================================== */
+
 .gen-history-load-more {
   display: flex;
-  gap: 0.375rem;
-  padding: 0.375rem;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-xs);
   justify-content: center;
 }
 
 .gen-history-load-more button {
-  padding: 0.25rem 0.5rem;
-  background: #374151;
-  border: 1px solid #4b5563;
-  border-radius: 0.25rem;
-  color: #d1d5db;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background: var(--color-surface-hover);
+  border: var(--border-width) solid var(--color-surface);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
   font-size: 0.6rem;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all var(--transition-base);
 }
 
 .gen-history-load-more button:hover:not(:disabled) {
-  background: #4b5563;
-  color: #e5e7eb;
+  background: var(--color-surface);
+  color: var(--color-text-primary);
 }
 
 .gen-history-load-more button:disabled {
@@ -432,31 +508,38 @@
 
 .gen-history-load-more button.secondary {
   background: transparent;
-  border-color: #374151;
-  color: #9ca3af;
+  border-color: var(--color-surface-hover);
+  color: var(--color-text-muted);
 }
 
 .gen-history-load-more button.secondary:hover:not(:disabled) {
-  background: #252542;
-  color: #d1d5db;
+  background: var(--color-surface-hover);
+  color: var(--color-text-primary);
 }
 
+/* ============================================================================
+ * FOOTER HINT
+ * ========================================================================== */
+
 .gen-history-hint {
-  padding: 0.25rem 0.5rem;
+  padding: var(--spacing-xs) var(--spacing-sm);
   text-align: center;
   font-size: 0.55rem;
-  color: #4b5563;
-  border-top: 1px solid #2d2d44;
+  color: var(--color-gray-600);
+  border-top: var(--border-width) solid var(--color-border-light);
   flex-shrink: 0;
 }
 
-/* Drop target styling for inputs */
+/* ============================================================================
+ * DROP TARGET STYLING
+ * ========================================================================== */
+
 .fuk-dropzone.drag-over-internal {
-  border-color: #10b981;
+  border-color: var(--color-success-800);
   background: rgba(16, 185, 129, 0.1);
 }
 
 .fuk-image-input.drag-over {
-  border-color: #10b981;
+  border-color: var(--color-success-800);
   background: rgba(16, 185, 129, 0.1);
 }

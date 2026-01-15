@@ -1,7 +1,140 @@
-/*
- * FUK Forms - Form Control Styles
- * Consolidated form inputs, buttons, and control utilities
+/**
+ * FUK UI - Forms
+ * All form control styles with variable integration
  */
+
+/* ============================================================================
+ * FORM GROUPS & LAYOUT
+ * ========================================================================== */
+
+.fuk-form-group {
+  margin-bottom: var(--spacing-lg);
+}
+
+.fuk-form-group-compact {
+  margin-bottom: var(--spacing-md);
+}
+
+.fuk-form-section {
+  margin-top: var(--spacing-md);
+}
+
+.fuk-form-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+/* ============================================================================
+ * LABELS
+ * ========================================================================== */
+
+.fuk-label {
+  display: block;
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--spacing-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.025em;
+}
+
+.fuk-label-description {
+  color: var(--color-text-muted);
+  font-weight: 400;
+  font-size: var(--font-size-xs);
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.fuk-label-required {
+  color: var(--color-error-400);
+  font-size: var(--font-size-xs);
+}
+
+/* ============================================================================
+ * TEXT INPUTS & TEXTAREAS
+ * ========================================================================== */
+
+.fuk-input,
+.fuk-textarea,
+.fuk-select {
+  width: 100%;
+  padding: var(--input-padding);
+  background-color: var(--input-bg);
+  border: var(--border-width) solid var(--input-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-base);
+  transition: all var(--transition-base);
+}
+
+.fuk-input:focus,
+.fuk-textarea:focus,
+.fuk-select:focus {
+  outline: none;
+  border-color: var(--input-focus-border);
+  box-shadow: 0 0 0 2px rgba(168, 85, 247, 0.2);
+}
+
+.fuk-textarea {
+  min-height: 3rem;
+  resize: vertical;
+  font-family: inherit;
+}
+
+.fuk-input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+.fuk-input[type="number"]::-webkit-outer-spin-button,
+.fuk-input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.fuk-input[type="file"] {
+  padding: var(--spacing-xs) var(--spacing-sm);
+  font-size: 0.8125rem;
+}
+
+.fuk-input[type="file"]::file-selector-button {
+  background-color: var(--color-surface);
+  color: var(--color-text-primary);
+  border: none;
+  padding: var(--spacing-xs) var(--spacing-md);
+  border-radius: var(--radius-sm);
+  margin-right: var(--spacing-md);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+}
+
+.fuk-input[type="file"]::file-selector-button:hover {
+  background-color: var(--color-surface-hover);
+}
+
+/* ============================================================================
+ * INPUT STATES & MODIFIERS
+ * ========================================================================== */
+
+.fuk-input--warning {
+  border-color: var(--color-warning-500) !important;
+  background: rgba(245, 158, 11, 0.1);
+}
+
+.fuk-input--warning:focus {
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.2);
+}
+
+.fuk-input--readonly {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.fuk-input--readonly-filled {
+  color: var(--color-text-secondary);
+  font-style: normal;
+}
 
 /* ============================================================================
  * INPUT WIDTH UTILITIES
@@ -26,89 +159,140 @@
 }
 
 /* ============================================================================
- * INPUT SUFFIX (dimension display, etc)
+ * INPUT GROUPS & INLINE LAYOUTS
  * ========================================================================== */
 
+.fuk-input-group {
+  display: flex;
+  gap: var(--spacing-sm);
+  align-items: flex-end;
+}
+
+.fuk-input-group .fuk-input {
+  flex: 1;
+}
+
+.fuk-input-inline {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.fuk-input-inline .fuk-select {
+  flex: 0 0 auto;
+  min-width: 100px;
+}
+
+.fuk-input-inline .fuk-input {
+  flex: 0 0 100px;
+}
+
 .fuk-input-suffix {
-  color: #9ca3af;
-  font-size: 0.875rem;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-base);
   min-width: 100px;
   white-space: nowrap;
 }
 
-/* ============================================================================
- * CHECKBOX LABEL (standalone text next to checkbox)
- * ========================================================================== */
+.fuk-input-result {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+  padding-left: var(--spacing-sm);
+}
 
-.fuk-checkbox-label {
-  font-size: 0.75rem;
-  font-weight: 500;
-  color: #d1d5db;
+.fuk-input-separator {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-base);
+  flex-shrink: 0;
 }
 
 /* ============================================================================
- * CARD TITLE VARIANTS
+ * RADIO BUTTONS
  * ========================================================================== */
 
-.fuk-card-title--highlight {
-  color: #c084fc;
-}
-
-/* ============================================================================
- * EMPTY STATE (for disabled/unavailable features)
- * ========================================================================== */
-
-.fuk-empty-state {
-  padding: 2rem 1rem;
-  text-align: center;
-}
-
-.fuk-empty-state-icon {
-  width: 2rem;
-  height: 2rem;
-  margin: 0 auto 0.5rem;
-  opacity: 0.3;
-}
-
-.fuk-empty-state-text {
-  font-size: 0.75rem;
-  color: #6b7280;
-}
-
-/* ============================================================================
- * PREPROCESS PREVIEW (for showing last preprocessed image)
- * ========================================================================== */
-
-.fuk-preprocess-preview {
+.fuk-radio-group {
   display: flex;
-  gap: 1rem;
+  gap: var(--spacing-md);
   align-items: center;
 }
 
-.fuk-preprocess-preview-thumb {
-  flex: 0 0 120px;
+.fuk-radio-option {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  cursor: pointer;
 }
 
-.fuk-preprocess-preview-image {
-  width: 100%;
-  aspect-ratio: 1;
-  object-fit: cover;
-  border-radius: 0.375rem;
-  border: 1px solid #a855f7;
+.fuk-radio {
+  width: var(--spacing-lg);
+  height: var(--spacing-lg);
+  border: var(--border-width-thick) solid var(--color-border);
+  border-radius: var(--radius-full);
+  background-color: var(--input-bg);
+  cursor: pointer;
+  transition: all var(--transition-base);
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  position: relative;
 }
 
-.fuk-preprocess-preview-info {
-  flex: 1;
+.fuk-radio:checked {
+  border-color: var(--color-accent);
+  background-color: var(--color-accent);
 }
 
-.fuk-preprocess-preview-method {
-  font-size: 0.75rem;
-  color: #c084fc;
-  margin-bottom: 0.5rem;
+.fuk-radio:checked::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: var(--spacing-xs);
+  height: var(--spacing-xs);
+  background-color: var(--color-text-primary);
+  border-radius: var(--radius-full);
+}
+
+.fuk-radio-label {
+  font-size: var(--font-size-base);
+  color: var(--color-text-secondary);
+  cursor: pointer;
 }
 
 /* ============================================================================
- * RANGE SLIDER STYLING
+ * CHECKBOXES
+ * ========================================================================== */
+
+.fuk-checkbox-group {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.fuk-checkbox {
+  width: 1.25rem;
+  height: 1.25rem;
+  background-color: var(--input-bg);
+  border: var(--border-width) solid var(--input-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.fuk-checkbox:checked {
+  background-color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.fuk-checkbox-label {
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+/* ============================================================================
+ * RANGE SLIDERS
  * ========================================================================== */
 
 .fuk-slider,
@@ -123,37 +307,37 @@
 
 .fuk-slider::-webkit-slider-track,
 .fuk-range::-webkit-slider-track {
-  background-color: #374151;
-  border-radius: 9999px;
-  height: 0.375rem;
+  background-color: var(--color-border);
+  border-radius: var(--radius-full);
+  height: var(--spacing-xs);
 }
 
 .fuk-slider::-webkit-slider-thumb,
 .fuk-range::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  background-color: #a855f7;
-  border-radius: 50%;
-  height: 1rem;
-  width: 1rem;
+  background-color: var(--color-accent);
+  border-radius: var(--radius-full);
+  height: var(--spacing-lg);
+  width: var(--spacing-lg);
   margin-top: -0.3125rem;
-  border: 2px solid #1f2937;
+  border: var(--border-width-thick) solid var(--input-bg);
 }
 
 .fuk-slider::-moz-range-track,
 .fuk-range::-moz-range-track {
-  background-color: #374151;
-  border-radius: 9999px;
-  height: 0.375rem;
+  background-color: var(--color-border);
+  border-radius: var(--radius-full);
+  height: var(--spacing-xs);
 }
 
 .fuk-slider::-moz-range-thumb,
 .fuk-range::-moz-range-thumb {
-  background-color: #a855f7;
-  border-radius: 50%;
-  height: 1rem;
-  width: 1rem;
-  border: 2px solid #1f2937;
+  background-color: var(--color-accent);
+  border-radius: var(--radius-full);
+  height: var(--spacing-lg);
+  width: var(--spacing-lg);
+  border: var(--border-width-thick) solid var(--input-bg);
 }
 
 .fuk-slider:focus::-webkit-slider-thumb,
@@ -161,21 +345,80 @@
   box-shadow: 0 0 0 2px rgba(168, 85, 247, 0.2);
 }
 
+.fuk-range-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
 /* ============================================================================
- * COMPACT FORM ROW (for EXR settings etc)
+ * SELECT DROPDOWNS
+ * ========================================================================== */
+
+.fuk-select {
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%239ca3af'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right var(--spacing-sm) center;
+  background-size: var(--spacing-lg);
+  padding-right: var(--spacing-2xl);
+}
+
+.fuk-select--compact {
+  font-size: var(--font-size-sm);
+  padding: var(--spacing-xs);
+}
+
+/* ============================================================================
+ * HELP TEXT
+ * ========================================================================== */
+
+.fuk-help-text {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  margin-top: var(--spacing-xs);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+}
+
+.fuk-help-text--inline {
+  margin-top: var(--spacing-xs);
+}
+
+.fuk-help-text--sm {
+  font-size: var(--font-size-xs);
+}
+
+.fuk-help-text--warning {
+  color: var(--color-warning-500);
+}
+
+.fuk-help-text--info {
+  color: var(--color-info-400);
+}
+
+.fuk-help-text--success {
+  color: var(--color-success-400);
+}
+
+/* ============================================================================
+ * COMPACT FORM LAYOUTS (Export Tab, etc.)
  * ========================================================================== */
 
 .compact-form-row {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: var(--spacing-md);
 }
 
 .compact-form-row > label {
   min-width: 70px;
-  font-size: 0.75rem;
+  font-size: var(--font-size-sm);
   font-weight: 500;
-  color: #d1d5db;
+  color: var(--color-text-secondary);
   margin-bottom: 0;
 }
 
@@ -184,19 +427,14 @@
   flex: 1;
 }
 
-.compact-form-row .fuk-select--compact {
-  font-size: 0.75rem;
-  padding: 0.375rem;
-}
-
 /* ============================================================================
- * LAYER INPUTS GRID (Export tab)
+ * LAYER INPUTS GRID (Export Tab)
  * ========================================================================== */
 
 .layer-inputs-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 0.75rem;
+  gap: var(--spacing-md);
 }
 
 @media (max-width: 1400px) {
@@ -206,12 +444,12 @@
 }
 
 /* ============================================================================
- * SAVE LOCATION ROW (Export tab)
+ * SAVE LOCATION & FILENAME (Export Tab)
  * ========================================================================== */
 
 .save-location-row {
   display: flex;
-  gap: 0.5rem;
+  gap: var(--spacing-sm);
 }
 
 .save-location-row input {
@@ -222,19 +460,15 @@
   flex-shrink: 0;
 }
 
-/* ============================================================================
- * EXPORT FILENAME INPUT
- * ========================================================================== */
-
 .export-filename-group {
   display: flex;
   flex-direction: column;
-  gap: 0.375rem;
+  gap: var(--spacing-xs);
 }
 
 .export-filename-row {
   display: flex;
-  gap: 0.5rem;
+  gap: var(--spacing-sm);
   align-items: center;
 }
 
@@ -243,20 +477,20 @@
 }
 
 .export-filename-row .extension {
-  font-size: 0.75rem;
-  color: #6b7280;
-  padding: 0.5rem;
-  background: rgba(31, 41, 55, 0.5);
-  border-radius: 0.25rem;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  padding: var(--spacing-sm);
+  background: var(--color-transparent);
+  border-radius: var(--radius-sm);
 }
 
 /* ============================================================================
- * EXPORT FORMAT CHECKBOXES
+ * EXPORT FORMAT CHECKBOXES (Export Tab)
  * ========================================================================== */
 
 .fuk-export-format-group {
   display: flex;
-  gap: 1rem;
+  gap: var(--spacing-lg);
   flex-wrap: wrap;
 }
 
@@ -267,142 +501,64 @@
 
 .fuk-export-format-label {
   margin-bottom: 0;
-  font-size: 0.75rem;
+  font-size: var(--font-size-sm);
 }
 
 .fuk-export-format-desc {
-  font-size: 0.6rem;
-  color: #6b7280;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
   display: block;
 }
 
 /* ============================================================================
- * INPUT READONLY STYLING
+ * EMPTY STATE (Disabled Features)
  * ========================================================================== */
 
-.fuk-input--readonly {
-  color: #6b7280;
-  font-style: italic;
+.fuk-empty-state {
+  padding: var(--spacing-2xl) var(--spacing-lg);
+  text-align: center;
 }
 
-.fuk-input--readonly-filled {
-  color: #d1d5db;
-  font-style: normal;
+.fuk-empty-state-icon {
+  width: var(--icon-2xl);
+  height: var(--icon-2xl);
+  margin: 0 auto var(--spacing-sm);
+  opacity: 0.3;
+}
+
+.fuk-empty-state-text {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
 }
 
 /* ============================================================================
- * FORM SECTION SPACING
+ * PREPROCESS PREVIEW (ImageTab last preprocessed image)
  * ========================================================================== */
 
-.fuk-form-section {
-  margin-top: 0.75rem;
-}
-
-.fuk-form-stack {
+.fuk-preprocess-preview {
   display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-/*
- * FUK Forms Additions - New Video Tab Styles
- * Add these to forms.css
- */
-
-/* ============================================================================
- * INPUT WARNING STATE
- * ========================================================================== */
-
-.fuk-input--warning {
-  border-color: #f59e0b !important;
-  background: rgba(245, 158, 11, 0.1);
-}
-
-.fuk-input--warning:focus {
-  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.2);
-}
-
-/* ============================================================================
- * INPUT RESULT DISPLAY (shows calculated value next to input)
- * ========================================================================== */
-
-.fuk-input-result {
-  color: #9ca3af;
-  font-size: 0.75rem;
-  white-space: nowrap;
-  padding-left: 0.5rem;
-}
-
-/* ============================================================================
- * HELP TEXT
- * ========================================================================== */
-
-.fuk-help-text {
-  font-size: 0.7rem;
-  color: #6b7280;
-  margin-top: 0.25rem;
-  display: flex;
+  gap: var(--spacing-lg);
   align-items: center;
-  gap: 0.25rem;
 }
 
-.fuk-help-text--warning {
-  color: #f59e0b;
+.fuk-preprocess-preview-thumb {
+  flex: 0 0 120px;
 }
 
-.fuk-help-text--info {
-  color: #60a5fa;
+.fuk-preprocess-preview-image {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: var(--radius-md);
+  border: var(--border-width) solid var(--color-accent);
 }
 
-.fuk-help-text--success {
-  color: #10b981;
+.fuk-preprocess-preview-info {
+  flex: 1;
 }
 
-/* ============================================================================
- * LABEL MODIFIERS
- * ========================================================================== */
-
-.fuk-label-required {
-  color: #f87171;
-  font-size: 0.65rem;
-}
-
-.fuk-label-description {
-  color: #6b7280;
-  font-weight: 400;
-  font-size: 0.65rem;
-}
-
-/* ============================================================================
- * PLACEHOLDER SUBTEXT
- * ========================================================================== */
-
-.fuk-placeholder-subtext {
-  font-size: 0.65rem;
-  color: #6b7280;
-  margin-top: 0.25rem;
-}
-
-/* ============================================================================
- * INPUT INLINE WITH RESULT
- * ========================================================================== */
-
-.fuk-input-inline {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.fuk-input-inline .fuk-select {
-  flex: 0 0 auto;
-  min-width: 100px;
-}
-
-.fuk-input-inline .fuk-input {
-  flex: 0 0 100px;
-}
-
-.fuk-input-separator {
-  color: #6b7280;
-  font-size: 0.875rem;
+.fuk-preprocess-preview-method {
+  font-size: var(--font-size-sm);
+  color: var(--color-accent-light);
+  margin-bottom: var(--spacing-sm);
 }
