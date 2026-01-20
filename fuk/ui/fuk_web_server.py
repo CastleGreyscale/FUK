@@ -2740,7 +2740,9 @@ setup_video_routes(
     DepthModel=DepthModel,
     NormalsMethod=NormalsMethod,
     SAMModel=SAMModel,
-    log=log
+    log=log,
+    clear_vram=clear_vram,                              
+    cleanup_failed_generation=cleanup_failed_generation 
 )
 
 # ============================================================================

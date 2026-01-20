@@ -2,15 +2,8 @@
 """
 Batch Video Depth Processing for Depth Anything V3
 
-This module provides batch-aware depth processing for videos to maintain
-temporal consistency. Unlike frame-by-frame processing, this passes ALL
-frames to DA3 at once with ref_view_strategy="middle" for coherence.
-
-Usage in video_endpoints.py:
-    if depth_model in DA3_MODELS and use_batch_processing:
-        result = process_depth_video_batch(...)
-    else:
-        result = video_processor.process_video(...)  # Frame-by-frame
+FIXED: Now uses GLOBAL normalization across all frames to prevent jitter.
+The original code normalized each frame independently, causing temporal flicker.
 """
 
 import tempfile
@@ -25,12 +18,30 @@ from enum import Enum
 from fuk.core.preprocessors.depth import DepthModel, DA3_MODEL_IDS
 
 
+# Default DA3 settings for video (optimized for temporal consistency)
+DA3_VIDEO_DEFAULTS = {
+    "process_res": 1344,  # Match config recommendation
+    "process_res_method": "lower_bound_resize",  # Preserves aspect ratio
+    "ref_view_strategy": "middle",  # Temporal consistency
+}
+
+# Chunking settings (based on DA3-Streaming recommendations)
+# Process videos in chunks to avoid memory corruption
+CHUNK_SETTINGS = {
+    "max_chunk_size": 60,  # Max frames per chunk (DA3-Streaming uses 60-120)
+    "overlap": 10,         # Frames overlap between chunks for blending
+    "blend_frames": 5,     # Frames to blend at chunk boundaries
+}
+
+
 class VideoDepthBatchProcessor:
     """
     Batch processor for video depth estimation with DA3
     
-    Maintains temporal consistency by processing all frames together
-    instead of one-at-a-time.
+    Maintains temporal consistency by:
+    1. Processing all frames together (batch inference)
+    2. Using GLOBAL normalization across all frames (not per-frame)
+    3. Optional temporal smoothing
     """
     
     def __init__(self, ffmpeg_path: Optional[Path] = None):
@@ -68,6 +79,7 @@ class VideoDepthBatchProcessor:
         process_res: int = 756,
         process_res_method: str = "lower_bound_resize",
         output_mode: str = "mp4",
+        temporal_smooth: int = 3,  # NEW: temporal smoothing window (0=off, try 3)
     ) -> Dict[str, Any]:
         """
         Process entire video with DA3 batch inference
@@ -78,11 +90,12 @@ class VideoDepthBatchProcessor:
             depth_model: Initialized depth model instance
             model_type: Type of depth model being used
             invert: Invert depth values
-            normalize: Normalize to 0-1
+            normalize: Normalize to 0-1 (now uses GLOBAL min/max)
             colormap: Colormap to apply
             process_res: DA3 processing resolution
             process_res_method: DA3 resize method
             output_mode: 'mp4' or 'sequence'
+            temporal_smooth: Temporal median filter window (0=off)
             
         Returns:
             Processing result dict
@@ -94,13 +107,16 @@ class VideoDepthBatchProcessor:
         print(f"[DepthBatch] Model: {model_type.value}")
         print(f"[DepthBatch] Input: {video_path}")
         print(f"[DepthBatch] Output: {output_path}")
+        print(f"[DepthBatch] Temporal smoothing: {temporal_smooth if temporal_smooth > 0 else 'off'}")
         
         # Get video info
         video_info = self.get_video_info(video_path)
         fps = video_info["fps"]
         total_frames = video_info["frame_count"]
+        original_size = (video_info["width"], video_info["height"])
         
         print(f"[DepthBatch] Frames: {total_frames} @ {fps:.2f}fps")
+        print(f"[DepthBatch] Original size: {original_size[0]}x{original_size[1]}")
         
         # Create temp directories
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -122,8 +138,8 @@ class VideoDepthBatchProcessor:
             if not frame_paths:
                 raise ValueError("No frames extracted from video")
             
-            # Step 2: BATCH INFERENCE - Pass all frames to DA3 at once
-            print(f"[DepthBatch] Running batch inference with ref_view_strategy='middle'...")
+            # Step 2: BATCH INFERENCE
+            print(f"[DepthBatch] Running batch inference...")
             
             # Ensure model is initialized (lazy loading)
             print(f"[DepthBatch] Initializing depth model...")
@@ -133,36 +149,55 @@ class VideoDepthBatchProcessor:
             # Convert frame paths to strings for DA3 API
             frame_path_strs = [str(p) for p in frame_paths]
             
-            # Call DA3 with all frames at once for temporal consistency
             try:
-                from depth_anything_3.api import DepthAnything3
-                
-                # DA3 batch inference with temporal coherence
+                # DA3 batch inference
                 prediction = depth_model.model.inference(
                     image=frame_path_strs,
                     process_res=process_res,
                     process_res_method=process_res_method,
-                    ref_view_strategy="middle",  # KEY: Temporal consistency
                 )
                 
-                print(f"[DepthBatch] Batch inference complete - got {prediction.depth.shape[0]} depth maps")
+                # Get all depth maps as numpy array [N, H, W]
+                all_depths = prediction.depth
+                print(f"[DepthBatch] Inference complete - shape: {all_depths.shape}")
                 
-                # Step 3: Post-process and save each depth map
+                # Step 3: GLOBAL NORMALIZATION (key fix for jitter)
+                if normalize:
+                    global_min = all_depths.min()
+                    global_max = all_depths.max()
+                    print(f"[DepthBatch] Global depth range: [{global_min:.4f}, {global_max:.4f}]")
+                    
+                    # Normalize ALL frames using the SAME min/max
+                    all_depths = (all_depths - global_min) / (global_max - global_min + 1e-8)
+                
+                # Step 4: Optional temporal smoothing
+                if temporal_smooth > 1:
+                    print(f"[DepthBatch] Applying temporal smoothing (window={temporal_smooth})...")
+                    all_depths = self._temporal_smooth(all_depths, window=temporal_smooth)
+                
+                # Step 5: Invert if requested
+                if invert:
+                    all_depths = 1.0 - all_depths
+                
+                # Step 6: Resize and colorize each frame
                 print(f"[DepthBatch] Post-processing depth maps...")
                 
-                for i, (frame_path, depth_map) in enumerate(zip(frame_paths, prediction.depth)):
+                for i, (frame_path, depth_map) in enumerate(zip(frame_paths, all_depths)):
                     output_frame_path = output_frames_dir / frame_path.name
                     
-                    # Post-process depth map
-                    depth_processed = self._postprocess_depth(
-                        depth_map,
-                        normalize=normalize,
-                        invert=invert,
-                        colormap=colormap,
-                    )
+                    # Resize to original video dimensions if needed
+                    if depth_map.shape[:2] != (original_size[1], original_size[0]):
+                        depth_map = cv2.resize(
+                            depth_map, 
+                            original_size,  # (width, height)
+                            interpolation=cv2.INTER_LINEAR
+                        )
+                    
+                    # Apply colormap (depth is already normalized)
+                    output_image = self._apply_colormap(depth_map, colormap)
                     
                     # Save
-                    cv2.imwrite(str(output_frame_path), depth_processed)
+                    cv2.imwrite(str(output_frame_path), output_image)
                     
                     if (i + 1) % 10 == 0:
                         print(f"[DepthBatch]   Processed {i+1}/{len(frame_paths)} frames")
@@ -171,27 +206,32 @@ class VideoDepthBatchProcessor:
                 
             except Exception as e:
                 print(f"[DepthBatch] ERROR during batch inference: {e}")
+                import traceback
+                traceback.print_exc()
                 raise
             
-            # Step 4: Assemble output
+            # Step 7: Assemble output
             if output_mode == "sequence":
-                # Copy frames to output directory
                 print(f"[DepthBatch] Saving as image sequence to {output_path}")
                 output_path.mkdir(parents=True, exist_ok=True)
                 
                 for frame_path in sorted(output_frames_dir.glob("frame_*.png")):
                     shutil.copy(frame_path, output_path / frame_path.name)
                 
+                frames = sorted([f.name for f in output_path.glob("*.png")])
+                
                 return {
                     "output_path": str(output_path),
                     "is_sequence": True,
                     "frame_count": len(frame_paths),
                     "fps": fps,
-                    "first_frame": sorted(output_path.glob("*.png"))[0].name if output_path.glob("*.png") else None,
+                    "first_frame": frames[0] if frames else None,
+                    "frames": frames,
                 }
             else:
                 # Assemble to MP4
                 print(f"[DepthBatch] Assembling MP4 to {output_path}")
+                output_path.parent.mkdir(parents=True, exist_ok=True)
                 self._assemble_video(output_frames_dir, output_path, fps)
                 
                 return {
@@ -200,6 +240,41 @@ class VideoDepthBatchProcessor:
                     "frame_count": len(frame_paths),
                     "fps": fps,
                 }
+    
+    def _temporal_smooth(self, depths: np.ndarray, window: int = 3) -> np.ndarray:
+        """
+        Apply temporal median filter to reduce frame-to-frame noise
+        
+        Args:
+            depths: [N, H, W] depth array
+            window: Window size (must be odd, e.g., 3, 5)
+        
+        Returns:
+            Smoothed depth array
+        """
+        if window <= 1:
+            return depths
+        
+        n_frames = len(depths)
+        half_window = window // 2
+        smoothed = np.zeros_like(depths)
+        
+        for i in range(n_frames):
+            start = max(0, i - half_window)
+            end = min(n_frames, i + half_window + 1)
+            smoothed[i] = np.median(depths[start:end], axis=0)
+        
+        return smoothed
+    
+    def _apply_colormap(self, depth: np.ndarray, colormap: Optional[str] = "inferno") -> np.ndarray:
+        """Apply colormap to normalized depth [0,1]"""
+        depth_uint8 = (depth * 255).astype(np.uint8)
+        
+        if colormap:
+            colormap_func = getattr(cv2, f"COLORMAP_{colormap.upper()}", cv2.COLORMAP_INFERNO)
+            return cv2.applyColorMap(depth_uint8, colormap_func)
+        else:
+            return cv2.cvtColor(depth_uint8, cv2.COLOR_GRAY2BGR)
     
     def _extract_frames(self, video_path: Path, output_dir: Path):
         """Extract frames from video using FFmpeg or OpenCV"""
@@ -232,23 +307,24 @@ class VideoDepthBatchProcessor:
         invert: bool = False,
         colormap: Optional[str] = "inferno",
     ) -> np.ndarray:
-        """Post-process depth map (normalize, invert, colormap)"""
+        """
+        Post-process depth map (invert, colormap)
         
-        # Normalize
-        if normalize:
-            depth = (depth - depth.min()) / (depth.max() - depth.min() + 1e-8)
-        
-        # Invert
+        NOTE: Normalization is done GLOBALLY before this is called,
+        so depth is already in [0, 1] range.
+        """
+        # Invert if requested
         if invert:
             depth = 1.0 - depth
         
+        # Convert to uint8
+        depth_uint8 = (depth * 255).astype(np.uint8)
+        
         # Apply colormap or grayscale
         if colormap:
-            depth_uint8 = (depth * 255).astype(np.uint8)
             colormap_func = getattr(cv2, f"COLORMAP_{colormap.upper()}", cv2.COLORMAP_INFERNO)
             output_image = cv2.applyColorMap(depth_uint8, colormap_func)
         else:
-            depth_uint8 = (depth * 255).astype(np.uint8)
             output_image = cv2.cvtColor(depth_uint8, cv2.COLOR_GRAY2BGR)
         
         return output_image

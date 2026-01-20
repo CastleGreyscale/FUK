@@ -9,6 +9,10 @@ AOV / Control Image Generation:
 - Normal map estimation (depth-derived or DSINE)
 - Cryptomatte / Instance segmentation (SAM2)
 
+Video Batch Processing:
+- VideoDepthBatchProcessor - Temporally consistent depth maps
+- VideoCryptoBatchProcessor - Temporally consistent crypto mattes (object tracking)
+
 Usage:
     from core.preprocessors import PreprocessorManager, DepthModel
     
@@ -35,6 +39,17 @@ Usage:
         'normals': True,
         'crypto': True,
     })
+    
+    # Video batch processing (for temporal consistency)
+    from core.preprocessors import VideoCryptoBatchProcessor
+    
+    processor = VideoCryptoBatchProcessor()
+    result = processor.process_video_batch(
+        video_path=video,
+        output_path=output,
+        model_size="large",
+        max_objects=50,
+    )
 """
 
 # Core manager
@@ -46,6 +61,10 @@ from .openpose import OpenPosePreprocessor
 from .depth import DepthPreprocessor, DepthModel
 from .normals import NormalsPreprocessor, NormalsMethod
 from .crypto import CryptoPreprocessor, SAMModel
+
+# Video batch processors (for temporal consistency)
+from .depth_video_batch import VideoDepthBatchProcessor
+from .crypto_video_batch import VideoCryptoBatchProcessor
 
 # Base class (for custom preprocessors)
 from .base import BasePreprocessor, SimplePreprocessor
@@ -65,6 +84,10 @@ __all__ = [
     "DepthPreprocessor",
     "NormalsPreprocessor",
     "CryptoPreprocessor",
+    
+    # Video Batch Processors
+    "VideoDepthBatchProcessor",
+    "VideoCryptoBatchProcessor",
     
     # Base classes
     "BasePreprocessor",

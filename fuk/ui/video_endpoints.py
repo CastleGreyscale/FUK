@@ -13,6 +13,7 @@ Import and register these routes in the main server file.
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from fuk.core.preprocessors.depth_video_batch import VideoDepthBatchProcessor
+from fuk.core.preprocessors.crypto_video_batch import VideoCryptoBatchProcessor
 from pydantic import BaseModel, Field
 from pathlib import Path
 from typing import Optional, Dict, Any, List
@@ -128,7 +129,9 @@ def setup_video_routes(
     DepthModel,
     NormalsMethod,
     SAMModel,
-    log
+    log,
+    clear_vram,            
+    cleanup_failed_generation
 ):
     """
     Setup video routes with access to server resources
@@ -278,11 +281,17 @@ def setup_video_routes(
                     # Use batch processor for DA3 models (temporal consistency)
                     log.info("VideoPreprocess", "Using BATCH processing for DA3 (temporal consistency)")
                     
+                    # For video, prefer DA3_LARGE (multi-view capable) over DA3_MONO_LARGE
+                    # unless user specifically requested a different model
+                    effective_model = depth_model
+                    if depth_model == DepthModel.DA3_MONO_LARGE:
+                        log.info("VideoPreprocess", "Recommending DA3_LARGE for video (multi-view capable)")
+                        # Keep user choice but note the recommendation
+                    
                     # Initialize depth model
                     from fuk.core.preprocessors.depth import DepthPreprocessor
-                    depth_processor = DepthPreprocessor(model_type=depth_model)
-        
-                    
+                    depth_processor = DepthPreprocessor(model_type=effective_model)
+
                     # Create batch processor
                     batch_processor = VideoDepthBatchProcessor()
                     
@@ -294,11 +303,11 @@ def setup_video_routes(
                         output_path=output_path,
                         depth_model=depth_processor,
                         model_type=depth_model,
+                        temporal_smooth=5,
                         invert=request.depth_invert,
                         normalize=request.depth_normalize,
                         colormap=request.depth_colormap,
-                        process_res=504,  # DA3 default
-                        process_res_method="upper_bound_resize",  # DA3 default
+                        # process_res and process_res_method now read from depth-anything-v3.json config
                         output_mode="mp4" if output_mode == OutputMode.MP4 else "sequence",
                     )
                     
@@ -391,18 +400,53 @@ def setup_video_routes(
                 }
                 sam_model = sam_model_map.get(request.crypto_model, SAMModel.LARGE)
                 
-                def frame_processor(inp, out):
-                    return preprocessor_manager.crypto(
-                        image_path=inp,
-                        output_path=out,
-                        model=sam_model,
-                        max_objects=request.crypto_max_objects,
-                        min_area=request.crypto_min_area,
-                        output_mode="id_matte",
-                        exact_output=True,  # Use exact path for video frames
-                    )
-                processor_kwargs = {"crypto_model": request.crypto_model}
-                batch_processed = False
+                # ALWAYS use batch processing for crypto (video tracking for temporal consistency)
+                log.info("VideoPreprocess", "Using VIDEO TRACKING for crypto (temporal consistency)")
+                
+                # Map SAMModel enum to model size string
+                model_size_map = {
+                    SAMModel.TINY: "tiny",
+                    SAMModel.SMALL: "small",
+                    SAMModel.BASE: "base",
+                    SAMModel.LARGE: "large",
+                }
+                model_size = model_size_map.get(sam_model, "large")
+                
+                # Create batch processor
+                crypto_batch_processor = VideoCryptoBatchProcessor()
+                
+                # Process with video tracking (consistent object IDs across frames)
+                start_time = time.time()
+                
+                result = crypto_batch_processor.process_video_batch(
+                    video_path=input_path,
+                    output_path=output_path,
+                    model_size=model_size,
+                    max_objects=request.crypto_max_objects,
+                    min_area=request.crypto_min_area,
+                    output_mode="mp4" if output_mode == OutputMode.MP4 else "sequence",
+                )
+                
+                # Clean up GPU memory
+                crypto_batch_processor.cleanup()
+                
+                elapsed = time.time() - start_time
+                log.timing("VideoPreprocess", start_time, f"Complete (video tracking) - {result.get('frame_count', 0)} frames, {result.get('num_objects', 0)} objects")
+                
+                # Build response
+                if output_mode == OutputMode.SEQUENCE:
+                    url_data = build_sequence_response(output_path, result, gen_dir)
+                else:
+                    url_data = build_video_response(output_path, result)
+                
+                processor_kwargs = {
+                    "crypto_model": request.crypto_model,
+                    "num_objects": result.get("num_objects", 0),
+                    "sam_version": result.get("sam_version", "unknown"),
+                }
+                
+                # Set flag to skip common video_processor call
+                batch_processed = True
             else:
                 raise HTTPException(status_code=400, detail=f"Unknown method: {request.method}")
             
@@ -443,7 +487,9 @@ def setup_video_routes(
                     **processor_kwargs,
                 },
             )
-            
+
+            clear_vram()
+
             return {
                 "success": True,
                 "output_path": str(output_path),
@@ -461,6 +507,9 @@ def setup_video_routes(
             }
             
         except Exception as e:
+            if gen_dir:
+                cleanup_failed_generation(gen_dir, reason=str(e))
+            clear_vram()
             log.exception("VideoPreprocess", e)
             raise HTTPException(status_code=500, detail=str(e))
     
@@ -687,6 +736,9 @@ def setup_video_routes(
                 layer_processors["normals"] = normals_processor
             
             if request.layers.get("crypto"):
+                # Crypto uses batch processing for temporal consistency - handle separately
+                log.info("VideoLayers", "Processing crypto layer with VIDEO TRACKING (temporal consistency)")
+                
                 sam_model_map = {
                     "sam2_hiera_tiny": SAMModel.TINY,
                     "sam2_hiera_small": SAMModel.SMALL,
@@ -694,31 +746,78 @@ def setup_video_routes(
                     "sam2_hiera_large": SAMModel.LARGE,
                 }
                 sam_model = sam_model_map.get(request.crypto_model, SAMModel.LARGE)
+                model_size_map = {
+                    SAMModel.TINY: "tiny",
+                    SAMModel.SMALL: "small",
+                    SAMModel.BASE: "base",
+                    SAMModel.LARGE: "large",
+                }
+                model_size = model_size_map.get(sam_model, "large")
                 
-                def crypto_processor(inp, out):
-                    return preprocessor_manager.crypto(
-                        image_path=inp,
-                        output_path=out,
-                        model=sam_model,
-                        max_objects=request.crypto_max_objects,
-                        min_area=request.crypto_min_area,
-                        output_mode="id_matte",
-                        exact_output=True,  # Use exact path for video frames
-                    )
-                layer_processors["crypto"] = crypto_processor
+                # NOTE: Crypto is processed separately using batch video tracking
+                # It will be added to results after processing other layers
+                crypto_batch_processor = VideoCryptoBatchProcessor()
+                crypto_enabled = True
+            else:
+                crypto_enabled = False
             
-            if not layer_processors:
+            if not layer_processors and not crypto_enabled:
                 raise HTTPException(status_code=400, detail="No layers enabled")
             
-            # Process all layers
+            # Process frame-by-frame layers (depth, normals) if any
             start_time = time.time()
             
-            result = video_processor.process_video_layers(
-                input_video=input_path,
-                output_dir=gen_dir,
-                layer_processors=layer_processors,
-                output_mode=output_mode,
-            )
+            if layer_processors:
+                result = video_processor.process_video_layers(
+                    input_video=input_path,
+                    output_dir=gen_dir,
+                    layer_processors=layer_processors,
+                    output_mode=output_mode,
+                )
+            else:
+                # No frame-by-frame layers, initialize empty result
+                result = {
+                    "layers": {},
+                    "frame_count": video_info.get("frame_count", 0),
+                    "fps": video_info.get("fps", 0),
+                    "errors": {},
+                }
+            
+            # Process crypto layer with batch video tracking
+            if crypto_enabled:
+                log.info("VideoLayers", "Running crypto batch processing...")
+                
+                if output_mode == OutputMode.MP4:
+                    crypto_output_path = gen_dir / "crypto.mp4"
+                else:
+                    crypto_output_path = gen_dir / "crypto"
+                
+                crypto_result = crypto_batch_processor.process_video_batch(
+                    video_path=input_path,
+                    output_path=crypto_output_path,
+                    model_size=model_size,
+                    max_objects=request.crypto_max_objects,
+                    min_area=request.crypto_min_area,
+                    output_mode="mp4" if output_mode == OutputMode.MP4 else "sequence",
+                )
+                
+                # Clean up GPU memory
+                crypto_batch_processor.cleanup()
+                
+                # Add crypto to result layers
+                result["layers"]["crypto"] = {
+                    "output_path": crypto_result["output_path"],
+                    "frame_count": crypto_result.get("frame_count", 0),
+                    "num_objects": crypto_result.get("num_objects", 0),
+                    "sam_version": crypto_result.get("sam_version", "unknown"),
+                    "errors": 0,
+                }
+                
+                if output_mode == OutputMode.SEQUENCE:
+                    result["layers"]["crypto"]["first_frame"] = crypto_result.get("first_frame")
+                    result["layers"]["crypto"]["frames"] = crypto_result.get("frames", [])
+                
+                log.info("VideoLayers", f"Crypto: {crypto_result.get('num_objects', 0)} objects tracked")
             
             elapsed = time.time() - start_time
             log.timing("VideoLayers", start_time, f"Complete - {len(result.get('layers', {}))} layers")

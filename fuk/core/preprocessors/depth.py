@@ -24,6 +24,7 @@ import cv2
 import numpy as np
 from PIL import Image
 import torch
+import json
 
 from .base import BasePreprocessor
 
@@ -51,13 +52,25 @@ DA3_MODEL_IDS = {
     DepthModel.DA3_GIANT: "depth-anything/DA3-GIANT-1.1",
 }
 
+# Hardcoded fallback defaults (used if config not found)
+_FALLBACK_DEFAULTS = {
+    "process_res": 1344,
+    "process_res_method": "lower_bound_resize",
+}
+
 
 class DepthPreprocessor(BasePreprocessor):
     """
     Depth map estimation with multiple model options
     
     Handles model loading, fallbacks, and auto-download of checkpoints.
+    
+    Config is loaded from depth-anything-v3.json if available.
     """
+    
+    # Class-level config cache (loaded once, shared across instances)
+    _da3_config: Optional[Dict] = None
+    _config_loaded: bool = False
     
     def __init__(
         self,
@@ -70,7 +83,58 @@ class DepthPreprocessor(BasePreprocessor):
         self.model = None
         self.transform = None
         self._is_da3 = model_type in DA3_MODEL_IDS
+        
+        # Load DA3 config (once per class, not per instance)
+        self._load_da3_config()
+        
         print(f"Depth preprocessor initialized: {model_type.value} on {self.device}")
+        if self._is_da3:
+            print(f"  DA3 config: process_res={self.da3_process_res}, method={self.da3_process_res_method}")
+    
+    @classmethod
+    def _load_da3_config(cls):
+        """Load DA3 config from JSON file (class method, loads once)"""
+        if cls._config_loaded:
+            return
+        
+        cls._config_loaded = True
+        
+        # Search for config in likely locations
+        config_locations = [
+            # Relative to this file: preprocessors/ -> core/ -> fuk/ -> config/
+            Path(__file__).parent.parent.parent / "config" / "tools" / "depth-anything-v3.json",
+            # Explicit common paths
+            Path("/home/brad/fuk/config/tools/depth-anything-v3.json"),
+            Path("/home/brad/fuk/depth-anything-v3.json"),
+        ]
+        
+        for config_path in config_locations:
+            if config_path.exists():
+                try:
+                    with open(config_path, 'r') as f:
+                        cls._da3_config = json.load(f)
+                    print(f"[Depth] Loaded DA3 config from: {config_path}")
+                    return
+                except Exception as e:
+                    print(f"[Depth] Warning: Failed to load config from {config_path}: {e}")
+        
+        print(f"[Depth] Warning: DA3 config not found, using fallback defaults")
+        print(f"[Depth]   Searched: {[str(p) for p in config_locations]}")
+        cls._da3_config = {}
+    
+    @property
+    def da3_process_res(self) -> int:
+        """Get process_res from config or fallback"""
+        if self._da3_config and "inference_defaults" in self._da3_config:
+            return self._da3_config["inference_defaults"].get("process_res", _FALLBACK_DEFAULTS["process_res"])
+        return _FALLBACK_DEFAULTS["process_res"]
+    
+    @property
+    def da3_process_res_method(self) -> str:
+        """Get process_res_method from config or fallback"""
+        if self._da3_config and "inference_defaults" in self._da3_config:
+            return self._da3_config["inference_defaults"].get("process_res_method", _FALLBACK_DEFAULTS["process_res_method"])
+        return _FALLBACK_DEFAULTS["process_res_method"]
     
     def _initialize(self):
         """Load model based on selected type"""
@@ -104,7 +168,7 @@ class DepthPreprocessor(BasePreprocessor):
         else:
             self.transform = midas_transforms.small_transform
         
-        print("✓ MiDaS loaded")
+        print("✔ MiDaS loaded")
     
     def _load_depth_anything_v3(self):
         """
@@ -153,7 +217,7 @@ class DepthPreprocessor(BasePreprocessor):
             self.model = self.model.to(device=self.device)
             self._is_da3 = True
             
-            print(f"✓ Depth Anything 3 loaded: {model_id}")
+            print(f"✔ Depth Anything 3 loaded: {model_id}")
             
         except ImportError as e:
             print(f"⚠ Depth Anything 3 not available: {e}")
@@ -204,40 +268,39 @@ class DepthPreprocessor(BasePreprocessor):
                 'vitl': {'encoder': 'vitl', 'features': 256, 'out_channels': [256, 512, 1024, 1024]},
             }
             
-            encoder = 'vitl'  # Large for best quality
+            encoder = 'vitl'  # Large model for quality
+            
             self.model = DepthAnythingV2(**model_configs[encoder])
             
             # Find checkpoint
-            checkpoint_path = self._find_depth_anything_v2_checkpoint()
+            checkpoint_path = self._find_v2_checkpoint()
             
-            if not checkpoint_path:
-                raise FileNotFoundError("Checkpoint not found")
-            
-            # Load checkpoint
-            self.model.load_state_dict(torch.load(str(checkpoint_path), map_location='cpu'))
-            print(f"✓ Loaded checkpoint: {checkpoint_path}")
+            if checkpoint_path and checkpoint_path.exists():
+                print(f"  Loading checkpoint: {checkpoint_path}")
+                self.model.load_state_dict(torch.load(checkpoint_path, map_location='cpu'))
+            else:
+                raise ValueError("Depth Anything V2 checkpoint not found")
             
             self.model.to(self.device)
             self.model.eval()
             self._is_da3 = False
             
-            print("✓ Depth Anything V2 loaded successfully")
+            print("✔ Depth Anything V2 loaded")
             
-        except (ImportError, FileNotFoundError) as e:
-            print(f"✗ Depth Anything V2 not available: {e}")
+        except Exception as e:
+            print(f"⚠ Could not load Depth Anything V2: {e}")
             print("  Falling back to MiDaS...")
             self.model_type = DepthModel.MIDAS_LARGE
             self._is_da3 = False
             self._load_midas("DPT_Large")
     
-    def _find_depth_anything_v2_checkpoint(self) -> Optional[Path]:
-        """Search for Depth Anything V2 checkpoint in known locations"""
-        
+    def _find_v2_checkpoint(self) -> Optional[Path]:
+        """Find Depth Anything V2 checkpoint"""
         # Try auto-download first if config available
-        if self.config_path and self.config_path.exists():
+        if self.config_path:
             try:
                 import importlib.util
-                downloader_path = Path(__file__).parent.parent / "model_downloader.py"
+                downloader_path = self.config_path.parent / "model_downloader.py"
                 if downloader_path.exists():
                     spec = importlib.util.spec_from_file_location("model_downloader", downloader_path)
                     downloader_module = importlib.util.module_from_spec(spec)
@@ -279,7 +342,7 @@ class DepthPreprocessor(BasePreprocessor):
             self.model.to(self.device)
             self.model.eval()
             self._is_da3 = False
-            print("✓ ZoeDepth loaded")
+            print("✔ ZoeDepth loaded")
             
         except Exception as e:
             print(f"⚠ Could not load ZoeDepth: {e}")
@@ -304,21 +367,23 @@ class DepthPreprocessor(BasePreprocessor):
                 normalize: Normalize depth to [0, 1]
                 colormap: Apply colormap (None, 'inferno', 'viridis', 'magma', 'plasma')
                 exact_output: If True, write to exact output_path (for video frames)
-                process_res: DA3 processing resolution (default 756)
-                process_res_method: DA3 resize method (default 'lower_bound_resize')
+                process_res: DA3 processing resolution (default from config)
+                process_res_method: DA3 resize method (default from config)
                 
         Returns:
             Dict with output_path and metadata
         """
         self._ensure_initialized()
         
-        # Extract parameters from kwargs
+        # Extract parameters from kwargs, using CONFIG DEFAULTS for DA3 params
         invert = kwargs.get('invert', False)
         normalize = kwargs.get('normalize', True)
         colormap = kwargs.get('colormap', 'inferno')
         exact_output = kwargs.get('exact_output', False)
-        process_res = kwargs.get('process_res', 1344)
-        process_res_method = kwargs.get('process_res_method', 'lower_bound_resize')
+        
+        # USE CONFIG VALUES as defaults (not hardcoded!)
+        process_res = kwargs.get('process_res', self.da3_process_res)
+        process_res_method = kwargs.get('process_res_method', self.da3_process_res_method)
         
         # Load image
         image = cv2.imread(str(image_path))
@@ -367,8 +432,14 @@ class DepthPreprocessor(BasePreprocessor):
         }
     
     def _infer_depth(self, image_rgb: np.ndarray, image_path: str = None, 
-                     process_res: int = 1344, process_res_method: str = "lower_bound_resize") -> np.ndarray:
+                     process_res: int = None, process_res_method: str = None) -> np.ndarray:
         """Run inference based on loaded model type"""
+        
+        # Use config defaults if not specified
+        if process_res is None:
+            process_res = self.da3_process_res
+        if process_res_method is None:
+            process_res_method = self.da3_process_res_method
         
         if self.model_type in [DepthModel.MIDAS_SMALL, DepthModel.MIDAS_LARGE]:
             input_batch = self.transform(image_rgb).to(self.device)
@@ -386,6 +457,8 @@ class DepthPreprocessor(BasePreprocessor):
         
         elif self._is_da3 and self.model_type in DA3_MODEL_IDS:
             # DA3 uses different inference API
+            print(f"[DA3] Inference with process_res={process_res}, method={process_res_method}")
+            
             if image_path:
                 prediction = self.model.inference(
                     [image_path],

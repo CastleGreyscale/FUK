@@ -23,13 +23,13 @@
 
   "inference_defaults": {
     "process_res": 1344,
-    "process_res_method": "lower_bound_resize"
+    "process_res_method": "upper_bound_resize"
   },
 
   "process_res_methods": {
     "_comment": "Available resize methods for inference",
     "available": ["lower_bound_resize", "upper_bound_resize", "exact_resize"],
-    "recommended": "lower_bound_resize"
+    "recommended": "exact_resize"
   },
 
   "output": {
