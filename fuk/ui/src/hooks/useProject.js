@@ -14,6 +14,7 @@ import {
   getProjectConfig,
   createNewProject,
   getCurrentProject,
+  getDefaults,
 } from '../utils/projectApi';
 import {
   parseProjectFilename,
@@ -40,6 +41,7 @@ export function useProject() {
   const [currentFilename, setCurrentFilename] = useState(null);
   const [projectState, setProjectState] = useState(null);
   const [projectConfig, setProjectConfig] = useState({ versionFormat: 'date' });
+  const [defaults, setDefaults] = useState(null);  // User defaults from defaults.json
   
   // UI state
   const [isLoading, setIsLoading] = useState(false);
@@ -105,6 +107,14 @@ export function useProject() {
           setProjectConfig(config);
         } catch (e) {
           console.warn('[Project] Could not load config, using defaults');
+        }
+        
+        // Get defaults from backend
+        try {
+          const defaultsData = await getDefaults();
+          setDefaults(defaultsData);
+        } catch (e) {
+          console.warn('[Project] Could not load defaults.json');
         }
         
         // Load project files
@@ -176,6 +186,14 @@ export function useProject() {
         console.warn('[Project] Could not load config, using defaults');
       }
       
+      // Get defaults from backend
+      try {
+        const defaultsData = await getDefaults();
+        setDefaults(defaultsData);
+      } catch (e) {
+        console.warn('[Project] Could not load defaults.json');
+      }
+      
       // Load project files
       await refreshProjectFiles();
       
@@ -202,7 +220,7 @@ export function useProject() {
       
       // Handle new response format with comprehensive info
       const data = response.data || response;  // Backwards compatible
-      const merged = mergeWithDefaults(data);
+      const merged = mergeWithDefaults(data, defaults || {});
       
       setProjectState(merged);
       setCurrentFilename(filename);
@@ -236,7 +254,7 @@ export function useProject() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [defaults]);
 
   /**
    * Save current project state
@@ -499,6 +517,14 @@ export function useProject() {
   useEffect(() => {
     const checkExistingProject = async () => {
       try {
+        // Load defaults first
+        try {
+          const defaultsData = await getDefaults();
+          setDefaults(defaultsData);
+        } catch (e) {
+          console.warn('[Project] Could not load defaults.json');
+        }
+        
         const current = await getCurrentProject();
         if (current.isSet) {
           console.log('[Project] Found existing project folder:', current.folder);
@@ -526,6 +552,7 @@ export function useProject() {
     currentFileInfo,
     projectState,
     projectConfig,
+    defaults,  // User defaults from defaults.json
     shots,
     currentShotVersions,
     

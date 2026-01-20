@@ -132,6 +132,19 @@ export async function getProjectConfig() {
 }
 
 /**
+ * Get user defaults from defaults.json
+ */
+export async function getDefaults() {
+  const res = await fetch(`${API_URL}/project/defaults`);
+  
+  if (!res.ok) {
+    throw new Error(`Failed to get defaults: ${res.statusText}`);
+  }
+  
+  return res.json();
+}
+
+/**
  * Get cache folder info
  */
 export async function getCacheInfo() {

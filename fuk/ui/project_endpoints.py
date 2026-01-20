@@ -652,7 +652,10 @@ async def create_new(data: dict = Body(...)):
         filename = f"{project_name}_shot{shot_number}_{version}{suffix}.json"
         file_path = _project_folder / filename
     
-    # Create empty project state
+    # Import DEFAULTS from main module
+    from fuk_web_server import DEFAULTS
+    
+    # Create project state populated with defaults from defaults.json
     state = {
         "meta": {
             "version": "1.0",
@@ -666,9 +669,34 @@ async def create_new(data: dict = Body(...)):
             "version": version,
         },
         "tabs": {
-            "image": {},
-            "video": {},
-            "preprocess": {},
+            "image": {
+                "positive_prompt": DEFAULTS.get("image", {}).get("positive_prompt", ""),
+                "negative_prompt": DEFAULTS.get("image", {}).get("negative_prompt", ""),
+                "width": DEFAULTS.get("image", {}).get("width", 1344),
+                "aspect_ratio": DEFAULTS.get("image", {}).get("aspect_ratio", "Widescreen"),
+                "infer_steps": DEFAULTS.get("image", {}).get("infer_steps", 20),
+                "guidance_scale": DEFAULTS.get("image", {}).get("guidance_scale", 2.1),
+                "flow_shift": DEFAULTS.get("image", {}).get("flow_shift", 2.1),
+                "blocks_to_swap": DEFAULTS.get("image", {}).get("blocks_to_swap", 0),
+                "lora_multiplier": DEFAULTS.get("image", {}).get("lora_multiplier", 1.0),
+                "seed": DEFAULTS.get("image", {}).get("seed"),
+            },
+            "video": {
+                "task": DEFAULTS.get("video", {}).get("task", "i2v-A14B"),
+                "positive_prompt": DEFAULTS.get("video", {}).get("positive_prompt", ""),
+                "negative_prompt": DEFAULTS.get("video", {}).get("negative_prompt", ""),
+                "length": DEFAULTS.get("video", {}).get("length", 41),
+                "scale_factor": DEFAULTS.get("video", {}).get("scale_factor", 1.0),
+                "infer_steps": DEFAULTS.get("video", {}).get("infer_steps", 20),
+                "guidance_scale": DEFAULTS.get("video", {}).get("guidance_scale", 5.0),
+                "flow_shift": DEFAULTS.get("video", {}).get("flow_shift", 2.1),
+                "blocks_to_swap": DEFAULTS.get("video", {}).get("blocks_to_swap", 5),
+                "lora_multiplier": DEFAULTS.get("video", {}).get("lora_multiplier", 1.0),
+                "seed": DEFAULTS.get("video", {}).get("seed"),
+            },
+            "preprocess": DEFAULTS.get("preprocess", {}),
+            "postprocess": DEFAULTS.get("postprocess", {}),
+            "export": DEFAULTS.get("export", {}),
         },
         "assets": {},
         "lastState": {},
@@ -696,6 +724,12 @@ async def get_config():
         "versionFormat": "date",  # or "sequential"
         "cacheFolder": str(_cache_root) if _cache_root else None,
     }
+
+@router.get("/defaults")
+async def get_defaults():
+    """Get user defaults from defaults.json"""
+    from fuk_web_server import DEFAULTS
+    return DEFAULTS
 
 @router.get("/cache-info")
 async def get_cache_info():

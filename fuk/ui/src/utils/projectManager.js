@@ -3,6 +3,28 @@
  * Handles project file discovery, loading, saving, and versioning
  */
 
+/**
+ * Deep merge two objects
+ * Recursively merges nested objects, with source taking precedence
+ */
+function deepMerge(target, source) {
+  const result = { ...target };
+  
+  for (const key in source) {
+    if (source[key] !== undefined) {
+      if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
+        // Recursively merge objects
+        result[key] = deepMerge(target[key] || {}, source[key]);
+      } else {
+        // Direct assignment for primitives and arrays
+        result[key] = source[key];
+      }
+    }
+  }
+  
+  return result;
+}
+
 // Default config - can be overridden by user config
 const DEFAULT_PROJECT_CONFIG = {
   versionFormat: 'date',  // 'date' (251229) or 'sequential' (v01)
@@ -84,8 +106,16 @@ export function generateProjectFilename(projectName, shotNumber, version) {
 /**
  * Create empty project state structure
  * This is what gets saved to the .json file
+ * 
+ * @param {Object} defaults - User defaults from defaults.json (optional)
  */
-export function createEmptyProjectState() {
+export function createEmptyProjectState(defaults = {}) {
+  const imageDefaults = defaults.image || {};
+  const videoDefaults = defaults.video || {};
+  const preprocessDefaults = defaults.preprocess || {};
+  const postprocessDefaults = defaults.postprocess || {};
+  const exportDefaults = defaults.export || {};
+  
   return {
     // Metadata
     meta: {
@@ -105,56 +135,49 @@ export function createEmptyProjectState() {
     // Tab states - all generation settings
     tabs: {
       image: {
-        prompt: '',
+        prompt: imageDefaults.positive_prompt || '',
         model: 'qwen_image',
-        negative_prompt: '',
-        aspectRatio: '16:9',
-        width: 1344,
-        height: 756,
-        steps: 20,
+        negative_prompt: imageDefaults.negative_prompt || '',
+        aspectRatio: imageDefaults.aspect_ratio || 'Widescreen',
+        width: imageDefaults.width || 1344,
+        height: null,  // Calculated from width and aspect ratio
+        steps: imageDefaults.infer_steps || 20,
         stepsMode: 'preset',
-        guidance_scale: 2.1,
-        flow_shift: 2.1,
-        seed: null,
+        guidance_scale: imageDefaults.guidance_scale ?? 2.1,
+        flow_shift: imageDefaults.flow_shift ?? 2.1,
+        seed: imageDefaults.seed,
         seedMode: 'random',  // 'random', 'fixed', 'increment'
         lastUsedSeed: null,
         lora: null,
-        lora_multiplier: 1.0,
-        blocks_to_swap: 10,
+        lora_multiplier: imageDefaults.lora_multiplier ?? 1.0,
+        blocks_to_swap: imageDefaults.blocks_to_swap ?? 0,
         output_format: 'png',
         edit_strength: 0.7,
         control_image_paths: [],
       },
       video: {
-        prompt: '',
-        task: 'i2v-14B',
-        negative_prompt: '',
+        prompt: videoDefaults.positive_prompt || '',
+        task: videoDefaults.task || 'i2v-A14B',
+        negative_prompt: videoDefaults.negative_prompt || '',
         width: 832,
         height: 480,
-        video_length: 81,
-        steps: 20,
-        guidance_scale: 5.0,
-        flow_shift: 5.0,
-        seed: null,
+        video_length: videoDefaults.length || 41,
+        steps: videoDefaults.infer_steps || 20,
+        guidance_scale: videoDefaults.guidance_scale ?? 5.0,
+        flow_shift: videoDefaults.flow_shift ?? 2.1,
+        seed: videoDefaults.seed,
         seedMode: 'random',
         lastUsedSeed: null,
         lora: null,
-        lora_multiplier: 1.0,
-        blocks_to_swap: 15,
+        lora_multiplier: videoDefaults.lora_multiplier ?? 1.0,
+        blocks_to_swap: videoDefaults.blocks_to_swap ?? 5,
+        scale_factor: videoDefaults.scale_factor ?? 1.0,
         image_path: null,
         end_image_path: null,
       },
-      preprocess: {
-        // Placeholder for future
-      },
-      postprocess: {
-        // Placeholder for future
-      },
-      export: {
-        outputFormat: 'exr',
-        colorSpace: 'linear',
-        // More to come
-      },
+      preprocess: preprocessDefaults,
+      postprocess: postprocessDefaults,
+      export: exportDefaults,
     },
     
     // Imported assets (control images, reference images, etc.)
@@ -179,22 +202,27 @@ export function createEmptyProjectState() {
 
 /**
  * Merge loaded state with defaults (handles version upgrades)
+ * Uses deep merge to properly handle nested configuration objects
+ * 
+ * @param {Object} loadedState - State loaded from .json file
+ * @param {Object} defaults - User defaults from defaults.json (optional)
  */
-export function mergeWithDefaults(loadedState) {
-  const defaults = createEmptyProjectState();
+export function mergeWithDefaults(loadedState, defaults = {}) {
+  const emptyState = createEmptyProjectState(defaults);
   
+  // Deep merge each top-level section
   return {
-    meta: { ...defaults.meta, ...loadedState.meta },
-    project: { ...defaults.project, ...loadedState.project },
+    meta: deepMerge(emptyState.meta, loadedState.meta || {}),
+    project: deepMerge(emptyState.project, loadedState.project || {}),
     tabs: {
-      image: { ...defaults.tabs.image, ...loadedState.tabs?.image },
-      video: { ...defaults.tabs.video, ...loadedState.tabs?.video },
-      preprocess: { ...defaults.tabs.preprocess, ...loadedState.tabs?.preprocess },
-      postprocess: { ...defaults.tabs.postprocess, ...loadedState.tabs?.postprocess },
-      export: { ...defaults.tabs.export, ...loadedState.tabs?.export },
+      image: deepMerge(emptyState.tabs.image, loadedState.tabs?.image || {}),
+      video: deepMerge(emptyState.tabs.video, loadedState.tabs?.video || {}),
+      preprocess: deepMerge(emptyState.tabs.preprocess, loadedState.tabs?.preprocess || {}),
+      postprocess: deepMerge(emptyState.tabs.postprocess, loadedState.tabs?.postprocess || {}),
+      export: deepMerge(emptyState.tabs.export, loadedState.tabs?.export || {}),
     },
-    assets: { ...defaults.assets, ...loadedState.assets },
-    lastState: { ...defaults.lastState, ...loadedState.lastState },
+    assets: deepMerge(emptyState.assets, loadedState.assets || {}),
+    lastState: deepMerge(emptyState.lastState, loadedState.lastState || {}),
     notes: loadedState.notes || '',
   };
 }
