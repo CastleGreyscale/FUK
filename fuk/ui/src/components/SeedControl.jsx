@@ -90,10 +90,10 @@ export default function SeedControl({
     onSeedChange(newSeed);
   };
 
-  // Handle dropdown selection - set seed AND switch to fixed mode
+  // Handle dropdown selection - switch to fixed mode THEN set seed
   const handleSelectSaved = (seedValue) => {
-    onSeedChange(seedValue);
     onSeedModeChange(SEED_MODES.FIXED);
+    onSeedChange(seedValue);
   };
 
   return (
