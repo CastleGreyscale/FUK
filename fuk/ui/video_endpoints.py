@@ -181,16 +181,36 @@ def setup_video_routes(
     
     def build_video_response(
         output_path: Path,
-        result: Dict[str, Any]
+        result: Dict[str, Any],
+        video_processor=None
     ) -> Dict[str, Any]:
         """Build response data for MP4 output mode."""
         output_url = get_project_relative_url(output_path)
         
-        return {
+        # Generate thumbnail if video exists and processor is available
+        thumbnail_url = None
+        if video_processor and output_path.exists():
+            thumb_path = output_path.with_suffix('.thumb.jpg')
+            if not thumb_path.exists():  # Only generate if not already present
+                try:
+                    video_processor.extract_thumbnail(output_path, thumb_path)
+                    if thumb_path.exists():
+                        thumbnail_url = get_project_relative_url(thumb_path)
+                except Exception as e:
+                    print(f"[VideoEndpoints] Failed to generate thumbnail: {e}")
+            elif thumb_path.exists():
+                thumbnail_url = get_project_relative_url(thumb_path)
+        
+        response = {
             "output_url": output_url,
             "preview_url": output_url,  # Video can be its own preview
             "is_sequence": False,
         }
+        
+        if thumbnail_url:
+            response["thumbnail_url"] = thumbnail_url
+        
+        return response
     
     # ========================================================================
     # Video Preprocess Endpoint
@@ -314,11 +334,20 @@ def setup_video_routes(
                     elapsed = time.time() - start_time
                     log.timing("VideoPreprocess", start_time, f"Complete (batch) - {result.get('frame_count', 0)} frames")
                     
+                    # Generate thumbnail for MP4 output
+                    if output_mode == OutputMode.MP4 and output_path.exists():
+                        thumb_path = output_path.with_suffix('.thumb.jpg')
+                        try:
+                            video_processor.extract_thumbnail(output_path, thumb_path)
+                            log.info("VideoPreprocess", f"Generated thumbnail: {thumb_path.name}")
+                        except Exception as e:
+                            log.error("VideoPreprocess", f"Failed to generate thumbnail: {e}")
+                    
                     # Build response
                     if output_mode == OutputMode.SEQUENCE:
                         url_data = build_sequence_response(output_path, result, gen_dir)
                     else:
-                        url_data = build_video_response(output_path, result)
+                        url_data = build_video_response(output_path, result, video_processor)
                     
                     processor_kwargs = {"depth_model": request.depth_model}
                     
@@ -433,11 +462,20 @@ def setup_video_routes(
                 elapsed = time.time() - start_time
                 log.timing("VideoPreprocess", start_time, f"Complete (video tracking) - {result.get('frame_count', 0)} frames, {result.get('num_objects', 0)} objects")
                 
+                # Generate thumbnail for MP4 output
+                if output_mode == OutputMode.MP4 and output_path.exists():
+                    thumb_path = output_path.with_suffix('.thumb.jpg')
+                    try:
+                        video_processor.extract_thumbnail(output_path, thumb_path)
+                        log.info("VideoPreprocess", f"Generated thumbnail: {thumb_path.name}")
+                    except Exception as e:
+                        log.error("VideoPreprocess", f"Failed to generate thumbnail: {e}")
+                
                 # Build response
                 if output_mode == OutputMode.SEQUENCE:
                     url_data = build_sequence_response(output_path, result, gen_dir)
                 else:
-                    url_data = build_video_response(output_path, result)
+                    url_data = build_video_response(output_path, result, video_processor)
                 
                 processor_kwargs = {
                     "crypto_model": request.crypto_model,
@@ -464,11 +502,20 @@ def setup_video_routes(
                 elapsed = time.time() - start_time
                 log.timing("VideoPreprocess", start_time, f"Complete - {result.get('frame_count', 0)} frames")
                 
+                # Generate thumbnail for MP4 output
+                if output_mode == OutputMode.MP4 and output_path.exists():
+                    thumb_path = output_path.with_suffix('.thumb.jpg')
+                    try:
+                        video_processor.extract_thumbnail(output_path, thumb_path)
+                        log.info("VideoPreprocess", f"Generated thumbnail: {thumb_path.name}")
+                    except Exception as e:
+                        log.error("VideoPreprocess", f"Failed to generate thumbnail: {e}")
+                
                 # Build response based on output mode
                 if output_mode == OutputMode.SEQUENCE:
                     url_data = build_sequence_response(output_path, result, gen_dir)
                 else:
-                    url_data = build_video_response(output_path, result)
+                    url_data = build_video_response(output_path, result, video_processor)
             
             # Save metadata
             save_generation_metadata(
@@ -586,7 +633,7 @@ def setup_video_routes(
             if output_mode == OutputMode.SEQUENCE:
                 url_data = build_sequence_response(output_path, result, gen_dir)
             else:
-                url_data = build_video_response(output_path, result)
+                url_data = build_video_response(output_path, result, video_processor)
             
             # Calculate output dimensions
             input_width = video_info.get("width", 0)

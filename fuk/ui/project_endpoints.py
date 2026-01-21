@@ -150,7 +150,7 @@ def ensure_project_loaded():
         try:
             with open(latest_file) as f:
                 _project_state = json.load(f)
-            print(f"[PROJECT] ✓ Auto-loaded: {latest_file.name}", flush=True)
+            print(f"[PROJECT] âœ“ Auto-loaded: {latest_file.name}", flush=True)
             return True
         except Exception as e:
             print(f"[PROJECT] Failed to auto-load {latest_file.name}: {e}", flush=True)
@@ -194,7 +194,7 @@ def ensure_project_loaded():
                 json.dump(state, f, indent=2)
             
             _project_state = state
-            print(f"[PROJECT] ✓ Created default project: {filename}", flush=True)
+            print(f"[PROJECT] âœ“ Created default project: {filename}", flush=True)
             return True
             
         except Exception as e:
@@ -314,7 +314,7 @@ def cleanup_failed_generation(gen_dir: Path, reason: str = "generation failed") 
         try:
             gen_dir.resolve().relative_to(_cache_root.resolve())
         except ValueError:
-            print(f"[CLEANUP] âœ— Refusing to delete - path outside cache: {gen_dir}", flush=True)
+            print(f"[CLEANUP] Ã¢Å“â€” Refusing to delete - path outside cache: {gen_dir}", flush=True)
             return False
     
     try:
@@ -325,14 +325,14 @@ def cleanup_failed_generation(gen_dir: Path, reason: str = "generation failed") 
             content_names.append(f"... and {len(contents) - 5} more")
         
         shutil.rmtree(gen_dir)
-        print(f"[CLEANUP] âœ“ Removed failed generation: {gen_dir.name}", flush=True)
+        print(f"[CLEANUP] Ã¢Å“â€œ Removed failed generation: {gen_dir.name}", flush=True)
         print(f"[CLEANUP]   Reason: {reason}", flush=True)
         if content_names:
             print(f"[CLEANUP]   Deleted: {', '.join(content_names)}", flush=True)
         return True
         
     except Exception as e:
-        print(f"[CLEANUP] âœ— Failed to clean up {gen_dir}: {e}", flush=True)
+        print(f"[CLEANUP] Ã¢Å“â€” Failed to clean up {gen_dir}: {e}", flush=True)
         return False
 
 def get_project_relative_url(file_path: Path) -> str:
@@ -949,9 +949,30 @@ async def list_generations(
                 continue
         else:
             # Look for pattern-based outputs
-            # Preprocessors: processed_*.png
-            processed_files = list(gen_dir.glob("processed_*.png"))
-            if processed_files:
+            # Video preprocessing: {method}.mp4 in preprocess_video_* folders
+            if gen_dir.name.startswith("preprocess_video_"):
+                # Look for method-named video files (canny.mp4, depth.mp4, etc.)
+                video_files = list(gen_dir.glob("*.mp4"))
+                if video_files:
+                    # Skip source.mp4 if it exists, prefer processed output
+                    for vid in video_files:
+                        if vid.name != "source.mp4":
+                            preview = f"api/project/cache/{rel_path}/{vid.name}"
+                            gen_type = "preprocess"
+                            # Mark as video preprocessing for frontend
+                            metadata["subtype"] = "video"
+                            break
+                    # If only source.mp4 exists, use it
+                    if not preview and video_files:
+                        preview = f"api/project/cache/{rel_path}/{video_files[0].name}"
+                        gen_type = "preprocess"
+                        metadata["subtype"] = "video"
+            # Image preprocessors: processed.png or processed_*.png
+            elif (gen_dir / "processed.png").exists():
+                preview = f"api/project/cache/{rel_path}/processed.png"
+                gen_type = "preprocess"
+            elif list(gen_dir.glob("processed_*.png")):
+                processed_files = list(gen_dir.glob("processed_*.png"))
                 preview_file = processed_files[0].name
                 preview = f"api/project/cache/{rel_path}/{preview_file}"
                 gen_type = "preprocess"
@@ -961,12 +982,18 @@ async def list_generations(
                 preview_file = interp_files[0].name
                 preview = f"api/project/cache/{rel_path}/{preview_file}"
                 gen_type = "video"
-            # Upscaling: upscaled_*.png
+            # Upscaling: upscaled_*.png or upscaled_*.mp4
             elif list(gen_dir.glob("upscaled_*.png")):
                 upscaled_files = list(gen_dir.glob("upscaled_*.png"))
                 preview_file = upscaled_files[0].name
                 preview = f"api/project/cache/{rel_path}/{preview_file}"
                 gen_type = "image"
+            elif list(gen_dir.glob("upscaled_*.mp4")):
+                upscaled_files = list(gen_dir.glob("upscaled_*.mp4"))
+                preview_file = upscaled_files[0].name
+                preview = f"api/project/cache/{rel_path}/{preview_file}"
+                gen_type = "upscale"
+                metadata["subtype"] = "video"
             # Fallback: find any image or video
             else:
                 image_exts = ['.png', '.jpg', '.jpeg', '.webp', '.exr']
@@ -976,9 +1003,9 @@ async def list_generations(
                 for ext in image_exts:
                     image_files = list(gen_dir.glob(f"*{ext}"))
                     if image_files:
-                        # Skip source.png if it exists, prefer other images
+                        # Skip source.png and .thumb.jpg files, prefer other images
                         for img in image_files:
-                            if img.name != "source.png":
+                            if img.name != "source.png" and not img.name.endswith('.thumb.jpg'):
                                 preview = f"api/project/cache/{rel_path}/{img.name}"
                                 gen_type = "image"
                                 break
@@ -995,7 +1022,9 @@ async def list_generations(
                             break
         # Check for video thumbnail (extract filename from preview URL)
         thumbnail_url = None
-        if preview and gen_type == "video":
+        if preview and (gen_type == "video" or 
+                       (gen_type == "preprocess" and metadata.get("subtype") == "video") or
+                       (gen_type == "upscale" and metadata.get("subtype") == "video")):
             # Extract filename from preview URL (e.g., "api/project/cache/xxx/upscaled_4x.mp4" -> "upscaled_4x.mp4")
             preview_filename = preview.split("/")[-1] if "/" in preview else preview
             thumb_candidates = [
@@ -1012,6 +1041,7 @@ async def list_generations(
             "id": str(rel_path),  # Use full relative path as ID
             "name": metadata.get("display_name"),  # For imports
             "type": gen_type,
+            "subtype": metadata.get("subtype"),  # For video preprocessing detection
             "preview": preview,
             "path": preview,  # Alias for drag-drop compatibility
             "sourcePath": source_path,  # Original path for imports

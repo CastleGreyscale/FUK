@@ -49,6 +49,7 @@ from file_browser_endpoints import setup_file_browser_routes
 from video_endpoints import setup_video_routes
 from core.qwen_image_wrapper import create_generator as create_image_generator, QwenModel
 from core.wan_video_wrapper import create_video_generator, WanTask
+from core.video_processor import VideoProcessor
 import json
 import asyncio
 import uuid
@@ -854,6 +855,12 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
             progress_callback=progress_cb,
         )
         
+        # Extract thumbnail from generated video
+        if paths["generated_mp4"].exists():
+            thumb_path = paths["generated_mp4"].with_suffix('.thumb.jpg')
+            video_processor = VideoProcessor()
+            video_processor.extract_thumbnail(paths["generated_mp4"], thumb_path)
+        
         # Build outputs with project-relative URLs
         outputs = {
             "mp4": get_project_relative_url(paths["generated_mp4"])
@@ -1532,6 +1539,19 @@ async def preprocess_image(request: PreprocessRequest):
             parameters=result.get("parameters", {}),
         )
         
+        # Generate thumbnail for preview in history
+        output_path = Path(result["output_path"])
+        thumbnail_path = gen_dir / "thumbnail.jpg"
+        
+        try:
+            from PIL import Image
+            with Image.open(output_path) as img:
+                # Create thumbnail maintaining aspect ratio
+                img.thumbnail((400, 400), Image.Resampling.LANCZOS)
+                img.save(thumbnail_path, "JPEG", quality=85)
+        except Exception as e:
+            print(f"[Preprocess] Failed to generate thumbnail: {e}")
+        
         # Convert output path to project-relative URL
         output_path = Path(result["output_path"])
         result["url"] = get_project_relative_url(output_path)
@@ -1686,6 +1706,16 @@ async def upscale_image(request: UpscaleRequest):
         with Image.open(source_path) as img:
             input_width, input_height = img.size
         
+        # Generate thumbnail for preview in history
+        thumbnail_path = gen_dir / "thumbnail.jpg"
+        try:
+            with Image.open(output_path) as img:
+                # Create thumbnail maintaining aspect ratio
+                img.thumbnail((400, 400), Image.Resampling.LANCZOS)
+                img.save(thumbnail_path, "JPEG", quality=85)
+        except Exception as e:
+            print(f"[Upscale] Failed to generate thumbnail: {e}")
+        
         # Save metadata
         save_generation_metadata(
             gen_dir=gen_dir,
@@ -1758,6 +1788,12 @@ async def interpolate_video(request: InterpolateRequest):
             target_fps=request.target_fps,
             model=request.model,
         )
+        
+        # Extract thumbnail from interpolated video
+        if output_path.exists():
+            thumb_path = output_path.with_suffix('.thumb.jpg')
+            video_processor = VideoProcessor()
+            video_processor.extract_thumbnail(output_path, thumb_path)
         
         # Save metadata
         save_generation_metadata(

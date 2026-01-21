@@ -200,6 +200,16 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
         });
       }
       
+      // Notify history to refresh
+      window.dispatchEvent(new CustomEvent('fuk-generation-complete', {
+        detail: { 
+          type: 'preprocess',
+          method: selectedMethod,
+          result: data,
+          elapsed: Math.floor((Date.now() - startTime) / 1000)
+        }
+      }));
+      
     } catch (err) {
       console.error('Preprocessing error:', err);
       setError(err.message);

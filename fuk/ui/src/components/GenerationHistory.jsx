@@ -3,7 +3,7 @@
  * Shows past generations with drag-and-drop, pagination, and pinning
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Film, Camera, Clock, Trash2, RefreshCw, ChevronDown, ChevronRight, Enhance, Zap, ArrowUp, Layers, Download, PinIcon, ImportIcon, SequenceIcon } from './Icons';
 import { buildImageUrl, API_URL } from '../utils/constants';
 
@@ -12,12 +12,27 @@ import { buildImageUrl, API_URL } from '../utils/constants';
 // Draggable thumbnail component
 function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned }) {
   const [imageError, setImageError] = useState(false);
+  const [isHovering, setIsHovering] = useState(false);
+  const videoRef = useRef(null);
   
-  const isVideo = generation.type === 'video' || generation.type === 'interpolate' || 
-                  (generation.type === 'preprocess' && generation.subtype === 'video');
+  const isVideo = generation.type === 'video' || 
+                  generation.type === 'interpolate' || 
+                  (generation.type === 'preprocess' && generation.subtype === 'video') ||
+                  (generation.type === 'upscale' && generation.subtype === 'video');
   const isSequence = generation.isSequence;
   const previewUrl = buildImageUrl(generation.preview);
+  const thumbnailUrl = generation.thumbnailUrl ? buildImageUrl(generation.thumbnailUrl) : null;
   const displayName = generation.name || generation.id || 'Unknown';
+  
+  // Clean up video when hover ends
+  const handleMouseLeave = () => {
+    setIsHovering(false);
+    if (videoRef.current) {
+      videoRef.current.pause();
+      videoRef.current.src = '';
+      videoRef.current.load(); // Force unload
+    }
+  };
   
   // Get the primary content type icon (Camera or Film)
   const getContentTypeIcon = () => {
@@ -183,24 +198,32 @@ function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned }) {
               </div>
             </div>
           ) : isVideo ? (
-            <video 
-              src={previewUrl}
-              muted
-              loop
-              preload="none"
-              onMouseEnter={(e) => {
-                // Load and play only on hover
-                if (e.target.readyState === 0) {
-                  e.target.load();
-                }
-                e.target.play().catch(() => {});
-              }}
-              onMouseLeave={(e) => { 
-                e.target.pause(); 
-                e.target.currentTime = 0;
-              }}
-              onError={() => setImageError(true)}
-            />
+            // Video: show thumbnail when not hovering, video when hovering
+            <div
+              style={{ width: '100%', height: '100%', position: 'relative' }}
+              onMouseEnter={() => setIsHovering(true)}
+              onMouseLeave={handleMouseLeave}
+            >
+              {!isHovering && thumbnailUrl ? (
+                // Show thumbnail image when not hovering
+                <img 
+                  src={thumbnailUrl} 
+                  alt={displayName}
+                  onError={() => setImageError(true)}
+                />
+              ) : (
+                // Show video when hovering (or if no thumbnail available)
+                <video 
+                  ref={videoRef}
+                  src={isHovering ? previewUrl : ''}
+                  muted
+                  loop
+                  preload="none"
+                  autoPlay={isHovering}
+                  onError={() => setImageError(true)}
+                />
+              )}
+            </div>
           ) : (
             <img 
               src={previewUrl} 
@@ -381,6 +404,17 @@ export default function GenerationHistory({ project, collapsed, onToggle }) {
     return () => window.removeEventListener('fuk-project-changed', handleProjectChange);
   }, [fetchGenerations]);
 
+  // Auto-refresh when generation completes
+  useEffect(() => {
+    const handleGenerationComplete = (event) => {
+      console.log('[History] Generation complete, auto-refreshing...', event.detail);
+      fetchGenerations(daysLoaded, true);
+    };
+    
+    window.addEventListener('fuk-generation-complete', handleGenerationComplete);
+    return () => window.removeEventListener('fuk-generation-complete', handleGenerationComplete);
+  }, [daysLoaded, fetchGenerations]);
+
 
   const handleRefresh = () => {
     console.log('[History] Manual refresh clicked');
@@ -549,7 +583,7 @@ export default function GenerationHistory({ project, collapsed, onToggle }) {
       </div>
 
       <div className="gen-history-hint">
-        Drag items to input fields Ã¢â‚¬Â¢ Click bookmark to pin
+        Drag items to input fields Click bookmark to pin
       </div>
     </div>
   );

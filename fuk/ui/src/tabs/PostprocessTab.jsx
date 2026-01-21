@@ -228,6 +228,15 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
       
       setProgress({ phase: 'Complete', progress: 1 });
       
+      // Notify history to refresh
+      window.dispatchEvent(new CustomEvent('fuk-generation-complete', {
+        detail: { 
+          type: 'upscale',
+          result: data,
+          elapsed: Math.floor((Date.now() - startTime) / 1000)
+        }
+      }));
+      
     } catch (err) {
       console.error('[PostProcess] Upscale error:', err);
       setError(err.message);
@@ -279,6 +288,15 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
       });
       
       setProgress({ phase: 'Complete', progress: 1 });
+      
+      // Notify history to refresh
+      window.dispatchEvent(new CustomEvent('fuk-generation-complete', {
+        detail: { 
+          type: 'interpolate',
+          result: data,
+          elapsed: Math.floor((Date.now() - startTime) / 1000)
+        }
+      }));
       
     } catch (err) {
       console.error('[PostProcess] Interpolate error:', err);

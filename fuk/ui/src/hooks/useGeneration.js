@@ -81,6 +81,11 @@ export function useGeneration() {
           setElapsedSeconds(finalElapsed);  // Set final elapsed time
           setResult(data);
           setGenerating(false);
+          
+          // Notify history to refresh
+          window.dispatchEvent(new CustomEvent('fuk-generation-complete', {
+            detail: { generationId, result: data, elapsed: finalElapsed }
+          }));
         },
         // onError
         (errorMsg) => {
