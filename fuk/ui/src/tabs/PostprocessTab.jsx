@@ -3,6 +3,10 @@
  * Upscaling (images & videos) and frame interpolation
  * Before/After comparison layout
  * Supports both single images and frame-by-frame video processing
+ * 
+ * Features:
+ * - Persists last result in project state for cross-tab restoration
+ * - On-demand loading of previews to prevent UI hangs
  */
 
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
@@ -74,6 +78,11 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const mountedRef = useRef(true);
   
+  // Track if we've restored from project state
+  const hasRestoredRef = useRef(false);
+  // Flag to prevent clearing result during restoration
+  const isRestoringRef = useRef(false);
+  
   // Detect if input is video
   const isVideo = useMemo(() => isVideoFile(sourceInput), [sourceInput]);
   
@@ -93,6 +102,64 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
     
     return () => clearInterval(interval);
   }, [processing, startTime]);
+  
+  // Restore last preview from project state when tab becomes active
+  useEffect(() => {
+    // Only run when this tab is active
+    if (activeTab !== 'postprocess') return;
+    
+    // Skip if we already have a result (user is actively working)
+    if (result) return;
+    
+    const lastState = project?.projectState?.lastState;
+    if (!lastState?.lastPostprocessPreview) return;
+    
+    // Restore the preview and metadata
+    const meta = lastState.lastPostprocessMeta || {};
+    
+    console.log('[PostprocessTab] Restoring from lastState:', {
+      preview: lastState.lastPostprocessPreview,
+      meta
+    });
+    
+    // Set flag to prevent handleSourceChange from clearing result
+    isRestoringRef.current = true;
+    
+    // Restore source input and process type FIRST (before result)
+    if (meta.sourceInput) {
+      setSourceInput(meta.sourceInput);
+    }
+    if (meta.processType) {
+      setActiveProcess(meta.processType);
+    }
+    
+    // Restore result
+    setResult({
+      type: meta.isVideo ? 'video' : 'image',
+      url: lastState.lastPostprocessPreview,
+      scale: meta.scale,
+      inputSize: meta.inputSize,
+      outputSize: meta.outputSize,
+      method: meta.method,
+      frameCount: meta.frameCount,
+      targetFps: meta.targetFps,
+      sourceFps: meta.sourceFps,
+      multiplier: meta.multiplier,
+    });
+    
+    // Clear restoring flag after state has settled
+    setTimeout(() => {
+      isRestoringRef.current = false;
+    }, 100);
+    
+  }, [activeTab, project?.projectState?.lastState, result]);
+  
+  // Reset state when project file changes
+  useEffect(() => {
+    setResult(null);
+    setSourceInput(null);
+    setError(null);
+  }, [project?.currentFilename]);
   
   // Fetch capabilities on mount
   useEffect(() => {
@@ -147,11 +214,45 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
   
   // Handle source input (MediaUploader passes array of media objects)
   const handleSourceChange = (media) => {
+    // Don't clear result if we're in the middle of restoring
+    if (isRestoringRef.current) {
+      console.log('[PostprocessTab] Skipping result clear during restore');
+      return;
+    }
+    
     const first = media[0];
-    setSourceInput(first?.path || first || null);
-    setResult(null);
-    setError(null);
+    const newPath = first?.path || first || null;
+    
+    // Only update and clear result if value actually changed
+    if (newPath !== sourceInput) {
+      setSourceInput(newPath);
+      setResult(null);
+      setError(null);
+    }
   };
+  
+  // Save result to project lastState
+  const saveResultToLastState = useCallback((newResult) => {
+    if (!project?.updateLastState) return;
+    
+    project.updateLastState({
+      lastPostprocessPreview: newResult.url,
+      lastPostprocessMeta: {
+        isVideo: newResult.type === 'video',
+        processType: activeProcess,
+        sourceInput,
+        scale: newResult.scale,
+        inputSize: newResult.inputSize,
+        outputSize: newResult.outputSize,
+        method: newResult.method,
+        frameCount: newResult.frameCount,
+        targetFps: newResult.targetFps,
+        sourceFps: newResult.sourceFps,
+        multiplier: newResult.multiplier,
+      },
+      activeTab: 'postprocess',
+    });
+  }, [project?.updateLastState, activeProcess, sourceInput]);
   
   const handleUpscale = async () => {
     if (!sourceInput) {
@@ -203,8 +304,9 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
       const data = await response.json();
       console.log('[PostProcess] Upscale result:', data);
       
+      let newResult;
       if (isVideo) {
-        setResult({
+        newResult = {
           type: 'video',
           url: data.output_url,
           path: data.output_path,
@@ -213,9 +315,9 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
           scale: data.scale,
           method: data.method,
           frameCount: data.frame_count,
-        });
+        };
       } else {
-        setResult({
+        newResult = {
           type: 'image',
           url: data.output_url,
           path: data.output_path,
@@ -223,10 +325,14 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
           outputSize: data.output_size,
           scale: data.scale,
           method: data.method,
-        });
+        };
       }
       
+      setResult(newResult);
       setProgress({ phase: 'Complete', progress: 1 });
+      
+      // Save to project lastState
+      saveResultToLastState(newResult);
       
       // Notify history to refresh
       window.dispatchEvent(new CustomEvent('fuk-generation-complete', {
@@ -277,7 +383,7 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
       const data = await response.json();
       console.log('[PostProcess] Interpolate result:', data);
       
-      setResult({
+      const newResult = {
         type: 'video',
         url: data.output_url,
         path: data.output_path,
@@ -285,10 +391,12 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
         targetFps: data.target_fps,
         multiplier: data.multiplier,
         method: data.method,
-      });
+      };
       
+      setResult(newResult);
       setProgress({ phase: 'Complete', progress: 1 });
-      
+      // Save to project lastState
+      saveResultToLastState(newResult);
       // Notify history to refresh
       window.dispatchEvent(new CustomEvent('fuk-generation-complete', {
         detail: { 
@@ -377,12 +485,14 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                     controls
                     loop
                     className="fuk-preview-media--constrained"
+                    preload="metadata"
                   />
                 ) : (
                   <img
                     src={buildImageUrl(sourceInput)}
                     alt="Input"
                     className="fuk-preview-media--constrained"
+                    loading="lazy"
                   />
                 )}
               </div>
@@ -437,6 +547,7 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                     src={buildImageUrl(result.url)}
                     alt="Processed"
                     className="fuk-preview-media--constrained"
+                    loading="lazy"
                   />
                 ) : (
                   <video
@@ -445,6 +556,7 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                     autoPlay
                     loop
                     className="fuk-preview-media--constrained"
+                    preload="metadata"
                   />
                 )}
                 <span className="fuk-preview-badge fuk-preview-badge--method">

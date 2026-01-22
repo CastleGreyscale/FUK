@@ -22,7 +22,7 @@
   },
 
   "inference_defaults": {
-    "process_res": 1344,
+    "process_res": 1280,
     "process_res_method": "upper_bound_resize"
   },
 

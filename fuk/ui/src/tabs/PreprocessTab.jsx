@@ -2,6 +2,10 @@
  * Preprocess Tab
  * Image/Video preprocessing for control inputs: Canny, OpenPose, Depth
  * Supports both single images and frame-by-frame video processing
+ * 
+ * Features:
+ * - Persists last result in project state for cross-tab restoration
+ * - On-demand loading of previews to prevent UI hangs
  */
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
@@ -51,6 +55,11 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const mountedRef = useRef(true);
   
+  // Track if we've restored from project state
+  const hasRestoredRef = useRef(false);
+  // Flag to prevent clearing result during restoration
+  const isRestoringRef = useRef(false);
+  
   // Detect if input is video
   const isVideo = useMemo(() => isVideoFile(sourceInput), [sourceInput]);
   
@@ -89,6 +98,60 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
     return () => clearInterval(interval);
   }, [processing, startTime]);
   
+  // Restore last preview from project state when tab becomes active
+  useEffect(() => {
+    // Only run when this tab is active
+    if (activeTab !== 'preprocess') return;
+    
+    // Skip if we already have a result (user is actively working)
+    if (result) return;
+    
+    const lastState = project?.projectState?.lastState;
+    if (!lastState?.lastPreprocessPreview) return;
+    
+    // Restore the preview and metadata
+    const meta = lastState.lastPreprocessMeta || {};
+    
+    console.log('[PreprocessTab] Restoring from lastState:', {
+      preview: lastState.lastPreprocessPreview,
+      meta
+    });
+    
+    // Set flag to prevent handleSourceInputChange from clearing result
+    isRestoringRef.current = true;
+    
+    // Restore source input FIRST (before result)
+    if (meta.sourceInput) {
+      setSourceInput(meta.sourceInput);
+    }
+    
+    // Restore selected method if available
+    if (meta.method) {
+      setSelectedMethod(meta.method);
+    }
+    
+    // Restore result
+    setResult({
+      url: lastState.lastPreprocessPreview,
+      isVideo: meta.isVideo || false,
+      isSequence: meta.isSequence || false,
+      frame_count: meta.frameCount || 0,
+    });
+    
+    // Clear restoring flag after state has settled
+    setTimeout(() => {
+      isRestoringRef.current = false;
+    }, 100);
+    
+  }, [activeTab, project?.projectState?.lastState, result]);
+  
+  // Reset state when project file changes
+  useEffect(() => {
+    setResult(null);
+    setSourceInput(null);
+    setError(null);
+  }, [project?.currentFilename]);
+  
   const updateSettings = useCallback((methodUpdates) => {
     const currentSettings = settingsRef.current;
     const newSettings = { ...currentSettings, ...methodUpdates };
@@ -118,10 +181,21 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
   
   // Handle source input selection (MediaUploader passes array of media objects)
   const handleSourceInputChange = (media) => {
+    // Don't clear result if we're in the middle of restoring
+    if (isRestoringRef.current) {
+      console.log('[PreprocessTab] Skipping result clear during restore');
+      return;
+    }
+    
     const first = media[0];
-    setSourceInput(first?.path || first || null);
-    setResult(null);
-    setError(null);
+    const newPath = first?.path || first || null;
+    
+    // Only update and clear result if value actually changed
+    if (newPath !== sourceInput) {
+      setSourceInput(newPath);
+      setResult(null);
+      setError(null);
+    }
   };
   
   // Run preprocessing
@@ -178,7 +252,7 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
         ? (data.preview_url || data.output_url) 
         : (data.output_url || data.url);
       
-      setResult({
+      const newResult = {
         ...data,
         isVideo,
         url: displayUrl,
@@ -187,28 +261,25 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
         // For sequences, store the directory URL separately
         sequenceUrl: data.is_sequence ? data.output_url : null,
         frames: data.frames || [],
-      });
+      };
       
-      // Save to project lastState so ImageTab can access it
+      setResult(newResult);
+      
+      // Save to project lastState for cross-tab persistence
       if (project?.updateLastState) {
         project.updateLastState({
-          lastPreprocessedImage: displayUrl,
-          lastPreprocessedMethod: selectedMethod,
-          lastPreprocessedParams: currentSettings,
-          lastPreprocessedIsVideo: isVideo,
-          lastPreprocessedIsSequence: data.is_sequence || false,
+          lastPreprocessPreview: displayUrl,
+          lastPreprocessMeta: {
+            isVideo,
+            isSequence: data.is_sequence || false,
+            method: selectedMethod,
+            sourceInput,
+            frameCount: data.frame_count || 0,
+            params: currentSettings,
+          },
+          activeTab: 'preprocess',
         });
       }
-      
-      // Notify history to refresh
-      window.dispatchEvent(new CustomEvent('fuk-generation-complete', {
-        detail: { 
-          type: 'preprocess',
-          method: selectedMethod,
-          result: data,
-          elapsed: Math.floor((Date.now() - startTime) / 1000)
-        }
-      }));
       
     } catch (err) {
       console.error('Preprocessing error:', err);
@@ -447,6 +518,7 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
               src={buildImageUrl(result.url)}
               alt={`${methodTitle} Preview (Frame 1)`}
               className="fuk-preview-media--constrained"
+              loading="lazy"
             />
           ) : (
             <div className="fuk-placeholder fuk-placeholder--sm">
@@ -475,6 +547,7 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
             src={buildImageUrl(result.url)}
             controls
             className="fuk-preview-media--constrained"
+            preload="metadata"
           />
           <div className="fuk-preview-badge fuk-preview-badge--success">
             <CheckCircle className="fuk-icon--md" />
@@ -491,6 +564,7 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
           src={buildImageUrl(result.url)}
           alt="Processed"
           className="fuk-preview-media--constrained"
+          loading="lazy"
         />
         <div className="fuk-preview-badge fuk-preview-badge--success">
           <CheckCircle className="fuk-icon--md" />
@@ -521,12 +595,14 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
                   src={buildImageUrl(sourceInput)}
                   controls
                   className="fuk-preview-media fuk-preview-media--constrained"
+                  preload="metadata"
                 />
               ) : (
                 <img
                   src={buildImageUrl(sourceInput)}
                   alt="Source"
                   className="fuk-preview-media fuk-preview-media--constrained"
+                  loading="lazy"
                 />
               )
             ) : (

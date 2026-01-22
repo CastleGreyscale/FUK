@@ -14,16 +14,16 @@ import ExportTab from './tabs/ExportTab';
 import { fetchConfig } from './utils/api';
 import { useProject } from './hooks/useProject';
 import { GenerationHistory } from './components';
+import { useActiveTab } from './hooks/useActiveTab';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('image');
+  const project = useProject();
+  const [activeTab, setActiveTab] = useActiveTab(project, 'image');
   const [config, setConfig] = useState(null);
   const [status, setStatus] = useState('loading');
   const [historyCollapsed, setHistoryCollapsed] = useState(false);
 
-  // Project management
-  const project = useProject();
-
+ 
   // Load config on mount
   useEffect(() => {
     loadConfig();

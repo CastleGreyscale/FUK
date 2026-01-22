@@ -652,18 +652,21 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
         # Map model string to enum
         model = QwenModel.IMAGE if request.model == "qwen_image" else QwenModel.EDIT_2509
         
-        # Handle control images for edit mode
-        control_image = None
+        # Handle control images for edit mode (supports multiple)
+        control_images = []
         if request.control_image_paths:
-            resolved = resolve_input_path(request.control_image_paths[0])
-            if resolved and resolved.exists():
-                control_image = resolved
-                print(f"[{generation_id}] Control image: {control_image}")
+            for img_path in request.control_image_paths:
+                resolved = resolve_input_path(img_path)
+                if resolved and resolved.exists():
+                    control_images.append(resolved)
+            if control_images:
+                print(f"[{generation_id}] Control images ({len(control_images)}): {[str(p) for p in control_images]}")
         elif request.control_image_path:
+            # Backward compatibility for single image
             resolved = resolve_input_path(request.control_image_path)
             if resolved and resolved.exists():
-                control_image = resolved
-                print(f"[{generation_id}] Control image: {control_image}")
+                control_images.append(resolved)
+                print(f"[{generation_id}] Control image: {resolved}")
         
         # Generate using the wrapper
         result = image_generator.generate(
@@ -680,7 +683,7 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
             negative_prompt=request.negative_prompt,
             lora=request.lora,
             lora_multiplier=request.lora_multiplier,
-            control_image=control_image,
+            control_image=control_images if control_images else None,
         )
         
         print(f"[{generation_id}] Generation complete!")
@@ -716,7 +719,7 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
             flow_shift=request.flow_shift,
             lora=request.lora,
             lora_multiplier=request.lora_multiplier,
-            control_image=str(control_image) if control_image else None
+            control_image=[str(p) for p in control_images] if control_images else None
         )
         
         # Mark complete

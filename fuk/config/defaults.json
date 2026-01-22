@@ -12,28 +12,28 @@
   },
 
   "image": {
-    "positive_prompt": "",
-    "negative_prompt": "blurry, low quality, distorted, deformed, ugly, bad anatomy, worst quality, low resolution, jpeg artifacts, watermark, signature, username, text",
-    "width": 1344,
+    "positive_prompt": "A cinematic still ",
+    "negative_prompt": "low resolution, low quality, limb deformities, finger deformities, over-saturated image, wax figure appearance, lack of facial detail, overly smooth, AI-generated look. Chaotic composition. Blurry, distorted text",
+    "width": 1280,
     "aspect_ratio": "Widescreen",
     "infer_steps": 20,
-    "guidance_scale": 2.1,
+    "guidance_scale": 5,
     "flow_shift": 2.1,
-    "blocks_to_swap": 0,
+    "blocks_to_swap": 1,
     "lora_multiplier": 1.0,
     "seed": null
   },
 
   "video": {
     "task": "i2v-A14B",
-    "positive_prompt": "",
-    "negative_prompt": "blurry, low quality, distorted, deformed, ugly, bad anatomy, worst quality, low resolution, jpeg artifacts, watermark, signature, username, text",
+    "positive_prompt": "A cinematic video",
+    "negative_prompt": "bright colors, overexposed, static, blurred details, subtitles, style, artwork, painting, picture, still, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, malformed limbs, fused fingers, still picture, cluttered background, three legs, many people in the background, walking backwards",
     "length": 41,
     "scale_factor": 1.0,
     "infer_steps": 20,
     "guidance_scale": 5.0,
     "flow_shift": 2.1,
-    "blocks_to_swap": 5,
+    "blocks_to_swap": 15,
     "lora_multiplier": 1.0,
     "seed": null
   },
@@ -43,7 +43,7 @@
       "model": "da3_mono_large",
       "invert": false,
       "normalize": true,
-      "colormap": "inferno"
+      "colormap": "greyscale"
     },
     "normals": {
       "method": "depth_gradient",
@@ -52,9 +52,9 @@
       "normalize": true
     },
     "canny": {
-      "low_threshold": 100,
-      "high_threshold": 200,
-      "blur_kernel": 5,
+      "low_threshold": 1,
+      "high_threshold": 20,
+      "blur_kernel": 3,
       "invert": false
     },
     "openpose": {

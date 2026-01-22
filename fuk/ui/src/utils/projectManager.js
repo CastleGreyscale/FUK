@@ -114,6 +114,7 @@ export function createEmptyProjectState(defaults = {}) {
   const videoDefaults = defaults.video || {};
   const preprocessDefaults = defaults.preprocess || {};
   const postprocessDefaults = defaults.postprocess || {};
+  const layersDefaults = defaults.layers || {};
   const exportDefaults = defaults.export || {};
   
   return {
@@ -177,6 +178,7 @@ export function createEmptyProjectState(defaults = {}) {
       },
       preprocess: preprocessDefaults,
       postprocess: postprocessDefaults,
+      layers: layersDefaults,
       export: exportDefaults,
     },
     
@@ -189,10 +191,32 @@ export function createEmptyProjectState(defaults = {}) {
     
     // Last state for "restore where you left off"
     lastState: {
+      // Active tab - restored when project loads
       activeTab: 'image',
-      lastImagePreview: null,   // Path to last generated image
-      lastVideoPreview: null,   // Path to last generated video
-      lastCacheFolder: null,    // Last cache folder used
+      
+      // Last cache folder used
+      lastCacheFolder: null,
+      
+      // Image tab preview
+      lastImagePreview: null,
+      
+      // Video tab preview
+      lastVideoPreview: null,
+      
+      // Preprocess tab preview
+      lastPreprocessPreview: null,
+      lastPreprocessMeta: null,  // { isVideo, isSequence, method, sourceInput, frameCount, params }
+      
+      // Postprocess tab preview
+      lastPostprocessPreview: null,
+      lastPostprocessMeta: null,  // { isVideo, processType, sourceInput, scale, inputSize, outputSize, etc }
+      
+      // Layers tab preview
+      lastLayersPreview: null,
+      lastLayersMeta: null,  // { isVideo, sourceInput, generatedLayers, frameCount }
+      
+      // Export tab - last export result
+      lastExportPath: null,
     },
     
     // Notes - free text for artist notes
@@ -219,6 +243,7 @@ export function mergeWithDefaults(loadedState, defaults = {}) {
       video: deepMerge(emptyState.tabs.video, loadedState.tabs?.video || {}),
       preprocess: deepMerge(emptyState.tabs.preprocess, loadedState.tabs?.preprocess || {}),
       postprocess: deepMerge(emptyState.tabs.postprocess, loadedState.tabs?.postprocess || {}),
+      layers: deepMerge(emptyState.tabs.layers, loadedState.tabs?.layers || {}),
       export: deepMerge(emptyState.tabs.export, loadedState.tabs?.export || {}),
     },
     assets: deepMerge(emptyState.assets, loadedState.assets || {}),

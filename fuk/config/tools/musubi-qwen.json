@@ -18,7 +18,7 @@
     ],
     "conditional": {
       "_comment": "Flags added based on conditions",
-      "edit_mode": ["--edit"]
+      "edit_mode": ["--edit_plus"]
     }
   },
 

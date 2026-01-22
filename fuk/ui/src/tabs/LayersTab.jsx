@@ -3,6 +3,10 @@
  * Generate and manage AOV layers (Arbitrary Output Variables)
  * Layers: Depth, Normals, Cryptomatte
  * Supports both images and frame-by-frame video processing
+ * 
+ * Features:
+ * - Persists last result in project state for cross-tab restoration
+ * - On-demand loading of previews to prevent UI hangs
  */
 
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
@@ -76,6 +80,9 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
   const timerRef = useRef(null);
   const mountedRef = useRef(true);
   
+  // Track if we've restored from project state
+  const hasRestoredRef = useRef(false);
+  
   // Detect if input is video
   const isVideo = useMemo(() => isVideoFile(sourceInput), [sourceInput]);
   
@@ -86,6 +93,37 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
       if (timerRef.current) clearInterval(timerRef.current);
     };
   }, []);
+  
+  // Restore last preview from project state
+  useEffect(() => {
+    // Only restore once per project file and when no current layers
+    if (Object.keys(generatedLayers).length > 0 || hasRestoredRef.current) return;
+    
+    const lastState = project?.projectState?.lastState;
+    if (!lastState?.lastLayersPreview) return;
+    
+    // Restore the generated layers
+    const meta = lastState.lastLayersMeta || {};
+    
+    // Restore generatedLayers object from meta
+    if (meta.generatedLayers && typeof meta.generatedLayers === 'object') {
+      setGeneratedLayers(meta.generatedLayers);
+    }
+    
+    // Restore source input if available
+    if (meta.sourceInput) {
+      setSourceInput(meta.sourceInput);
+    }
+    
+    hasRestoredRef.current = true;
+  }, [project?.projectState?.lastState, generatedLayers]);
+  
+  // Reset restoration flag when project file changes
+  useEffect(() => {
+    hasRestoredRef.current = false;
+    setGeneratedLayers({});
+    setErrors({});
+  }, [project?.currentFilename]);
   
   // Handle source input (MediaUploader passes array of media objects)
   const handleSourceChange = (media) => {
@@ -211,6 +249,23 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
       setGeneratedLayers(layers);
       setErrors(result.errors || {});
       
+      // Save to project lastState for cross-tab persistence
+      if (project?.updateLastState) {
+        // Use first layer URL as the main preview
+        const firstLayerUrl = Object.values(layers)[0]?.url || null;
+        
+        project.updateLastState({
+          lastLayersPreview: firstLayerUrl,
+          lastLayersMeta: {
+            isVideo,
+            sourceInput,
+            generatedLayers: layers,
+            frameCount: result.frame_count || 0,
+          },
+          activeTab: 'layers',
+        });
+      }
+      
     } catch (err) {
       console.error('Layer generation failed:', err);
       setErrors({ _general: err.message });
@@ -276,6 +331,7 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
                         src={buildImageUrl(layerData.url)}
                         alt={layerName}
                         className="fuk-layer-card-media"
+                        loading="lazy"
                       />
                     )}
                   </div>
@@ -432,15 +488,18 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
                   onChange={(e) => updateSettings({ depthModel: e.target.value })}
                   disabled={processing}
                 >
-                  <option value="depth_anything_v2">Depth Anything V2</option>
-                  <option value="depth_anything_v3">Depth Anything V3 (Mono Large)</option>
-                  <option value="da3_mono_large">DA3 Mono Large</option>
-                  <option value="da3_metric_large">DA3 Metric Large</option>
-                  <option value="da3_large">DA3 Large (Multi-view)</option>
-                  <option value="da3_giant">DA3 Giant</option>
-                  <option value="midas_large">MiDaS Large</option>
-                  <option value="midas_small">MiDaS Small (Fast)</option>
-                  <option value="zoedepth">ZoeDepth (Metric)</option>
+                  <optgroup label="Depth Anything V3 (Latest)">
+                    <option value="da3_mono_large">DA3 Mono Large (Best)</option>
+                    <option value="da3_metric_large">DA3 Metric (Real-world scale)</option>
+                    <option value="da3_large">DA3 Large (Multi-view)</option>
+                    <option value="da3_giant">DA3 Giant (Highest quality)</option>
+                  </optgroup>
+                  <optgroup label="Legacy">
+                    <option value="depth_anything_v2">Depth Anything V2</option>
+                    <option value="midas_large">MiDaS Large</option>
+                    <option value="midas_small">MiDaS Small (Fast)</option>
+                    <option value="zoedepth">ZoeDepth</option>
+                  </optgroup>
                 </select>
               </div>
               
@@ -575,11 +634,11 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
                     onChange={(e) => updateSettings({ normalsFlipY: e.target.checked })}
                     disabled={processing}
                   />
-                  <span className="fuk-checkbox-label">Flip Y (OpenGL â†’ DirectX)</span>
+                  <span className="fuk-checkbox-label">Flip Y (OpenGL ↔ DirectX)</span>
                 </label>
               </div>
               
-              <p className="fuk-help-text">Normals encoded as RGB (XYZ â†’ RGB)</p>
+              <p className="fuk-help-text">Normals encoded as RGB (XYZ → RGB)</p>
             </div>
           )}
 

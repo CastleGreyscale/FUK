@@ -101,6 +101,13 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
     }
   }, [project?.isProjectLoaded, project?.updateTabState, setLocalFormData]);
 
+  // Auto-resize textarea handler
+  const handleTextareaResize = useCallback((e) => {
+    const textarea = e.target;
+    textarea.style.height = 'auto';
+    textarea.style.height = textarea.scrollHeight + 'px';
+  }, []);
+
   // Frame input state (for controlled input before validation)
   const [frameInput, setFrameInput] = useState(String(formData.video_length || 81));
   
@@ -582,9 +589,14 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
               <textarea
                 className="fuk-textarea"
                 value={formData.prompt}
-                onChange={(e) => setFormData({...formData, prompt: e.target.value})}
+                onChange={(e) => {
+                  setFormData({...formData, prompt: e.target.value});
+                  handleTextareaResize(e);
+                }}
+                onInput={handleTextareaResize}
                 placeholder="A cinematic video of..."
-                rows={3}
+                rows={4}
+                style={{ resize: 'none', overflow: 'hidden' }}
               />
             </div>
             
@@ -593,9 +605,14 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
               <textarea
                 className="fuk-textarea"
                 value={formData.negative_prompt}
-                onChange={(e) => setFormData({...formData, negative_prompt: e.target.value})}
+                onChange={(e) => {
+                  setFormData({...formData, negative_prompt: e.target.value});
+                  handleTextareaResize(e);
+                }}
+                onInput={handleTextareaResize}
                 placeholder="blurry, low quality..."
-                rows={2}
+                rows={4}
+                style={{ resize: 'none', overflow: 'hidden' }}
               />
             </div>
           </div>

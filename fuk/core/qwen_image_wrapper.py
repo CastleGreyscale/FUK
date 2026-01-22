@@ -24,7 +24,7 @@ if hasattr(sys.stdout, 'reconfigure'):
 
 from pathlib import Path
 import subprocess
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Tuple, Dict, Any, List, Union
 from enum import Enum
 import json
 import time
@@ -135,8 +135,8 @@ class QwenImageGenerator:
         # LoRA
         lora: Optional[str] = None,
         lora_multiplier: float = None,
-        # Control image for edit mode
-        control_image: Optional[Path] = None,
+        # Control images for edit mode (single Path or list of Paths)
+        control_image: Optional[Union[Path, List[Path]]] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -186,9 +186,13 @@ class QwenImageGenerator:
                 params["prompt"] = f"{trigger}, {prompt}"
                 _log("QWEN", f"Auto-appended LoRA trigger: {trigger}")
         
-        # Add control image for edit mode
+        # Add control images for edit mode (can be single or list)
+        # musubi accepts multiple images as space-separated paths
         if control_image:
-            params["control_image"] = str(control_image)
+            if isinstance(control_image, list):
+                params["control_images"] = [str(p) for p in control_image]
+            else:
+                params["control_images"] = [str(control_image)]
         
         # ====== LOGGING ======
         self._log_generation_start(model, params)
@@ -277,14 +281,16 @@ class QwenImageGenerator:
             cmd.extend([mapping["lora_path"], params["lora_path"]])
             cmd.extend([mapping["lora_multiplier"], str(params.get("lora_multiplier", 1.0))])
         
-        # Control image (edit mode)
-        if params.get("control_image"):
+        # Control images (edit mode) - musubi uses space-separated paths
+        if params.get("control_images"):
             # Add conditional flags for edit mode
             conditional = self.cli_flags.get("conditional", {})
             if "edit_mode" in conditional:
                 cmd.extend(conditional["edit_mode"])
             if "control_image" in mapping:
-                cmd.extend([mapping["control_image"], params["control_image"]])
+                # Add the flag once, followed by ALL image paths as separate args
+                cmd.append(mapping["control_image"])
+                cmd.extend(params["control_images"])
         
         # Add always-on flags from tool config
         always_flags = self.cli_flags.get("always", [])
@@ -374,9 +380,10 @@ class QwenImageGenerator:
         print(f"    flow_shift: {params.get('flow_shift', 'auto')}")
         print(f"    blocks_to_swap: {params.get('blocks_to_swap')}")
         
-        if params.get("control_image"):
-            print(f"\n  Control Image:")
-            print(f"    path: {params['control_image']}")
+        if params.get("control_images"):
+            print(f"\n  Control Images ({len(params['control_images'])}):")
+            for i, img in enumerate(params["control_images"], 1):
+                print(f"    [{i}] {img}")
         
         if params.get("lora_path"):
             print(f"\n  LoRA:")
