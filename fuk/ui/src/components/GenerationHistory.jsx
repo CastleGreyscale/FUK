@@ -9,12 +9,65 @@ import { buildImageUrl, API_URL } from '../utils/constants';
 
 
 
-// Draggable thumbnail component
-function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned }) {
-  const [imageError, setImageError] = useState(false);
-  const [isHovering, setIsHovering] = useState(false);
-  const videoRef = useRef(null);
+// Hover preview popup component
+function HoverPreview({ generation, position }) {
+  const isVideo = generation.type === 'video' || generation.type === 'interpolate' || 
+                  (generation.type === 'preprocess' && generation.subtype === 'video');
+  const isSequence = generation.isSequence;
+  const previewUrl = buildImageUrl(generation.preview);
+  const displayName = generation.name || generation.id || 'Unknown';
   
+  // Calculate position - keep popup in viewport
+  const style = {
+    position: 'fixed',
+    left: position.x + 16,
+    top: position.y - 100,
+    zIndex: 9999,
+  };
+  
+  // Clamp to viewport
+  if (style.left + 320 > window.innerWidth) {
+    style.left = position.x - 336; // Show on left side instead
+  }
+  if (style.top < 8) {
+    style.top = 8;
+  }
+  if (style.top + 200 > window.innerHeight) {
+    style.top = window.innerHeight - 208;
+  }
+  
+  return (
+    <div className="gen-history-hover-preview" style={style}>
+      <div className="gen-history-hover-media">
+        {isSequence ? (
+          <img src={previewUrl} alt={displayName} />
+        ) : isVideo ? (
+          <video 
+            src={previewUrl}
+            autoPlay
+            muted
+            loop
+            playsInline
+          />
+        ) : (
+          <img src={previewUrl} alt={displayName} />
+        )}
+      </div>
+      <div className="gen-history-hover-info">
+        <span className="gen-history-hover-name">{displayName}</span>
+        <span className="gen-history-hover-time">{generation.timestamp}</span>
+        {generation.subtype && (
+          <span className="gen-history-hover-subtype">{generation.subtype}</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Draggable thumbnail component
+function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned, onHover, onHoverEnd }) {
+  const [imageError, setImageError] = useState(false);
+  const videoRef = useRef(null);
   const isVideo = generation.type === 'video' || 
                   generation.type === 'interpolate' || 
                   (generation.type === 'preprocess' && generation.subtype === 'video') ||
@@ -23,16 +76,6 @@ function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned }) {
   const previewUrl = buildImageUrl(generation.preview);
   const thumbnailUrl = generation.thumbnailUrl ? buildImageUrl(generation.thumbnailUrl) : null;
   const displayName = generation.name || generation.id || 'Unknown';
-  
-  // Clean up video when hover ends
-  const handleMouseLeave = () => {
-    setIsHovering(false);
-    if (videoRef.current) {
-      videoRef.current.pause();
-      videoRef.current.src = '';
-      videoRef.current.load(); // Force unload
-    }
-  };
   
   // Get the primary content type icon (Camera or Film)
   const getContentTypeIcon = () => {
@@ -171,6 +214,19 @@ function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned }) {
     document.body.appendChild(img);
     e.dataTransfer.setDragImage(img, 40, 40);
     setTimeout(() => document.body.removeChild(img), 0);
+    
+    // Hide hover preview when dragging starts
+    if (onHoverEnd) onHoverEnd();
+  };
+  
+  const handleMouseMove = (e) => {
+    if (onHover) {
+      onHover(generation, { x: e.clientX, y: e.clientY });
+    }
+  };
+  
+  const handleMouseLeave = () => {
+    if (onHoverEnd) onHoverEnd();
   };
 
   return (
@@ -178,6 +234,8 @@ function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned }) {
       className={`gen-history-item ${isPinned ? 'pinned' : ''}`}
       draggable
       onDragStart={handleDragStart}
+      onMouseMove={handleMouseMove}
+      onMouseLeave={handleMouseLeave}
       title={generation.sourcePath 
         ? `Drag to use as input\n${displayName}\nSource: ${generation.sourcePath}\n${generation.timestamp}`
         : `Drag to use as input\n${displayName}\n${generation.timestamp}`
@@ -198,32 +256,24 @@ function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned }) {
               </div>
             </div>
           ) : isVideo ? (
-            // Video: show thumbnail when not hovering, video when hovering
-            <div
-              style={{ width: '100%', height: '100%', position: 'relative' }}
-              onMouseEnter={() => setIsHovering(true)}
-              onMouseLeave={handleMouseLeave}
-            >
-              {!isHovering && thumbnailUrl ? (
-                // Show thumbnail image when not hovering
-                <img 
-                  src={thumbnailUrl} 
-                  alt={displayName}
-                  onError={() => setImageError(true)}
-                />
-              ) : (
-                // Show video when hovering (or if no thumbnail available)
-                <video 
-                  ref={videoRef}
-                  src={isHovering ? previewUrl : ''}
-                  muted
-                  loop
-                  preload="none"
-                  autoPlay={isHovering}
-                  onError={() => setImageError(true)}
-                />
-              )}
-            </div>
+            <video 
+              src={previewUrl}
+              muted
+              loop
+              preload="none"
+              onMouseEnter={(e) => {
+                // Load and play only on hover
+                if (e.target.readyState === 0) {
+                  e.target.load();
+                }
+                e.target.play().catch(() => {});
+              }}
+              onMouseLeave={(e) => { 
+                e.target.pause(); 
+                e.target.currentTime = 0;
+              }}
+              onError={() => setImageError(true)}
+            />
           ) : (
             <img 
               src={previewUrl} 
@@ -301,6 +351,36 @@ export default function GenerationHistory({ project, collapsed, onToggle }) {
   const [error, setError] = useState(null);
   const [hasMore, setHasMore] = useState(false);
   const [daysLoaded, setDaysLoaded] = useState(1);
+  
+  // Hover preview state
+  const [hoveredItem, setHoveredItem] = useState(null);
+  const [hoverPosition, setHoverPosition] = useState({ x: 0, y: 0 });
+  const hoverTimeoutRef = useRef(null);
+  
+  const handleItemHover = useCallback((generation, position) => {
+    // Clear any pending timeout
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+    }
+    
+    // Show immediately if already showing, otherwise delay slightly
+    if (hoveredItem) {
+      setHoveredItem(generation);
+      setHoverPosition(position);
+    } else {
+      hoverTimeoutRef.current = setTimeout(() => {
+        setHoveredItem(generation);
+        setHoverPosition(position);
+      }, 300); // 300ms delay before showing
+    }
+  }, [hoveredItem]);
+  
+  const handleItemHoverEnd = useCallback(() => {
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+    }
+    setHoveredItem(null);
+  }, []);
   
   // Pinned items stored in localStorage
   const [pinnedIds, setPinnedIds] = useState(() => {
@@ -543,6 +623,8 @@ export default function GenerationHistory({ project, collapsed, onToggle }) {
                       onDelete={handleDelete}
                       onTogglePin={handleTogglePin}
                       isPinned={true}
+                      onHover={handleItemHover}
+                      onHoverEnd={handleItemHoverEnd}
                     />
                   ))}
                 </div>
@@ -562,6 +644,8 @@ export default function GenerationHistory({ project, collapsed, onToggle }) {
                     onDelete={handleDelete}
                     onTogglePin={handleTogglePin}
                     isPinned={false}
+                    onHover={handleItemHover}
+                    onHoverEnd={handleItemHoverEnd}
                   />
                 ))}
               </div>
@@ -583,8 +667,16 @@ export default function GenerationHistory({ project, collapsed, onToggle }) {
       </div>
 
       <div className="gen-history-hint">
-        Drag items to input fields Click bookmark to pin
+        Drag items to input fields • Click bookmark to pin
       </div>
+      
+      {/* Hover preview popup */}
+      {hoveredItem && (
+        <HoverPreview 
+          generation={hoveredItem} 
+          position={hoverPosition} 
+        />
+      )}
     </div>
   );
 }
