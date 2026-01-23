@@ -7,6 +7,7 @@
 import { useEffect, useCallback, useMemo, useRef } from 'react';
 import { Camera, CheckCircle, X, Pipeline } from '../../src/components/Icons';
 import MediaUploader from '../components/MediaUploader';
+import ZoomableImage from '../components/ZoomableImage';
 import SeedControl from '../components/SeedControl';
 import { useGeneration } from '../hooks/useGeneration';
 import { useLocalStorage } from '../../src/hooks/useLocalStorage';
@@ -216,7 +217,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
         <div className="fuk-preview-single">
           {previewImage ? (
             <div className="fuk-preview-container">
-              <img
+              <ZoomableImage
                 src={buildImageUrl(previewImage)}
                 alt="Generated"
                 className="fuk-preview-media"

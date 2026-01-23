@@ -27,6 +27,13 @@
   position: relative;
 }
 
+/* Padded variant for grid layouts (Layers tab) */
+.fuk-preview-container--padded {
+  align-items: flex-start;
+  overflow-y: auto;
+  padding: 0.5rem;
+}
+
 /* Single media preview (Image/Video tabs) */
 .fuk-preview-single {
   display: flex;
@@ -78,15 +85,23 @@
   color: #6b7280;
 }
 
-/* Grid layout (Layers tab) */
+/* Grid layout (Layers tab) - max 2 columns, stacks on smaller screens */
 .fuk-preview-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(2, 1fr);
   gap: 1rem;
   width: 100%;
-  height: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
   align-content: start;
   padding: 1rem;
+  overflow-y: auto;
+}
+
+@media (max-width: 800px) {
+  .fuk-preview-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* Centered content layout (Export tab) */
@@ -96,6 +111,7 @@
   display: flex;
   flex-direction: column;
   padding: 1rem;
+  overflow: hidden;
 }
 
 .fuk-preview-main {
@@ -103,6 +119,23 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  min-height: 0; /* Allow flex shrinking */
+  max-height: 100%;
+  overflow: hidden;
+}
+
+/* Constrain images/videos in export preview */
+.fuk-preview-main .fuk-media-frame {
+  max-height: 100%;
+  max-width: 100%;
+}
+
+.fuk-preview-main .zoomable-image-container {
+  max-height: 100%;
+}
+
+.fuk-preview-main .zoomable-image {
+  max-height: 60vh; /* Ensure it doesn't exceed viewport */
 }
 
 /* ============================================================================

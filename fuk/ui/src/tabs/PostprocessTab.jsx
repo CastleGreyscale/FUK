@@ -12,6 +12,7 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { Enhance, Loader2, CheckCircle, Camera, Film, AlertCircle } from '../components/Icons';
 import MediaUploader, { isVideoFile } from '../components/MediaUploader';
+import ZoomableImage from '../components/ZoomableImage';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { buildImageUrl } from '../utils/constants';
 import Footer from '../components/Footer';
@@ -488,7 +489,7 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                     preload="metadata"
                   />
                 ) : (
-                  <img
+                  <ZoomableImage
                     src={buildImageUrl(sourceInput)}
                     alt="Input"
                     className="fuk-preview-media--constrained"
@@ -543,7 +544,7 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
             {result ? (
               <div className="fuk-media-frame fuk-media-frame--success">
                 {result.type === 'image' ? (
-                  <img
+                  <ZoomableImage
                     src={buildImageUrl(result.url)}
                     alt="Processed"
                     className="fuk-preview-media--constrained"

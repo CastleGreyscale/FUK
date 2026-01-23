@@ -2,7 +2,7 @@
  * Preprocess Tab
  * Image/Video preprocessing for control inputs: Canny, OpenPose, Depth
  * Supports both single images and frame-by-frame video processing
- * 
+000 * 
  * Features:
  * - Persists last result in project state for cross-tab restoration
  * - On-demand loading of previews to prevent UI hangs
@@ -11,6 +11,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Pipeline, CheckCircle, Camera, Film, AlertCircle, Folder } from '../components/Icons';
 import MediaUploader, { isVideoFile } from '../components/MediaUploader';
+import ZoomableImage from '../components/ZoomableImage';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { buildImageUrl } from '../utils/constants';
 import Footer from '../components/Footer';
@@ -514,7 +515,7 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
       return (
         <div className="fuk-media-frame fuk-media-frame--success">
           {result.url ? (
-            <img
+            <ZoomableImage
               src={buildImageUrl(result.url)}
               alt={`${methodTitle} Preview (Frame 1)`}
               className="fuk-preview-media--constrained"
@@ -560,7 +561,7 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
     // Image output
     return (
       <div className="fuk-media-frame fuk-media-frame--success">
-        <img
+        <ZoomableImage
           src={buildImageUrl(result.url)}
           alt="Processed"
           className="fuk-preview-media--constrained"
@@ -598,7 +599,7 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
                   preload="metadata"
                 />
               ) : (
-                <img
+                <ZoomableImage
                   src={buildImageUrl(sourceInput)}
                   alt="Source"
                   className="fuk-preview-media fuk-preview-media--constrained"

@@ -7,6 +7,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import { CheckCircle, Download, AlertCircle, Film , Folder} from '../components/Icons';
 import InlineImageInput from '../components/InlineImageInput';
+import ZoomableImage from '../components/ZoomableImage';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { buildImageUrl, API_URL } from '../utils/constants';
 import Footer from '../components/Footer';
@@ -279,7 +280,7 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
                     className="fuk-media-preview"
                   />
                 ) : (
-                  <img
+                  <ZoomableImage
                     src={buildImageUrl(mainPreview)}
                     alt="Preview"
                     className="fuk-preview-media fuk-preview-media--constrained"

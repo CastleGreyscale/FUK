@@ -12,6 +12,7 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import {CheckCircle, Layers, AlertCircle, Film } from '../components/Icons';
 import MediaUploader, { isVideoFile } from '../components/MediaUploader';
+import ZoomableImage from '../components/ZoomableImage';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { buildImageUrl } from '../utils/constants';
 import Footer from '../components/Footer';
@@ -327,7 +328,7 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
                         className="fuk-layer-card-media"
                       />
                     ) : (
-                      <img
+                      <ZoomableImage
                         src={buildImageUrl(layerData.url)}
                         alt={layerName}
                         className="fuk-layer-card-media"
