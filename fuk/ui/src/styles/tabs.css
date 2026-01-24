@@ -145,7 +145,7 @@
 .fuk-media-frame {
   max-width: 100%;
   max-height: 100%;
-  border-radius: 0.5rem;
+  /*border-radius: 0.5rem;*/
   border: 1px solid #374151;
   overflow: hidden;
   background: #000;
@@ -176,7 +176,7 @@
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
-  border-radius: 0.5rem;
+  /*border-radius: 0.5rem;*/
   border: 1px solid #374151;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
 }

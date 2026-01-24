@@ -1,0 +1,166 @@
+/**
+ * VideoSyncController Styles
+ * Unified playback bar for synchronized video comparison
+ */
+
+.video-sync-controller {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 1rem;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+  border-radius: var(--radius-lg, 0.5rem);
+  border: 1px solid var(--color-border, #374151);
+}
+
+/* Control buttons group */
+.video-sync-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.video-sync-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: var(--radius-md, 0.375rem);
+  color: #d1d5db;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.video-sync-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+}
+
+.video-sync-btn--primary {
+  width: 2.5rem;
+  height: 2.5rem;
+  background: var(--color-accent, #a855f7);
+  border-color: var(--color-accent, #a855f7);
+  color: #fff;
+}
+
+.video-sync-btn--primary:hover {
+  background: var(--color-accent-hover, #9333ea);
+  border-color: var(--color-accent-hover, #9333ea);
+}
+
+.video-sync-icon {
+  width: 1rem;
+  height: 1rem;
+}
+
+.video-sync-btn--primary .video-sync-icon {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+/* Scrubber/timeline */
+.video-sync-scrubber {
+  flex: 1;
+  height: 1.5rem;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  padding: 0 0.25rem;
+}
+
+.video-sync-track {
+  position: relative;
+  width: 100%;
+  height: 0.375rem;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: var(--radius-full, 9999px);
+}
+
+.video-sync-progress {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background: linear-gradient(to right, var(--color-accent, #a855f7), #ec4899);
+  border-radius: var(--radius-full, 9999px);
+  transition: width 0.05s linear;
+}
+
+.video-sync-handle {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 0.875rem;
+  height: 0.875rem;
+  background: #fff;
+  border: 2px solid var(--color-accent, #a855f7);
+  border-radius: 50%;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.video-sync-scrubber:hover .video-sync-handle,
+.video-sync-controller:active .video-sync-handle {
+  opacity: 1;
+}
+
+/* Time display */
+.video-sync-time {
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+  color: #9ca3af;
+  white-space: nowrap;
+  min-width: 5.5rem;
+  text-align: right;
+}
+
+.video-sync-time-sep {
+  margin: 0 0.125rem;
+  color: #6b7280;
+}
+
+/* Video display area - videos shown side by side above controls */
+.video-sync-display {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+}
+
+.video-sync-display video {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: var(--radius-md, 0.375rem);
+}
+
+/* Responsive */
+@media (max-width: 640px) {
+  .video-sync-controller {
+    gap: 0.5rem;
+    padding: 0.375rem 0.75rem;
+  }
+  
+  .video-sync-btn {
+    width: 1.75rem;
+    height: 1.75rem;
+  }
+  
+  .video-sync-btn--primary {
+    width: 2rem;
+    height: 2rem;
+  }
+  
+  .video-sync-time {
+    font-size: 0.65rem;
+    min-width: 4.5rem;
+  }
+}

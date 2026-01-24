@@ -1,44 +1,41 @@
 /**
  * ZoomableImage Styles
- * Hover-to-zoom with pan functionality
  * 
- * KEY PRINCIPLE: The container behaves like a regular <img> element -
- * it sizes based on its content with max constraints, NOT forced to fill parent.
+ * KEY TRICK: Container uses display:contents normally (invisible to layout).
+ * On hover, it becomes a positioned box with explicit dimensions from JS.
+ * 
+ * This means: in normal state, the <img> sizing works EXACTLY like a plain <img>.
+ * Events are on the image since display:contents has no box.
  */
 
-/* Base container - behaves like an inline image */
-.zoomable-image-container {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-  cursor: zoom-in;
-  border-radius: var(--radius-lg, 0.5rem);
-  background: #000;
-  /* Size is determined by the image inside + any max constraints from className */
-  /* DO NOT set width/height: 100% here - that breaks natural sizing */
+/* Normal state: container is invisible, image behaves like regular <img> */
+.zoomable-container {
+  display: contents; /* Doesn't participate in layout - image inherits parent context */
 }
 
-.zoomable-image-container.zooming {
+/* Zooming state: container becomes a sized box to clip the zoomed image */
+.zoomable-container--zooming {
+  display: block;
+  position: relative;
+  overflow: hidden;
+  /* Width/height set via inline style from JS (locked to image size) */
+}
+
+/* Image: className prop applies here, so all your existing classes work */
+.zoomable-img {
+  display: block;
+  cursor: zoom-in;
+  user-select: none;
+  /* NO transition - transform must be instant to prevent jitter at clip edges */
+}
+
+/* When zooming, change cursor */
+.zoomable-container--zooming .zoomable-img {
   cursor: crosshair;
 }
 
-/* The image inside - normal state matches regular preview images */
-.zoomable-image {
-  display: block;
-  max-width: 100%;
-  max-height: 100%;
-  width: auto;
-  height: auto;
-  object-fit: contain;
-  transition: transform 0.1s ease-out;
-  pointer-events: none;
-  user-select: none;
-}
-
-/* Zoom level indicator */
-.zoomable-zoom-indicator {
+/* Zoom indicator */
+.zoomable-indicator {
   position: absolute;
   bottom: 0.5rem;
   right: 0.5rem;
@@ -47,89 +44,8 @@
   font-size: 0.65rem;
   font-weight: 600;
   padding: 0.25rem 0.5rem;
-  border-radius: var(--radius-sm, 0.25rem);
+  border-radius: 0.00rem;
   pointer-events: none;
   font-family: ui-monospace, monospace;
   z-index: 10;
-}
-
-/* ============================================================================
- * PREVIEW MEDIA CLASSES - Apply these to ZoomableImage like you would to <img>
- * These control the max size constraints
- * ========================================================================== */
-
-/* Full preview for single media display (ImageTab, VideoTab) */
-.zoomable-image-container.fuk-preview-media {
-  max-width: 100%;
-  max-height: 100%;
-  border: 1px solid var(--color-border, #374151);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-}
-
-/* Constrained preview for side-by-side comparisons (PreprocessTab, PostprocessTab) */
-.zoomable-image-container.fuk-preview-media--constrained {
-  max-width: 100%;
-  max-height: 400px;
-  border: 1px solid var(--color-border, #374151);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
-}
-
-/* ============================================================================
- * CONTEXT-SPECIFIC OVERRIDES
- * When ZoomableImage is inside certain containers, apply specific sizing
- * ========================================================================== */
-
-/* Inside .fuk-preview-container (ImageTab single preview) */
-.fuk-preview-container .zoomable-image-container {
-  /* Container centers it, image sizes naturally with max constraints */
-  max-width: 100%;
-  max-height: 100%;
-}
-
-/* Inside .fuk-preview-pane (PreprocessTab, PostprocessTab side-by-side) */
-.fuk-preview-pane .zoomable-image-container {
-  max-width: 100%;
-  max-height: 100%;
-}
-
-/* Inside a media frame - let the frame control size, remove duplicate styling */
-.fuk-media-frame .zoomable-image-container {
-  max-width: 100%;
-  max-height: 100%;
-  border: none;
-  box-shadow: none;
-  border-radius: 0;
-}
-
-/* Inside .fuk-preview-main (ExportTab main preview area) */
-.fuk-preview-main .zoomable-image-container {
-  max-width: 100%;
-  max-height: 100%;
-}
-
-/* Layer card variant - image fills the card body */
-.fuk-layer-card-body .zoomable-image-container {
-  width: 100%;
-  display: flex;
-  border-radius: 0;
-}
-
-.fuk-layer-card-body .zoomable-image-container .zoomable-image {
-  width: 100%;
-  height: auto;
-  max-height: none;
-}
-
-/* ============================================================================
- * RESPONSIVE
- * ========================================================================== */
-
-@media (max-width: 1024px) {
-  .zoomable-image-container.fuk-preview-media--constrained {
-    max-height: 250px;
-  }
-  
-  .fuk-preview-pane .zoomable-image-container {
-    max-height: 250px;
-  }
 }

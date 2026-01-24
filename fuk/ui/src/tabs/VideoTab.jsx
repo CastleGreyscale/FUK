@@ -68,6 +68,7 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
     scale_factor: 1.0,
     source_width: null,  // From input image
     source_height: null, // From input image
+    control_path: null,  // For Fun Control mode
   }), [defaults]);
   
   // Fallback localStorage for when no project is loaded
@@ -246,6 +247,7 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
       seed: effectiveSeed,
       image_path: formData.image_path ? formData.image_path.replace(/^\/outputs\//, '').replace(/^\//, '') : null,
       end_image_path: formData.end_image_path ? formData.end_image_path.replace(/^\/outputs\//, '').replace(/^\//, '') : null,
+      control_path: formData.control_path ? formData.control_path.replace(/^\/outputs\//, '').replace(/^\//, '') : null,
     };
     
     console.log('Video generation payload:', payload);
@@ -274,9 +276,15 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
     setFormData(prev => ({ ...prev, end_image_path: paths[0] || null }));
   };
 
-  // Check if task requires images
+  const handleControlPathChange = (paths) => {
+    setFormData(prev => ({ ...prev, control_path: paths[0] || null }));
+  };
+
+  // Check if task requires images or control video
+  const isFunControl = formData.task.includes('-FC');
   const requiresStartImage = formData.task.includes('i2v') || formData.task.includes('flf2v');
   const requiresEndImage = formData.task.includes('flf2v');
+  const requiresControlVideo = isFunControl;
   
   // Calculate whether current frame input is valid
   const currentFrameValid = (parseInt(frameInput) - 1) % 4 === 0;
@@ -349,18 +357,45 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
         <div className="fuk-settings-grid">
           {/* Input Images Card */}
           <div className="fuk-card">
-            <h3 className="fuk-card-title fuk-mb-3">Input Images</h3>
+            <h3 className="fuk-card-title fuk-mb-3">
+              {isFunControl ? 'Control Inputs' : 'Input Images'}
+            </h3>
             
-            {requiresStartImage ? (
+            {/* Control Video for Fun Control mode */}
+            {requiresControlVideo && (
+              <div className="fuk-form-group-compact">
+                <label className="fuk-label">
+                  Control Video <span className="fuk-label-required">(Required)</span>
+                </label>
+                <MediaUploader
+                  images={formData.control_path ? [formData.control_path] : []}
+                  onImagesChange={handleControlPathChange}
+                  disabled={generating}
+                  multiple={false}
+                  accept="all"
+                  label="Drop video or click to browse"
+                />
+                <p className="fuk-help-text">
+                  Video or image sequence for pose/motion control
+                </p>
+              </div>
+            )}
+            
+            {/* Start Image - for I2V modes (optional in Fun Control) */}
+            {(requiresStartImage || isFunControl) ? (
               <>
-                <div className="fuk-form-group-compact">
+                <div className={`fuk-form-group-compact ${requiresControlVideo ? 'fuk-mt-4' : ''}`}>
                   <label className="fuk-label">
-                    Start Image <span className="fuk-label-required">(Required)</span>
+                    Start Image 
+                    {!isFunControl && <span className="fuk-label-required">(Required)</span>}
+                    {isFunControl && <span className="fuk-label-description">(Optional)</span>}
                   </label>
                   <MediaUploader
                     images={formData.image_path ? [formData.image_path] : []}
                     onImagesChange={handleStartImageChange}
                     disabled={generating}
+                    multiple={false}
+                    accept="all"
                   />
                   {formData.source_width && (
                     <p className="fuk-help-text">
@@ -378,6 +413,8 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
                       images={formData.end_image_path ? [formData.end_image_path] : []}
                       onImagesChange={handleEndImageChange}
                       disabled={generating}
+                      multiple={false}
+                      accept="all"
                     />
                   </div>
                 )}
@@ -386,7 +423,7 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
               <div className="fuk-empty-state">
                 <Film className="fuk-empty-state-icon" />
                 <p className="fuk-empty-state-text">
-                  Select an I2V or FLF2V model<br />to enable image inputs
+                  Select an I2V, FLF2V, or Fun Control model<br />to enable control inputs
                 </p>
               </div>
             )}
@@ -627,7 +664,12 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
         elapsedSeconds={elapsedSeconds}
         onGenerate={handleGenerate}
         onCancel={cancel}
-        canGenerate={!!formData.prompt && (!requiresStartImage || !!formData.image_path) && (!requiresEndImage || !!formData.end_image_path)}
+        canGenerate={
+          !!formData.prompt && 
+          (!requiresStartImage || isFunControl || !!formData.image_path) && 
+          (!requiresEndImage || !!formData.end_image_path) &&
+          (!requiresControlVideo || !!formData.control_path)
+        }
         generateLabel="Generate Video"
         generatingLabel="Generating..."
       />

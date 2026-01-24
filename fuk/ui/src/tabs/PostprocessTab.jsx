@@ -489,7 +489,7 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                     preload="metadata"
                   />
                 ) : (
-                  <ZoomableImage
+                  <img
                     src={buildImageUrl(sourceInput)}
                     alt="Input"
                     className="fuk-preview-media--constrained"
@@ -544,7 +544,7 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
             {result ? (
               <div className="fuk-media-frame fuk-media-frame--success">
                 {result.type === 'image' ? (
-                  <ZoomableImage
+                  <img
                     src={buildImageUrl(result.url)}
                     alt="Processed"
                     className="fuk-preview-media--constrained"

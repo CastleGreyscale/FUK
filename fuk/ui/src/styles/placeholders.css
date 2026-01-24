@@ -9,7 +9,7 @@
 
 .fuk-placeholder-card {
   background-color: var(--color-transparent);
-  border-radius: var(--radius-lg);
+  /*border-radius: var(--radius-lg); */
   border: var(--border-width-thick) dashed var(--color-border);
   display: flex;
   align-items: center;

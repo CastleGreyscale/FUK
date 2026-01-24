@@ -328,7 +328,7 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
                         className="fuk-layer-card-media"
                       />
                     ) : (
-                      <ZoomableImage
+                      <img
                         src={buildImageUrl(layerData.url)}
                         alt={layerName}
                         className="fuk-layer-card-media"

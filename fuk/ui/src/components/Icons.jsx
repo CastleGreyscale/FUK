@@ -216,3 +216,36 @@ export const SequenceIcon = ({ className, style }) => (
     <line x1="18" y1="15" x2="22" y2="15" strokeWidth={1.5} />
   </svg>
 );
+
+// Add these icons to your Icons.jsx file
+
+// Play icon (for video controls)
+export const Play = ({ className, style }) => (
+  <svg className={className} style={style} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <polygon points="5,3 19,12 5,21" fill="currentColor" strokeWidth={0} />
+  </svg>
+);
+
+// Pause icon (for video controls)
+export const Pause = ({ className, style }) => (
+  <svg className={className} style={style} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <rect x="6" y="4" width="4" height="16" fill="currentColor" strokeWidth={0} />
+    <rect x="14" y="4" width="4" height="16" fill="currentColor" strokeWidth={0} />
+  </svg>
+);
+
+// Skip Back icon (for video controls)
+export const SkipBack = ({ className, style }) => (
+  <svg className={className} style={style} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <polygon points="11,19 2,12 11,5" fill="currentColor" strokeWidth={0} />
+    <polygon points="22,19 13,12 22,5" fill="currentColor" strokeWidth={0} />
+  </svg>
+);
+
+// Skip Forward icon (for video controls)
+export const SkipForward = ({ className, style }) => (
+  <svg className={className} style={style} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <polygon points="13,19 22,12 13,5" fill="currentColor" strokeWidth={0} />
+    <polygon points="2,19 11,12 2,5" fill="currentColor" strokeWidth={0} />
+  </svg>
+);

@@ -2,10 +2,8 @@
  * Preprocess Tab
  * Image/Video preprocessing for control inputs: Canny, OpenPose, Depth
  * Supports both single images and frame-by-frame video processing
-000 * 
- * Features:
- * - Persists last result in project state for cross-tab restoration
- * - On-demand loading of previews to prevent UI hangs
+ * 
+ * Updated: VideoSyncController for synchronized video comparison
  */
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
@@ -103,21 +101,23 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
   useEffect(() => {
     // Only run when this tab is active
     if (activeTab !== 'preprocess') return;
-    
+    if (hasRestoredRef.current) return;
     // Skip if we already have a result (user is actively working)
     if (result) return;
     
     const lastState = project?.projectState?.lastState;
     if (!lastState?.lastPreprocessPreview) return;
     
+  
     // Restore the preview and metadata
     const meta = lastState.lastPreprocessMeta || {};
-    
+
     console.log('[PreprocessTab] Restoring from lastState:', {
       preview: lastState.lastPreprocessPreview,
       meta
     });
     
+    hasRestoredRef.current = true;
     // Set flag to prevent handleSourceInputChange from clearing result
     isRestoringRef.current = true;
     
@@ -144,10 +144,11 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
       isRestoringRef.current = false;
     }, 100);
     
-  }, [activeTab, project?.projectState?.lastState, result]);
+  }, [activeTab, project?.projectState?.lastState]);
   
   // Reset state when project file changes
   useEffect(() => {
+    hasRestoredRef.current = false;
     setResult(null);
     setSourceInput(null);
     setError(null);
