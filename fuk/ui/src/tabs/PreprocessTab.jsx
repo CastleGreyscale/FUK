@@ -101,8 +101,6 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
   useEffect(() => {
     // Only run when this tab is active
     if (activeTab !== 'preprocess') return;
-    if (hasRestoredRef.current) return;
-    // Skip if we already have a result (user is actively working)
     if (result) return;
     
     const lastState = project?.projectState?.lastState;
@@ -144,11 +142,10 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
       isRestoringRef.current = false;
     }, 100);
     
-  }, [activeTab, project?.projectState?.lastState]);
+  }, [activeTab, project?.projectState?.lastState, result]);
   
   // Reset state when project file changes
   useEffect(() => {
-    hasRestoredRef.current = false;
     setResult(null);
     setSourceInput(null);
     setError(null);
@@ -282,6 +279,15 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
           activeTab: 'preprocess',
         });
       }
+      
+      // Notify history to refresh
+      window.dispatchEvent(new CustomEvent('fuk-generation-complete', {
+        detail: { 
+          type: 'preprocess',
+          method: selectedMethod,
+          result: data,
+        }
+      }));
       
     } catch (err) {
       console.error('Preprocessing error:', err);

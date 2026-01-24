@@ -266,6 +266,13 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
           activeTab: 'layers',
         });
       }
+      // Notify history to refresh  
+      window.dispatchEvent(new CustomEvent('fuk-generation-complete', {
+        detail: { 
+          type: 'layers',
+          result: result,
+        }
+      }));
       
     } catch (err) {
       console.error('Layer generation failed:', err);
