@@ -541,6 +541,76 @@ class PreprocessorManager:
                 results['crypto'] = {'error': str(e)}
         
         return results
+    
+    # =========================================================================
+    # VRAM Management
+    # =========================================================================
+    
+    def clear_caches(self, models: Optional[list] = None):
+        """
+        Unload preprocessor models from VRAM
+        
+        Call this after video processing to free VRAM for other tasks.
+        
+        Args:
+            models: List of model types to clear ('depth', 'normals', 'crypto', 'openpose', 'canny')
+                   If None, clears ALL cached models.
+        
+        Example:
+            manager.clear_caches()  # Clear all
+            manager.clear_caches(['depth'])  # Clear only depth models
+        """
+        import gc
+        import torch
+        
+        cleared = []
+        
+        # Clear specific or all models
+        clear_all = models is None
+        models = models or ['depth', 'normals', 'crypto', 'openpose', 'canny']
+        
+        if ('depth' in models or clear_all) and self._depth_cache:
+            for model_type, preprocessor in self._depth_cache.items():
+                preprocessor.unload()
+                cleared.append(f"depth:{model_type.value}")
+            self._depth_cache.clear()
+        
+        if ('normals' in models or clear_all) and self._normals_cache:
+            for cache_key, preprocessor in self._normals_cache.items():
+                preprocessor.unload()
+                cleared.append(f"normals:{cache_key}")
+            self._normals_cache.clear()
+        
+        if ('crypto' in models or clear_all) and self._crypto_cache:
+            for model_type, preprocessor in self._crypto_cache.items():
+                preprocessor.unload()
+                cleared.append(f"crypto:{model_type.value}")
+            self._crypto_cache.clear()
+        
+        if ('openpose' in models or clear_all) and self._openpose is not None:
+            self._openpose.unload()
+            self._openpose = None
+            cleared.append("openpose")
+        
+        if ('canny' in models or clear_all) and self._canny is not None:
+            # Canny doesn't use GPU, but clear for consistency
+            self._canny = None
+            cleared.append("canny")
+        
+        # Force garbage collection and CUDA cache clear
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+            
+            allocated = torch.cuda.memory_allocated() / (1024**3)
+            reserved = torch.cuda.memory_reserved() / (1024**3)
+            print(f"[PreprocessorManager] VRAM after clear - Allocated: {allocated:.2f}GB, Reserved: {reserved:.2f}GB")
+        
+        if cleared:
+            print(f"[PreprocessorManager] Cleared caches: {', '.join(cleared)}")
+        else:
+            print(f"[PreprocessorManager] No models to clear")
 
 
 # ============================================================================

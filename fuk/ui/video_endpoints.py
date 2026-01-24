@@ -535,6 +535,9 @@ def setup_video_routes(
                 },
             )
 
+            # Clear preprocessor caches to free VRAM after video processing
+            # Video preprocessing is memory-intensive, so unload models when done
+            preprocessor_manager.clear_caches([request.method])
             clear_vram()
 
             return {
@@ -556,6 +559,8 @@ def setup_video_routes(
         except Exception as e:
             if gen_dir:
                 cleanup_failed_generation(gen_dir, reason=str(e))
+            # Clear caches on error too
+            preprocessor_manager.clear_caches([request.method])
             clear_vram()
             log.exception("VideoPreprocess", e)
             raise HTTPException(status_code=500, detail=str(e))

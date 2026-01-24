@@ -94,3 +94,14 @@ class OpenPosePreprocessor(BasePreprocessor):
             "method": "openpose",
             "parameters": params,
         }
+    
+    def unload(self):
+        """
+        Unload OpenPose model from VRAM
+        """
+        if self.processor is not None:
+            del self.processor
+            self.processor = None
+        
+        # Call base cleanup
+        super().unload()

@@ -266,3 +266,20 @@ class NormalsPreprocessor(BasePreprocessor):
             return self._normals_from_depth(image_path, intensity)
         else:
             return self._normals_from_dsine(image)
+    
+    def unload(self):
+        """
+        Unload normals models from VRAM
+        
+        Handles both DSINE model and depth processor.
+        """
+        if self.model is not None:
+            del self.model
+            self.model = None
+        
+        if self._depth_processor is not None:
+            self._depth_processor.unload()
+            self._depth_processor = None
+        
+        # Call base cleanup
+        super().unload()

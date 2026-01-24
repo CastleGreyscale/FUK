@@ -69,6 +69,29 @@ class BasePreprocessor(ABC):
             self._initialize()
             self._initialized = True
     
+    def unload(self):
+        """
+        Unload model from VRAM
+        
+        Subclasses should override to delete specific model attributes.
+        Base implementation handles common cleanup.
+        """
+        import gc
+        
+        # Subclasses should delete their model references
+        # This base implementation handles the cleanup after
+        self._initialized = False
+        
+        # Force garbage collection
+        gc.collect()
+        
+        # Clear CUDA cache if available
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+            
+        print(f"[{self.__class__.__name__}] Unloaded from VRAM")
+    
     def _make_unique_path(
         self, 
         base_path: Path, 

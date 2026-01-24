@@ -514,3 +514,21 @@ class DepthPreprocessor(BasePreprocessor):
         depth = (depth - depth.min()) / (depth.max() - depth.min() + 1e-8)
         
         return depth.astype(np.float32)
+    
+    def unload(self):
+        """
+        Unload depth model from VRAM
+        
+        Properly releases model memory for DA3, DAv2, MiDaS, ZoeDepth.
+        """
+        if self.model is not None:
+            # Delete model reference
+            del self.model
+            self.model = None
+        
+        if self.transform is not None:
+            del self.transform
+            self.transform = None
+        
+        # Call base cleanup (gc.collect, empty_cache)
+        super().unload()

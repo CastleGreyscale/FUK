@@ -108,15 +108,15 @@ class FukLogger:
     
     @classmethod
     def success(cls, category: str, message: str):
-        print(f"{cls.COLORS['green']}[{cls.timestamp()}] ÃƒÂ¢Ã…â€œÃ¢â‚¬Å“ [{category}] {message}{cls.COLORS['end']}")
+        print(f"{cls.COLORS['green']}[{cls.timestamp()}] [{category}] {message}{cls.COLORS['end']}")
     
     @classmethod
     def warning(cls, category: str, message: str):
-        print(f"{cls.COLORS['yellow']}[{cls.timestamp()}] ÃƒÂ¢Ã…Â¡  [{category}] {message}{cls.COLORS['end']}")
+        print(f"{cls.COLORS['yellow']}[{cls.timestamp()}] [{category}] {message}{cls.COLORS['end']}")
     
     @classmethod
     def error(cls, category: str, message: str):
-        print(f"{cls.COLORS['red']}[{cls.timestamp()}] ÃƒÂ¢Ã…â€œÃ¢â‚¬â€ [{category}] {message}{cls.COLORS['end']}")
+        print(f"{cls.COLORS['red']}[{cls.timestamp()}] [{category}] {message}{cls.COLORS['end']}")
     
     @classmethod
     def params(cls, title: str, params: Dict[str, Any]):
@@ -189,7 +189,7 @@ try:
     from core.format_convert import FormatConverter
     from core.preprocessors import PreprocessorManager, DepthModel, NormalsMethod, SAMModel
     from core.postprocessors import PostProcessorManager
-    print("[STARTUP] ÃƒÂ¢Ã…â€œÃ¢â‚¬Å“ Loaded modules from core/")
+    print("[STARTUP] Loaded modules from core/")
 except ImportError as e:
     print(f"\n{'='*60}")
     print("ERROR: Cannot import FUK modules from core/")
@@ -270,7 +270,7 @@ image_generator = create_image_generator(
     vendor_dir=VENDOR_DIR
 )
 
-print("[STARTUP] âœ“ Image generator initialized", flush=True)
+print("[STARTUP] Image generator initialized", flush=True)
 
 
 # Initialize video generator
@@ -278,7 +278,7 @@ video_generator = create_video_generator(
     config_dir=CONFIG_DIR,
     vendor_dir=VENDOR_DIR
 )
-print("[STARTUP] âœ“ Video generator initialized", flush=True)
+print("[STARTUP] Video generator initialized", flush=True)
 
 # ============================================================================
 # Global State
@@ -392,17 +392,17 @@ def resolve_input_path(path_str: str) -> Optional[Path]:
             resolved = cache_root / relative
             print(f"[PATH] Project cache path: {resolved}", flush=True)
             if resolved.exists():
-                print(f"[PATH] ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ File exists in project cache", flush=True)
+                print(f"[PATH] File exists in project cache", flush=True)
                 return resolved
             else:
-                print(f"[PATH] ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã‚Â¡Ãƒâ€š ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¸Ãƒâ€šÃ‚Â  File NOT found in project cache, checking default...", flush=True)
+                print(f"[PATH]  File NOT found in project cache, checking default...", flush=True)
         
         # Fall back to default cache
         if default_cache:
             default_resolved = default_cache / relative
             print(f"[PATH] Default cache path: {default_resolved}", flush=True)
             if default_resolved.exists():
-                print(f"[PATH] ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ File found in default cache (fallback)", flush=True)
+                print(f"[PATH] File found in default cache (fallback)", flush=True)
                 return default_resolved
         
         # If still not found, return project cache path (for creation) or default
@@ -1559,7 +1559,10 @@ async def preprocess_image(request: PreprocessRequest):
         output_path = Path(result["output_path"])
         result["url"] = get_project_relative_url(output_path)
         
-        #print(f"[Preprocess] Complete - {result[\'url\']}")
+        # Clear preprocessor cache to free VRAM
+        # For demo/testing - remove if you want models to stay cached for fast iteration
+        preprocessor_manager.clear_caches([request.method])
+        clear_vram()
         
         return result
         
@@ -1567,6 +1570,9 @@ async def preprocess_image(request: PreprocessRequest):
         print(f"Preprocessing failed: {e}")
         import traceback
         traceback.print_exc()
+        # Clear on error too
+        preprocessor_manager.clear_caches([request.method])
+        clear_vram()
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1664,6 +1670,47 @@ async def get_preprocessor_models():
         },
     }
 
+
+@app.post("/api/preprocess/clear-cache")
+async def clear_preprocessor_cache(models: Optional[List[str]] = None):
+    """
+    Clear preprocessor model caches to free VRAM
+    
+    Args:
+        models: List of model types to clear ('depth', 'normals', 'crypto', 'openpose', 'canny')
+               If None or empty, clears ALL cached models.
+    
+    Returns:
+        Dict with VRAM stats after clearing
+    """
+    import torch
+    
+    try:
+        # Clear specified or all caches
+        preprocessor_manager.clear_caches(models if models else None)
+        
+        # Get VRAM stats
+        if torch.cuda.is_available():
+            allocated = torch.cuda.memory_allocated() / (1024**3)
+            reserved = torch.cuda.memory_reserved() / (1024**3)
+            total = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+        else:
+            allocated = reserved = total = 0
+        
+        return {
+            "success": True,
+            "cleared": models if models else ["all"],
+            "vram": {
+                "allocated_gb": round(allocated, 2),
+                "reserved_gb": round(reserved, 2),
+                "total_gb": round(total, 2),
+                "free_gb": round(total - reserved, 2),
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ============================================================================
 # Post-Processing Endpoints
 # ============================================================================
@@ -1737,7 +1784,7 @@ async def upscale_image(request: UpscaleRequest):
         # Build URL using project-relative path (IMPORTANT!)
         output_url = get_project_relative_url(output_path)
         
-        print(f"ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ Upscaled: {input_width}x{input_height} -> {output_width}x{output_height}")
+        print(f"Upscaled: {input_width}x{input_height} -> {output_width}x{output_height}")
         print(f"  Output URL: {output_url}")
         
         return {
@@ -1752,7 +1799,7 @@ async def upscale_image(request: UpscaleRequest):
         }
         
     except Exception as e:
-        print(f"ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Upscaling failed: {e}")
+        print(f"Upscaling failed: {e}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
@@ -1833,7 +1880,7 @@ async def interpolate_video(request: InterpolateRequest):
         }
         
     except Exception as e:
-        print(f"ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Interpolation failed: {e}")
+        print(f"Interpolation failed: {e}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
@@ -2074,12 +2121,19 @@ async def preprocess_image(request: PreprocessRequest):
         output_path = Path(result["output_path"])
         result["url"] = get_project_relative_url(output_path)
         
+        # Clear preprocessor cache to free VRAM
+        preprocessor_manager.clear_caches([request.method])
+        clear_vram()
+        
         return result
         
     except Exception as e:
-        print(f"ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Preprocessing failed: {e}")
+        print(f"Preprocessing failed: {e}")
         import traceback
         traceback.print_exc()
+        # Clear on error too
+        preprocessor_manager.clear_caches([request.method])
+        clear_vram()
         raise HTTPException(status_code=500, detail=str(e))
 
 

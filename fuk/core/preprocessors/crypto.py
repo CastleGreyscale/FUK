@@ -353,3 +353,21 @@ class CryptoPreprocessor(BasePreprocessor):
     def get_version(self) -> str:
         """Get the loaded SAM version"""
         return self._sam_version or "unknown"
+    
+    def unload(self):
+        """
+        Unload SAM2 model from VRAM
+        
+        SAM2 models can be quite large (224MB+ for Large),
+        so proper cleanup is important.
+        """
+        if self.mask_generator is not None:
+            del self.mask_generator
+            self.mask_generator = None
+        
+        if self.predictor is not None:
+            del self.predictor
+            self.predictor = None
+        
+        # Call base cleanup
+        super().unload()
