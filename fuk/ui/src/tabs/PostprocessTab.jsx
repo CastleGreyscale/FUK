@@ -104,6 +104,13 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
     return () => clearInterval(interval);
   }, [processing, startTime]);
   
+  // Reset restoration flag when leaving the tab
+  useEffect(() => {
+    if (activeTab !== 'postprocess') {
+      hasRestoredRef.current = false;
+    }
+  }, [activeTab]);
+  
   // Restore last preview from project state when tab becomes active
   useEffect(() => {
     // Only run when this tab is active
@@ -111,6 +118,9 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
     
     // Skip if we already have a result (user is actively working)
     if (result) return;
+    
+    // Only restore once per tab activation
+    if (hasRestoredRef.current) return;
     
     const lastState = project?.projectState?.lastState;
     if (!lastState?.lastPostprocessPreview) return;
@@ -123,6 +133,7 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
       meta
     });
     
+    hasRestoredRef.current = true;
     // Set flag to prevent handleSourceChange from clearing result
     isRestoringRef.current = true;
     
@@ -160,6 +171,7 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
     setResult(null);
     setSourceInput(null);
     setError(null);
+    hasRestoredRef.current = false; // Allow restoration for new project
   }, [project?.currentFilename]);
   
   // Fetch capabilities on mount

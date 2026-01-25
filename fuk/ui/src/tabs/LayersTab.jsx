@@ -28,14 +28,14 @@ const DEFAULT_SETTINGS = {
   },
   
   // Depth settings
-  depthModel: 'depth_anything_v2',
+  depthModel: 'da3_mono_large',
   depthInvert: false,
   depthNormalize: true,
   depthColormap: 'inferno',
   
   // Normals settings
   normalsMethod: 'from_depth',
-  normalsDepthModel: 'depth_anything_v2',
+  normalsDepthModel: 'da3_mono_large',
   normalsSpace: 'tangent',
   normalsFlipY: false,
   normalsIntensity: 1.0,
@@ -54,10 +54,29 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
   const [localSettings, setLocalSettings] = useLocalStorage('fuk_layers_settings', DEFAULT_SETTINGS);
   
   const settings = useMemo(() => {
+    // Valid depth models (only DA3 family now)
+    const validDepthModels = ['da3_mono_large', 'da3_metric_large', 'da3_large', 'da3_giant'];
+    
+    let mergedSettings;
     if (project?.projectState?.tabs?.layers) {
-      return { ...DEFAULT_SETTINGS, ...project.projectState.tabs.layers };
+      mergedSettings = { ...DEFAULT_SETTINGS, ...project.projectState.tabs.layers };
+    } else {
+      mergedSettings = { ...DEFAULT_SETTINGS, ...localSettings };
     }
-    return { ...DEFAULT_SETTINGS, ...localSettings };
+    
+    // Validate and migrate depth model settings
+    // If stored value is not a valid DA3 model, reset to default
+    if (!validDepthModels.includes(mergedSettings.depthModel)) {
+      console.warn(`[Layers] Invalid depthModel '${mergedSettings.depthModel}', resetting to 'da3_mono_large'`);
+      mergedSettings.depthModel = 'da3_mono_large';
+    }
+    
+    if (!validDepthModels.includes(mergedSettings.normalsDepthModel)) {
+      console.warn(`[Layers] Invalid normalsDepthModel '${mergedSettings.normalsDepthModel}', resetting to 'da3_mono_large'`);
+      mergedSettings.normalsDepthModel = 'da3_mono_large';
+    }
+    
+    return mergedSettings;
   }, [project?.projectState?.tabs?.layers, localSettings]);
   
   const updateSettings = useCallback((updates) => {
@@ -69,6 +88,22 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
       setLocalSettings(newSettings);
     }
   }, [project, settings, setLocalSettings]);
+  
+  // Persist migrated settings to localStorage on first load
+  useEffect(() => {
+    // Only run if not using project state
+    if (project?.projectState?.tabs?.layers) return;
+    
+    // Check if we need to persist migration
+    const needsMigration = 
+      localSettings.depthModel !== settings.depthModel ||
+      localSettings.normalsDepthModel !== settings.normalsDepthModel;
+    
+    if (needsMigration) {
+      console.log('[Layers] Persisting migrated depth model settings to localStorage');
+      setLocalSettings(settings);
+    }
+  }, [settings, localSettings, project?.projectState?.tabs?.layers, setLocalSettings]);
   
   // UI state
   const [sourceInput, setSourceInput] = useState(null);
@@ -496,18 +531,10 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
                   onChange={(e) => updateSettings({ depthModel: e.target.value })}
                   disabled={processing}
                 >
-                  <optgroup label="Depth Anything V3 (Latest)">
                     <option value="da3_mono_large">DA3 Mono Large (Best)</option>
                     <option value="da3_metric_large">DA3 Metric (Real-world scale)</option>
                     <option value="da3_large">DA3 Large (Multi-view)</option>
                     <option value="da3_giant">DA3 Giant (Highest quality)</option>
-                  </optgroup>
-                  <optgroup label="Legacy">
-                    <option value="depth_anything_v2">Depth Anything V2</option>
-                    <option value="midas_large">MiDaS Large</option>
-                    <option value="midas_small">MiDaS Small (Fast)</option>
-                    <option value="zoedepth">ZoeDepth</option>
-                  </optgroup>
                 </select>
               </div>
               
@@ -519,7 +546,7 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
                   onChange={(e) => updateSettings({ depthColormap: e.target.value || null })}
                   disabled={processing}
                 >
-                  <option value="">Grayscale</option>
+                  <option value="grayscale">Grayscale</option>
                   <option value="inferno">Inferno (Heat)</option>
                   <option value="viridis">Viridis (Green-Blue)</option>
                   <option value="magma">Magma (Purple-Orange)</option>
@@ -584,18 +611,10 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
                       onChange={(e) => updateSettings({ normalsDepthModel: e.target.value })}
                       disabled={processing}
                     >
-                      <optgroup label="Depth Anything V3 (Latest)">
                         <option value="da3_mono_large">DA3 Mono Large (Best)</option>
                         <option value="da3_metric_large">DA3 Metric (Real-world scale)</option>
                         <option value="da3_large">DA3 Large (Multi-view)</option>
                         <option value="da3_giant">DA3 Giant (Highest quality)</option>
-                      </optgroup>
-                      <optgroup label="Legacy">
-                        <option value="depth_anything_v2">Depth Anything V2</option>
-                        <option value="midas_large">MiDaS Large</option>
-                        <option value="midas_small">MiDaS Small (Fast)</option>
-                        <option value="zoedepth">ZoeDepth</option>
-                      </optgroup>
                     </select>
                   </div>
                   

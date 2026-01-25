@@ -97,11 +97,21 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
     return () => clearInterval(interval);
   }, [processing, startTime]);
   
+  // Reset restoration flag when leaving the tab
+  useEffect(() => {
+    if (activeTab !== 'preprocess') {
+      hasRestoredRef.current = false;
+    }
+  }, [activeTab]);
+  
   // Restore last preview from project state when tab becomes active
   useEffect(() => {
     // Only run when this tab is active
     if (activeTab !== 'preprocess') return;
     if (result) return;
+    
+    // Only restore once per tab activation
+    if (hasRestoredRef.current) return;
     
     const lastState = project?.projectState?.lastState;
     if (!lastState?.lastPreprocessPreview) return;
@@ -149,6 +159,7 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
     setResult(null);
     setSourceInput(null);
     setError(null);
+    hasRestoredRef.current = false; // Allow restoration for new project
   }, [project?.currentFilename]);
   
   const updateSettings = useCallback((methodUpdates) => {
@@ -163,7 +174,17 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
   }, [project?.isProjectLoaded, project?.updateTabState, setLocalSettings]);
   
   // Current method settings
-  const currentSettings = settings[selectedMethod] || DEFAULT_SETTINGS[selectedMethod];
+  const currentSettings = useMemo(() => {
+    const methodSettings = settings[selectedMethod] || DEFAULT_SETTINGS[selectedMethod];
+    
+    // For OpenPose, always force detect_body to true (can't be disabled)
+    if (selectedMethod === 'openpose') {
+      return { ...methodSettings, detect_body: true };
+    }
+    
+    return methodSettings;
+  }, [settings, selectedMethod]);
+  
   const videoSettings = settings.video || DEFAULT_SETTINGS.video;
   
   const setCurrentSettings = (updates) => {
@@ -216,6 +237,12 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
         method: selectedMethod,
         ...currentSettings,
       };
+      
+      // Log OpenPose settings for debugging
+      if (selectedMethod === 'openpose') {
+        console.log('[OpenPose] Current settings:', currentSettings);
+        console.log('[OpenPose] Payload being sent:', payload);
+      }
       
       let endpoint;
       
@@ -385,10 +412,12 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
               <input
                 type="checkbox"
                 className="fuk-checkbox"
-                checked={currentSettings.detect_body}
-                onChange={(e) => setCurrentSettings({ detect_body: e.target.checked })}
+                checked={true}
+                disabled={true}
+                onChange={() => {}}
               />
               <span className="fuk-checkbox-label">Detect Body</span>
+              <span className="fuk-help-text fuk-ml-2">(always on)</span>
             </label>
           </div>
           
@@ -398,7 +427,10 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
                 type="checkbox"
                 className="fuk-checkbox"
                 checked={currentSettings.detect_hand}
-                onChange={(e) => setCurrentSettings({ detect_hand: e.target.checked })}
+                onChange={(e) => {
+                  console.log('[OpenPose] Setting detect_hand:', e.target.checked);
+                  setCurrentSettings({ detect_hand: e.target.checked });
+                }}
               />
               <span className="fuk-checkbox-label">Detect Hands</span>
             </label>
@@ -410,14 +442,17 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
                 type="checkbox"
                 className="fuk-checkbox"
                 checked={currentSettings.detect_face}
-                onChange={(e) => setCurrentSettings({ detect_face: e.target.checked })}
+                onChange={(e) => {
+                  console.log('[OpenPose] Setting detect_face:', e.target.checked);
+                  setCurrentSettings({ detect_face: e.target.checked });
+                }}
               />
               <span className="fuk-checkbox-label">Detect Face</span>
             </label>
           </div>
           
           <p className="fuk-help-text fuk-mt-4">
-            OpenPose detection for human pose estimation. Enable what you need.
+            OpenPose detection for human pose estimation. Body is always detected. Hands and face add detail but increase processing time.
           </p>
         </>
       );
@@ -433,18 +468,10 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
                 value={currentSettings.depth_model}
                 onChange={(e) => setCurrentSettings({ depth_model: e.target.value })}
               >
-                <optgroup label="Depth Anything V3 (Latest)">
                   <option value="da3_mono_large">DA3 Mono Large (Best)</option>
                   <option value="da3_metric_large">DA3 Metric (Real-world scale)</option>
                   <option value="da3_large">DA3 Large (Multi-view)</option>
                   <option value="da3_giant">DA3 Giant (Highest quality)</option>
-                </optgroup>
-                <optgroup label="Legacy">
-                  <option value="depth_anything_v2">Depth Anything V2</option>
-                  <option value="midas_large">MiDaS Large</option>
-                  <option value="midas_small">MiDaS Small (Fast)</option>
-                  <option value="zoedepth">ZoeDepth</option>
-                </optgroup>
               </select>
           </div>
           
@@ -455,7 +482,7 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
               value={currentSettings.depth_colormap || ''}
               onChange={(e) => setCurrentSettings({ depth_colormap: e.target.value || null })}
             >
-              <option value="">Grayscale</option>
+              <option value="grayscale">Grayscale</option>
               <option value="inferno">Inferno (Heat)</option>
               <option value="viridis">Viridis (Green-Blue)</option>
               <option value="magma">Magma (Purple-Orange)</option>
@@ -557,10 +584,7 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
             className="fuk-preview-media--constrained"
             preload="metadata"
           />
-          <div className="fuk-preview-badge">
-            <CheckCircle className="fuk-icon--md" />
-            Complete
-          </div>
+          
         </div>
       );
     }
@@ -574,10 +598,6 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
           className="fuk-preview-media--constrained"
           loading="lazy"
         />
-        <div className="fuk-preview-badge">
-          <CheckCircle className="fuk-icon--md" />
-          Complete
-        </div>
       </div>
     );
   };

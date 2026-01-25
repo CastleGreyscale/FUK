@@ -69,38 +69,80 @@ class NormalsPreprocessor(BasePreprocessor):
         Requires vendor: git clone https://github.com/baegwangbin/DSINE vendor/DSINE
         """
         try:
-            # Try vendor path first
             vendor_path = self._get_vendor_path("DSINE")
             
-            if vendor_path.exists():
-                import sys
-                sys.path.insert(0, str(vendor_path))
+            if not vendor_path.exists():
+                raise ImportError(
+                    f"DSINE not found at {vendor_path}\n"
+                    f"Install with: git clone https://github.com/baegwangbin/DSINE {vendor_path}"
+                )
+            
+            import sys
+            # Add vendor path to sys.path if not already there
+            vendor_str = str(vendor_path)
+            if vendor_str not in sys.path:
+                sys.path.insert(0, vendor_str)
+            
+            print("Loading DSINE normal estimator...")
+            
+            # Try different import patterns depending on DSINE structure
+            DSINE = None
+            import_error = None
+            
+            # Pattern 1: Direct import from models.dsine
+            try:
+                from models.dsine import DSINE as DSINEModel
+                DSINE = DSINEModel
+            except ImportError as e1:
+                import_error = str(e1)
                 
-                # DSINE uses a specific model loading pattern
-                from models.dsine import DSINE
-                
-                print("Loading DSINE normal estimator...")
-                
-                # Load pretrained model
-                checkpoint_path = vendor_path / "checkpoints" / "dsine.pt"
-                if not checkpoint_path.exists():
-                    # Try alternative location
-                    checkpoint_path = vendor_path / "weights" / "dsine.pt"
-                
-                if not checkpoint_path.exists():
-                    raise FileNotFoundError(
-                        f"DSINE checkpoint not found. Download from:\n"
-                        f"https://github.com/baegwangbin/DSINE/releases"
-                    )
-                
-                self.model = DSINE()
-                self.model.load_state_dict(torch.load(str(checkpoint_path), map_location='cpu'))
-                self.model.to(self.device)
-                self.model.eval()
-                
-                print("✓ DSINE loaded")
-            else:
-                raise ImportError(f"DSINE not found at {vendor_path}")
+                # Pattern 2: Try importing from projects.dsine 
+                try:
+                    from projects.dsine.models.dsine import DSINE as DSINEModel
+                    DSINE = DSINEModel
+                except ImportError as e2:
+                    
+                    # Pattern 3: Try main DSINE module
+                    try:
+                        from DSINE.models.dsine import DSINE as DSINEModel
+                        DSINE = DSINEModel
+                    except ImportError as e3:
+                        raise ImportError(
+                            f"Could not import DSINE model. Tried:\n"
+                            f"  1. from models.dsine import DSINE - {e1}\n"
+                            f"  2. from projects.dsine.models.dsine import DSINE - {e2}\n"
+                            f"  3. from DSINE.models.dsine import DSINE - {e3}\n"
+                            f"Check your DSINE installation at: {vendor_path}"
+                        )
+            
+            # Find checkpoint
+            checkpoint_path = None
+            possible_checkpoint_paths = [
+                vendor_path / "checkpoints" / "dsine.pt",
+                vendor_path / "weights" / "dsine.pt",
+                vendor_path / "pretrained" / "dsine.pt",
+                vendor_path / "checkpoints" / "dsine_v00.pt",
+            ]
+            
+            for path in possible_checkpoint_paths:
+                if path.exists():
+                    checkpoint_path = path
+                    break
+            
+            if checkpoint_path is None:
+                raise FileNotFoundError(
+                    f"DSINE checkpoint not found. Tried:\n" +
+                    "\n".join(f"  - {p}" for p in possible_checkpoint_paths) +
+                    f"\n\nDownload from: https://github.com/baegwangbin/DSINE/releases"
+                )
+            
+            # Load model
+            self.model = DSINE()
+            self.model.load_state_dict(torch.load(str(checkpoint_path), map_location='cpu'))
+            self.model.to(self.device)
+            self.model.eval()
+            
+            print(f"✓ DSINE loaded from {checkpoint_path.name}")
                 
         except Exception as e:
             print(f"⚠ Could not load DSINE: {e}")

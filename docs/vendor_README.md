@@ -27,7 +27,7 @@ git clone https://github.com/facebookresearch/segment-anything-2 vendor/segment-
 git clone https://github.com/kohya-ss/musubi-tuner.git vendor/musubi-tuner
 git clone https://github.com/baegwangbin/DSINE.git vendor/DSINE
 
-pip install -e ./vendor/Depth-Anything-3 --no-deps
+pip install -e ./vendor/Depth-Anything-3 
 pip install -e ./vendor/segment-anything-2
 pip install -e ./vendor/musubi-tuner
 ```
@@ -35,9 +35,3 @@ pip install -e ./vendor/musubi-tuner
 ## Note
 
 This directory is excluded from version control. Each installation clones fresh copies.
-```bash
-mkdir rife-ncnn
-cd rife-ncnn
-# download correct interpolation package
-# https://github.com/nihui/rife-ncnn-vulkan/releases
-```
