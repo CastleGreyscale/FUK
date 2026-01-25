@@ -17,7 +17,9 @@
 !setup.sh
 
 
+
 # Exclude sensitive/cache data
+fuk/testing/
 **/*.log
 **/*.bak
 **/*.backup
