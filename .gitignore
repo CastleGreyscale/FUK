@@ -12,6 +12,9 @@
 !fuk/fuk/ui/**
 !fuk/fuk/utils/**
 !fuk/fuk/config/**
+!docs
+!docs/**
+!setup.sh
 
 
 # Exclude sensitive/cache data

@@ -4,36 +4,34 @@ version = "0.1.0"
 description = "Framework for Unified Kreation - Professional VFX AI Pipeline"
 requires-python = ">=3.10"
 dependencies = [
-    "torch==2.7.1",
-    "torchvision==0.22.1",
-    "xformers==0.0.31",
+    # Core Deep Learning
+    "torch>=2.7.0",
+    "torchvision>=0.22.0",
+    "xformers>=0.0.31",
     "triton>=3.1.0",
     
-    # Hugging Face ecosystem
+    # Hugging Face Ecosystem
     "transformers>=4.54.0",
     "diffusers>=0.32.0",
     "accelerate>=1.6.0",
     "safetensors>=0.4.5",
     "huggingface-hub>=0.34.0",
-    "timm>=1.0.0",  # Vision transformers (needed by many models)
+    "timm>=1.0.0",
     
     # Preprocessors & Control
-    "controlnet_aux>=0.0.10",  # OpenPose, Canny, etc.
-    # Note: SAM-2 and depth-anything-3 installed separately from vendors/
+    "controlnet_aux>=0.0.10",
     
     # Image/Video Processing
     "opencv-python>=4.10.0",
     "pillow>=11.0.0",
-    "OpenEXR>=3.4.0",  # EXR export for VFX
+    "OpenEXR>=3.4.0",
     "imageio>=2.37.0",
     "imageio-ffmpeg>=0.6.0",
-    "av>=14.0.0",  # Video I/O
-    "moviepy>=1.0.0",
+    "av>=14.0.0",
     "scikit-image>=0.25.0",
-    "tifffile>=2025.0.0",
     
     # Upscaling
-    "basicsr>=1.4.2",  # Real-ESRGAN backend
+    "basicsr>=1.4.2",
     
     # Scientific Computing
     "numpy>=1.26.0,<2.0.0",
@@ -46,35 +44,33 @@ dependencies = [
     "python-multipart>=0.0.21",
     "starlette>=0.50.0",
     "websockets>=11.0.0",
+    "tk>=0.1.0",
     
     # Utilities
     "pyyaml>=6.0.0",
     "tqdm>=4.67.0",
     "omegaconf>=2.3.0",
     "requests>=2.32.0",
-
-    # Depth Anything V3
-    "moviepy==1.0.3",
-    "typer>=0.9.0",
-    "pycolmap",
-    "plyfile",
-    "evo",
-    "e3nn",
-    "open3d",
-    "pre-commit",
-    "trimesh",
-    "pillow_heif",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0",
-    "ruff>=0.14.0",  # Linting and formatting
+    "ruff>=0.14.0",
 ]
 
-# Packages installed separately from vendors/ directory:
-# - depth-anything-3 (custom installation)
-# - SAM-2 or sam3 (segmentation models)
+# Depth Anything V3 specific dependencies
+# Install with: pip install -e ".[depth]"
+depth = [
+    "moviepy==1.0.3",
+    "typer>=0.9.0",
+    "pycolmap",
+    "plyfile",
+    "e3nn",
+    "open3d",
+    "trimesh",
+    "pillow_heif",
+]
 
 [build-system]
 requires = ["setuptools>=68.0.0", "wheel"]
