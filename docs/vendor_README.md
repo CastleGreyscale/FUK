@@ -35,3 +35,9 @@ pip install -e ./vendor/musubi-tuner
 ## Note
 
 This directory is excluded from version control. Each installation clones fresh copies.
+```bash
+mkdir rife-ncnn
+cd rife-ncnn
+# download correct interpolation package
+# https://github.com/nihui/rife-ncnn-vulkan/releases
+```

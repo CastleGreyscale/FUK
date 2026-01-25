@@ -25,56 +25,68 @@ pip install -e .
 
 echo ""
 echo "[2/6] Setting up vendor directory..."
-mkdir -p vendor
+mkdir -p fuk/vendor
 
 echo ""
 echo "[3/6] Cloning vendor dependencies..."
 
 # Depth Anything V3
-if [ ! -d "vendor/Depth-Anything-3" ]; then
+if [ ! -d "fuk/vendor/Depth-Anything-3" ]; then
     echo "  → Cloning Depth-Anything-3..."
-    git clone https://github.com/ByteDance-Seed/Depth-Anything-3.git vendor/Depth-Anything-3
+    git clone https://github.com/ByteDance-Seed/Depth-Anything-3.git fuk/vendor/Depth-Anything-3
 else
     echo "  ✓ Depth-Anything-3 already exists"
 fi
 
 # SAM2
-if [ ! -d "vendor/segment-anything-2" ]; then
+if [ ! -d "fuk/vendor/segment-anything-2" ]; then
     echo "  → Cloning SAM2..."
-    git clone https://github.com/facebookresearch/segment-anything-2 vendor/segment-anything-2
+    git clone https://github.com/facebookresearch/segment-anything-2 fuk/vendor/segment-anything-2
     echo "  → Downloading SAM2 checkpoints..."
-    cd vendor/segment-anything-2/checkpoints
+    cd fuk/vendor/segment-anything-2/checkpoints
     bash download_ckpts.sh
-    cd ../../..
+    cd ../../../..
 else
     echo "  ✓ segment-anything-2 already exists"
 fi
 
 # musubi-tuner
-if [ ! -d "vendor/musubi-tuner" ]; then
+if [ ! -d "fuk/vendor/musubi-tuner" ]; then
     echo "  → Cloning musubi-tuner..."
-    git clone https://github.com/kohya-ss/musubi-tuner.git vendor/musubi-tuner
+    git clone https://github.com/kohya-ss/musubi-tuner.git fuk/vendor/musubi-tuner
 else
     echo "  ✓ musubi-tuner already exists"
 fi
 
 # DSINE (normals)
-if [ ! -d "vendor/DSINE" ]; then
+if [ ! -d "fuk/vendor/DSINE" ]; then
     echo "  → Cloning DSINE..."
-    git clone https://github.com/baegwangbin/DSINE.git vendor/DSINE
+    git clone https://github.com/baegwangbin/DSINE.git fuk/vendor/DSINE
 else
     echo "  ✓ DSINE already exists"
 fi
 
 echo ""
 echo "[4/6] Installing vendor packages..."
-pip install -e ./vendor/Depth-Anything-3 --no-deps
-pip install -e ./vendor/segment-anything-2
-pip install -e ./vendor/musubi-tuner
+pip install -e ./fuk/vendor/Depth-Anything-3
+pip install -e ./fuk/vendor/segment-anything-2
+pip install -e ./fuk/vendor/musubi-tuner
 
 echo ""
 echo "[5/6] Installing Depth Anything V3 dependencies..."
 pip install -e ".[depth]"
+
+echo ""
+echo "Note: RIFE and Real-ESRGAN are optional but recommended for"
+echo "frame interpolation and upscaling. Download pre-built binaries:"
+echo ""
+echo "  RIFE: https://github.com/nihui/rife-ncnn-vulkan/releases"
+echo "  Real-ESRGAN: https://github.com/xinntao/Real-ESRGAN/releases"
+echo ""
+echo "Extract to:"
+echo "  fuk/vendor/rife-ncnn/"
+echo "  fuk/vendor/realesrgan-ncnn/"
+echo ""
 
 echo ""
 echo "[6/6] Installing frontend dependencies..."
