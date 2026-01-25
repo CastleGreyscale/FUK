@@ -26,6 +26,8 @@
 @import './placeholders.css';
 @import './generation-history.css';
 @import './zoomable-image.css';
+@import './video-sync-controller.css';
+@import './generation-modal.css';
 @import './animations.css';
 
 /* ============================================================================

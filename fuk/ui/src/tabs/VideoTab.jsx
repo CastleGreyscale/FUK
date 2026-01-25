@@ -13,6 +13,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Film, CheckCircle, AlertCircle } from '../../src/components/Icons';
 import MediaUploader from '../components/MediaUploader.jsx';
 import SeedControl from '../components/SeedControl';
+import GenerationModal from '../components/GenerationModal';
 import { useGeneration } from '../hooks/useGeneration';
 import { useLocalStorage } from '../../src/hooks/useLocalStorage';
 import { useSavedSeeds } from '../hooks/useSavedSeeds';
@@ -124,8 +125,11 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
     result,
     error,
     elapsedSeconds,
+    consoleLog,
+    showModal,
     startGeneration,
     cancel,
+    closeModal,
     reset: resetGeneration,
   } = useGeneration();
 
@@ -334,17 +338,16 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
             </div>
           ) : (
             <div 
-              className="fuk-placeholder-card fuk-placeholder-card--60 fuk-placeholder-card--dynamic"
+              className="fuk-placeholder-card fuk-placeholder-card--ratio"
               style={aspectRatioStyle}
             >
               <div className="fuk-placeholder">
                 <Film className="fuk-placeholder-icon" />
                 <p className="fuk-placeholder-text">
                   {formData.width || '---'} × {formData.height || '---'} × {formData.video_length} frames
-                  <br />
-                  <span className="fuk-placeholder-subtext">
-                    {formData.source_width ? `Source: ${formData.source_width}×${formData.source_height}` : 'Upload image to set dimensions'}
-                  </span>
+                </p>
+                <p className="fuk-placeholder-subtext">
+                  {formData.source_width ? `Source: ${formData.source_width}×${formData.source_height}` : 'Upload image to set dimensions'}
                 </p>
               </div>
             </div>
@@ -672,6 +675,19 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
         }
         generateLabel="Generate Video"
         generatingLabel="Generating..."
+      />
+
+      {/* Generation Modal */}
+      <GenerationModal
+        isOpen={showModal}
+        type="video"
+        generating={generating}
+        progress={progress}
+        elapsedSeconds={elapsedSeconds}
+        consoleLog={consoleLog}
+        error={error}
+        onCancel={cancel}
+        onClose={closeModal}
       />
     </>
   );

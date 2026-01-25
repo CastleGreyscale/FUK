@@ -221,6 +221,9 @@ export function createEmptyProjectState(defaults = {}) {
     
     // Notes - free text for artist notes
     notes: '',
+    
+    // Pinned generation IDs for history panel
+    pinnedGenerations: [],
   };
 }
 
@@ -249,6 +252,7 @@ export function mergeWithDefaults(loadedState, defaults = {}) {
     assets: deepMerge(emptyState.assets, loadedState.assets || {}),
     lastState: deepMerge(emptyState.lastState, loadedState.lastState || {}),
     notes: loadedState.notes || '',
+    pinnedGenerations: loadedState.pinnedGenerations || [],
   };
 }
 

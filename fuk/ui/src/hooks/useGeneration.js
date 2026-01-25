@@ -1,6 +1,7 @@
 /**
  * useGeneration Hook
  * Shared logic for image/video generation with progress tracking
+ * Includes console log capture for the generation modal
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -13,6 +14,8 @@ export function useGeneration() {
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [consoleLog, setConsoleLog] = useState([]);
+  const [showModal, setShowModal] = useState(false);
   
   // Ref to track if component is mounted
   const mountedRef = useRef(true);
@@ -20,6 +23,8 @@ export function useGeneration() {
   const startTimeRef = useRef(null);
   // Ref to track timer interval
   const timerRef = useRef(null);
+  // Ref to track last console log length (to avoid duplicate processing)
+  const lastLogLengthRef = useRef(0);
   
   useEffect(() => {
     mountedRef.current = true;
@@ -69,7 +74,15 @@ export function useGeneration() {
         (data) => {
           if (!mountedRef.current) return;
           console.log('[useGeneration] Progress:', data.phase, `${Math.round((data.progress || 0) * 100)}%`);
+          console.log('[useGeneration] console_log length:', data.console_log?.length || 0);  // ADD THIS
           setProgress(data);
+          
+          // Update console log if new entries
+          if (data.console_log && data.console_log.length > lastLogLengthRef.current) {
+            console.log('[useGeneration] Updating consoleLog, new entries:', data.console_log.length - lastLogLengthRef.current);  // ADD THIS
+            setConsoleLog(data.console_log);
+            lastLogLengthRef.current = data.console_log.length;
+          }
         },
         // onComplete
         (data) => {
@@ -82,6 +95,18 @@ export function useGeneration() {
           setResult(data);
           setGenerating(false);
           
+          // Update final console log
+          if (data.console_log) {
+            setConsoleLog(data.console_log);
+          }
+          
+          // Auto-close modal on success after a brief delay
+          setTimeout(() => {
+            if (mountedRef.current && !data.error) {
+              setShowModal(false);
+            }
+          }, 1500);
+          
           // Notify history to refresh
           window.dispatchEvent(new CustomEvent('fuk-generation-complete', {
             detail: { generationId, result: data, elapsed: finalElapsed }
@@ -93,6 +118,7 @@ export function useGeneration() {
           console.log('[useGeneration] Error:', errorMsg);
           setError(errorMsg);
           setGenerating(false);
+          // Keep modal open on error
         }
       );
     } catch (err) {
@@ -112,11 +138,14 @@ export function useGeneration() {
   const startGeneration = useCallback((id) => {
     console.log('[useGeneration] Starting generation:', id);
     startTimeRef.current = Date.now();  // Set start time using ref
+    lastLogLengthRef.current = 0;  // Reset log length tracker
     setGenerating(true);
     setProgress(null);
     setResult(null);
     setError(null);
     setElapsedSeconds(0);
+    setConsoleLog([]);
+    setShowModal(true);  // Open modal when generation starts
     setGenerationId(id);
   }, []);
 
@@ -129,10 +158,16 @@ export function useGeneration() {
       setGenerating(false);
       setProgress(null);
       setGenerationId(null);
+      setError('Generation cancelled');
+      // Keep modal open briefly to show cancellation
     } catch (err) {
       console.error('Cancel failed:', err);
     }
   }, [generationId]);
+
+  const closeModal = useCallback(() => {
+    setShowModal(false);
+  }, []);
 
   const reset = useCallback(() => {
     setGenerating(false);
@@ -140,7 +175,10 @@ export function useGeneration() {
     setProgress(null);
     setResult(null);
     setError(null);
+    setConsoleLog([]);
+    setShowModal(false);
     startTimeRef.current = null;
+    lastLogLengthRef.current = 0;
     setElapsedSeconds(0);
   }, []);
 
@@ -151,8 +189,11 @@ export function useGeneration() {
     result,
     error,
     elapsedSeconds,
+    consoleLog,
+    showModal,
     startGeneration,
     cancel,
+    closeModal,
     reset,
   };
 }

@@ -382,20 +382,25 @@ export default function GenerationHistory({ project, collapsed, onToggle }) {
     setHoveredItem(null);
   }, []);
   
-  // Pinned items stored in localStorage
-  const [pinnedIds, setPinnedIds] = useState(() => {
-    try {
-      const saved = localStorage.getItem('fuk_pinned_generations');
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
+  // Pinned items stored in project state
+  // Read from project, with fallback to empty array
+  const pinnedIds = project?.projectState?.pinnedGenerations || [];
   
-  // Save pinned to localStorage
-  useEffect(() => {
-    localStorage.setItem('fuk_pinned_generations', JSON.stringify(pinnedIds));
-  }, [pinnedIds]);
+  // Update pinned IDs via project state
+  const setPinnedIds = useCallback((updater) => {
+    if (!project?.updatePinnedGenerations) {
+      console.warn('[History] Cannot update pins - no project loaded');
+      return;
+    }
+    
+    // Handle both direct values and updater functions
+    const newIds = typeof updater === 'function' 
+      ? updater(pinnedIds) 
+      : updater;
+    
+    console.log('[History] Updating pinned IDs:', newIds);
+    project.updatePinnedGenerations(newIds);
+  }, [project?.updatePinnedGenerations, pinnedIds]);
 
   // Fetch generations from API
   const fetchGenerations = useCallback(async (days = 1, force = false) => {

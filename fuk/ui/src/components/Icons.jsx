@@ -249,3 +249,10 @@ export const SkipForward = ({ className, style }) => (
     <polygon points="2,19 11,12 2,5" fill="currentColor" strokeWidth={0} />
   </svg>
 );
+
+// Skip Forward icon (for video controls)
+export const Square = ({ className, style }) => (
+  <svg className={className} style={style} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <rect x="0" y="0" width="24" height="24"/>
+  </svg>
+);

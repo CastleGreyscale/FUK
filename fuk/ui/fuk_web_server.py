@@ -73,6 +73,40 @@ from project_endpoints import (
 # Logging Utility
 # ============================================================================
 
+# ============================================================================
+# Generation Log Capture
+# ============================================================================
+
+# Global reference to active_generations (set after dict is created)
+_active_generations_ref = None
+_current_generation_id = None
+
+def set_current_generation(generation_id: str):
+    """Set the current generation ID for log capture"""
+    global _current_generation_id
+    _current_generation_id = generation_id
+
+def clear_current_generation():
+    """Clear the current generation ID"""
+    global _current_generation_id
+    _current_generation_id = None
+
+def _append_to_generation_log(line: str, level: str = "info"):
+    """Append a log line to the current generation's console_log"""
+    global _active_generations_ref, _current_generation_id
+    if _active_generations_ref is None or _current_generation_id is None:
+        return
+    if _current_generation_id in _active_generations_ref:
+        gen = _active_generations_ref[_current_generation_id]
+        if "console_log" not in gen:
+            gen["console_log"] = []
+        # Keep last 500 lines to avoid memory bloat
+        if len(gen["console_log"]) > 500:
+            gen["console_log"] = gen["console_log"][-400:]
+        gen["console_log"].append({"line": line, "level": level})
+        gen["updated_at"] = datetime.now().isoformat()
+
+
 class FukLogger:
     """Centralized logging with timestamps and categories"""
     
@@ -94,56 +128,80 @@ class FukLogger:
     @classmethod
     def header(cls, title: str, char: str = "="):
         width = 70
-        print(f"\n{cls.COLORS['cyan']}{char * width}")
-        print(f"  {title}")
-        print(f"{char * width}{cls.COLORS['end']}\n")
+        line1 = char * width
+        line2 = f"  {title}"
+        line3 = char * width
+        print(f"\n{cls.COLORS['cyan']}{line1}")
+        print(line2)
+        print(f"{line3}{cls.COLORS['end']}\n")
+        _append_to_generation_log(line1, "header")
+        _append_to_generation_log(line2, "header")
+        _append_to_generation_log(line3, "header")
     
     @classmethod
     def section(cls, title: str):
-        print(f"\n{cls.COLORS['blue']}--- {title} ---{cls.COLORS['end']}")
+        line = f"--- {title} ---"
+        print(f"\n{cls.COLORS['blue']}{line}{cls.COLORS['end']}")
+        _append_to_generation_log(line, "section")
     
     @classmethod
     def info(cls, category: str, message: str):
+        line = f"[{cls.timestamp()}] [{category}] {message}"
         print(f"{cls.COLORS['cyan']}[{cls.timestamp()}]{cls.COLORS['end']} [{category}] {message}")
+        _append_to_generation_log(line, "info")
     
     @classmethod
     def success(cls, category: str, message: str):
-        print(f"{cls.COLORS['green']}[{cls.timestamp()}] [{category}] {message}{cls.COLORS['end']}")
+        line = f"[{cls.timestamp()}] OK [{category}] {message}"
+        print(f"{cls.COLORS['green']}{line}{cls.COLORS['end']}")
+        _append_to_generation_log(line, "success")
     
     @classmethod
     def warning(cls, category: str, message: str):
-        print(f"{cls.COLORS['yellow']}[{cls.timestamp()}] [{category}] {message}{cls.COLORS['end']}")
+        line = f"[{cls.timestamp()}] WARN [{category}] {message}"
+        print(f"{cls.COLORS['yellow']}{line}{cls.COLORS['end']}")
+        _append_to_generation_log(line, "warning")
     
     @classmethod
     def error(cls, category: str, message: str):
-        print(f"{cls.COLORS['red']}[{cls.timestamp()}] [{category}] {message}{cls.COLORS['end']}")
+        line = f"[{cls.timestamp()}] ERROR [{category}] {message}"
+        print(f"{cls.COLORS['red']}{line}{cls.COLORS['end']}")
+        _append_to_generation_log(line, "error")
     
     @classmethod
     def params(cls, title: str, params: Dict[str, Any]):
         """Log parameters in a formatted way"""
         print(f"\n{cls.COLORS['yellow']}  {title}:{cls.COLORS['end']}")
+        _append_to_generation_log(f"  {title}:", "params")
         for key, value in params.items():
             # Truncate long values
             str_val = str(value)
             if len(str_val) > 80:
                 str_val = str_val[:77] + "..."
-            print(f"    {key}: {str_val}")
+            line = f"    {key}: {str_val}"
+            print(line)
+            _append_to_generation_log(line, "params")
     
     @classmethod
     def command(cls, cmd: List[str]):
         """Log a command being executed"""
         print(f"\n{cls.COLORS['bold']}  Command:{cls.COLORS['end']}")
+        _append_to_generation_log("  Command:", "command")
         # Format command nicely
         formatted = " \\\n    ".join(cmd)
         print(f"    {formatted}")
+        _append_to_generation_log(f"    {formatted}", "command")
         print()
     
     @classmethod
     def paths(cls, title: str, paths: Dict[str, Any]):
         """Log path information"""
         print(f"\n{cls.COLORS['blue']}  {title}:{cls.COLORS['end']}")
+        _append_to_generation_log(f"  {title}:", "paths")
         for key, value in paths.items():
-            print(f"    {key}: {value}")
+            line = f"    {key}: {value}"
+            print(line)
+            _append_to_generation_log(line, "paths")
     
     @classmethod
     def timing(cls, category: str, start_time: float, message: str = ""):
@@ -154,19 +212,29 @@ class FukLogger:
             mins = int(elapsed // 60)
             secs = elapsed % 60
             time_str = f"{mins}m {secs:.1f}s"
-        print(f"{cls.COLORS['green']}[{cls.timestamp()}] ÃƒÂ¢Ã‚ÂÃ‚Â± [{category}] {message} ({time_str}){cls.COLORS['end']}")
+        line = f"[{cls.timestamp()}] TIME [{category}] {message} ({time_str})"
+        print(f"{cls.COLORS['green']}{line}{cls.COLORS['end']}")
+        _append_to_generation_log(line, "timing")
     
     @classmethod
     def exception(cls, category: str, e: Exception):
         """Log full exception with traceback"""
-        print(f"\n{cls.COLORS['red']}{'=' * 70}")
-        print(f"  EXCEPTION in {category}")
-        print(f"{'=' * 70}")
-        print(f"  Error: {type(e).__name__}: {e}")
-        print(f"\n  Traceback:")
-        for line in traceback.format_exc().split('\n'):
-            print(f"    {line}")
-        print(f"{'=' * 70}{cls.COLORS['end']}\n")
+        lines = []
+        lines.append("=" * 70)
+        lines.append(f"  EXCEPTION in {category}")
+        lines.append("=" * 70)
+        lines.append(f"  Error: {type(e).__name__}: {e}")
+        lines.append("")
+        lines.append("  Traceback:")
+        for tb_line in traceback.format_exc().split('\n'):
+            lines.append(f"    {tb_line}")
+        lines.append("=" * 70)
+        
+        print(f"\n{cls.COLORS['red']}")
+        for line in lines:
+            print(line)
+            _append_to_generation_log(line, "error")
+        print(f"{cls.COLORS['end']}\n")
 
 log = FukLogger()
 
@@ -312,6 +380,9 @@ app.mount("/project-cache", StaticFiles(directory=str(CACHE_ROOT)), name="projec
 # Active generations tracking
 active_generations: Dict[str, Dict[str, Any]] = {}
 
+# Hook up the log capture reference
+_active_generations_ref = active_generations
+
 # Load defaults
 with open(CONFIG_DIR / "defaults.json") as f:
     DEFAULTS = json.load(f)
@@ -357,7 +428,7 @@ def resolve_input_path(path_str: str) -> Optional[Path]:
     print(f"[PATH] Default cache: {default_cache}", flush=True)
     
     if cache_root is None:
-        print(f"[PATH] ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã‚Â¡Ãƒâ€š ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¸Ãƒâ€šÃ‚Â  WARNING: No project cache set! Is a project loaded?", flush=True)
+        print(f"[PATH] WARNING: No project cache set! Is a project loaded?", flush=True)
     
     p = Path(path_str)
     
@@ -620,20 +691,23 @@ def clear_vram():
 async def run_image_generation(generation_id: str, request: ImageGenerationRequest):
     """Background task for image generation"""
     
+    # Start log capture for this generation
+    set_current_generation(generation_id)
+    
     try:
-        print("\n" + "="*80)
-        print(f"Starting Image Generation: {generation_id}")
-        print("="*80)
-        print(f"Prompt: {request.prompt}")
-        print(f"Model: {request.model}")
-        print(f"Size: {request.width}x{request.height}")
-        print(f"Steps: {request.steps}")
-        print(f"Guidance: {request.guidance_scale}")
-        print(f"Flow Shift: {request.flow_shift}")
-        print(f"Seed: {request.seed}")
-        print(f"LoRA: {request.lora} ({request.lora_multiplier}x)" if request.lora else "LoRA: None")
-        print(f"Blocks to swap: {request.blocks_to_swap}")
-        print("="*80 + "\n")
+        log.header("IMAGE GENERATION")
+        log.info("ImageGen", f"Generation ID: {generation_id}")
+        log.params("Parameters", {
+            "prompt": request.prompt[:60] + "..." if len(request.prompt) > 60 else request.prompt,
+            "model": request.model,
+            "size": f"{request.width}x{request.height}",
+            "steps": request.steps,
+            "guidance": request.guidance_scale,
+            "flow_shift": request.flow_shift,
+            "seed": request.seed,
+            "lora": f"{request.lora} ({request.lora_multiplier}x)" if request.lora else "None",
+            "blocks_to_swap": request.blocks_to_swap,
+        })
         
         # Update status
         active_generations[generation_id]["status"] = "running"
@@ -644,7 +718,7 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
         # Create generation directory
         gen_dir = get_generation_output_dir("img_gen")
         paths = build_output_paths(gen_dir)
-        print(f"[{generation_id}] Output directory: {gen_dir}")
+        log.info("ImageGen", f"Output directory: {gen_dir}")
         
         active_generations[generation_id]["gen_dir"] = str(gen_dir)
         active_generations[generation_id]["phase"] = "generating"
@@ -660,16 +734,19 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
                 if resolved and resolved.exists():
                     control_images.append(resolved)
             if control_images:
-                print(f"[{generation_id}] Control images ({len(control_images)}): {[str(p) for p in control_images]}")
+                log.info("ImageGen", f"Control images ({len(control_images)}): {[str(p) for p in control_images]}")
         elif request.control_image_path:
             # Backward compatibility for single image
             resolved = resolve_input_path(request.control_image_path)
             if resolved and resolved.exists():
                 control_images.append(resolved)
-                print(f"[{generation_id}] Control image: {resolved}")
+                log.info("ImageGen", f"Control image: {resolved}")
+        
+        log.info("ImageGen", "Starting generation...")
         
         # Generate using the wrapper
-        result = image_generator.generate(
+        result = await asyncio.to_thread(
+            image_generator.generate,
             prompt=request.prompt,
             output_path=paths["generated_png"],
             model=model,
@@ -686,17 +763,17 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
             control_image=control_images if control_images else None,
         )
         
-        print(f"[{generation_id}] Generation complete!")
+        log.success("ImageGen", "Generation complete!")
         
         outputs = {
             "png": get_project_relative_url(paths["generated_png"])
         }
-        print(f"[{generation_id}] PNG saved: {paths['generated_png']}")
+        log.info("ImageGen", f"PNG saved: {paths['generated_png']}")
         
         # Convert to EXR if requested
         if request.output_format in ["exr", "both"]:
             active_generations[generation_id]["phase"] = "converting_to_exr"
-            print(f"[{generation_id}] Converting to EXR...")
+            log.info("ImageGen", "Converting to EXR...")
             
             FormatConverter.png_to_exr_32bit(
                 paths["generated_png"],
@@ -704,7 +781,7 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
                 linear=True
             )
             outputs["exr"] = get_project_relative_url(paths["generated_exr"])
-            print(f"[{generation_id}] EXR saved: {paths['generated_exr']}")
+            log.info("ImageGen", f"EXR saved: {paths['generated_exr']}")
         
         # Save metadata
         save_generation_metadata(
@@ -732,23 +809,18 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
             "completed_at": datetime.now().isoformat()
         })
         
-        print("\n" + "="*80)
-        print(f"Generation Complete: {generation_id}")
-        print(f"Output: {outputs['png']}")
-        print("="*80 + "\n")
+        log.success("ImageGen", f"Complete! Output: {outputs['png']}")
         
         # Clear VRAM
         clear_vram()
         
     except Exception as e:
+        log.exception("ImageGen", e)
         active_generations[generation_id].update({
             "status": "failed",
             "error": str(e),
             "failed_at": datetime.now().isoformat()
         })
-        print(f"Generation Failed: {e}")
-        import traceback
-        traceback.print_exc()
 
         # Clean up failed generation directory
         gen_dir = active_generations[generation_id].get("gen_dir")
@@ -756,8 +828,12 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
             cleanup_failed_generation(gen_dir, reason=str(e))
 
         # Clear VRAM even on failure
-        print(f"[{generation_id}] Clearing VRAM after failure...")
+        log.info("ImageGen", "Clearing VRAM after failure...")
         clear_vram()
+    
+    finally:
+        # Always clear the current generation for log capture
+        clear_current_generation()
 
 
 @app.post("/api/generate/image", response_model=GenerationResponse)
@@ -793,6 +869,9 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
     
     start_time = time.time()
     
+    # Start log capture for this generation
+    set_current_generation(generation_id)
+    
     try:
         log.header("VIDEO GENERATION")
         log.info("VideoGen", f"Generation ID: {generation_id}")
@@ -813,10 +892,11 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
         end_image_path_abs = resolve_input_path(request.end_image_path)
         control_path_abs = resolve_input_path(request.control_path)
         
-        print(f"[VIDEO] Resolved paths:", flush=True)
-        print(f"[VIDEO]   image_path: {request.image_path} -> {image_path_abs}", flush=True)
-        print(f"[VIDEO]   end_image_path: {request.end_image_path} -> {end_image_path_abs}", flush=True)
-        print(f"[VIDEO]   control_path: {request.control_path} -> {control_path_abs}", flush=True)
+        log.paths("Resolved paths", {
+            "image_path": f"{request.image_path} -> {image_path_abs}",
+            "end_image_path": f"{request.end_image_path} -> {end_image_path_abs}",
+            "control_path": f"{request.control_path} -> {control_path_abs}",
+        })
         
         # Copy control inputs for reference
         if image_path_abs:
@@ -836,8 +916,11 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
         # Map task string to enum
         task_enum = WanTask(request.task)
         
+        log.info("VideoGen", f"Starting generation with task: {task_enum.value}")
+        
         # Generate video using the wrapper
-        result = video_generator.generate_video(
+        result = await asyncio.to_thread(
+            video_generator.generate_video,
             prompt=request.prompt,
             output_path=paths["generated_mp4"],
             task=task_enum,
@@ -919,18 +1002,19 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
             "completed_at": datetime.now().isoformat()
         })
         
+        log.timing("VideoGen", start_time, "Generation complete")
+        log.success("VideoGen", f"Output: {outputs['mp4']}")
+        
         # Clear VRAM
         clear_vram()
         
     except Exception as e:
+        log.exception("VideoGen", e)
         active_generations[generation_id].update({
             "status": "failed",
             "error": str(e),
             "failed_at": datetime.now().isoformat()
         })
-        print(f"Generation {generation_id} failed: {e}")
-        import traceback
-        traceback.print_exc()
 
         # Clean up failed generation directory
         gen_dir = active_generations[generation_id].get("gen_dir")
@@ -942,6 +1026,10 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
             clear_vram()
         except:
             pass
+    
+    finally:
+        # Always clear the current generation for log capture
+        clear_current_generation()
 
 @app.post("/api/generate/video", response_model=GenerationResponse)
 async def generate_video(request: VideoGenerationRequest, background_tasks: BackgroundTasks):

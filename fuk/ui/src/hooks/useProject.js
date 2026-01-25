@@ -467,6 +467,21 @@ export function useProject() {
   }, []);
 
   /**
+   * Update pinned generations list (for history panel)
+   */
+  const updatePinnedGenerations = useCallback((pinnedIds) => {
+    setProjectState(prev => {
+      if (!prev) return prev;
+      
+      return {
+        ...prev,
+        pinnedGenerations: pinnedIds,
+      };
+    });
+    setHasUnsavedChanges(true);
+  }, []);
+
+  /**
    * Autosave effect - saves after delay when changes are made
    */
   useEffect(() => {
@@ -577,6 +592,7 @@ export function useProject() {
     createProject,
     updateTabState,
     updateLastState,
+    updatePinnedGenerations,
     refreshProjectFiles,
   };
 }

@@ -270,7 +270,7 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
           {/* Main preview */}
           <div className="fuk-preview-main">
             {mainPreview ? (
-              <div className="fuk-media-frame">
+              <div className="fuk-media-container">
                 {mainPreviewIsVideo ? (
                   <video
                     src={buildImageUrl(mainPreview)}
@@ -283,14 +283,16 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
                   <ZoomableImage
                     src={buildImageUrl(mainPreview)}
                     alt="Preview"
-                    className="fuk-preview-media fuk-preview-media--constrained"
+                    className="fuk-preview-media"
                   />
                 )}
               </div>
             ) : (
-              <div className="fuk-placeholder-card fuk-placeholder-card--60 fuk-placeholder-card--16x9">
-                <Download className="fuk-placeholder-icon fuk-placeholder-icon--faded" />
-                <p>Drag layers from History to export</p>
+              <div className="fuk-placeholder-card fuk-placeholder-card--ratio">
+                <div className="fuk-placeholder">
+                  <Download className="fuk-placeholder-icon" />
+                  <p className="fuk-placeholder-text">Drag layers from History to export</p>
+                </div>
               </div>
             )}
           </div>

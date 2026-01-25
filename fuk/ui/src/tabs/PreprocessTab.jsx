@@ -520,7 +520,7 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
     // Sequence output - show first frame as image
     if (result.isSequence) {
       return (
-        <div className="fuk-media-frame fuk-media-frame--success">
+        <div className="fuk-media-frame">
           {result.url ? (
             <ZoomableImage
               src={buildImageUrl(result.url)}
@@ -529,12 +529,12 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
               loading="lazy"
             />
           ) : (
-            <div className="fuk-placeholder fuk-placeholder--sm">
+            <div className="fuk-placeholder">
               <Folder className="fuk-placeholder-icon" />
               <p className="fuk-placeholder-text">Sequence saved</p>
             </div>
           )}
-          <div className="fuk-preview-badge fuk-preview-badge--success">
+          <div className="fuk-preview-badge">
             <CheckCircle className="fuk-icon--md" />
             {result.frame_count} frames
           </div>
@@ -550,14 +550,14 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
     // Video output - show as video player
     if (result.isVideo) {
       return (
-        <div className="fuk-media-frame fuk-media-frame--success">
+        <div className="fuk-media-frame">
           <video
             src={buildImageUrl(result.url)}
             controls
             className="fuk-preview-media--constrained"
             preload="metadata"
           />
-          <div className="fuk-preview-badge fuk-preview-badge--success">
+          <div className="fuk-preview-badge">
             <CheckCircle className="fuk-icon--md" />
             Complete
           </div>
@@ -567,14 +567,14 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
     
     // Image output
     return (
-      <div className="fuk-media-frame fuk-media-frame--success">
+      <div className="fuk-media-frame">
         <ZoomableImage
           src={buildImageUrl(result.url)}
           alt="Processed"
           className="fuk-preview-media--constrained"
           loading="lazy"
         />
-        <div className="fuk-preview-badge fuk-preview-badge--success">
+        <div className="fuk-preview-badge">
           <CheckCircle className="fuk-icon--md" />
           Complete
         </div>

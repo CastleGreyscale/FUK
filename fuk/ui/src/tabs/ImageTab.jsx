@@ -9,6 +9,7 @@ import { Camera, CheckCircle, X, Pipeline } from '../../src/components/Icons';
 import MediaUploader from '../components/MediaUploader';
 import ZoomableImage from '../components/ZoomableImage';
 import SeedControl from '../components/SeedControl';
+import GenerationModal from '../components/GenerationModal';
 import { useGeneration } from '../hooks/useGeneration';
 import { useLocalStorage } from '../../src/hooks/useLocalStorage';
 import { useSavedSeeds } from '../hooks/useSavedSeeds';
@@ -81,8 +82,11 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
     result,
     error,
     elapsedSeconds,
+    consoleLog,
+    showModal,
     startGeneration,
     cancel,
+    closeModal,
     reset: resetGeneration,
   } = useGeneration();
 
@@ -239,13 +243,13 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
             </div>
           ) : (
             <div 
-              className="fuk-placeholder-card fuk-placeholder-card--60 fuk-placeholder-card--dynamic"
+              className="fuk-placeholder-card fuk-placeholder-card--ratio"
               style={aspectRatioStyle}
             >
               <div className="fuk-placeholder">
                 <Camera className="fuk-placeholder-icon" />
                 <p className="fuk-placeholder-text">
-                  {dims.width} x {dims.height}
+                  {dims.width} × {dims.height}
                 </p>
               </div>
             </div>
@@ -265,7 +269,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
               
               <div className="fuk-preprocess-preview">
                 <div className="fuk-preprocess-preview-thumb">
-                  <img
+                  <ZoomableImage
                     src={project.projectState.lastState.lastPreprocessedImage}
                     alt="Preprocessed"
                     className="fuk-preprocess-preview-image"
@@ -627,6 +631,19 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
         canGenerate={!!formData.prompt}
         generateLabel="Generate Image"
         generatingLabel="Generating..."
+      />
+
+      {/* Generation Modal */}
+      <GenerationModal
+        isOpen={showModal}
+        type="image"
+        generating={generating}
+        progress={progress}
+        elapsedSeconds={elapsedSeconds}
+        consoleLog={consoleLog}
+        error={error}
+        onCancel={cancel}
+        onClose={closeModal}
       />
     </>
   );

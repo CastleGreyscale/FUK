@@ -1,0 +1,323 @@
+/**
+ * GenerationModal Styles
+ * Terminal-style modal for generation progress
+ */
+
+/* Overlay */
+.gen-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 2rem;
+  animation: gen-modal-fade-in 0.2s ease-out;
+}
+
+.gen-modal-overlay--error {
+  background: rgba(40, 0, 0, 0.9);
+}
+
+@keyframes gen-modal-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Modal container */
+.gen-modal {
+  background: var(--surface-1);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  width: 100%;
+  max-width: 900px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  animation: gen-modal-slide-up 0.2s ease-out;
+}
+
+.gen-modal--error {
+  border-color: var(--error);
+}
+
+@keyframes gen-modal-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Header */
+.gen-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--surface-2);
+  border-radius: 12px 12px 0 0;
+}
+
+.gen-modal-title {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.gen-modal-title-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+}
+
+.gen-modal-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--border-color);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: gen-modal-spin 0.8s linear infinite;
+}
+
+@keyframes gen-modal-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.gen-modal-success-icon {
+  color: var(--success);
+  font-size: 1.2rem;
+}
+
+.gen-modal-error-icon {
+  color: var(--error);
+  font-size: 1.2rem;
+}
+
+.gen-modal-close {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0.5rem;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.gen-modal-close:hover {
+  background: var(--surface-3);
+  color: var(--text-primary);
+}
+
+/* Progress section */
+.gen-modal-progress {
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--surface-1);
+}
+
+.gen-modal-progress-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+  font-size: 0.875rem;
+}
+
+.gen-modal-phase {
+  color: var(--text-secondary);
+  text-transform: capitalize;
+}
+
+.gen-modal-time {
+  color: var(--accent);
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
+  font-weight: 500;
+}
+
+.gen-modal-progress-bar {
+  height: 6px;
+  background: var(--surface-3);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.gen-modal-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.gen-modal-progress-fill--error {
+  background: var(--error);
+}
+
+.gen-modal-steps {
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+  text-align: right;
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
+}
+
+/* Console output */
+.gen-modal-console {
+  flex: 1;
+  min-height: 300px;
+  max-height: 400px;
+  overflow-y: auto;
+  background: #0d1117;
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Consolas', monospace;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  padding: 1rem;
+  color: #c9d1d9;
+}
+
+.gen-modal-console-empty {
+  color: #6e7681;
+  font-style: italic;
+}
+
+.gen-modal-log-line {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* Log level colors */
+.gen-modal-log-error {
+  color: #f85149;
+}
+
+.gen-modal-log-warning {
+  color: #d29922;
+}
+
+.gen-modal-log-success {
+  color: #3fb950;
+}
+
+.gen-modal-log-timing {
+  color: #58a6ff;
+}
+
+.gen-modal-log-header {
+  color: #79c0ff;
+  font-weight: 600;
+}
+
+.gen-modal-log-section {
+  color: #a5d6ff;
+  margin-top: 0.5rem;
+}
+
+.gen-modal-log-dim {
+  color: #8b949e;
+}
+
+/* Error message */
+.gen-modal-error-message {
+  padding: 1rem 1.5rem;
+  background: rgba(248, 81, 73, 0.1);
+  border-top: 1px solid rgba(248, 81, 73, 0.3);
+  color: #f85149;
+  font-size: 0.875rem;
+}
+
+.gen-modal-error-message strong {
+  font-weight: 600;
+}
+
+/* Footer */
+.gen-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding: 1rem 1.5rem;
+  border-top: 1px solid var(--border-color);
+  background: var(--surface-2);
+  border-radius: 0 0 12px 12px;
+}
+
+.gen-modal-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 1.25rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.gen-modal-btn--cancel {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+}
+
+.gen-modal-btn--cancel:hover {
+  background: var(--surface-3);
+  border-color: var(--error);
+  color: var(--error);
+}
+
+.gen-modal-btn--close {
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  color: white;
+}
+
+.gen-modal-btn--close:hover {
+  background: var(--accent-hover);
+}
+
+.gen-modal--error .gen-modal-btn--close {
+  background: var(--error);
+  border-color: var(--error);
+}
+
+.gen-modal--error .gen-modal-btn--close:hover {
+  background: #da3633;
+}
+
+/* Scrollbar styling for console */
+.gen-modal-console::-webkit-scrollbar {
+  width: 8px;
+}
+
+.gen-modal-console::-webkit-scrollbar-track {
+  background: #161b22;
+}
+
+.gen-modal-console::-webkit-scrollbar-thumb {
+  background: #30363d;
+  border-radius: 4px;
+}
+
+.gen-modal-console::-webkit-scrollbar-thumb:hover {
+  background: #484f58;
+}

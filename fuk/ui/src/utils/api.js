@@ -106,7 +106,7 @@ export function createProgressStream(generationId, onProgress, onComplete, onErr
   };
   
   eventSource.onerror = (error) => {
-    console.error('[SSE] Connection error:', error);
+    //console.error('[SSE] Connection error:', error);
     // Don't close on error immediately - SSE will try to reconnect
     // Only report error if readyState is CLOSED (2)
     if (eventSource.readyState === EventSource.CLOSED) {

@@ -489,7 +489,7 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                     preload="metadata"
                   />
                 ) : (
-                  <img
+                  <ZoomableImage
                     src={buildImageUrl(sourceInput)}
                     alt="Input"
                     className="fuk-preview-media--constrained"
@@ -498,14 +498,12 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                 )}
               </div>
             ) : (
-              <div 
-                className="fuk-placeholder-card fuk-placeholder-card--100 fuk-placeholder-card--16x9"
-              >
+              <div className="fuk-placeholder-card">
                 <div className="fuk-placeholder">
                   {activeProcess === 'upscale' ? (
-                    <Camera className="fuk-placeholder-icon--sm" />
+                    <Camera className="fuk-placeholder-icon" />
                   ) : (
-                    <Film className="fuk-placeholder-icon--sm" />
+                    <Film className="fuk-placeholder-icon" />
                   )}
                   <p className="fuk-placeholder-text">
                     {activeProcess === 'upscale' ? 'Select image or video to upscale' : 'Select video to interpolate'}
@@ -542,9 +540,9 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
             </div>
             
             {result ? (
-              <div className="fuk-media-frame fuk-media-frame--success">
+              <div className="fuk-media-frame">
                 {result.type === 'image' ? (
-                  <img
+                  <ZoomableImage
                     src={buildImageUrl(result.url)}
                     alt="Processed"
                     className="fuk-preview-media--constrained"
@@ -566,11 +564,11 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
               </div>
             ) : (
               <div 
-                className="fuk-placeholder-card fuk-placeholder-card--100 fuk-placeholder-card--dynamic"
+                className="fuk-placeholder-card fuk-placeholder-card--ratio"
                 style={sourceInput ? inputAspectStyle : undefined}
               >
                 <div className="fuk-placeholder">
-                  <Enhance className="fuk-placeholder-icon--sm" />
+                  <Enhance className="fuk-placeholder-icon" />
                   <p className="fuk-placeholder-text">
                     {processing ? `Processing... ${formatTime(elapsedSeconds)}` : 'Result will appear here'}
                   </p>

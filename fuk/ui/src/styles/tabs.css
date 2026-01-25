@@ -152,11 +152,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-}
-
-.fuk-media-frame--success {
-  border-color: #10b981;
-  border-width: 2px;
+  position: relative;
 }
 
 .fuk-media-frame--highlighted {
@@ -176,7 +172,6 @@
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
-  /*border-radius: 0.5rem;*/
   border: 1px solid #374151;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
 }
@@ -197,7 +192,6 @@
   background-color: rgba(17, 24, 39, 0.9);
   backdrop-filter: blur(12px);
   border: 1px solid #374151;
-  border-radius: 0.5rem;
   padding: 0.5rem 0.75rem;
   font-size: 0.75rem;
   color: #9ca3af;
@@ -217,18 +211,12 @@
   align-items: center;
   gap: 0.25rem;
   padding: 0.25rem 0.5rem;
-  border-radius: 0.375rem;
+  background: rgba(0, 0, 0, 0.7);
+  color: #9ca3af;
   font-size: 0.75rem;
 }
 
-.fuk-preview-badge--success {
-  background: rgba(16, 185, 129, 0.9);
-  color: white;
-}
-
 .fuk-preview-badge--method {
-  background: rgba(0, 0, 0, 0.7);
-  color: #9ca3af;
   bottom: 0.5rem;
   top: auto;
   font-size: 0.65rem;
@@ -236,66 +224,45 @@
 
 /* ============================================================================
  * PLACEHOLDER - Empty state displays
+ * Simplified: expand to fill, no rounded corners
  * ========================================================================== */
 
 .fuk-placeholder-card {
-  background-color: rgba(31, 41, 55, 0.3);
-  border-radius: 0.5rem;
+  background-color: rgba(31, 41, 55, 0.2);
   border: 2px dashed #374151;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 3rem;
-}
-
-/* Percentage-based width placeholders */
-.fuk-placeholder-card--40 {
-  width: 40%;
-}
-
-.fuk-placeholder-card--60 {
-  width: 60%;
-}
-
-.fuk-placeholder-card--100 {
   width: 100%;
-}
-
-/* Aspect ratio variants */
-.fuk-placeholder-card--16x9 {
-  aspect-ratio: 16 / 9;
-}
-
-.fuk-placeholder-card--square {
-  aspect-ratio: 1;
+  min-height: 200px;
+  padding: 2rem;
 }
 
 /* Dynamic aspect ratio via CSS variable */
-.fuk-placeholder-card--dynamic {
+.fuk-placeholder-card--ratio {
   aspect-ratio: var(--preview-aspect, 16 / 9);
+  min-height: unset;
 }
 
 /* Error state placeholder */
 .fuk-placeholder-card--error {
   border-color: #ef4444;
+  background-color: rgba(239, 68, 68, 0.03);
 }
 
 .fuk-placeholder {
   text-align: center;
   color: #6b7280;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
 }
 
 .fuk-placeholder-icon {
-  width: 3rem;
-  height: 3rem;
-  margin: 0 auto 1rem;
-  opacity: 0.3;
-}
-
-.fuk-placeholder-icon--sm {
   width: 2rem;
   height: 2rem;
-  margin: 0 auto 0.5rem;
+  opacity: 0.3;
 }
 
 .fuk-placeholder-icon--spin {
@@ -303,12 +270,9 @@
   animation: spin 1s linear infinite;
 }
 
-.fuk-placeholder-icon--faded {
-  opacity: 0.5;
-}
-
 .fuk-placeholder-text {
   color: #6b7280;
+  font-size: 0.875rem;
 }
 
 .fuk-placeholder-text--highlight {
@@ -322,7 +286,7 @@
 .fuk-placeholder-subtext {
   font-size: 0.75rem;
   color: #6b7280;
-  margin-top: 0.5rem;
+  opacity: 0.7;
 }
 
 /* ============================================================================

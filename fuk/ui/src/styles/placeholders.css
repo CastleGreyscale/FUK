@@ -1,68 +1,39 @@
 /**
  * FUK UI - Placeholders
- * Unified placeholder system for empty states with dynamic aspect ratios
+ * Unified placeholder system for empty states
+ * 
+ * DESIGN PRINCIPLES:
+ * - Placeholders expand to fill available space
+ * - No rounded corners (professional/technical aesthetic)
+ * - Single dashed border style for all states
+ * - Dynamic aspect ratio support via CSS variable
  */
 
 /* ============================================================================
- * PLACEHOLDER CARDS - Base Structure
+ * PLACEHOLDER CARD - Container
  * ========================================================================== */
 
 .fuk-placeholder-card {
   background-color: var(--color-transparent);
-  /*border-radius: var(--radius-lg); */
   border: var(--border-width-thick) dashed var(--color-border);
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: var(--spacing-3xl);
-}
-
-/* Size Variants */
-.fuk-placeholder-card--40 {
-  width: 40%;
-}
-
-.fuk-placeholder-card--60 {
-  width: 60%;
-}
-
-.fuk-placeholder-card--100,
-.fuk-placeholder-card--full {
   width: 100%;
+  min-height: 200px;
+  padding: var(--spacing-xl);
 }
 
-/* Aspect Ratio Variants */
-.fuk-placeholder-card--square {
-  aspect-ratio: 1;
-}
-
-.fuk-placeholder-card--16x9 {
-  aspect-ratio: 16 / 9;
-}
-
-.fuk-placeholder-card--4x3 {
-  aspect-ratio: 4 / 3;
-}
-
-.fuk-placeholder-card--21x9 {
-  aspect-ratio: 21 / 9;
-}
-
-/* Dynamic aspect ratio via CSS variable */
-.fuk-placeholder-card--dynamic {
+/* Aspect ratio - use CSS variable for dynamic sizing */
+.fuk-placeholder-card--ratio {
   aspect-ratio: var(--preview-aspect, 16 / 9);
+  min-height: unset;
 }
 
-/* State Variants */
+/* Error state - subtle red tint */
 .fuk-placeholder-card--error {
   border-color: var(--color-error-500);
-  background-color: rgba(239, 68, 68, 0.05);
-}
-
-.fuk-placeholder-card--loading {
-  border-style: solid;
-  border-color: var(--color-accent);
-  background-color: rgba(168, 85, 247, 0.05);
+  background-color: rgba(239, 68, 68, 0.03);
 }
 
 /* ============================================================================
@@ -78,49 +49,14 @@
   gap: var(--spacing-md);
 }
 
-/* Icon Sizes */
+/* Icon */
 .fuk-placeholder-icon {
-  width: var(--icon-3xl);
-  height: var(--icon-3xl);
+  width: var(--icon-2xl);
+  height: var(--icon-2xl);
   opacity: 0.3;
 }
 
-.fuk-placeholder-icon--xs {
-  width: var(--icon-md);
-  height: var(--icon-md);
-}
-
-.fuk-placeholder-icon--sm {
-  width: var(--icon-2xl);
-  height: var(--icon-2xl);
-}
-
-.fuk-placeholder-icon--md {
-  width: var(--icon-3xl);
-  height: var(--icon-3xl);
-}
-
-.fuk-placeholder-icon--lg {
-  width: 4rem;
-  height: 4rem;
-}
-
-/* Icon States */
-.fuk-placeholder-icon--faded {
-  opacity: 0.5;
-}
-
-.fuk-placeholder-icon--spin {
-  opacity: 0.5;
-  animation: spin 1s linear infinite;
-}
-
-.fuk-placeholder-icon--error {
-  color: var(--color-error-500);
-  opacity: 0.7;
-}
-
-/* Text Variants */
+/* Text */
 .fuk-placeholder-text {
   color: var(--color-text-secondary);
   font-size: var(--font-size-sm);
@@ -131,14 +67,22 @@
   color: var(--color-error-500);
 }
 
-.fuk-placeholder-text--highlight {
-  color: var(--color-accent-light);
-}
-
 .fuk-placeholder-subtext {
   font-size: var(--font-size-xs);
   color: var(--color-text-secondary);
   opacity: 0.7;
+}
+
+/* ============================================================================
+ * MEDIA FRAME - Wrapper for actual content (images/video)
+ * ========================================================================== */
+
+.fuk-media-frame {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
 }
 
 /* ============================================================================
@@ -169,7 +113,7 @@
 }
 
 /* ============================================================================
- * LOADING STATES
+ * LOADING & ERROR STATES (full page)
  * ========================================================================== */
 
 .fuk-loading {
@@ -194,10 +138,6 @@
   height: var(--icon-3xl);
   color: var(--color-accent);
 }
-
-/* ============================================================================
- * ERROR STATES
- * ========================================================================== */
 
 .fuk-error {
   min-height: 100vh;
@@ -236,8 +176,29 @@
   text-align: left;
   background-color: var(--color-surface);
   padding: var(--spacing-lg);
-  border-radius: var(--radius-lg);
   font-size: var(--font-size-base);
   overflow-x: auto;
   font-family: ui-monospace, monospace;
+}
+
+/* ============================================================================
+ * PREVIEW BADGES
+ * ========================================================================== */
+
+.fuk-preview-badge {
+  position: absolute;
+  bottom: var(--spacing-sm);
+  right: var(--spacing-sm);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background: rgba(0, 0, 0, 0.7);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+}
+
+.fuk-preview-badge--method {
+  background: rgba(168, 85, 247, 0.8);
 }

@@ -335,7 +335,7 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
                         className="fuk-layer-card-media"
                       />
                     ) : (
-                      <img
+                      <ZoomableImage
                         src={buildImageUrl(layerData.url)}
                         alt={layerName}
                         className="fuk-layer-card-media"
@@ -362,7 +362,7 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
               )}
             </div>
           ) : (
-            <div className="fuk-placeholder-card fuk-placeholder-card--full">
+            <div className="fuk-placeholder-card">
               <div className="fuk-placeholder">
                 <Layers className="fuk-placeholder-icon" />
                 <p className="fuk-placeholder-text">
