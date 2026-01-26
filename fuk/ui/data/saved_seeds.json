@@ -30,14 +30,14 @@
   ],
   "qwen_image_2509_edit": [
     {
+      "seed": 14831351940,
+      "note": "",
+      "timestamp": "2026-01-25T14:19:10.400909"
+    },
+    {
       "seed": 2393677105,
       "note": "italian horror qwen edit mossibility",
       "timestamp": "2026-01-21T07:46:26.102837"
-    },
-    {
-      "seed": 14831351940,
-      "note": "italianhorror_03",
-      "timestamp": "2026-01-14T08:22:54.508804"
     },
     {
       "seed": 2674395943,
@@ -48,6 +48,13 @@
       "seed": 838655114,
       "note": "italian_horror01",
       "timestamp": "2026-01-14T08:03:25.005363"
+    }
+  ],
+  "i2v-14B-FC": [
+    {
+      "seed": 3487073944,
+      "note": "fun control",
+      "timestamp": "2026-01-25T17:21:16.908610"
     }
   ]
 }

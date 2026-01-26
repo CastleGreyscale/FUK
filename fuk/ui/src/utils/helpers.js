@@ -2,7 +2,7 @@
  * FUK UI Helper Functions
  */
 
-import { ASPECT_RATIOS } from './constants';
+
 
 /**
  * Format seconds as MM:SS
@@ -15,9 +15,13 @@ export function formatTime(seconds) {
 
 /**
  * Calculate dimensions based on aspect ratio and width
+ * @param {string} aspectRatioValue - The aspect ratio value (e.g., "1.78:1")
+ * @param {number} width - Target width
+ * @param {Array} aspectRatios - Array of aspect ratio objects from config
+ * @returns {{width: number, height: number}} Dimensions rounded to nearest 64
  */
-export function calculateDimensions(aspectRatio, width) {
-  const ratio = ASPECT_RATIOS.find(ar => ar.value === aspectRatio)?.ratio || 1;
+export function calculateDimensions(aspectRatioValue, width, aspectRatios = []) {
+  const ratio = aspectRatios.find(ar => ar.value === aspectRatioValue)?.ratio || 1;
   const height = Math.round(width / ratio);
   // Round to nearest 64 (required by diffusion models)
   return {

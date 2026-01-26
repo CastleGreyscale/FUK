@@ -1,41 +1,58 @@
 {
   "_comment": "FUK User Defaults - Per-tab generation settings and project preferences",
 
-  "aspect_ratios": {
-    "_comment": "Aspect ratio presets - label maps to ratio for height calculation",
-    "Square": 1.0,
-    "Fullscreen": 1.33,
-    "Academy": 1.85,
-    "Widescreen": 1.78,
-    "Anamorphic": 2.39,
-    "Panavision": 2.75
-  },
+  "aspect_ratios": [
+    { "label": "1:1 (Square)", "value": "1:1", "ratio": 1.0 },
+    { "label": "1.33:1 (Fullscreen)", "value": "1.33:1", "ratio": 1.33 },
+    { "label": "1.78:1 (Widescreen)", "value": "1.78:1", "ratio": 1.78 },
+    { "label": "1.85:1 (Academy)", "value": "1.85:1", "ratio": 1.85 },
+    { "label": "2.39:1 (Anamorphic)", "value": "2.39:1", "ratio": 2.39 },
+    { "label": "2.75:1 (Panavision)", "value": "2.75:1", "ratio": 2.76 }
+  ],
 
   "image": {
-    "positive_prompt": "A cinematic still ",
+    "prompt": "",
     "negative_prompt": "low resolution, low quality, limb deformities, finger deformities, over-saturated image, wax figure appearance, lack of facial detail, overly smooth, AI-generated look. Chaotic composition. Blurry, distorted text",
+    "model": "qwen_image",
     "width": 1280,
-    "aspect_ratio": "Widescreen",
-    "infer_steps": 20,
+    "aspectRatio": "2.39:1",
+    "steps": 20,
+    "stepsMode": "preset",
     "guidance_scale": 5,
     "flow_shift": 2.1,
-    "blocks_to_swap": 1,
+    "blocks_to_swap": 2,
+    "lora": null,
     "lora_multiplier": 1.0,
-    "seed": null
+    "seed": null,
+    "seedMode": "random",
+    "lastUsedSeed": null,
+    "output_format": "png",
+    "edit_strength": 0.7,
+    "control_image_paths": []
   },
 
   "video": {
-    "task": "i2v-A14B",
-    "positive_prompt": "A cinematic video",
+    "prompt": "",
     "negative_prompt": "bright colors, overexposed, static, blurred details, subtitles, style, artwork, painting, picture, still, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, malformed limbs, fused fingers, still picture, cluttered background, three legs, many people in the background, walking backwards",
-    "length": 41,
+    "task": "i2v-A14B",
+    "video_length": 41,
     "scale_factor": 1.0,
-    "infer_steps": 20,
+    "steps": 20,
+    "stepsMode": "preset",
     "guidance_scale": 5.0,
     "flow_shift": 2.1,
-    "blocks_to_swap": 15,
+    "blocks_to_swap": 25,
+    "lora": null,
     "lora_multiplier": 1.0,
-    "seed": null
+    "seed": null,
+    "seedMode": "random",
+    "lastUsedSeed": null,
+    "image_path": null,
+    "end_image_path": null,
+    "width": null,
+    "height": null,
+    "source_width": null,
+    "source_height": null
   },
 
   "preprocess": {

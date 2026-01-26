@@ -2,6 +2,8 @@
  * Video Generation Tab
  * Wan video generation with I2V, FLF2V support
  * 
+ * Defaults flow: config.defaults.video -> project state overwrites
+ * 
  * Features:
  * - Auto-reads dimensions from input image
  * - Scale factor for VRAM management
@@ -20,7 +22,6 @@ import { useSavedSeeds } from '../hooks/useSavedSeeds';
 import { startVideoGeneration } from '../../src/utils/api';
 import { formatTime } from '../utils/helpers.js';
 import { 
-  DEFAULT_VIDEO_SETTINGS, 
   buildImageUrl, 
   SEED_MODES, 
   generateRandomSeed 
@@ -53,29 +54,40 @@ function getFrameDuration(frames, fps = 24) {
 }
 
 export default function VideoTab({ config, activeTab, setActiveTab, project }) {
-  const defaults = config?.defaults?.video || config?.defaults || {};
+  // Get defaults from backend config
+  const videoDefaults = config?.defaults?.video || {};
   
-  // Build initial defaults by merging config with hardcoded defaults
+  // Initial defaults come entirely from backend config
+  // These are the values used when no project is loaded and no localStorage exists
   const initialDefaults = useMemo(() => ({
-    ...DEFAULT_VIDEO_SETTINGS,
-    task: 'i2v-A14B', // Default to Wan 2.2
-    negative_prompt: defaults.negative_prompt || DEFAULT_VIDEO_SETTINGS.negative_prompt,
-    guidance_scale: defaults.guidance_scale ?? DEFAULT_VIDEO_SETTINGS.guidance_scale,
-    flow_shift: defaults.flow_shift ?? DEFAULT_VIDEO_SETTINGS.flow_shift,
-    lora_multiplier: defaults.lora_multiplier ?? DEFAULT_VIDEO_SETTINGS.lora_multiplier,
-    blocks_to_swap: defaults.blocks_to_swap ?? DEFAULT_VIDEO_SETTINGS.blocks_to_swap,
-    video_length: defaults.length ?? DEFAULT_VIDEO_SETTINGS.video_length,
-    // New fields
-    scale_factor: 1.0,
-    source_width: null,  // From input image
-    source_height: null, // From input image
-    control_path: null,  // For Fun Control mode
-  }), [defaults]);
+    prompt: videoDefaults.prompt ?? '',
+    negative_prompt: videoDefaults.negative_prompt ?? '',
+    task: videoDefaults.task ?? 'i2v-A14B',
+    video_length: videoDefaults.video_length ?? 41,
+    scale_factor: videoDefaults.scale_factor ?? 1.0,
+    steps: videoDefaults.steps ?? 20,
+    stepsMode: videoDefaults.stepsMode ?? 'preset',
+    guidance_scale: videoDefaults.guidance_scale ?? 5.0,
+    flow_shift: videoDefaults.flow_shift ?? 5.0,
+    blocks_to_swap: videoDefaults.blocks_to_swap ?? 25,
+    lora: videoDefaults.lora ?? null,
+    lora_multiplier: videoDefaults.lora_multiplier ?? 1.0,
+    seed: videoDefaults.seed ?? null,
+    seedMode: videoDefaults.seedMode ?? SEED_MODES.RANDOM,
+    lastUsedSeed: videoDefaults.lastUsedSeed ?? null,
+    image_path: videoDefaults.image_path ?? null,
+    end_image_path: videoDefaults.end_image_path ?? null,
+    width: videoDefaults.width ?? null,
+    height: videoDefaults.height ?? null,
+    source_width: videoDefaults.source_width ?? null,
+    source_height: videoDefaults.source_height ?? null,
+  }), [videoDefaults]);
   
   // Fallback localStorage for when no project is loaded
   const [localFormData, setLocalFormData] = useLocalStorage('fuk_video_settings', initialDefaults);
 
   // Use project state if available, otherwise localStorage
+  // Order: initialDefaults <- localStorage/projectState (overwrites)
   const formData = useMemo(() => {
     if (project?.projectState?.tabs?.video) {
       return { ...initialDefaults, ...project.projectState.tabs.video };
@@ -667,12 +679,7 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
         elapsedSeconds={elapsedSeconds}
         onGenerate={handleGenerate}
         onCancel={cancel}
-        canGenerate={
-          !!formData.prompt && 
-          (!requiresStartImage || isFunControl || !!formData.image_path) && 
-          (!requiresEndImage || !!formData.end_image_path) &&
-          (!requiresControlVideo || !!formData.control_path)
-        }
+        canGenerate={!!formData.prompt && (!requiresStartImage || !!formData.image_path) && (!requiresEndImage || !!formData.end_image_path)}
         generateLabel="Generate Video"
         generatingLabel="Generating..."
       />

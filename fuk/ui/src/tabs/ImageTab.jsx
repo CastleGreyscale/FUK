@@ -1,7 +1,8 @@
 /**
  * Image Generation Tab
  * Main UI for Qwen image generation
- * Refactored: All inline styles moved to CSS classes
+ * 
+ * Defaults flow: config.defaults.image -> project state overwrites
  */
 
 import { useEffect, useCallback, useMemo, useRef } from 'react';
@@ -16,8 +17,6 @@ import { useSavedSeeds } from '../hooks/useSavedSeeds';
 import { startImageGeneration } from '../../src/utils/api';
 import { calculateDimensions, formatTime } from '../utils/helpers.js';
 import { 
-  ASPECT_RATIOS, 
-  DEFAULT_IMAGE_SETTINGS, 
   buildImageUrl, 
   SEED_MODES, 
   generateRandomSeed 
@@ -25,22 +24,38 @@ import {
 import Footer from '../components/Footer';
 
 export default function ImageTab({ config, activeTab, setActiveTab, project }) {
-  const defaults = config?.defaults || {};
+  // Get defaults from backend config
+  const imageDefaults = config?.defaults?.image || {};
+  const aspectRatios = config?.defaults?.aspect_ratios || [];
   
-  // Build initial defaults by merging config with hardcoded defaults
+  // Initial defaults come entirely from backend config
+  // These are the values used when no project is loaded and no localStorage exists
   const initialDefaults = useMemo(() => ({
-    ...DEFAULT_IMAGE_SETTINGS,
-    negative_prompt: defaults.negative_prompt || DEFAULT_IMAGE_SETTINGS.negative_prompt,
-    guidance_scale: defaults.guidance_scale ?? DEFAULT_IMAGE_SETTINGS.guidance_scale,
-    flow_shift: defaults.flow_shift ?? DEFAULT_IMAGE_SETTINGS.flow_shift,
-    lora_multiplier: defaults.lora_multiplier ?? DEFAULT_IMAGE_SETTINGS.lora_multiplier,
-    blocks_to_swap: defaults.blocks_to_swap ?? DEFAULT_IMAGE_SETTINGS.blocks_to_swap,
-  }), [defaults]);
+    prompt: imageDefaults.prompt ?? '',
+    negative_prompt: imageDefaults.negative_prompt ?? '',
+    model: imageDefaults.model ?? 'qwen_image',
+    width: imageDefaults.width ?? 1280,
+    aspectRatio: imageDefaults.aspectRatio ?? '1.78:1',
+    steps: imageDefaults.steps ?? 20,
+    stepsMode: imageDefaults.stepsMode ?? 'preset',
+    guidance_scale: imageDefaults.guidance_scale ?? 5,
+    flow_shift: imageDefaults.flow_shift ?? 2.1,
+    blocks_to_swap: imageDefaults.blocks_to_swap ?? 10,
+    lora: imageDefaults.lora ?? null,
+    lora_multiplier: imageDefaults.lora_multiplier ?? 1.0,
+    seed: imageDefaults.seed ?? null,
+    seedMode: imageDefaults.seedMode ?? SEED_MODES.RANDOM,
+    lastUsedSeed: imageDefaults.lastUsedSeed ?? null,
+    output_format: imageDefaults.output_format ?? 'png',
+    edit_strength: imageDefaults.edit_strength ?? 0.7,
+    control_image_paths: imageDefaults.control_image_paths ?? [],
+  }), [imageDefaults]);
   
   // Fallback localStorage for when no project is loaded
   const [localFormData, setLocalFormData] = useLocalStorage('fuk_image_settings', initialDefaults);
 
   // Use project state if available, otherwise localStorage
+  // Order: initialDefaults <- localStorage/projectState (overwrites)
   const formData = useMemo(() => {
     if (project?.projectState?.tabs?.image) {
       return { ...initialDefaults, ...project.projectState.tabs.image };
@@ -111,10 +126,10 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
     return null;
   }, [result, project?.projectState?.lastState?.lastImagePreview]);
 
-  // Get current dimensions
-  const getCurrentDimensions = () => {
-    return calculateDimensions(formData.aspectRatio, formData.width || 1024);
-  };
+  // Get current dimensions (pass aspectRatios from config)
+  const getCurrentDimensions = useCallback(() => {
+    return calculateDimensions(formData.aspectRatio, formData.width || 1024, aspectRatios);
+  }, [formData.aspectRatio, formData.width, aspectRatios]);
 
   // Update height when aspect ratio changes
   const prevDimsRef = useRef({ aspectRatio: null, width: null });
@@ -128,11 +143,11 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
     
     prevDimsRef.current = { aspectRatio, width };
     
-    const dims = calculateDimensions(aspectRatio, width || 1024);
+    const dims = calculateDimensions(aspectRatio, width || 1024, aspectRatios);
     if (dims.height !== formData.height) {
       setFormData(prev => ({ ...prev, height: dims.height }));
     }
-  }, [formData.aspectRatio, formData.width, formData.height, setFormData]);
+  }, [formData.aspectRatio, formData.width, formData.height, aspectRatios, setFormData]);
 
   // Update last state and seed when generation completes
   useEffect(() => {
@@ -173,7 +188,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
   }, [formData.seedMode, formData.seed, formData.lastUsedSeed]);
 
   const handleGenerate = async () => {
-    const dims = calculateDimensions(formData.aspectRatio, formData.width);
+    const dims = calculateDimensions(formData.aspectRatio, formData.width, aspectRatios);
     const effectiveSeed = getEffectiveSeed();
     
     const payload = {
@@ -372,8 +387,9 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                 value={formData.model}
                 onChange={(e) => setFormData({...formData, model: e.target.value})}
               >
-                <option value="qwen_image">Qwen Image</option>
-                <option value="qwen_image_2509_edit">Qwen Edit 2509</option>
+                {config?.models?.image_models?.map(model => (
+                  <option key={model} value={model}>{model}</option>
+                ))}
               </select>
             </div>
             
@@ -386,9 +402,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
               >
                 <option value="">None</option>
                 {config?.models?.loras?.map(lora => (
-                  <option key={lora} value={lora}>
-                    {lora.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
-                  </option>
+                  <option key={lora} value={lora}>{lora}</option>
                 ))}
               </select>
             </div>
@@ -577,7 +591,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                 value={formData.aspectRatio}
                 onChange={(e) => setFormData({...formData, aspectRatio: e.target.value})}
               >
-                {ASPECT_RATIOS.map(ar => (
+                {aspectRatios.map(ar => (
                   <option key={ar.value} value={ar.value}>{ar.label}</option>
                 ))}
               </select>
@@ -592,14 +606,14 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                   value={formData.width || ''}
                   onChange={(e) => {
                     const val = e.target.value === '' ? '' : parseInt(e.target.value);
-                    const dims = calculateDimensions(formData.aspectRatio, val || 1024);
-                    setFormData({...formData, width: val, height: dims.height});
+                    const newDims = calculateDimensions(formData.aspectRatio, val || 1024, aspectRatios);
+                    setFormData({...formData, width: val, height: newDims.height});
                   }}
                   onBlur={(e) => {
                     const val = parseInt(e.target.value) || 1024;
                     const clamped = Math.max(512, Math.min(2048, val));
-                    const dims = calculateDimensions(formData.aspectRatio, clamped);
-                    setFormData({...formData, width: clamped, height: dims.height});
+                    const newDims = calculateDimensions(formData.aspectRatio, clamped, aspectRatios);
+                    setFormData({...formData, width: clamped, height: newDims.height});
                   }}
                   step={64}
                   min={512}
@@ -613,9 +627,6 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
             </div>
           </div>
 
-
-
-        
         </div>
       </div>
 

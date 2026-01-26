@@ -79,7 +79,7 @@ FUK treats AI generation as source material that enters a professional pipeline,
 ### Linux/Mac
 
 ```bash
-git clone https://github.com/yourusername/FUK.git
+git clone https://github.com/CastleGreyscale/FUK.git
 cd FUK
 chmod +x setup.sh
 ./setup.sh
@@ -151,17 +151,11 @@ FUK requires these AI models:
 ### Required Models
 
 **Image Generation (Qwen):**
-- [Qwen2-VL-7B-Instruct](https://huggingface.co/Qwen/Qwen2-VL-7B-Instruct)
+- [Qwen_Image](https://github.com/kohya-ss/musubi-tuner/blob/main/docs/qwen_image.md)
 
 **Video Generation (Wan):**
-- [WanX-FluxV1](https://huggingface.co/wanx-video/WanX-FluxV1)
+- [Wan2.1 & Wan2.2](https://github.com/kohya-ss/musubi-tuner/blob/main/docs/wan.md)
 
-Download via musubi-tuner's model manager or manually:
-
-```bash
-cd vendor/musubi-tuner
-python download_models.py
-```
 
 See [musubi-tuner documentation](https://github.com/kohya-ss/musubi-tuner) for detailed model setup.
 
