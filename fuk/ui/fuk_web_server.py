@@ -956,21 +956,17 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
         if request.export_exr:
             active_generations[generation_id]["phase"] = "exporting_exr"
             
-            latent_path = gen_dir / "latent.safetensors"
-            if latent_path.exists():
-                exr_dir = video_manager.export_latent_to_exr(
-                    gen_dir=gen_dir,
-                    task=request.task,
-                    config_path=CONFIG_DIR / "models.json",
-                    musubi_path=VENDOR_DIR / "musubi-tuner",
-                    linear=True
-                )
-            else:
-                exr_dir = video_manager.export_to_exr_sequence(
-                    gen_dir=gen_dir,
-                    video_path=paths["generated_mp4"],
-                    linear=True
-                )
+            # NOTE: Latent-to-EXR disabled - VAE mismatch causes render artifacts.
+            # Always use the MP4 path until VAE matching is resolved.
+            # latent_path = gen_dir / "latent.safetensors"
+            # if latent_path.exists():
+            #     exr_dir = video_manager.export_latent_to_exr(...)
+            
+            exr_dir = video_manager.export_to_exr_sequence(
+                gen_dir=gen_dir,
+                video_path=paths["generated_mp4"],
+                linear=True
+            )
             
             outputs["exr_sequence"] = get_project_relative_url(exr_dir)
         
@@ -2581,8 +2577,8 @@ class ExportEXRSequenceRequest(BaseModel):
     multi_layer: bool = True  # Each frame is multi-layer EXR
     single_files: bool = False  # Also export separate sequences per layer
     
-    # True latent export (bypasses MP4 lossy compression)
-    use_latent: bool = True  # Auto-use latent.safetensors if available
+    # True latent export (DISABLED - VAE mismatch causes artifacts)
+    use_latent: bool = False  # Latent-to-EXR disabled until VAE matching is resolved
     
     # Output naming and location
     filename: str = "export"  # Base filename for sequence
