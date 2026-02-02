@@ -325,6 +325,10 @@ class VideoCryptoBatchProcessor:
             # Generate consistent color palette for all objects
             colors = self._generate_color_palette(num_objects)
             
+            # Also build raw ID matte array for lossless EXR export
+            # Use uint16 to support up to 65535 objects
+            raw_id_mattes = np.zeros((len(frame_paths), height, width), dtype=np.uint16)
+            
             for frame_idx, frame_path in enumerate(frame_paths):
                 if frame_idx not in video_segments:
                     # Frame not processed (shouldn't happen), create empty
@@ -336,6 +340,15 @@ class VideoCryptoBatchProcessor:
                         colors,
                         (height, width)
                     )
+                    
+                    # Build raw ID matte (object ID per pixel)
+                    for obj_id, mask in video_segments[frame_idx].items():
+                        # Resize mask if needed
+                        if mask.shape[:2] != (height, width):
+                            mask = cv2.resize(mask.astype(np.uint8), (width, height), interpolation=cv2.INTER_NEAREST)
+                            mask = mask.astype(bool)
+                        # Object IDs are 1-indexed (0 = background)
+                        raw_id_mattes[frame_idx][mask] = obj_id + 1
                 
                 # Save frame
                 output_frame_path = output_frames_dir / frame_path.name
@@ -354,6 +367,11 @@ class VideoCryptoBatchProcessor:
                 for frame_path in sorted(output_frames_dir.glob("frame_*.png")):
                     shutil.copy(frame_path, output_path / frame_path.name)
                 
+                # SAVE RAW CRYPTO DATA for lossless EXR export
+                raw_crypto_path = output_path / "crypto_raw.npy"
+                np.save(str(raw_crypto_path), raw_id_mattes)
+                print(f"[CryptoBatch] Saved raw crypto data: {raw_crypto_path} (shape: {raw_id_mattes.shape})")
+                
                 frames_list = [f.name for f in sorted(output_path.glob("*.png"))]
                 
                 return {
@@ -365,11 +383,17 @@ class VideoCryptoBatchProcessor:
                     "sam_version": self._sam_version,
                     "first_frame": frames_list[0] if frames_list else None,
                     "frames": frames_list,
+                    "raw_data_path": str(raw_crypto_path),
                 }
             else:
                 print(f"[CryptoBatch] Assembling MP4 to {output_path}")
                 output_path.parent.mkdir(parents=True, exist_ok=True)
                 self._assemble_video(output_frames_dir, output_path, fps)
+                
+                # SAVE RAW CRYPTO DATA alongside MP4 for lossless EXR export
+                raw_crypto_path = output_path.parent / f"{output_path.stem}_raw.npy"
+                np.save(str(raw_crypto_path), raw_id_mattes)
+                print(f"[CryptoBatch] Saved raw crypto data: {raw_crypto_path} (shape: {raw_id_mattes.shape})")
                 
                 return {
                     "output_path": str(output_path),
@@ -378,6 +402,7 @@ class VideoCryptoBatchProcessor:
                     "fps": fps,
                     "num_objects": num_objects,
                     "sam_version": self._sam_version,
+                    "raw_data_path": str(raw_crypto_path),
                 }
     
     def _generate_color_palette(self, num_colors: int) -> List[Tuple[int, int, int]]:

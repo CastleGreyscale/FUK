@@ -146,7 +146,7 @@ class QwenImageGenerator:
         Tool-specific flags come from configs/tools/musubi-qwen.json.
         
         Returns:
-            Dict with output_path, seed_used, and metadata
+            Dict with output_path, latent_path (if output_type="both"), seed_used, and metadata
         """
         start_time = time.time()
         
@@ -207,14 +207,15 @@ class QwenImageGenerator:
         _log("QWEN", f"Working directory: {self.musubi_path}")
         result = self._execute(cmd)
         
-        # Find and rename output file
-        final_output = self._finalize_output(output_path)
+        # Find and rename output files (image + optional latent)
+        outputs = self._finalize_output(output_path)
         
         elapsed = time.time() - start_time
         _log("QWEN", f"Generation complete in {elapsed:.1f}s ({elapsed/60:.1f} min)", "success")
         
         return {
-            "output_path": str(final_output),
+            "output_path": str(outputs['image']),
+            "latent_path": str(outputs['latent']) if 'latent' in outputs else None,
             "seed_used": seed,
             "elapsed_seconds": elapsed,
             "params": params,
@@ -340,23 +341,46 @@ class QwenImageGenerator:
         
         return process.returncode
     
-    def _finalize_output(self, output_path: Path) -> Path:
-        """Find generated file and rename to expected output path"""
-        save_dir = output_path.parent
-        generated_files = sorted(save_dir.glob("*.png"), key=lambda p: p.stat().st_mtime)
+    def _finalize_output(self, output_path: Path) -> Dict[str, Path]:
+        """Find generated files and rename to expected paths.
         
-        if not generated_files:
+        Returns:
+            Dict with 'image' and optionally 'latent' paths
+        """
+        save_dir = output_path.parent
+        result = {}
+        
+        # Find and rename image
+        image_files = sorted(save_dir.glob("*.png"), key=lambda p: p.stat().st_mtime)
+        
+        if not image_files:
             _log("QWEN", "No output file found after generation!", "error")
             raise RuntimeError("No output file found after generation")
         
-        latest_file = generated_files[-1]
-        _log("QWEN", f"Found generated file: {latest_file}")
+        latest_file = image_files[-1]
+        _log("QWEN", f"Found generated image: {latest_file}")
         
         if latest_file != output_path:
+            if output_path.exists():
+                output_path.unlink()
             latest_file.rename(output_path)
             _log("QWEN", f"Renamed to: {output_path}")
         
-        return output_path
+        result['image'] = output_path
+        
+        # Handle latent file (when output_type is "both")
+        latent_files = list(save_dir.glob("*.safetensors"))
+        if latent_files:
+            latest_latent = sorted(latent_files, key=lambda p: p.stat().st_mtime)[-1]
+            expected_latent = save_dir / "latent.safetensors"
+            if latest_latent != expected_latent:
+                if expected_latent.exists():
+                    expected_latent.unlink()
+                latest_latent.rename(expected_latent)
+            _log("QWEN", f"Found latent: {expected_latent}", "success")
+            result['latent'] = expected_latent
+        
+        return result
     
     def _log_generation_start(self, model: QwenModel, params: dict):
         """Log generation parameters"""

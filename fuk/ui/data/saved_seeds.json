@@ -30,6 +30,16 @@
   ],
   "qwen_image_2509_edit": [
     {
+      "seed": 2197157601,
+      "note": "horror cat 02",
+      "timestamp": "2026-01-26T17:20:22.407440"
+    },
+    {
+      "seed": 2674395943,
+      "note": "horror cat 01",
+      "timestamp": "2026-01-26T17:18:30.074571"
+    },
+    {
       "seed": 14831351940,
       "note": "",
       "timestamp": "2026-01-25T14:19:10.400909"
@@ -38,11 +48,6 @@
       "seed": 2393677105,
       "note": "italian horror qwen edit mossibility",
       "timestamp": "2026-01-21T07:46:26.102837"
-    },
-    {
-      "seed": 2674395943,
-      "note": "italianhorror02",
-      "timestamp": "2026-01-14T08:07:56.122455"
     },
     {
       "seed": 838655114,

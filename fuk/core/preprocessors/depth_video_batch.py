@@ -218,6 +218,11 @@ class VideoDepthBatchProcessor:
                 for frame_path in sorted(output_frames_dir.glob("frame_*.png")):
                     shutil.copy(frame_path, output_path / frame_path.name)
                 
+                # SAVE RAW DEPTH DATA for lossless EXR export
+                raw_depth_path = output_path / "depth_raw.npy"
+                np.save(str(raw_depth_path), all_depths.astype(np.float32))
+                print(f"[DepthBatch] Saved raw depth data: {raw_depth_path}")
+                
                 frames = sorted([f.name for f in output_path.glob("*.png")])
                 
                 return {
@@ -227,6 +232,7 @@ class VideoDepthBatchProcessor:
                     "fps": fps,
                     "first_frame": frames[0] if frames else None,
                     "frames": frames,
+                    "raw_data_path": str(raw_depth_path),
                 }
             else:
                 # Assemble to MP4
@@ -234,11 +240,17 @@ class VideoDepthBatchProcessor:
                 output_path.parent.mkdir(parents=True, exist_ok=True)
                 self._assemble_video(output_frames_dir, output_path, fps)
                 
+                # SAVE RAW DEPTH DATA alongside MP4 for lossless EXR export
+                raw_depth_path = output_path.parent / f"{output_path.stem}_raw.npy"
+                np.save(str(raw_depth_path), all_depths.astype(np.float32))
+                print(f"[DepthBatch] Saved raw depth data: {raw_depth_path}")
+                
                 return {
                     "output_path": str(output_path),
                     "is_sequence": False,
                     "frame_count": len(frame_paths),
                     "fps": fps,
+                    "raw_data_path": str(raw_depth_path),
                 }
     
     def _temporal_smooth(self, depths: np.ndarray, window: int = 3) -> np.ndarray:

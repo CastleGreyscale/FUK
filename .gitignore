@@ -31,12 +31,94 @@ fuk/vendor/
 **/outputs/
 **/venv/
 __pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# FUK specific - Working directories
+cache/
+renders/
+outputs/
+projects/*/cache/
+projects/*/renders/
+
+# FUK specific - Configuration files (personal settings)
+# Actual config files are ignored, .example files are tracked
+fuk/config/models.json
+fuk/config/defaults.json
+fuk/config/tools/*.json
+!config/tools/*.json.example
+fuk/config/*.json
+!config/*.json.example
+
+# Logs
+*.log
+logs/
+
+# Model files (too large for git)
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.bin
+models/
+
+# Generated files
 *.pyc
 *.pyo
 *.pyd
-*.png
-*.exr
-**/inputs/
-_old
-node_modules
-offline
+
+# Test files
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Node.js (for frontend)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build artifacts
+*.so
+*.dylib
+*.dll

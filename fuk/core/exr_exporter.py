@@ -186,6 +186,27 @@ class EXRExporter:
             print(f"⚠ Failed to extract frame {frame_index}: {e}")
         
         return None
+    def _find_raw_data_path(self, layer_path: Path, layer_name: str) -> Optional[Path]:
+        """
+        Look for raw .npy file alongside an MP4 or inside a sequence directory.
+        
+        The batch preprocessors now save these automatically:
+        depth.mp4     -> depth_raw.npy  (same directory)
+        depth_seq/    -> depth_seq/depth_raw.npy
+        """
+        if self._is_video_file(layer_path):
+            raw_path = layer_path.parent / f"{layer_path.stem}_raw.npy"
+            if raw_path.exists():
+                return raw_path
+            raw_path = layer_path.parent / f"{layer_name}_raw.npy"
+            if raw_path.exists():
+                return raw_path
+        elif layer_path.is_dir():
+            for name in [f'{layer_name}_raw.npy', 'depth_raw.npy', 'crypto_raw.npy', 'normals_raw.npy']:
+                raw_path = layer_path / name
+                if raw_path.exists():
+                    return raw_path
+        return None
     
     def export_video_sequence(
         self,
@@ -240,6 +261,7 @@ class EXRExporter:
         # Determine frame count and validate inputs
         frame_counts = {}
         layer_paths = {}
+        raw_data = {}
         
         for layer_name, layer_path in layers.items():
             if layer_path is None:
@@ -251,6 +273,16 @@ class EXRExporter:
                 continue
             
             layer_paths[layer_name] = layer_path
+            raw_npy_path = self._find_raw_data_path(layer_path, layer_name)
+            if raw_npy_path:
+                try:
+                    raw_array = np.load(str(raw_npy_path))
+                    raw_data[layer_name] = raw_array
+                    frame_counts[layer_name] = len(raw_array)
+                    print(f"  ✓ {layer_name}: {len(raw_array)} frames from RAW .npy (lossless)")
+                    continue  # Don't bother checking if it's MP4 or sequence
+                except Exception as e:
+                    print(f"  ⚠ {layer_name}: raw .npy failed ({e}), falling back")
             
             if self._is_video_file(layer_path):
                 info = self._get_video_info(layer_path)
@@ -282,6 +314,8 @@ class EXRExporter:
             extracted_frames = {}
             
             for layer_name, layer_path in layer_paths.items():
+                if layer_name in raw_data:
+                    continue  # NEW: skip, we have raw numpy data
                 if self._is_video_file(layer_path):
                     print(f"  Extracting {layer_name} frames...")
                     layer_temp = temp_dir / layer_name
@@ -304,6 +338,11 @@ class EXRExporter:
                 for layer_name, frames in extracted_frames.items():
                     if frame_idx < len(frames):
                         frame_layers[layer_name] = str(frames[frame_idx])
+
+                frame_raw = {}
+                for layer_name, arr in raw_data.items():
+                    if frame_idx < len(arr):
+                        frame_raw[layer_name] = arr[frame_idx]
                 
                 # Generate output filename
                 output_filename = filename_pattern.format(frame=frame_num)
@@ -318,6 +357,7 @@ class EXRExporter:
                         compression=compression,
                         linear=linear,
                         quiet=True,  # Suppress per-frame output
+                        raw_arrays=frame_raw,  
                     )
                     
                     exported_frames.append(output_path)
@@ -367,6 +407,7 @@ class EXRExporter:
         compression: str = "ZIP",
         linear: bool = True,
         quiet: bool = False,
+        raw_arrays: Optional[Dict[str, np.ndarray]] = None, 
     ) -> Dict[str, Any]:
         """
         Internal method to export a single frame (used by sequence export)
@@ -378,6 +419,24 @@ class EXRExporter:
         # Load all layers
         loaded_layers = {}
         width, height = None, None
+
+        # NEW: Process raw arrays first (lossless, no file I/O)
+        if raw_arrays:
+            for layer_name, arr in raw_arrays.items():
+                if width is None:
+                    height, width = arr.shape[:2] if arr.ndim >= 2 else (0, 0)
+                
+                if layer_name == 'depth':
+                    # Already float32 [H,W] range [0,1] — perfect
+                    loaded_layers['depth'] = arr.astype(np.float32) if arr.ndim == 2 else arr[:,:,0].astype(np.float32)
+                    
+                elif layer_name == 'normals':
+                    # Already float32 [H,W,3] range [-1,1] — no 0-1 conversion needed
+                    loaded_layers['normals_raw'] = arr[:,:,:3].astype(np.float32)
+                    
+                elif layer_name == 'crypto':
+                    # uint16 [H,W] object IDs — store as float for EXR
+                    loaded_layers['crypto_raw'] = arr.astype(np.float32)
         
         for layer_name, layer_path in layers.items():
             if layer_path is None:
@@ -445,7 +504,17 @@ class EXRExporter:
             channels_dict['Z'] = self._to_bytes(arr, bit_depth)
             channel_info['Z'] = self.Imath.Channel(pixel_type)
         
-        if 'normals' in loaded_layers:
+        # Normals: prefer raw (already [-1,1]) over PNG (needs conversion)
+        if 'normals_raw' in loaded_layers:
+            arr = loaded_layers['normals_raw']  # Already [-1,1], no math needed
+            channels_dict['N.X'] = self._to_bytes(arr[:, :, 0], bit_depth)
+            channels_dict['N.Y'] = self._to_bytes(arr[:, :, 1], bit_depth)
+            channels_dict['N.Z'] = self._to_bytes(arr[:, :, 2], bit_depth)
+            channel_info['N.X'] = self.Imath.Channel(pixel_type)
+            channel_info['N.Y'] = self.Imath.Channel(pixel_type)
+            channel_info['N.Z'] = self.Imath.Channel(pixel_type)
+
+        elif 'normals' in loaded_layers:
             arr = loaded_layers['normals']
             arr_decoded = arr * 2.0 - 1.0
             channels_dict['N.X'] = self._to_bytes(arr_decoded[:, :, 0], bit_depth)
@@ -454,8 +523,13 @@ class EXRExporter:
             channel_info['N.X'] = self.Imath.Channel(pixel_type)
             channel_info['N.Y'] = self.Imath.Channel(pixel_type)
             channel_info['N.Z'] = self.Imath.Channel(pixel_type)
-        
-        if 'crypto' in loaded_layers:
+
+        if 'crypto_raw' in loaded_layers:
+            arr = loaded_layers['crypto_raw']  # Single channel, object IDs as float
+            channels_dict['crypto.ID'] = self._to_bytes(arr, bit_depth)
+            channel_info['crypto.ID'] = self.Imath.Channel(pixel_type)
+
+        elif 'crypto' in loaded_layers:
             arr = loaded_layers['crypto']
             channels_dict['crypto.R'] = self._to_bytes(arr[:, :, 0], bit_depth)
             channels_dict['crypto.G'] = self._to_bytes(arr[:, :, 1], bit_depth)
@@ -741,6 +815,437 @@ class EXRExporter:
             img * 12.92,
             1.055 * np.power(img, 1/2.4) - 0.055
         )
+    
+    # ========================================================================
+    # True Latent-to-EXR Export (No MP4 Compression)
+    # ========================================================================
+    
+    def export_from_array(
+        self,
+        pixels: np.ndarray,
+        output_path: Path,
+        bit_depth: Literal[16, 32] = 32,
+        compression: str = "ZIP",
+        is_linear: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Export a decoded pixel array directly to EXR.
+        
+        This is the true lossless path - pixels go directly to EXR
+        without any intermediate lossy compression.
+        
+        Args:
+            pixels: Float32 numpy array of shape (H, W, C) in [0, 1] range
+                   Already decoded from latent, already in linear space if is_linear=True
+            output_path: Output EXR path
+            bit_depth: 16 (half float) or 32 (full float)
+            compression: Compression method
+            is_linear: Whether pixels are already in linear color space
+            
+        Returns:
+            Dict with output info
+        """
+        if not self._has_openexr:
+            raise RuntimeError("OpenEXR not installed")
+        
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Validate input
+        if pixels.ndim != 3:
+            raise ValueError(f"Expected 3D array (H, W, C), got shape {pixels.shape}")
+        
+        height, width, channels = pixels.shape
+        
+        if channels not in [1, 3, 4]:
+            raise ValueError(f"Expected 1, 3, or 4 channels, got {channels}")
+        
+        # Ensure float32
+        pixels = pixels.astype(np.float32)
+        
+        # Setup EXR
+        pixel_type = self.Imath.PixelType(
+            self.Imath.PixelType.HALF if bit_depth == 16 else self.Imath.PixelType.FLOAT
+        )
+        
+        channels_dict = {}
+        channel_info = {}
+        
+        # RGB channels
+        if channels >= 3:
+            channels_dict['R'] = self._to_bytes(pixels[:, :, 0], bit_depth)
+            channels_dict['G'] = self._to_bytes(pixels[:, :, 1], bit_depth)
+            channels_dict['B'] = self._to_bytes(pixels[:, :, 2], bit_depth)
+            channel_info['R'] = self.Imath.Channel(pixel_type)
+            channel_info['G'] = self.Imath.Channel(pixel_type)
+            channel_info['B'] = self.Imath.Channel(pixel_type)
+        elif channels == 1:
+            # Single channel (e.g., depth)
+            channels_dict['Y'] = self._to_bytes(pixels[:, :, 0], bit_depth)
+            channel_info['Y'] = self.Imath.Channel(pixel_type)
+        
+        # Alpha channel
+        if channels == 4:
+            channels_dict['A'] = self._to_bytes(pixels[:, :, 3], bit_depth)
+            channel_info['A'] = self.Imath.Channel(pixel_type)
+        
+        # Create and write EXR
+        header = self.OpenEXR.Header(width, height)
+        header['channels'] = channel_info
+        
+        exr_file = self.OpenEXR.OutputFile(str(output_path), header)
+        exr_file.writePixels(channels_dict)
+        exr_file.close()
+        
+        file_size = output_path.stat().st_size
+        
+        return {
+            "output_path": str(output_path),
+            "width": width,
+            "height": height,
+            "channels": list(channels_dict.keys()),
+            "bit_depth": bit_depth,
+            "compression": compression,
+            "file_size": file_size,
+            "is_linear": is_linear,
+        }
+    
+    def export_from_latent(
+        self,
+        latent_path: Path,
+        output_path: Path,
+        vae_path: str,
+        musubi_path: Optional[Path] = None,
+        bit_depth: Literal[16, 32] = 32,
+        compression: str = "ZIP",
+        device: str = "cuda",
+    ) -> Dict[str, Any]:
+        """
+        Export an image latent directly to EXR.
+        
+        Loads the VAE, decodes the latent, and writes directly to EXR.
+        This is the true lossless path for single images.
+        
+        Args:
+            latent_path: Path to latent.safetensors
+            output_path: Output EXR path
+            vae_path: Path to VAE model
+            musubi_path: Path to musubi-tuner (for VAE loading)
+            bit_depth: 16 or 32
+            compression: Compression method
+            device: torch device
+            
+        Returns:
+            Dict with output info
+        """
+        # Import from same directory or installed package
+        try:
+            from latent_decoder import LatentDecoder
+        except ImportError:
+            # Try relative import if running as module
+            from .latent_decoder import LatentDecoder
+        
+        print(f"\n{'='*60}")
+        print(f"True Latent-to-EXR Export (Image)")
+        print(f"{'='*60}")
+        print(f"Latent: {latent_path}")
+        print(f"Output: {output_path}")
+        print(f"Bit Depth: {bit_depth}-bit")
+        print(f"{'='*60}\n")
+        
+        # Decode latent
+        decoder = LatentDecoder(vae_path=vae_path, musubi_path=musubi_path, device=device)
+        pixels = decoder.decode_image_latent(latent_path, normalize=True)
+        
+        # VAE output is already in linear space
+        result = self.export_from_array(
+            pixels=pixels,
+            output_path=output_path,
+            bit_depth=bit_depth,
+            compression=compression,
+            is_linear=True,
+        )
+        
+        # Clean up
+        decoder.unload()
+        
+        print(f"\n✓ Exported true latent EXR: {output_path}")
+        print(f"  Size: {result['file_size'] / (1024*1024):.2f} MB")
+        
+        return result
+    
+    def export_from_latent_sequence(
+        self,
+        latent_path: Path,
+        output_dir: Path,
+        vae_path: str,
+        musubi_path: Optional[Path] = None,
+        filename_pattern: str = "frame.{frame:04d}.exr",
+        bit_depth: Literal[16, 32] = 32,
+        compression: str = "ZIP",
+        start_frame: int = 1,
+        device: str = "cuda",
+        progress_callback: Optional[Callable[[int, int], None]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Export a video latent directly to EXR sequence.
+        
+        Decodes the video latent and writes each frame directly to EXR.
+        This is the TRUE lossless path - no MP4 compression anywhere.
+        
+        Args:
+            latent_path: Path to latent.safetensors (video latent)
+            output_dir: Directory for output EXR sequence
+            vae_path: Path to VAE model
+            musubi_path: Path to musubi-tuner (for VAE loading)
+            filename_pattern: Pattern with {frame:04d} placeholder
+            bit_depth: 16 or 32
+            compression: Compression method
+            start_frame: First frame number
+            device: torch device
+            progress_callback: Optional callback(current, total)
+            
+        Returns:
+            Dict with sequence info
+        """
+        try:
+            from latent_decoder import LatentDecoder
+        except ImportError:
+            from .latent_decoder import LatentDecoder
+        
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        print(f"\n{'='*60}")
+        print(f"True Latent-to-EXR Export (Video Sequence)")
+        print(f"{'='*60}")
+        print(f"Latent: {latent_path}")
+        print(f"Output: {output_dir}")
+        print(f"Pattern: {filename_pattern}")
+        print(f"Bit Depth: {bit_depth}-bit")
+        print(f"{'='*60}\n")
+        
+        # Initialize decoder
+        decoder = LatentDecoder(vae_path=vae_path, musubi_path=musubi_path, device=device)
+        
+        # Get latent info first
+        info = decoder.get_latent_info(latent_path)
+        estimated = info.get("estimated_output", {})
+        total_frames = estimated.get("frames", 0)
+        
+        print(f"  Estimated frames: {total_frames}")
+        print(f"  Estimated size: {estimated.get('width', '?')}x{estimated.get('height', '?')}")
+        
+        # Decode and export frame by frame
+        exported_frames = []
+        total_size = 0
+        
+        for frame_idx, pixels in decoder.decode_video_latent(latent_path, normalize=True):
+            frame_num = start_frame + frame_idx
+            output_filename = filename_pattern.format(frame=frame_num)
+            output_path = output_dir / output_filename
+            
+            try:
+                result = self.export_from_array(
+                    pixels=pixels,
+                    output_path=output_path,
+                    bit_depth=bit_depth,
+                    compression=compression,
+                    is_linear=True,
+                )
+                
+                exported_frames.append(output_path)
+                total_size += result.get('file_size', 0)
+                
+            except Exception as e:
+                print(f"  ⚠ Frame {frame_num} failed: {e}")
+            
+            # Progress
+            if progress_callback and total_frames > 0:
+                progress_callback(frame_idx + 1, total_frames)
+            
+            if (frame_idx + 1) % 10 == 0:
+                print(f"  Exported {frame_idx + 1} frames...")
+        
+        # Clean up
+        decoder.unload()
+        
+        total_size_mb = total_size / (1024 * 1024)
+        
+        print(f"\n✓ Exported true latent EXR sequence")
+        print(f"  Frames: {len(exported_frames)}")
+        print(f"  Total Size: {total_size_mb:.2f} MB")
+        print(f"  Output: {output_dir}")
+        
+        return {
+            "output_dir": str(output_dir),
+            "frame_count": len(exported_frames),
+            "total_size": total_size,
+            "bit_depth": bit_depth,
+            "compression": compression,
+            "frames": [str(f) for f in exported_frames],
+            "is_true_latent": True,  # Flag to indicate this bypassed MP4
+        }
+    
+    def _find_raw_data_path(self, layer_path: Path, layer_name: str) -> Optional[Path]:
+        """
+        Find raw .npy data file for a layer.
+        
+        Looks for patterns:
+        - MP4: /path/to/depth.mp4 -> /path/to/depth_raw.npy
+        - Directory: /path/to/depth_sequence/ -> /path/to/depth_sequence/depth_raw.npy
+        """
+        if self._is_video_file(layer_path):
+            # Look for {stem}_raw.npy alongside the MP4
+            raw_path = layer_path.parent / f"{layer_path.stem}_raw.npy"
+            if raw_path.exists():
+                return raw_path
+            # Also try {layer_name}_raw.npy
+            raw_path = layer_path.parent / f"{layer_name}_raw.npy"
+            if raw_path.exists():
+                return raw_path
+        elif layer_path.is_dir():
+            # Look for {layer_name}_raw.npy inside directory
+            raw_path = layer_path / f"{layer_name}_raw.npy"
+            if raw_path.exists():
+                return raw_path
+            # Also try depth_raw.npy, crypto_raw.npy, normals_raw.npy
+            for name in ['depth_raw.npy', 'crypto_raw.npy', 'normals_raw.npy']:
+                raw_path = layer_path / name
+                if raw_path.exists():
+                    return raw_path
+        
+        return None
+
+
+    # Add this method to export frames with raw numpy arrays:
+
+    def _export_frame_multilayer_with_raw(
+        self,
+        layers: Dict[str, str],
+        raw_arrays: Dict[str, np.ndarray],
+        output_path: Path,
+        bit_depth: Literal[16, 32] = 32,
+        compression: str = "ZIP",
+        linear: bool = True,
+        quiet: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Export a single frame with support for raw numpy arrays.
+        
+        Args:
+            layers: Dict of layer_name -> file_path (for layers loaded from PNG/JPG)
+            raw_arrays: Dict of layer_name -> numpy array (for raw lossless data)
+            output_path: Where to save EXR
+            bit_depth: 16 or 32
+            compression: Compression method
+            linear: Convert beauty to linear
+            quiet: Suppress output
+        """
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Load all layers
+        loaded_layers = {}
+        width, height = None, None
+        
+        # Process raw arrays first (these are lossless!)
+        for layer_name, arr in raw_arrays.items():
+            if width is None and arr.ndim >= 2:
+                if arr.ndim == 2:
+                    height, width = arr.shape
+                else:
+                    height, width = arr.shape[:2]
+            
+            # Process based on layer type
+            if layer_name == 'depth':
+                # Depth: single channel float [H, W] in range [0, 1]
+                if arr.ndim == 2:
+                    loaded_layers['depth'] = arr.astype(np.float32)
+                else:
+                    loaded_layers['depth'] = arr[:, :, 0].astype(np.float32) if arr.ndim == 3 else arr.astype(np.float32)
+                    
+            elif layer_name == 'normals':
+                # Normals: 3 channels [H, W, 3] in range [-1, 1]
+                if arr.ndim == 3 and arr.shape[2] >= 3:
+                    loaded_layers['normals'] = arr[:, :, :3].astype(np.float32)
+                elif arr.ndim == 2:
+                    loaded_layers['normals'] = np.stack([arr, arr, arr], axis=-1).astype(np.float32)
+                    
+            elif layer_name == 'crypto':
+                # Crypto: integer IDs [H, W] - convert to float for EXR
+                # Store as raw float - the ID value IS the value
+                # Compositors can use this directly for keying
+                loaded_layers['crypto'] = arr.astype(np.float32)
+                
+            elif layer_name == 'beauty':
+                # Beauty: RGB [H, W, 3]
+                if arr.ndim == 2:
+                    arr = np.stack([arr, arr, arr], axis=-1)
+                if arr.max() > 1.0:
+                    arr = arr / 255.0
+                if linear:
+                    arr = self._srgb_to_linear(arr)
+                loaded_layers['beauty'] = arr[:, :, :3].astype(np.float32)
+            else:
+                # Generic layer
+                loaded_layers[layer_name] = arr.astype(np.float32)
+        
+        # Process file-based layers (from PNG/JPG) - only for layers not in raw_arrays
+        for layer_name, layer_path in layers.items():
+            if layer_path is None or layer_name in loaded_layers:
+                continue
+                
+            layer_path = Path(layer_path)
+            if not layer_path.exists():
+                continue
+            
+            img = Image.open(layer_path)
+            arr = np.array(img).astype(np.float32) / 255.0
+            
+            if width is None:
+                height, width = arr.shape[:2]
+            
+            # Process based on layer type
+            if layer_name == 'beauty':
+                if arr.ndim == 2:
+                    arr = np.stack([arr, arr, arr], axis=-1)
+                elif arr.shape[2] == 4:
+                    arr = arr[:, :, :3]
+                if linear:
+                    arr = self._srgb_to_linear(arr)
+                loaded_layers['beauty'] = arr
+                
+            elif layer_name == 'depth':
+                if arr.ndim == 3:
+                    arr = arr[:, :, 0]
+                loaded_layers['depth'] = arr
+                
+            elif layer_name == 'normals':
+                if arr.ndim == 2:
+                    arr = np.stack([arr, arr, arr], axis=-1)
+                elif arr.shape[2] == 4:
+                    arr = arr[:, :, :3]
+                # Convert from 0-1 to -1 to 1
+                arr = arr * 2.0 - 1.0
+                loaded_layers['normals'] = arr
+                
+            elif layer_name == 'crypto':
+                if arr.ndim == 3:
+                    arr = arr[:, :, 0]
+                loaded_layers['crypto'] = arr
+            else:
+                loaded_layers[layer_name] = arr
+        
+        if not loaded_layers:
+            raise ValueError("No layers loaded")
+        
+        # Write EXR
+        return self._write_multilayer_exr(
+            loaded_layers, output_path, width, height, 
+            bit_depth, compression, quiet
+        )
+
 
 
 # ============================================================================
@@ -826,4 +1331,128 @@ def export_video_layers_to_exr_sequence(
         linear=linear,
         start_frame=start_frame,
         progress_callback=progress_callback,
+    )
+
+
+# ============================================================================
+# True Latent-to-EXR Functions (No MP4 Compression)
+# ============================================================================
+
+def export_latent_to_exr(
+    latent_path: Path,
+    output_path: Path,
+    vae_path: str,
+    musubi_path: Optional[Path] = None,
+    bit_depth: int = 32,
+    compression: str = "ZIP",
+    device: str = "cuda",
+) -> Dict[str, Any]:
+    """
+    Export an image latent directly to EXR (true lossless path).
+    
+    Args:
+        latent_path: Path to latent.safetensors
+        output_path: Output EXR path
+        vae_path: Path to VAE model
+        musubi_path: Path to musubi-tuner (for VAE loading)
+        bit_depth: 16 or 32
+        compression: ZIP, PIZ, DWAA, etc.
+        device: torch device
+        
+    Returns:
+        Export result dict
+    """
+    exporter = EXRExporter()
+    
+    return exporter.export_from_latent(
+        latent_path=Path(latent_path),
+        output_path=Path(output_path),
+        vae_path=vae_path,
+        musubi_path=musubi_path,
+        bit_depth=bit_depth,
+        compression=compression,
+        device=device,
+    )
+
+
+def export_video_latent_to_exr_sequence(
+    latent_path: Path,
+    output_dir: Path,
+    vae_path: str,
+    musubi_path: Optional[Path] = None,
+    filename_pattern: str = "frame.{frame:04d}.exr",
+    bit_depth: int = 32,
+    compression: str = "ZIP",
+    start_frame: int = 1,
+    device: str = "cuda",
+    progress_callback: Optional[Callable[[int, int], None]] = None,
+) -> Dict[str, Any]:
+    """
+    Export a video latent directly to EXR sequence (true lossless path).
+    
+    This is the recommended export path for maximum quality - it decodes
+    the latent directly to EXR without any intermediate MP4 compression.
+    
+    Args:
+        latent_path: Path to latent.safetensors (video latent from Wan)
+        output_dir: Directory for output EXR sequence
+        vae_path: Path to VAE model
+        musubi_path: Path to musubi-tuner (for VAE loading)
+        filename_pattern: Pattern with {frame:04d} placeholder
+        bit_depth: 16 or 32
+        compression: ZIP, PIZ, DWAA, etc.
+        start_frame: First frame number
+        device: torch device
+        progress_callback: Optional callback(current, total)
+        
+    Returns:
+        Export result dict with sequence info
+    """
+    exporter = EXRExporter()
+    
+    return exporter.export_from_latent_sequence(
+        latent_path=Path(latent_path),
+        output_dir=Path(output_dir),
+        vae_path=vae_path,
+        musubi_path=musubi_path,
+        filename_pattern=filename_pattern,
+        bit_depth=bit_depth,
+        compression=compression,
+        start_frame=start_frame,
+        device=device,
+        progress_callback=progress_callback,
+    )
+
+
+def export_array_to_exr(
+    pixels: np.ndarray,
+    output_path: Path,
+    bit_depth: int = 32,
+    compression: str = "ZIP",
+    is_linear: bool = True,
+) -> Dict[str, Any]:
+    """
+    Export a decoded pixel array directly to EXR.
+    
+    Use this when you've already decoded the latent yourself
+    and just need to write to EXR.
+    
+    Args:
+        pixels: Float32 numpy array (H, W, C) in [0, 1] range
+        output_path: Output EXR path
+        bit_depth: 16 or 32
+        compression: ZIP, PIZ, DWAA, etc.
+        is_linear: Whether pixels are in linear color space
+        
+    Returns:
+        Export result dict
+    """
+    exporter = EXRExporter()
+    
+    return exporter.export_from_array(
+        pixels=pixels,
+        output_path=Path(output_path),
+        bit_depth=bit_depth,
+        compression=compression,
+        is_linear=is_linear,
     )
