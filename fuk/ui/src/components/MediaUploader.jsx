@@ -148,7 +148,15 @@ export default function MediaUploader({
 
         // Register imports in history and auto-pin
         for (const file of data.files) {
-          const result = await registerImport(file.path, file.display_name, true);
+          // Build sequence info if this is a sequence
+          const sequenceInfo = file.media_type === 'sequence' ? {
+            firstFrame: file.first_frame,
+            lastFrame: file.last_frame,
+            frameCount: file.frame_count,
+            framePattern: file.frame_pattern,
+          } : null;
+          
+          const result = await registerImport(file.path, file.display_name, true, sequenceInfo);
           if (result.success && result.auto_pin && result.id) {
             // Dispatch event to notify GenerationHistory to add pin and refresh
             window.dispatchEvent(new CustomEvent('fuk-import-registered', {

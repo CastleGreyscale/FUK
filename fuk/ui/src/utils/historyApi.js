@@ -1,87 +1,55 @@
 /**
- * History API utilities
- * Separated from GenerationHistory component to fix Vite HMR issues
+ * History API utilities for registering imports
  */
 
-import { API_URL } from '../utils/constants';
+const API_URL = '/api';
 
 /**
- * Register an imported asset in history
- * Call this from any component when assets are imported
+ * Register an imported file in history
  * 
- * @param {string} path - Absolute path to the file
- * @param {string} name - Display name (optional)
- * @param {boolean} autoPin - Whether to auto-pin (default: true)
- * @returns {Promise<{success, id, path, auto_pin}>}
+ * @param {string} path - File path (absolute, or printf pattern for sequences)
+ * @param {string} displayName - Display name for the file
+ * @param {boolean} autoPin - Whether to auto-pin the import
+ * @param {object} sequenceInfo - Optional sequence metadata
+ * @param {number} sequenceInfo.firstFrame - First frame number
+ * @param {number} sequenceInfo.lastFrame - Last frame number  
+ * @param {number} sequenceInfo.frameCount - Total frame count
+ * @param {string} sequenceInfo.framePattern - Pattern with #### notation
+ * @returns {Promise<object>} Import result
  */
-export async function registerImport(path, name = null, autoPin = true) {
+export async function registerImport(path, displayName, autoPin = true, sequenceInfo = null) {
   try {
-    const res = await fetch(`${API_URL}/project/import`, {
+    const body = {
+      path,
+      name: displayName,
+      auto_pin: autoPin,
+    };
+    
+    // Add sequence metadata if provided
+    if (sequenceInfo) {
+      body.first_frame = sequenceInfo.firstFrame;
+      body.last_frame = sequenceInfo.lastFrame;
+      body.frame_count = sequenceInfo.frameCount;
+      body.frame_pattern = sequenceInfo.framePattern;
+    }
+    
+    const response = await fetch(`${API_URL}/project/import`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        path,
-        name,
-        auto_pin: autoPin,
-      }),
+      body: JSON.stringify(body),
     });
     
-    if (!res.ok) {
-      throw new Error(`Import failed: ${res.statusText}`);
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: response.statusText }));
+      console.error('[HistoryAPI] Import failed:', error);
+      return { success: false, error: error.detail || 'Import failed' };
     }
     
-    const data = await res.json();
-    console.log('[History] Registered import:', data);
+    const result = await response.json();
+    return result;
     
-    return data;
   } catch (err) {
-    console.error('[History] Failed to register import:', err);
+    console.error('[HistoryAPI] Import error:', err);
     return { success: false, error: err.message };
   }
-}
-
-/**
- * Delete a generation from history
- * 
- * @param {string} generationId - ID of the generation to delete
- * @returns {Promise<{success: boolean}>}
- */
-export async function deleteGeneration(generationId) {
-  try {
-    const res = await fetch(`${API_URL}/project/generations/${encodeURIComponent(generationId)}`, {
-      method: 'DELETE'
-    });
-    
-    if (!res.ok) {
-      throw new Error(`Delete failed: ${res.statusText}`);
-    }
-    
-    return { success: true };
-  } catch (err) {
-    console.error('[History] Failed to delete generation:', err);
-    return { success: false, error: err.message };
-  }
-}
-
-/**
- * Fetch generations from history
- * 
- * @param {number} days - Number of days to fetch (0 = all)
- * @param {string[]} pinnedIds - Array of pinned generation IDs
- * @returns {Promise<{generations: Array, hasMore: boolean}>}
- */
-export async function fetchGenerations(days = 1, pinnedIds = []) {
-  const params = new URLSearchParams({ days: days.toString() });
-  
-  if (pinnedIds.length > 0) {
-    params.set('pinned', pinnedIds.join(','));
-  }
-  
-  const res = await fetch(`${API_URL}/project/generations?${params}`);
-  
-  if (!res.ok) {
-    throw new Error(`Failed to fetch: ${res.statusText}`);
-  }
-  
-  return await res.json();
 }

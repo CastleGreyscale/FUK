@@ -61,5 +61,12 @@
       "note": "fun control",
       "timestamp": "2026-01-25T17:21:16.908610"
     }
+  ],
+  "qwen_image_2512": [
+    {
+      "seed": 2096288445,
+      "note": "test",
+      "timestamp": "2026-02-07T10:37:59.511945"
+    }
   ]
 }

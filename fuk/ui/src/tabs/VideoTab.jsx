@@ -57,6 +57,9 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
   // Get defaults from backend config
   const videoDefaults = config?.defaults?.video || {};
   
+  // Model metadata from config
+  const videoModels = config?.models?.video_models || [];
+  
   // Initial defaults come entirely from backend config
   // These are the values used when no project is loaded and no localStorage exists
   const initialDefaults = useMemo(() => ({
@@ -68,8 +71,9 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
     steps: videoDefaults.steps ?? 20,
     stepsMode: videoDefaults.stepsMode ?? 'preset',
     guidance_scale: videoDefaults.guidance_scale ?? 5.0,
-    flow_shift: videoDefaults.flow_shift ?? 5.0,
-    blocks_to_swap: videoDefaults.blocks_to_swap ?? 25,
+    sigma_shift: videoDefaults.sigma_shift ?? 5.0,
+    motion_bucket_id: videoDefaults.motion_bucket_id ?? null,
+    denoising_strength: videoDefaults.denoising_strength ?? 1.0,
     lora: videoDefaults.lora ?? null,
     lora_multiplier: videoDefaults.lora_multiplier ?? 1.0,
     seed: videoDefaults.seed ?? null,
@@ -81,6 +85,7 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
     height: videoDefaults.height ?? null,
     source_width: videoDefaults.source_width ?? null,
     source_height: videoDefaults.source_height ?? null,
+    vram_preset: config?.models?.vram_preset_default ?? 'low',
   }), [videoDefaults]);
   
   // Fallback localStorage for when no project is loaded
@@ -433,6 +438,36 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
                     />
                   </div>
                 )}
+                
+                {/* Denoising Strength - only when input image present */}
+                {formData.image_path && (
+                  <div className="fuk-form-group-compact fuk-mt-4">
+                    <label className="fuk-label">Denoising Strength</label>
+                    <div className="fuk-input-inline">
+                      <input
+                        type="range"
+                        className="fuk-input fuk-input--flex-2"
+                        value={formData.denoising_strength ?? 1.0}
+                        onChange={(e) => setFormData({...formData, denoising_strength: parseFloat(e.target.value)})}
+                        min={0}
+                        max={1}
+                        step={0.05}
+                      />
+                      <input
+                        type="number"
+                        className="fuk-input fuk-input--w-80"
+                        value={formData.denoising_strength ?? 1.0}
+                        onChange={(e) => setFormData({...formData, denoising_strength: parseFloat(e.target.value)})}
+                        step={0.05}
+                        min={0}
+                        max={1}
+                      />
+                    </div>
+                    <p className="fuk-help-text fuk-mt-1">
+                      0.0 = similar to input, 1.0 = maximum variation from input
+                    </p>
+                  </div>
+                )}
               </>
             ) : (
               <div className="fuk-empty-state">
@@ -455,12 +490,62 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
                 value={formData.task}
                 onChange={(e) => setFormData({...formData, task: e.target.value})}
               >
-                <option value="i2v-A14B">Wan 2.2 I2V (Recommended)</option>
-                <option value="i2v-14B">Wan 2.1 I2V</option>
-                <option value="flf2v-14B">Wan 2.1 FLF2V (First+Last Frame)</option>
-                <option value="i2v-14B-FC">Wan 2.1 I2V Fun Control</option>
+                {videoModels.length > 0 ? (
+                  videoModels.map(model => (
+                    <option key={model.key} value={model.key}>{model.description}</option>
+                  ))
+                ) : (
+                  <>
+                    <option value="i2v-A14B">Wan 2.2 I2V (Recommended)</option>
+                    <option value="i2v-14B">Wan 2.1 I2V</option>
+                    <option value="flf2v-14B">Wan 2.1 FLF2V (First+Last Frame)</option>
+                    <option value="i2v-14B-FC">Wan 2.1 I2V Fun Control</option>
+                  </>
+                )}
               </select>
             </div>
+            
+            <div className="fuk-form-group-compact">
+              <label className="fuk-label">LoRA</label>
+              <select
+                className="fuk-select"
+                value={formData.lora || ''}
+                onChange={(e) => setFormData({...formData, lora: e.target.value || null})}
+              >
+                <option value="">None</option>
+                {config?.models?.loras?.map((lora, idx) => (
+                  <option key={typeof lora === 'string' ? lora : lora.key || idx} value={typeof lora === 'string' ? lora : lora.key}>
+                    {typeof lora === 'string' ? lora : (lora.name || lora.description || lora.key) + (lora.size_mb ? ` (${lora.size_mb}MB)` : '')}
+                  </option>
+                ))}
+              </select>
+            </div>
+            
+            {formData.lora && (
+              <div className="fuk-form-group-compact">
+                <label className="fuk-label">LoRA Strength</label>
+                <div className="fuk-input-inline">
+                  <input
+                    type="range"
+                    className="fuk-input fuk-input--flex-2"
+                    value={formData.lora_multiplier}
+                    onChange={(e) => setFormData({...formData, lora_multiplier: parseFloat(e.target.value)})}
+                    min={0}
+                    max={2}
+                    step={0.1}
+                  />
+                  <input
+                    type="number"
+                    className="fuk-input fuk-input--w-80"
+                    value={formData.lora_multiplier}
+                    onChange={(e) => setFormData({...formData, lora_multiplier: parseFloat(e.target.value)})}
+                    step={0.1}
+                    min={0}
+                    max={2}
+                  />
+                </div>
+              </div>
+            )}
             
             {/* Resolution from input + scale factor */}
             <div className="fuk-form-group-compact">
@@ -586,30 +671,60 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
             </div>
             
             <div className="fuk-form-group-compact">
-              <label className="fuk-label">Flow Shift</label>
-              <input
-                type="number"
-                className="fuk-input"
-                value={formData.flow_shift}
-                onChange={(e) => setFormData({...formData, flow_shift: parseFloat(e.target.value)})}
-                step={0.5}
-                min={1}
-                max={10}
-              />
-            </div>
-            
-            <div className="fuk-form-group-compact">
               <label className="fuk-label">
-                Blocks to Swap <span className="fuk-label-description">(VRAM)</span>
+                Sigma Shift
+                <span className="fuk-help-text-inline"> (timestep control)</span>
               </label>
               <input
                 type="number"
                 className="fuk-input"
-                value={formData.blocks_to_swap}
-                onChange={(e) => setFormData({...formData, blocks_to_swap: parseInt(e.target.value)})}
-                min={0}
-                max={39}
+                value={formData.sigma_shift}
+                onChange={(e) => setFormData({...formData, sigma_shift: parseFloat(e.target.value)})}
+                step={0.5}
+                min={1}
+                max={10}
               />
+              <p className="fuk-help-text fuk-mt-1">
+                Controls sampling timestep distribution. Default: 5.0
+              </p>
+            </div>
+            
+            <div className="fuk-form-group-compact">
+              <label className="fuk-label">
+                Motion Amplitude
+                <span className="fuk-help-text-inline"> (auto if blank)</span>
+              </label>
+              <input
+                type="number"
+                className="fuk-input"
+                value={formData.motion_bucket_id ?? ''}
+                onChange={(e) => setFormData({
+                  ...formData, 
+                  motion_bucket_id: e.target.value ? parseFloat(e.target.value) : null
+                })}
+                placeholder="auto"
+                step={5}
+                min={0}
+                max={200}
+              />
+              <p className="fuk-help-text fuk-mt-1">
+                Controls motion intensity. Higher = more movement. Leave blank for auto.
+              </p>
+            </div>
+            
+            <div className="fuk-form-group-compact">
+              <label className="fuk-label">VRAM Management</label>
+              <select
+                className="fuk-select"
+                value={formData.vram_preset || 'low'}
+                onChange={(e) => setFormData({...formData, vram_preset: e.target.value})}
+              >
+                {(config?.models?.vram_presets || []).map(preset => (
+                  <option key={preset.key} value={preset.key} title={preset.description}>
+                    {preset.label}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 

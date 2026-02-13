@@ -3,8 +3,8 @@
 FUK Web Server - FastAPI backend for the FUK generation pipeline
 
 Provides REST API endpoints for:
-- Image generation (Qwen via musubi)
-- Video generation (Wan via musubi)
+- Image generation (Qwen via DiffSynth-Studio)
+- Video generation (Wan via DiffSynth-Studio)
 - Progress monitoring (Server-Sent Events)
 - File serving
 - Generation history
@@ -47,8 +47,7 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 from file_browser_endpoints import setup_file_browser_routes
 from video_endpoints import setup_video_routes
-from core.qwen_image_wrapper import create_generator as create_image_generator, QwenModel
-from core.wan_video_wrapper import create_video_generator, WanTask
+from core.diffsynth_backend import DiffSynthBackend
 from core.video_processor import VideoProcessor
 import json
 import asyncio
@@ -250,8 +249,7 @@ print(f"[STARTUP] Looking for core/ at: {fuk_root / 'core'}")
 
 # Import from core/ directory
 try:
-    from core.qwen_image_wrapper import QwenImageGenerator, QwenModel
-    from core.wan_video_wrapper import WanVideoGenerator, WanTask
+    from core.diffsynth_backend import DiffSynthBackend
     from core.image_generation_manager import ImageGenerationManager
     from core.video_generation_manager import VideoGenerationManager
     from core.format_convert import FormatConverter
@@ -264,8 +262,7 @@ except ImportError as e:
     print(f"{'='*60}")
     print(f"\nLooking in: {fuk_root / 'core'}")
     print(f"\nExpected files:")
-    print("  - core/qwen_image_wrapper.py")
-    print("  - core/wan_video_wrapper.py")
+    print("  - core/diffsynth_backend.py")
     print("  - core/image_generation_manager.py")
     print("  - core/video_generation_manager.py")
     print("  - core/format_convert.py")
@@ -299,8 +296,8 @@ try:
         raise FileNotFoundError(f"models.json not found in {CONFIG_DIR}")
     if not (CONFIG_DIR / "defaults.json").exists():
         raise FileNotFoundError(f"defaults.json not found in {CONFIG_DIR}")
-    if not (VENDOR_DIR / "musubi-tuner").exists():
-        raise FileNotFoundError(f"musubi-tuner not found in {VENDOR_DIR}")
+    if not (VENDOR_DIR / "DiffSynth-Studio").exists():
+        raise FileNotFoundError(f"DiffSynth-Studio not found in {VENDOR_DIR}")
     
     print(f"[STARTUP] Config directory: {CONFIG_DIR}", flush=True)
     print(f"[STARTUP] Vendor directory: {VENDOR_DIR}", flush=True)
@@ -315,7 +312,7 @@ except FileNotFoundError as e:
     print("\nPlease ensure your project has the following structure:", flush=True)
     print("  config/models.json", flush=True)
     print("  config/defaults.json", flush=True)
-    print("  vendor/musubi-tuner/", flush=True)
+    print("  vendor/DiffSynth-Studio/", flush=True)
     sys.exit(1)
 
 # Ensure output subdirs exist
@@ -332,21 +329,9 @@ CACHE_ROOT.mkdir(exist_ok=True)
 # Initialize Generators
 # ============================================================================
 
-# Initialize image generator
-image_generator = create_image_generator(
-    config_dir=CONFIG_DIR,
-    vendor_dir=VENDOR_DIR
-)
-
-print("[STARTUP] Image generator initialized", flush=True)
-
-
-# Initialize video generator
-video_generator = create_video_generator(
-    config_dir=CONFIG_DIR,
-    vendor_dir=VENDOR_DIR
-)
-print("[STARTUP] Video generator initialized", flush=True)
+# Initialize DiffSynth backend (handles both image and video generation)
+generation_backend = DiffSynthBackend(config_dir=CONFIG_DIR)
+print("[STARTUP] DiffSynth backend initialized (image + video)", flush=True)
 
 # ============================================================================
 # Global State
@@ -548,14 +533,15 @@ class ImageGenerationRequest(BaseModel):
     height: int = 1024
     steps: int = 20
     guidance_scale: float = 2.1
-    flow_shift: Optional[float] = 2.1
     seed: Optional[int] = None
     lora: Optional[str] = None
     lora_multiplier: float = 1.0
-    blocks_to_swap: int = 10
     control_image_path: Optional[str] = None  # For backward compatibility (single image)
     control_image_paths: Optional[List[str]] = None  # For multiple images
     output_format: str = "png"  # png, exr, both
+    vram_preset: Optional[str] = None  # none, low, medium, high
+    denoising_strength: Optional[float] = None  # Edit strength when control images present
+    exponential_shift_mu: Optional[float] = None  # Sampling timestep control (null = auto)
     
 class VideoGenerationRequest(BaseModel):
     prompt: str
@@ -566,16 +552,17 @@ class VideoGenerationRequest(BaseModel):
     video_length: int = 81
     steps: int = 20
     guidance_scale: float = 5.0
-    flow_shift: float = 5.0
     seed: Optional[int] = None
     image_path: Optional[str] = None
     end_image_path: Optional[str] = None
     control_path: Optional[str] = None
     lora: Optional[str] = None
     lora_multiplier: float = 1.0
-    blocks_to_swap: int = 0
     export_exr: bool = False
-    # Removed: fp8, fp8_scaled, fp8_t5 - now in tool config
+    vram_preset: Optional[str] = None  # none, low, medium, high
+    sigma_shift: Optional[float] = None  # Timestep control (default 5.0)
+    motion_bucket_id: Optional[float] = None  # Motion amplitude control (null = auto)
+    denoising_strength: Optional[float] = None  # Edit strength when input image/video present
     
 class GenerationResponse(BaseModel):
     generation_id: str
@@ -703,10 +690,9 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
             "size": f"{request.width}x{request.height}",
             "steps": request.steps,
             "guidance": request.guidance_scale,
-            "flow_shift": request.flow_shift,
             "seed": request.seed,
             "lora": f"{request.lora} ({request.lora_multiplier}x)" if request.lora else "None",
-            "blocks_to_swap": request.blocks_to_swap,
+            "vram_preset": request.vram_preset or "default",
         })
         
         # Update status
@@ -722,9 +708,6 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
         
         active_generations[generation_id]["gen_dir"] = str(gen_dir)
         active_generations[generation_id]["phase"] = "generating"
-        
-        # Map model string to enum
-        model = QwenModel.IMAGE if request.model == "qwen_image" else QwenModel.EDIT_2509
         
         # Handle control images for edit mode (supports multiple)
         control_images = []
@@ -744,23 +727,24 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
         
         log.info("ImageGen", "Starting generation...")
         
-        # Generate using the wrapper
+        # Generate using DiffSynth backend
         result = await asyncio.to_thread(
-            image_generator.generate,
+            generation_backend.generate_image,
             prompt=request.prompt,
             output_path=paths["generated_png"],
-            model=model,
+            model=request.model,
             width=request.width,
             height=request.height,
             seed=request.seed,
-            infer_steps=request.steps,
+            steps=request.steps,
             guidance_scale=request.guidance_scale,
-            flow_shift=request.flow_shift,
-            blocks_to_swap=request.blocks_to_swap,
             negative_prompt=request.negative_prompt,
             lora=request.lora,
             lora_multiplier=request.lora_multiplier,
             control_image=control_images if control_images else None,
+            vram_preset=request.vram_preset,
+            denoising_strength=request.denoising_strength,
+            exponential_shift_mu=request.exponential_shift_mu,
         )
         
         log.success("ImageGen", "Generation complete!")
@@ -793,7 +777,7 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
             infer_steps=request.steps,
             guidance_scale=request.guidance_scale,
             negative_prompt=request.negative_prompt or "",
-            flow_shift=request.flow_shift,
+
             lora=request.lora,
             lora_multiplier=request.lora_multiplier,
             control_image=[str(p) for p in control_images] if control_images else None
@@ -913,25 +897,20 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
         # Create progress callback
         progress_cb = ProgressCallback(generation_id)
         
-        # Map task string to enum
-        task_enum = WanTask(request.task)
+        log.info("VideoGen", f"Starting generation with task: {request.task}")
         
-        log.info("VideoGen", f"Starting generation with task: {task_enum.value}")
-        
-        # Generate video using the wrapper
+        # Generate video using DiffSynth backend
         result = await asyncio.to_thread(
-            video_generator.generate_video,
+            generation_backend.generate_video,
             prompt=request.prompt,
             output_path=paths["generated_mp4"],
-            task=task_enum,
+            task=request.task,
             width=request.width,
             height=request.height,
             video_length=request.video_length,
             seed=request.seed,
-            infer_steps=request.steps,
+            steps=request.steps,
             guidance_scale=request.guidance_scale,
-            flow_shift=request.flow_shift,
-            blocks_to_swap=request.blocks_to_swap,
             negative_prompt=request.negative_prompt,
             image_path=image_path_abs,
             end_image_path=end_image_path_abs,
@@ -939,6 +918,10 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
             lora=request.lora,
             lora_multiplier=request.lora_multiplier,
             progress_callback=progress_cb,
+            vram_preset=request.vram_preset,
+            sigma_shift=request.sigma_shift,
+            motion_bucket_id=request.motion_bucket_id,
+            denoising_strength=request.denoising_strength,
         )
         
         # Extract thumbnail from generated video
@@ -980,7 +963,6 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
             video_length=request.video_length,
             negative_prompt=request.negative_prompt or "",
             guidance_scale=request.guidance_scale,
-            flow_shift=request.flow_shift,
             infer_steps=request.steps,
             lora=request.lora,
             lora_multiplier=request.lora_multiplier,
@@ -1075,7 +1057,7 @@ async def cancel_generation(generation_id: str):
     gen["cancelled_at"] = datetime.now().isoformat()
     
     print(f"\nGeneration Cancelled: {generation_id}")
-    print(f"Note: Backend process may still be running (musubi doesn't support mid-generation cancellation)")
+    print(f"Note: Backend process may still be running (DiffSynth doesn't support mid-generation cancellation)")
     
     # Clear VRAM
     print(f"[{generation_id}] Clearing VRAM after cancellation...")
@@ -1308,14 +1290,56 @@ async def get_defaults():
 
 @app.get("/api/config/models")
 async def get_models():
-    """Get available models"""
+    """Get available models with full metadata for UI dropdowns"""
     with open(CONFIG_DIR / "models.json") as f:
         config = json.load(f)
     
+    with open(CONFIG_DIR / "defaults.json") as f:
+        defaults = json.load(f)
+    
+    image_models = []
+    video_models = []
+    
+    for key, entry in config.items():
+        if key.startswith("_") or not isinstance(entry, dict) or "pipeline" not in entry:
+            continue
+        
+        model_info = {
+            "key": key,
+            "description": entry.get("description", key),
+            "pipeline": entry["pipeline"],
+            "supports": entry.get("supports", []),
+            "aliases": entry.get("aliases", []),
+        }
+        
+        if entry["pipeline"] == "qwen":
+            image_models.append(model_info)
+        elif entry["pipeline"] == "wan":
+            video_models.append(model_info)
+    
+    # VRAM presets
+    vram_section = defaults.get("vram", {})
+    vram_presets = []
+    for key, preset in vram_section.get("presets", {}).items():
+        vram_presets.append({
+            "key": key,
+            "label": preset.get("label", key),
+            "description": preset.get("description", ""),
+        })
+    
+    # Available LoRAs from scanned directories
+    lora_list = []
+    try:
+        lora_list = generation_backend.get_available_loras()
+    except Exception as e:
+        log.warning("Config", f"Failed to scan LoRAs: {e}")
+    
     return {
-        "image_models": list(config.get("models", {}).keys()),
-        "video_tasks": list(config.get("wan_models", {}).keys()),
-        "loras": list(config.get("loras", {}).keys())
+        "image_models": image_models,
+        "video_models": video_models,
+        "loras": lora_list,
+        "vram_presets": vram_presets,
+        "vram_preset_default": vram_section.get("preset", "low"),
     }
 
 @app.get("/health")
@@ -1334,7 +1358,8 @@ async def health_check():
             "seed_favorites"
         ],
         "active_generations": len(active_generations),
-        "musubi_path": str(MUSUBI_PATH),
+        "backend": "diffsynth",
+        "vendor_dir": str(VENDOR_DIR),
         "output_root": str(OUTPUT_ROOT)
     }
 
@@ -2672,7 +2697,8 @@ async def export_to_exr(request: ExportEXRRequest):
                 
                 # Get VAE path from models config
                 vae_path = None
-                musubi_path = None
+                # TODO: Use DiffSynth backend VAE directly instead of standalone VAE file
+                # For now, latent-to-EXR falls back to PNG path
                 
                 try:
                     models_config = CONFIG_DIR / "models.json"
@@ -2686,8 +2712,6 @@ async def export_to_exr(request: ExportEXRRequest):
                                 vae_path = models["models"][model_key].get("vae")
                                 if vae_path:
                                     break
-                    
-                    musubi_path = VENDOR_DIR / "musubi-tuner"
                 except Exception as e:
                     log.warning("Export", f"Could not get VAE path: {e}")
                 
@@ -2697,7 +2721,7 @@ async def export_to_exr(request: ExportEXRRequest):
                             latent_path=latent_path,
                             output_path=output_path,
                             vae_path=vae_path,
-                            musubi_path=musubi_path if musubi_path and musubi_path.exists() else None,
+                            musubi_path=None,
                             bit_depth=request.bit_depth,
                             compression=request.compression,
                         )
@@ -2853,11 +2877,16 @@ async def export_video_to_exr_sequence(request: ExportEXRSequenceRequest):
                 log.info("SeqExport", f"  {layer_name}: {resolved_path.name}")
                 
                 # Check for latent.safetensors alongside beauty layer
+                
                 if layer_name == 'beauty' and request.use_latent:
-                    potential_latent = resolved_path.parent / "latent.safetensors"
-                    if potential_latent.exists():
-                        latent_path = potential_latent
-                        log.info("SeqExport", f"  Found latent: {latent_path.name}")
+                    latent_dir = resolved_path.parent / "latents"
+                    if latent_dir.exists():
+                        # Try matching filename
+                        potential_latent = latent_dir / f"{resolved_path.stem}.latent.pt"
+                        if potential_latent.exists():
+                            latent_path = potential_latent
+                            log.info("SeqExport", f"  Found latent: {latent_path.name}")
+
             else:
                 log.warning("SeqExport", f"  {layer_name}: not found ({layer_path})")
         
@@ -2881,7 +2910,7 @@ async def export_video_to_exr_sequence(request: ExportEXRSequenceRequest):
                 
                 # Get VAE path from models config
                 vae_path = None
-                musubi_path = None
+                # TODO: Use DiffSynth backend VAE directly instead of standalone VAE file
                 
                 try:
                     models_config = CONFIG_DIR / "models.json"
@@ -2895,8 +2924,6 @@ async def export_video_to_exr_sequence(request: ExportEXRSequenceRequest):
                                 vae_path = models["models"][model_key].get("vae")
                                 if vae_path:
                                     break
-                    
-                    musubi_path = VENDOR_DIR / "musubi-tuner"
                 except Exception as e:
                     log.warning("SeqExport", f"Could not get VAE path: {e}")
                 
@@ -2906,7 +2933,7 @@ async def export_video_to_exr_sequence(request: ExportEXRSequenceRequest):
                             latent_path=latent_path,
                             output_dir=export_dir,
                             vae_path=vae_path,
-                            musubi_path=musubi_path if musubi_path and musubi_path.exists() else None,
+                            musubi_path=None,
                             filename_pattern=filename_pattern,
                             bit_depth=request.bit_depth,
                             compression=request.compression,
@@ -2925,7 +2952,10 @@ async def export_video_to_exr_sequence(request: ExportEXRSequenceRequest):
                             compression=request.compression,
                             linear=(request.color_space == "Linear"),
                             start_frame=request.start_frame,
+                            backend=generation_backend,  # NEW!
+                            auto_decode_beauty_latents=request.use_latent,  # NEW!
                         )
+
                 else:
                     log.warning("SeqExport", f"VAE not found at {vae_path}, falling back to MP4 path")
                     result = exporter.export_video_sequence(

@@ -51,15 +51,14 @@ VIDEO_EXTENSIONS = {'.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v', '.mxf', '.p
 SEQUENCE_EXTENSIONS = {'.exr', '.dpx', '.png', '.jpg', '.jpeg', '.tiff', '.tif'}
 
 # Regex for detecting frame numbers in filenames
-# Order matters! More specific patterns must come first.
-# Each tuple: (compiled_regex, separator_char)
+# Each pattern includes a group for the separator to preserve it
 FRAME_PATTERNS = [
-    # render.0001.exr - dot separator (REQUIRED dot before frame number)
-    (re.compile(r'^(.+)\.(\d{3,})\.(\w+)$'), '.'),
-    # render_0001.exr - underscore separator  
-    (re.compile(r'^(.+)_(\d{3,})\.(\w+)$'), '_'),
-    # render0001.exr - no separator (4+ digits required, must end with digits before ext)
-    (re.compile(r'^(.+?)(\d{4,})\.(\w+)$'), ''),
+    # render.0001.exr, render.001.exr (dot separator)
+    (re.compile(r'^(.+?)(\.?)(\d{3,})\.(\w+)$'), '.'),
+    # render_0001.exr, render_001.exr (underscore separator)
+    (re.compile(r'^(.+?)(_)(\d{3,})\.(\w+)$'), '_'),
+    # render0001.exr (no separator - 4+ digits required)
+    (re.compile(r'^(.+?)()(\d{4,})\.(\w+)$'), ''),
 ]
 
 
@@ -80,24 +79,29 @@ def detect_sequence(file_path: Path) -> Optional[Dict[str, Any]]:
     filename = file_path.name
     parent = file_path.parent
     
-    for pattern, separator in FRAME_PATTERNS:
+    for pattern, default_sep in FRAME_PATTERNS:
         match = pattern.match(filename)
         if match:
             prefix = match.group(1)
-            frame_str = match.group(2)
-            ext = match.group(3)
+            separator = match.group(2)  # Captured separator (., _, or empty)
+            frame_str = match.group(3)
+            ext = match.group(4)
             padding = len(frame_str)
             
+            # Use the actual separator from the filename
+            # For no-separator pattern, default_sep is already ''
+            sep = separator if separator else default_sep
+            
             # Build pattern preserving original separator
-            frame_pattern = f"{prefix}{separator}{'#' * padding}.{ext}"
+            frame_pattern = f"{prefix}{sep}{'#' * padding}.{ext}"
             
             # Find all matching frames using same pattern
             frames = []
-            for f in parent.glob(f"{prefix}{separator}*"):
+            for f in parent.glob(f"{prefix}*"):
                 m = pattern.match(f.name)
-                if m and m.group(3) == ext:
+                if m and m.group(4) == ext:
                     try:
-                        frames.append(int(m.group(2)))
+                        frames.append(int(m.group(3)))
                     except ValueError:
                         pass
             
@@ -106,7 +110,7 @@ def detect_sequence(file_path: Path) -> Optional[Dict[str, Any]]:
                 return {
                     "is_sequence": True,
                     "prefix": prefix,
-                    "separator": separator,
+                    "separator": sep,  # Include separator in result
                     "extension": ext,
                     "padding": padding,
                     "first_frame": min(frames),
@@ -115,7 +119,7 @@ def detect_sequence(file_path: Path) -> Optional[Dict[str, Any]]:
                     "pattern": frame_pattern,
                     "path_pattern": str(parent / frame_pattern),
                     # Python-style pattern for actual file access
-                    "printf_pattern": str(parent / f"{prefix}{separator}%0{padding}d.{ext}"),
+                    "printf_pattern": str(parent / f"{prefix}{sep}%0{padding}d.{ext}"),
                 }
     
     return None

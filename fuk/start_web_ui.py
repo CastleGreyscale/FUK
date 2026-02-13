@@ -23,7 +23,7 @@ def main():
         "core/": project_root / "core",
         "ui/": ui_dir,
         "config/": project_root / "config",
-        "vendor/musubi-tuner/": project_root / "vendor" / "musubi-tuner"
+        "vendor/DiffSynth-Studio/": project_root / "vendor" / "DiffSynth-Studio"
     }
     
     missing = []

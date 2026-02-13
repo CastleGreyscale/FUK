@@ -186,6 +186,7 @@ class EXRExporter:
             print(f"⚠ Failed to extract frame {frame_index}: {e}")
         
         return None
+
     def _find_raw_data_path(self, layer_path: Path, layer_name: str) -> Optional[Path]:
         """
         Look for raw .npy file alongside an MP4 or inside a sequence directory.
@@ -207,7 +208,153 @@ class EXRExporter:
                 if raw_path.exists():
                     return raw_path
         return None
+
+    def _find_beauty_latent_path(self, beauty_path: Path) -> Optional[Path]:
+        """
+        Find the corresponding .latent.pt file for a beauty pass video/image.
+        
+        Latents are stored in a 'latents/' subdirectory next to the beauty file:
+            generated.mp4 -> latents/generated.latent.pt
+            render/frame_001.png -> latents/frame_001.latent.pt
+        
+        Returns:
+            Path to .latent.pt file if found, None otherwise
+        """
+        # Check for latents directory at same level as beauty file
+        latent_dir = beauty_path.parent / "latents"
+        if not latent_dir.exists():
+            return None
+        
+        # Look for matching latent file
+        latent_file = latent_dir / f"{beauty_path.stem}.latent.pt"
+        if latent_file.exists():
+            return latent_file
+        
+        # Also try without any extension suffix
+        base_name = beauty_path.stem.split('.')[0]
+        latent_file = latent_dir / f"{base_name}.latent.pt"
+        if latent_file.exists():
+            return latent_file
+        
+        return None
     
+    def _decode_beauty_latents(
+        self,
+        latent_path: Path,
+        backend,  # DiffSynthBackend instance
+        model_type: str = "auto",
+        progress_callback: Optional[Callable[[int, int], None]] = None,
+    ) -> List[np.ndarray]:
+        """
+        Decode beauty pass latents to numpy arrays.
+        
+        Args:
+            latent_path: Path to .latent.pt file
+            backend: DiffSynthBackend instance with VAE loaded
+            model_type: Model type for decoding ("wan_t2v_14b", "qwen_image", or "auto")
+            progress_callback: Optional progress callback
+        
+        Returns:
+            List of decoded frames as float32 numpy arrays [H, W, C] in [0, 1] range
+        """
+        import torch
+        
+        print(f"  📄 Decoding beauty latents: {latent_path.name}")
+        
+        # Load latent to check if it's image or video
+        latent_data = torch.load(str(latent_path), map_location='cpu')
+        latent = latent_data['latent']
+        is_video = latent.ndim == 5
+        
+        # Auto-detect model type
+        if model_type == "auto":
+            model_type = "wan_t2v_14b" if is_video else "qwen_image"
+        
+        print(f"  📄 Latent shape: {latent.shape}, type: {'video' if is_video else 'image'}")
+        print(f"  📄 Using model: {model_type}")
+        
+        # Get pipeline with VAE
+        pipe = backend.get_pipeline(model_type)
+        device = next(pipe.vae.parameters()).device
+        latent = latent.to(device)
+        
+        # Decode frames
+        decoded_frames = []
+        
+        if is_video:
+            # Video latents: shape (B, C, T, H, W)
+            num_frames = latent.shape[2]
+            print(f"  📄 Decoding {num_frames} frames...")
+            
+            for frame_idx in range(num_frames):
+                # Extract single frame latent
+                frame_latent = latent[:, :, frame_idx:frame_idx+1, :, :]
+                
+                # Decode frame
+                with torch.no_grad():
+                    decoded = pipe.vae.decode(frame_latent)
+                
+                # Convert to numpy array
+                if isinstance(decoded, torch.Tensor):
+                    # Convert BFloat16 to Float32 if needed
+                    if decoded.dtype == torch.bfloat16:
+                        decoded = decoded.to(torch.float32)
+                    
+                    pixels = decoded.cpu().numpy()
+                    if pixels.ndim == 5:  # (B, C, T, H, W)
+                        pixels = pixels[0, :, 0, :, :]  # First batch, first frame
+                    elif pixels.ndim == 4:  # (B, C, H, W)
+                        pixels = pixels[0]
+                    
+                    # Normalize from [-1, 1] to [0, 1]
+                    if pixels.min() < 0:
+                        pixels = (pixels + 1.0) / 2.0
+                    
+                    # CHW to HWC
+                    if pixels.shape[0] in [1, 3, 4]:
+                        pixels = np.transpose(pixels, (1, 2, 0))
+                    
+                    # Ensure RGB (strip alpha if present)
+                    if pixels.shape[2] == 4:
+                        pixels = pixels[:, :, :3]
+                    
+                    decoded_frames.append(pixels.astype(np.float32))
+                
+                if progress_callback and (frame_idx + 1) % 10 == 0:
+                    progress_callback(frame_idx + 1, num_frames)
+        else:
+            # Image latent: shape (B, C, H, W)
+            print(f"  📄 Decoding single image...")
+            
+            with torch.no_grad():
+                decoded = pipe.vae.decode(latent)
+            
+            # Convert to numpy
+            if isinstance(decoded, torch.Tensor):
+                if decoded.dtype == torch.bfloat16:
+                    decoded = decoded.to(torch.float32)
+                
+                pixels = decoded.cpu().numpy()
+                if pixels.ndim == 4:  # (B, C, H, W)
+                    pixels = pixels[0]
+                
+                # Normalize from [-1, 1] to [0, 1]
+                if pixels.min() < 0:
+                    pixels = (pixels + 1.0) / 2.0
+                
+                # CHW to HWC
+                if pixels.shape[0] in [1, 3, 4]:
+                    pixels = np.transpose(pixels, (1, 2, 0))
+                
+                # Ensure RGB
+                if pixels.shape[2] == 4:
+                    pixels = pixels[:, :, :3]
+                
+                decoded_frames.append(pixels.astype(np.float32))
+        
+        print(f"  ✅ Decoded {len(decoded_frames)} beauty frames from latent")
+        return decoded_frames
+
     def export_video_sequence(
         self,
         layers: Dict[str, str],
@@ -218,6 +365,9 @@ class EXRExporter:
         linear: bool = True,
         start_frame: int = 1,
         progress_callback: Optional[Callable[[int, int], None]] = None,
+        backend = None,  # NEW
+        model_type: str = "auto",  # NEW
+        auto_decode_beauty_latents: bool = True,  # NEW
     ) -> Dict[str, Any]:
         """
         Export video layers as an EXR image sequence
@@ -262,6 +412,35 @@ class EXRExporter:
         frame_counts = {}
         layer_paths = {}
         raw_data = {}
+        beauty_decoded_frames = None  # Will hold decoded beauty frames if found
+        
+        # Check for beauty latents if enabled
+        if auto_decode_beauty_latents and 'beauty' in layers and backend is not None:
+            beauty_path = Path(layers['beauty'])
+            if beauty_path.exists():
+                latent_path = self._find_beauty_latent_path(beauty_path)
+                if latent_path:
+                    print(f"  ✅ Found beauty latents: {latent_path}")
+                    try:
+                        beauty_decoded_frames = self._decode_beauty_latents(
+                            latent_path=latent_path,
+                            backend=backend,
+                            model_type=model_type,
+                            progress_callback=None,  # Handle progress separately
+                        )
+                        # Add to frame counts
+                        frame_counts['beauty'] = len(beauty_decoded_frames)
+                        # Remove beauty from layers dict since we're using decoded latents
+                        layers = {k: v for k, v in layers.items() if k != 'beauty'}
+                        print(f"  ✅ Using decoded beauty latents ({len(beauty_decoded_frames)} frames) instead of {beauty_path.name}")
+                    except Exception as e:
+                        print(f"  ⚠ Failed to decode beauty latents: {e}")
+                        print(f"  ⚠ Falling back to beauty file: {beauty_path.name}")
+                        beauty_decoded_frames = None
+                else:
+                    print(f"  ℹ No beauty latents found for {beauty_path.name}")
+
+
         
         for layer_name, layer_path in layers.items():
             if layer_path is None:
@@ -343,6 +522,10 @@ class EXRExporter:
                 for layer_name, arr in raw_data.items():
                     if frame_idx < len(arr):
                         frame_raw[layer_name] = arr[frame_idx]
+
+                if beauty_decoded_frames is not None and frame_idx < len(beauty_decoded_frames):
+                    frame_raw['beauty'] = beauty_decoded_frames[frame_idx]
+                
                 
                 # Generate output filename
                 output_filename = filename_pattern.format(frame=frame_num)
@@ -426,7 +609,16 @@ class EXRExporter:
                 if width is None:
                     height, width = arr.shape[:2] if arr.ndim >= 2 else (0, 0)
                 
-                if layer_name == 'depth':
+                if layer_name == 'beauty':
+                    # Decoded latent: float32 [H,W,3] range [0,1], already in linear space
+                    if arr.ndim == 3 and arr.shape[2] in [3, 4]:
+                        # Already correct format, just ensure RGB (strip alpha if present)
+                        loaded_layers['beauty'] = arr[:,:,:3].astype(np.float32)
+                    elif arr.ndim == 2:
+                        # Grayscale - convert to RGB
+                        loaded_layers['beauty'] = np.stack([arr, arr, arr], axis=-1).astype(np.float32)
+                
+                elif layer_name == 'depth':
                     # Already float32 [H,W] range [0,1] — perfect
                     loaded_layers['depth'] = arr.astype(np.float32) if arr.ndim == 2 else arr[:,:,0].astype(np.float32)
                     
@@ -437,6 +629,7 @@ class EXRExporter:
                 elif layer_name == 'crypto':
                     # uint16 [H,W] object IDs — store as float for EXR
                     loaded_layers['crypto_raw'] = arr.astype(np.float32)
+
         
         for layer_name, layer_path in layers.items():
             if layer_path is None:
@@ -451,7 +644,9 @@ class EXRExporter:
             
             if width is None:
                 height, width = arr.shape[:2]
-            
+
+
+
             # Process based on layer type
             if layer_name == 'beauty':
                 if arr.ndim == 2:
@@ -626,16 +821,15 @@ class EXRExporter:
             
             # Handle different layer types
             if layer_name == 'beauty':
-                # Beauty is RGB, optionally convert to linear
+                # Beauty from file needs sRGB conversion
                 if arr.ndim == 2:
                     arr = np.stack([arr, arr, arr], axis=-1)
                 elif arr.shape[2] == 4:
-                    arr = arr[:, :, :3]  # Drop alpha for now
-                
+                    arr = arr[:, :, :3]
                 if linear:
                     arr = self._srgb_to_linear(arr)
-                    
                 loaded_layers['beauty'] = arr
+
                 print(f"  ✓ Loaded beauty ({width}x{height}, {'linear' if linear else 'sRGB'})")
                 
             elif layer_name == 'depth':
@@ -973,6 +1167,288 @@ class EXRExporter:
         print(f"  Size: {result['file_size'] / (1024*1024):.2f} MB")
         
         return result
+    
+    # ========================================================================
+    # DiffSynth Backend Integration (for .pt latents)
+    # ========================================================================
+    
+    def export_from_diffsynth_latent(
+        self,
+        latent_path: Path,
+        output_path: Path,
+        backend,  # DiffSynthBackend instance
+        model_type: str = "qwen_image",
+        bit_depth: Literal[16, 32] = 32,
+        compression: str = "ZIP",
+    ) -> Dict[str, Any]:
+        """
+        Export a .pt latent using DiffSynth backend.
+        
+        This is the new recommended path for latents saved by diffsynth_backend.py
+        using torch.save() format (.pt files).
+        
+        Args:
+            latent_path: Path to .latent.pt file
+            output_path: Output EXR path
+            backend: DiffSynthBackend instance with loaded pipeline
+            model_type: Which model's VAE to use (e.g. "qwen_image", "wan_t2v_14b")
+            bit_depth: 16 or 32
+            compression: Compression method
+            
+        Returns:
+            Dict with output info
+        """
+        import torch
+        
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        print(f"\n{'='*60}")
+        print(f"DiffSynth Latent-to-EXR Export (Image)")
+        print(f"{'='*60}")
+        print(f"Latent: {latent_path}")
+        print(f"Output: {output_path}")
+        print(f"Model: {model_type}")
+        print(f"Bit Depth: {bit_depth}-bit")
+        print(f"{'='*60}\n")
+        
+        # Load latent tensor
+        if not latent_path.exists():
+            raise FileNotFoundError(f"Latent file not found: {latent_path}")
+        
+        latent_data = torch.load(str(latent_path), map_location='cpu')
+        latent = latent_data['latent']
+        print(f"  Loaded latent: shape={latent.shape}")
+        
+        # Get pipeline with VAE
+        pipe = backend.get_pipeline(model_type)
+        device = next(pipe.vae.parameters()).device
+        
+        # Move to device and decode
+        latent = latent.to(device)
+        print(f"  Decoding with {model_type} VAE...")
+        
+        with torch.no_grad():
+            decoded = pipe.vae.decode(latent)
+        
+        # Convert to numpy array [0, 1] range
+        if isinstance(decoded, torch.Tensor):
+            # Convert BFloat16 to Float32 (numpy doesn't support bfloat16)
+            if decoded.dtype == torch.bfloat16:
+                decoded = decoded.to(torch.float32)
+            
+            pixels = decoded.cpu().numpy()
+            # Handle different tensor formats
+            if pixels.ndim == 4:  # Batch dimension
+                pixels = pixels[0]
+            # Normalize from [-1, 1] to [0, 1] if needed
+            # But DON'T clip - 32-bit EXR can handle values outside [0, 1]
+            if pixels.min() < 0:
+                pixels = (pixels + 1.0) / 2.0
+            # Convert CHW to HWC if needed
+            if pixels.shape[0] in [1, 3, 4]:  # CHW format
+                pixels = np.transpose(pixels, (1, 2, 0))
+        else:
+            # Handle other decode outputs (PIL Image, etc)
+            pixels = np.array(decoded).astype(np.float32) / 255.0
+        
+        print(f"  Decoded pixels: shape={pixels.shape}, range=[{pixels.min():.3f}, {pixels.max():.3f}]")
+        
+        # CRITICAL: Convert from sRGB to Linear
+        # VAE is trained on sRGB images, so outputs are sRGB-encoded
+        # We need linear color space for professional compositing
+        print(f"  Converting sRGB → Linear color space...")
+        
+        def srgb_to_linear(srgb):
+            """Convert sRGB to linear color space (correct gamma removal)"""
+            linear = np.where(
+                srgb <= 0.04045,
+                srgb / 12.92,
+                np.power((srgb + 0.055) / 1.055, 2.4)
+            )
+            return linear
+        
+        pixels = srgb_to_linear(pixels)
+        print(f"  Converted to linear: range=[{pixels.min():.3f}, {pixels.max():.3f}]")
+        
+        # Export to EXR (now truly in linear color space)
+        result = self.export_from_array(
+            pixels=pixels,
+            output_path=output_path,
+            bit_depth=bit_depth,
+            compression=compression,
+            is_linear=True,  # Now actually linear after sRGB conversion
+        )
+        
+        print(f"\n✓ Exported EXR: {output_path}")
+        print(f"  Size: {result['file_size'] / (1024*1024):.2f} MB")
+        
+        return result
+    
+    def export_from_diffsynth_video_latent(
+        self,
+        latent_path: Path,
+        output_dir: Path,
+        backend,  # DiffSynthBackend instance
+        model_type: str = "wan_t2v_14b",
+        filename_pattern: str = "frame.{frame:04d}.exr",
+        bit_depth: Literal[16, 32] = 32,
+        compression: str = "ZIP",
+        start_frame: int = 1,
+        progress_callback: Optional[Callable[[int, int], None]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Export a video .pt latent using DiffSynth backend to EXR sequence.
+        
+        This decodes video latents frame-by-frame and writes each to EXR.
+        True lossless path - no MP4 compression.
+        
+        Args:
+            latent_path: Path to .latent.pt file (video latent)
+            output_dir: Directory for output EXR sequence
+            backend: DiffSynthBackend instance
+            model_type: Which model's VAE to use (e.g. "wan_t2v_14b")
+            filename_pattern: Pattern with {frame:04d} placeholder
+            bit_depth: 16 or 32
+            compression: Compression method
+            start_frame: First frame number
+            progress_callback: Optional callback(current, total)
+            
+        Returns:
+            Dict with sequence info
+        """
+        import torch
+        
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        print(f"\n{'='*60}")
+        print(f"DiffSynth Latent-to-EXR Export (Video Sequence)")
+        print(f"{'='*60}")
+        print(f"Latent: {latent_path}")
+        print(f"Output: {output_dir}")
+        print(f"Pattern: {filename_pattern}")
+        print(f"Model: {model_type}")
+        print(f"Bit Depth: {bit_depth}-bit")
+        print(f"{'='*60}\n")
+        
+        # Load latent tensor
+        if not latent_path.exists():
+            raise FileNotFoundError(f"Latent file not found: {latent_path}")
+        
+        latent_data = torch.load(str(latent_path), map_location='cpu')
+        latent = latent_data['latent']
+        print(f"  Loaded latent: shape={latent.shape}")
+        
+        # Get pipeline with VAE
+        pipe = backend.get_pipeline(model_type)
+        device = next(pipe.vae.parameters()).device
+        
+        # Move to device
+        latent = latent.to(device)
+        
+        # Determine number of frames
+        # Video latents typically have shape (B, C, T, H, W)
+        if latent.ndim == 5:
+            num_frames = latent.shape[2]
+        else:
+            raise ValueError(f"Unexpected latent shape for video: {latent.shape}")
+        
+        print(f"  Frames: {num_frames}")
+        
+        # Decode and export frame by frame
+        exported_frames = []
+        total_size = 0
+        
+        for frame_idx in range(num_frames):
+            frame_num = start_frame + frame_idx
+            output_filename = filename_pattern.format(frame=frame_num)
+            output_path = output_dir / output_filename
+            
+            try:
+                # Extract single frame latent
+                frame_latent = latent[:, :, frame_idx:frame_idx+1, :, :]
+                
+                # Decode frame
+                with torch.no_grad():
+                    decoded = pipe.vae.decode(frame_latent)
+                
+                # Convert to numpy
+                if isinstance(decoded, torch.Tensor):
+                    # Convert BFloat16 to Float32 (numpy doesn't support bfloat16)
+                    if decoded.dtype == torch.bfloat16:
+                        decoded = decoded.to(torch.float32)
+                    
+                    pixels = decoded.cpu().numpy()
+                    if pixels.ndim == 5:  # (B, C, T, H, W)
+                        pixels = pixels[0, :, 0, :, :]  # Extract first batch, first frame
+                    elif pixels.ndim == 4:  # (B, C, H, W)
+                        pixels = pixels[0]
+                    
+                    # Normalize from [-1, 1] to [0, 1] if needed
+                    # DON'T clip - 32-bit EXR can handle values outside [0, 1]
+                    if pixels.min() < 0:
+                        pixels = (pixels + 1.0) / 2.0
+                    
+                    # CHW to HWC
+                    if pixels.shape[0] in [1, 3, 4]:
+                        pixels = np.transpose(pixels, (1, 2, 0))
+                else:
+                    pixels = np.array(decoded).astype(np.float32) / 255.0
+                
+                # CRITICAL: Convert from sRGB to Linear
+                # VAE outputs are sRGB-encoded, need linear for EXR
+                def srgb_to_linear(srgb):
+                    """Convert sRGB to linear color space"""
+                    linear = np.where(
+                        srgb <= 0.04045,
+                        srgb / 12.92,
+                        np.power((srgb + 0.055) / 1.055, 2.4)
+                    )
+                    return linear
+                
+                pixels = srgb_to_linear(pixels)
+                
+                # Export frame
+                result = self.export_from_array(
+                    pixels=pixels,
+                    output_path=output_path,
+                    bit_depth=bit_depth,
+                    compression=compression,
+                    is_linear=True,
+                )
+                
+                exported_frames.append(output_path)
+                total_size += result.get('file_size', 0)
+                
+            except Exception as e:
+                print(f"  ⚠ Frame {frame_num} failed: {e}")
+                import traceback
+                traceback.print_exc()
+            
+            # Progress
+            if progress_callback:
+                progress_callback(frame_idx + 1, num_frames)
+            
+            if (frame_idx + 1) % 10 == 0:
+                print(f"  Exported {frame_idx + 1}/{num_frames} frames...")
+        
+        total_size_mb = total_size / (1024 * 1024)
+        
+        print(f"\n✓ Exported EXR sequence")
+        print(f"  Frames: {len(exported_frames)}")
+        print(f"  Total Size: {total_size_mb:.2f} MB")
+        print(f"  Output: {output_dir}")
+        
+        return {
+            "output_dir": str(output_dir),
+            "frame_count": len(exported_frames),
+            "total_size": total_size,
+            "bit_depth": bit_depth,
+            "compression": compression,
+            "frames": [str(f) for f in exported_frames],
+            "is_true_latent": True,
+        }
     
     def export_from_latent_sequence(
         self,
@@ -1456,3 +1932,187 @@ def export_array_to_exr(
         compression=compression,
         is_linear=is_linear,
     )
+
+
+# ============================================================================
+# DiffSynth Backend Convenience Functions (for .pt latents)
+# ============================================================================
+
+def export_pt_latent_to_exr(
+    latent_path: Path,
+    output_path: Path,
+    backend,  # DiffSynthBackend instance
+    model_type: str = "qwen_image",
+    bit_depth: int = 32,
+    compression: str = "ZIP",
+) -> Dict[str, Any]:
+    """
+    Export a .pt latent (torch.save format) to 32-bit EXR using DiffSynth backend.
+    
+    This is the recommended way to export latents saved by diffsynth_backend.py
+    to professional EXR format.
+    
+    Args:
+        latent_path: Path to .latent.pt file
+        output_path: Output EXR path
+        backend: DiffSynthBackend instance (from diffsynth_backend.py)
+        model_type: Which model to use ("qwen_image", "wan_t2v_14b", etc.)
+        bit_depth: 16 or 32 (default 32 for maximum quality)
+        compression: ZIP, PIZ, DWAA, etc. (default ZIP)
+        
+    Returns:
+        Export result dict
+        
+    Example:
+        from diffsynth_backend import DiffSynthBackend
+        from exr_exporter import export_pt_latent_to_exr
+        
+        backend = DiffSynthBackend(config_dir)
+        
+        result = export_pt_latent_to_exr(
+            latent_path="output/latents/image.latent.pt",
+            output_path="output/image.exr",
+            backend=backend,
+            model_type="qwen_image",
+            bit_depth=32,
+            compression="ZIP"
+        )
+    """
+    exporter = EXRExporter()
+    
+    return exporter.export_from_diffsynth_latent(
+        latent_path=Path(latent_path),
+        output_path=Path(output_path),
+        backend=backend,
+        model_type=model_type,
+        bit_depth=bit_depth,
+        compression=compression,
+    )
+
+
+def export_pt_video_latent_to_exr_sequence(
+    latent_path: Path,
+    output_dir: Path,
+    backend,  # DiffSynthBackend instance
+    model_type: str = "wan_t2v_14b",
+    filename_pattern: str = "frame.{frame:04d}.exr",
+    bit_depth: int = 32,
+    compression: str = "ZIP",
+    start_frame: int = 1,
+    progress_callback: Optional[Callable[[int, int], None]] = None,
+) -> Dict[str, Any]:
+    """
+    Export a video .pt latent to EXR sequence using DiffSynth backend.
+    
+    This is the TRUE lossless path - latent -> EXR with no MP4 compression.
+    
+    Args:
+        latent_path: Path to .latent.pt file (video latent)
+        output_dir: Directory for output EXR sequence
+        backend: DiffSynthBackend instance
+        model_type: Which model to use ("wan_t2v_14b", "wan_i2v_14b", etc.)
+        filename_pattern: Pattern with {frame:04d} placeholder
+        bit_depth: 16 or 32 (default 32)
+        compression: ZIP, PIZ, DWAA, etc.
+        start_frame: First frame number
+        progress_callback: Optional callback(current, total)
+        
+    Returns:
+        Export result dict with sequence info
+        
+    Example:
+        from diffsynth_backend import DiffSynthBackend
+        from exr_exporter import export_pt_video_latent_to_exr_sequence
+        
+        backend = DiffSynthBackend(config_dir)
+        
+        result = export_pt_video_latent_to_exr_sequence(
+            latent_path="output/latents/video.latent.pt",
+            output_dir="output/exr_sequence/",
+            backend=backend,
+            model_type="wan_t2v_14b",
+            filename_pattern="shot01.{frame:04d}.exr",
+            bit_depth=32,
+        )
+    """
+    exporter = EXRExporter()
+    
+    return exporter.export_from_diffsynth_video_latent(
+        latent_path=Path(latent_path),
+        output_dir=Path(output_dir),
+        backend=backend,
+        model_type=model_type,
+        filename_pattern=filename_pattern,
+        bit_depth=bit_depth,
+        compression=compression,
+        start_frame=start_frame,
+        progress_callback=progress_callback,
+    )
+
+
+def decode_pt_latent_and_export(
+    latent_path: Path,
+    output_path: Path,
+    backend,
+    model_type: str = "auto",
+    export_format: str = "exr",
+    bit_depth: int = 32,
+    compression: str = "ZIP",
+) -> Dict[str, Any]:
+    """
+    Auto-detect latent type (image/video) and export to specified format.
+    
+    Convenience function that handles both image and video latents.
+    
+    Args:
+        latent_path: Path to .latent.pt file
+        output_path: Output path (file for image, dir for video sequence)
+        backend: DiffSynthBackend instance
+        model_type: Which model to use, or "auto" to detect
+        export_format: "exr" (default), "png", or "mp4"
+        bit_depth: 16 or 32 (for EXR)
+        compression: Compression method (for EXR)
+        
+    Returns:
+        Export result dict
+    """
+    import torch
+    
+    # Load latent to check shape
+    latent_data = torch.load(str(latent_path), map_location='cpu')
+    latent = latent_data['latent']
+    shape = latent.shape
+    
+    # Detect if video (5D) or image (4D)
+    is_video = latent.ndim == 5
+    
+    # Auto-detect model type
+    if model_type == "auto":
+        model_type = "wan_t2v_14b" if is_video else "qwen_image"
+    
+    if export_format == "exr":
+        if is_video:
+            return export_pt_video_latent_to_exr_sequence(
+                latent_path=latent_path,
+                output_dir=output_path,
+                backend=backend,
+                model_type=model_type,
+                bit_depth=bit_depth,
+                compression=compression,
+            )
+        else:
+            return export_pt_latent_to_exr(
+                latent_path=latent_path,
+                output_path=output_path,
+                backend=backend,
+                model_type=model_type,
+                bit_depth=bit_depth,
+                compression=compression,
+            )
+    else:
+        # Use backend's decode_latent_direct for other formats
+        return backend.decode_latent_direct(
+            latent_path=latent_path,
+            output_path=output_path,
+            model_type=model_type,
+        )

@@ -724,6 +724,18 @@ def setup_video_routes(
             # Get video info
             video_info = video_processor.get_video_info(input_path)
             
+            # Copy source video for history preview (symlink to save space)
+            import shutil
+            source_copy = gen_dir / f"source{input_path.suffix}"
+            try:
+                # Try symlink first (saves disk space)
+                source_copy.symlink_to(input_path)
+                log.info("VideoLayers", f"Linked source: {source_copy.name}")
+            except (OSError, NotImplementedError):
+                # Fall back to copy if symlinks not supported
+                shutil.copy2(input_path, source_copy)
+                log.info("VideoLayers", f"Copied source: {source_copy.name}")
+            
             output_mode = OutputMode.SEQUENCE if request.output_mode == "sequence" else OutputMode.MP4
             
             # Build layer processors

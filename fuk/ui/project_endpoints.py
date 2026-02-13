@@ -150,7 +150,7 @@ def ensure_project_loaded():
         try:
             with open(latest_file) as f:
                 _project_state = json.load(f)
-            print(f"[PROJECT] âœ“ Auto-loaded: {latest_file.name}", flush=True)
+            print(f"[PROJECT] Auto-loaded: {latest_file.name}", flush=True)
             return True
         except Exception as e:
             print(f"[PROJECT] Failed to auto-load {latest_file.name}: {e}", flush=True)
@@ -194,7 +194,7 @@ def ensure_project_loaded():
                 json.dump(state, f, indent=2)
             
             _project_state = state
-            print(f"[PROJECT] âœ“ Created default project: {filename}", flush=True)
+            print(f"[PROJECT] Created default project: {filename}", flush=True)
             return True
             
         except Exception as e:
@@ -314,7 +314,7 @@ def cleanup_failed_generation(gen_dir: Path, reason: str = "generation failed") 
         try:
             gen_dir.resolve().relative_to(_cache_root.resolve())
         except ValueError:
-            print(f"[CLEANUP] Ã¢Å“â€” Refusing to delete - path outside cache: {gen_dir}", flush=True)
+            print(f"[CLEANUP]  Refusing to delete - path outside cache: {gen_dir}", flush=True)
             return False
     
     try:
@@ -325,14 +325,14 @@ def cleanup_failed_generation(gen_dir: Path, reason: str = "generation failed") 
             content_names.append(f"... and {len(contents) - 5} more")
         
         shutil.rmtree(gen_dir)
-        print(f"[CLEANUP] Ã¢Å“â€œ Removed failed generation: {gen_dir.name}", flush=True)
+        print(f"[CLEANUP]  Removed failed generation: {gen_dir.name}", flush=True)
         print(f"[CLEANUP]   Reason: {reason}", flush=True)
         if content_names:
             print(f"[CLEANUP]   Deleted: {', '.join(content_names)}", flush=True)
         return True
         
     except Exception as e:
-        print(f"[CLEANUP] Ã¢Å“â€” Failed to clean up {gen_dir}: {e}", flush=True)
+        print(f"[CLEANUP] Failed to clean up {gen_dir}: {e}", flush=True)
         return False
 
 def get_project_relative_url(file_path: Path) -> str:
@@ -834,13 +834,24 @@ async def list_generations(
         preview = None
         gen_type = "unknown"
         source_path = None  # For imports
+        is_sequence = False
+        frame_count = None
         
         # Handle imports specially - they reference external files
         if gen_dir.name.startswith("import_") and metadata.get("source_path"):
             source_path = metadata["source_path"]
-            # Strip leading slash for URL path
-            preview = f"api/project/files{source_path}"
-            gen_type = metadata.get("media_type", "import")
+            is_sequence = metadata.get("is_sequence", False)
+            frame_count = metadata.get("frame_count")
+            
+            if is_sequence:
+                # For sequences, use first_frame_path for preview
+                first_frame = metadata.get("first_frame_path", source_path)
+                preview = f"api/project/files{first_frame}"
+                gen_type = "sequence"
+            else:
+                # Regular file - use source path directly
+                preview = f"api/project/files{source_path}"
+                gen_type = metadata.get("media_type", "import")
         # Standard generation outputs
         elif (gen_dir / "generated.png").exists():
             preview = f"api/project/cache/{rel_path}/generated.png"
@@ -1051,7 +1062,9 @@ async def list_generations(
             "seed": metadata.get("seed"),
             "model": metadata.get("model", ""),
             "pinned": is_pinned,
-            "thumbnailUrl": thumbnail_url,  # ADD THIS
+            "thumbnailUrl": thumbnail_url,
+            "isSequence": is_sequence,  # For sequence detection in frontend
+            "frameCount": frame_count,  # Number of frames for sequences
         }
         
         # Include metadata for special types that need extra data
@@ -1170,6 +1183,9 @@ async def list_layer_generations(
     
     return entries
 
+# Replace the register_import function in project_endpoints.py (lines 1173-1260)
+# with this version that handles image sequences
+
 @router.post("/import")
 async def register_import(data: dict = Body(...)):
     """
@@ -1181,24 +1197,89 @@ async def register_import(data: dict = Body(...)):
     - Re-renders (e.g., Blender depth passes) automatically update
     - Files served directly from original location
     
+    Supports image sequences with printf patterns like %04d.
+    
     Args (in body):
-        path: Source file path (absolute)
+        path: Source file path (absolute) - for sequences, this is the printf pattern
         name: Display name (optional)
         auto_pin: Whether to auto-pin (default: True)
+        first_frame: First frame number (for sequences, optional)
+        last_frame: Last frame number (for sequences, optional)
+        frame_count: Number of frames (for sequences, optional)
+        frame_pattern: Original pattern with #### (for sequences, optional)
     
     Returns:
         Import info including the new history ID
     """
+    import re
+    import glob as glob_module
+    
     source_path = data.get("path")
     display_name = data.get("name")
     auto_pin = data.get("auto_pin", True)
+    
+    # Sequence metadata (passed from MediaUploader for sequences)
+    first_frame = data.get("first_frame")
+    last_frame = data.get("last_frame")
+    frame_count = data.get("frame_count")
+    frame_pattern = data.get("frame_pattern")
     
     if not source_path:
         raise HTTPException(status_code=400, detail="No path provided")
     
     source = Path(source_path)
-    if not source.exists():
-        raise HTTPException(status_code=404, detail=f"File not found: {source_path}")
+    
+    # Check if this is a sequence path (contains printf pattern like %04d)
+    is_sequence = '%' in source_path and 'd' in source_path
+    
+    if is_sequence:
+        # For sequences, verify at least one frame exists
+        # Convert printf pattern to glob: /path/to/file_%04d.png -> /path/to/file_*.png
+        glob_pattern = re.sub(r'%\d*d', '*', source_path)
+        matching_files = sorted(glob_module.glob(glob_pattern))
+        
+        if not matching_files:
+            raise HTTPException(status_code=404, detail=f"No frames found matching pattern: {source_path}")
+        
+        # Extract first frame path for thumbnail/preview
+        first_frame_path = Path(matching_files[0])
+        
+        # Try to determine frame range if not provided
+        if first_frame is None or last_frame is None or frame_count is None:
+            # Extract frame numbers from filenames
+            frame_numbers = []
+            
+            for f in matching_files:
+                # Try to extract number from filename
+                name = Path(f).stem
+                # Find the number at the end or after underscore/dot
+                num_match = re.search(r'(\d+)$', name)
+                if num_match:
+                    frame_numbers.append(int(num_match.group(1)))
+            
+            if frame_numbers:
+                first_frame = min(frame_numbers)
+                last_frame = max(frame_numbers)
+                frame_count = len(frame_numbers)
+        
+        media_type = "sequence"
+        
+    else:
+        # Regular file - must exist
+        if not source.exists():
+            raise HTTPException(status_code=404, detail=f"File not found: {source_path}")
+        first_frame_path = source
+        
+        # Determine media type from extension
+        ext = source.suffix.lower()
+        if ext in ['.mp4', '.mov', '.webm', '.avi', '.mkv']:
+            media_type = "video"
+        elif ext in ['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tiff', '.tif']:
+            media_type = "image"
+        elif ext in ['.exr', '.dpx']:
+            media_type = "exr"
+        else:
+            media_type = "unknown"
     
     # Get project cache directory
     try:
@@ -1209,30 +1290,36 @@ async def register_import(data: dict = Body(...)):
     # Create import directory (just for metadata)
     import_dir = get_generation_output_dir("import")
     
-    # Determine file name
+    # Determine display name
     if not display_name:
-        display_name = source.name
-    
-    # Determine media type
-    ext = source.suffix.lower()
-    if ext in ['.mp4', '.mov', '.webm', '.avi', '.mkv']:
-        media_type = "video"
-    elif ext in ['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tiff', '.tif']:
-        media_type = "image"
-    elif ext in ['.exr', '.dpx']:
-        media_type = "exr"
-    else:
-        media_type = "unknown"
+        if is_sequence and frame_pattern:
+            display_name = f"{frame_pattern} [{first_frame}-{last_frame}]" if first_frame and last_frame else frame_pattern
+        elif is_sequence:
+            # Convert printf to hash notation for display
+            base_name = Path(source_path).name
+            hash_name = re.sub(r'%(\d*)d', lambda m: '#' * (int(m.group(1)) if m.group(1) else 4), base_name)
+            display_name = f"{hash_name} [{first_frame}-{last_frame}]" if first_frame and last_frame else hash_name
+        else:
+            display_name = source.name
     
     # Save metadata with reference to original path (no copying!)
     metadata = {
         "timestamp": datetime.now().isoformat(),
-        "source_path": str(source),
+        "source_path": str(source_path),
         "display_name": display_name,
         "media_type": media_type,
         "link_type": "reference",  # Just a pointer, no duplication
         "imported": True,
+        "is_sequence": is_sequence,
     }
+    
+    # Add sequence-specific metadata
+    if is_sequence:
+        metadata["first_frame"] = first_frame
+        metadata["last_frame"] = last_frame
+        metadata["frame_count"] = frame_count
+        metadata["frame_pattern"] = frame_pattern
+        metadata["first_frame_path"] = str(first_frame_path)
     
     metadata_path = import_dir / "metadata.json"
     with open(metadata_path, 'w') as f:
@@ -1246,9 +1333,15 @@ async def register_import(data: dict = Body(...)):
         import_id = import_dir.name
     
     # Build API path for serving
-    api_path = f"api/project/files{source}"  # Use files endpoint for external paths
+    # For sequences, use the first frame for preview
+    if is_sequence:
+        api_path = f"api/project/files{first_frame_path}"
+    else:
+        api_path = f"api/project/files{source}"
     
-    print(f"[IMPORT] Registered: {source.name} -> {import_id} (reference only, no copy)", flush=True)
+    print(f"[IMPORT] Registered: {display_name} -> {import_id} (reference only, no copy)", flush=True)
+    if is_sequence:
+        print(f"[IMPORT]   Sequence: frames {first_frame}-{last_frame} ({frame_count} frames)", flush=True)
     
     return {
         "success": True,
@@ -1257,8 +1350,11 @@ async def register_import(data: dict = Body(...)):
         "name": display_name,
         "media_type": media_type,
         "auto_pin": auto_pin,
+        "is_sequence": is_sequence,
+        "first_frame": first_frame,
+        "last_frame": last_frame,
+        "frame_count": frame_count,
     }
-
 @router.delete("/generations/{gen_id:path}")
 async def delete_generation(gen_id: str):
     """Delete a generation directory or specific layer file"""

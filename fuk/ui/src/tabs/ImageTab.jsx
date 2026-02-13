@@ -28,6 +28,26 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
   const imageDefaults = config?.defaults?.image || {};
   const aspectRatios = config?.defaults?.aspect_ratios || [];
   
+  // Model metadata from config
+  const imageModels = config?.models?.image_models || [];
+  
+  // Helper: find selected model entry and check supports
+  const getSelectedModel = (modelKey) => {
+    return imageModels.find(m => m.key === modelKey || m.aliases?.includes(modelKey));
+  };
+  const modelSupports = (modelKey, feature) => {
+    const model = getSelectedModel(modelKey);
+    return model?.supports?.includes(feature) || false;
+  };
+  
+  // Resolve a model key or alias to a canonical key (for dropdown matching)
+  const resolveModelKey = (modelKey) => {
+    if (!modelKey || !imageModels.length) return modelKey;
+    if (imageModels.find(m => m.key === modelKey)) return modelKey;
+    const aliased = imageModels.find(m => m.aliases?.includes(modelKey));
+    return aliased ? aliased.key : modelKey;
+  };
+  
   // Initial defaults come entirely from backend config
   // These are the values used when no project is loaded and no localStorage exists
   const initialDefaults = useMemo(() => ({
@@ -39,16 +59,16 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
     steps: imageDefaults.steps ?? 20,
     stepsMode: imageDefaults.stepsMode ?? 'preset',
     guidance_scale: imageDefaults.guidance_scale ?? 5,
-    flow_shift: imageDefaults.flow_shift ?? 2.1,
-    blocks_to_swap: imageDefaults.blocks_to_swap ?? 10,
     lora: imageDefaults.lora ?? null,
     lora_multiplier: imageDefaults.lora_multiplier ?? 1.0,
     seed: imageDefaults.seed ?? null,
     seedMode: imageDefaults.seedMode ?? SEED_MODES.RANDOM,
     lastUsedSeed: imageDefaults.lastUsedSeed ?? null,
     output_format: imageDefaults.output_format ?? 'png',
-    edit_strength: imageDefaults.edit_strength ?? 0.7,
+    edit_strength: imageDefaults.edit_strength ?? 0.85,
+    exponential_shift_mu: imageDefaults.exponential_shift_mu ?? null,
     control_image_paths: imageDefaults.control_image_paths ?? [],
+    vram_preset: config?.models?.vram_preset_default ?? 'low',
   }), [imageDefaults]);
   
   // Fallback localStorage for when no project is loaded
@@ -68,6 +88,16 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
   useEffect(() => {
     formDataRef.current = formData;
   }, [formData]);
+
+  // Resolve alias model values to canonical keys when models config loads
+  useEffect(() => {
+    if (imageModels.length > 0 && formData.model) {
+      const resolved = resolveModelKey(formData.model);
+      if (resolved !== formData.model) {
+        setFormData(prev => ({ ...prev, model: resolved }));
+      }
+    }
+  }, [imageModels.length]);
 
   // Update function that writes to project or localStorage
   const setFormData = useCallback((updater) => {
@@ -200,7 +230,13 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
       control_image_paths: formData.control_image_paths,
       control_image_path: formData.control_image_paths.length > 0 
         ? formData.control_image_paths[0] 
-        : null
+        : null,
+      // Pass denoising_strength only when control images exist
+      denoising_strength: formData.control_image_paths.length > 0 
+        ? formData.edit_strength 
+        : null,
+      // Pass exponential_shift_mu (null = auto-calculate)
+      exponential_shift_mu: formData.exponential_shift_mu,
     };
     
     console.log('Generation payload:', payload);
@@ -276,7 +312,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
       <div className="fuk-settings-area">
         <div className="fuk-settings-grid">
           {/* Preprocessed Image Card */}
-          {project?.projectState?.lastState?.lastPreprocessedImage && formData.model === 'qwen_image_2509_edit' && (
+          {project?.projectState?.lastState?.lastPreprocessedImage && modelSupports(formData.model, 'edit_image') && (
             <div className="fuk-card">
               <h3 className="fuk-card-title fuk-card-title--highlight fuk-mb-3">
                 Last Preprocessed Image
@@ -325,7 +361,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
           <div className="fuk-card">
             <h3 className="fuk-card-title fuk-mb-3">Image Tools</h3>
             
-            {formData.model === 'qwen_image_2509_edit' ? (
+            {(modelSupports(formData.model, 'edit_image') || modelSupports(formData.model, 'context_image')) ? (
               <>
                 <div className="fuk-form-group-compact">
                   <label className="fuk-label">
@@ -338,29 +374,35 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                   />
                 </div>
                 
-                <div className="fuk-form-group-compact fuk-mt-4">
-                  <label className="fuk-label">Edit Strength</label>
-                  <div className="fuk-input-inline">
-                    <input
-                      type="range"
-                      className="fuk-input fuk-input--flex-2"
-                      value={formData.edit_strength || 0.7}
-                      onChange={(e) => setFormData({...formData, edit_strength: parseFloat(e.target.value)})}
-                      min={0}
-                      max={1}
-                      step={0.05}
-                    />
-                    <input
-                      type="number"
-                      className="fuk-input fuk-input--w-80"
-                      value={formData.edit_strength || 0.7}
-                      onChange={(e) => setFormData({...formData, edit_strength: parseFloat(e.target.value)})}
-                      step={0.05}
-                      min={0}
-                      max={1}
-                    />
+                {formData.control_image_paths.length > 0 && (
+                  <div className="fuk-form-group-compact fuk-mt-4">
+                    <label className="fuk-label">Edit Strength</label>
+                    <div className="fuk-input-inline">
+                      <input
+                        type="range"
+                        className="fuk-input fuk-input--flex-2"
+                        value={formData.edit_strength || 0.85}
+                        onChange={(e) => setFormData({...formData, edit_strength: parseFloat(e.target.value)})}
+                        min={0}
+                        max={1}
+                        step={0.05}
+                      />
+                      <input
+                        type="number"
+                        className="fuk-input fuk-input--w-80"
+                        value={formData.edit_strength || 0.85}
+                        onChange={(e) => setFormData({...formData, edit_strength: parseFloat(e.target.value)})}
+                        step={0.05}
+                        min={0}
+                        max={1}
+                      />
+                    </div>
+                    <p className="fuk-help-text fuk-mt-1">
+                      Controls how much the control images influence generation. 
+                      1.0 = full strength, 0.0 = minimal influence.
+                    </p>
                   </div>
-                </div>
+                )}
                 
                 <p className="fuk-help-text">
                   Upload one or more images to guide the generation.
@@ -370,7 +412,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
               <div className="fuk-empty-state">
                 <Camera className="fuk-empty-state-icon" />
                 <p className="fuk-empty-state-text">
-                  Select "Qwen Edit 2509" model<br />to enable image editing tools
+                  Select an Edit or Control model<br />to enable image tools
                 </p>
               </div>
             )}
@@ -387,8 +429,8 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                 value={formData.model}
                 onChange={(e) => setFormData({...formData, model: e.target.value})}
               >
-                {config?.models?.image_models?.map(model => (
-                  <option key={model} value={model}>{model}</option>
+                {imageModels.map(model => (
+                  <option key={model.key} value={model.key}>{model.description}</option>
                 ))}
               </select>
             </div>
@@ -401,8 +443,10 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                 onChange={(e) => setFormData({...formData, lora: e.target.value || null})}
               >
                 <option value="">None</option>
-                {config?.models?.loras?.map(lora => (
-                  <option key={lora} value={lora}>{lora}</option>
+                {config?.models?.loras?.map((lora, idx) => (
+                  <option key={typeof lora === 'string' ? lora : lora.key || idx} value={typeof lora === 'string' ? lora : lora.key}>
+                    {typeof lora === 'string' ? lora : (lora.name || lora.description || lora.key) + (lora.size_mb ? ` (${lora.size_mb}MB)` : '')}
+                  </option>
                 ))}
               </select>
             </div>
@@ -497,30 +541,41 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
             </div>
             
             <div className="fuk-form-group-compact">
-              <label className="fuk-label">Flow Shift</label>
-              <input
-                type="number"
-                className="fuk-input"
-                value={formData.flow_shift}
-                onChange={(e) => setFormData({...formData, flow_shift: parseFloat(e.target.value)})}
-                step={0.1}
-                min={1}
-                max={5}
-              />
-            </div>
-            
-            <div className="fuk-form-group-compact">
               <label className="fuk-label">
-                Blocks to Swap <span className="fuk-label-description">(VRAM)</span>
+                Exponential Shift Mu
+                <span className="fuk-help-text-inline"> (auto if blank)</span>
               </label>
               <input
                 type="number"
                 className="fuk-input"
-                value={formData.blocks_to_swap}
-                onChange={(e) => setFormData({...formData, blocks_to_swap: parseInt(e.target.value)})}
-                min={0}
-                max={30}
+                value={formData.exponential_shift_mu ?? ''}
+                onChange={(e) => setFormData({
+                  ...formData, 
+                  exponential_shift_mu: e.target.value ? parseFloat(e.target.value) : null
+                })}
+                placeholder="auto"
+                step={0.1}
+                min={1}
+                max={10}
               />
+              <p className="fuk-help-text fuk-mt-1">
+                Controls sampling timestep distribution. Leave blank for auto-calculation.
+              </p>
+            </div>
+            
+            <div className="fuk-form-group-compact">
+              <label className="fuk-label">VRAM Management</label>
+              <select
+                className="fuk-select"
+                value={formData.vram_preset || 'low'}
+                onChange={(e) => setFormData({...formData, vram_preset: e.target.value})}
+              >
+                {(config?.models?.vram_presets || []).map(preset => (
+                  <option key={preset.key} value={preset.key} title={preset.description}>
+                    {preset.label}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 
