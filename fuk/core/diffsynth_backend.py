@@ -921,32 +921,39 @@ class DiffSynthBackend:
         """
         Install a hook to capture latent before VAE decode.
         
-        This patches the VAE's decode method temporarily to intercept
-        and save the latent tensor right before it's decoded.
+        Captures a CPU copy of the latent with minimal GPU disruption.
+        The actual torch.save() happens in cleanup, AFTER decode completes,
+        so disk I/O doesn't block the GPU pipeline during generation.
         
         Args:
             pipe: The pipeline instance
             save_path: Where to save the captured latent
             
         Returns:
-            Function to remove the hook after generation
+            Function to remove the hook and save latent
         """
         original_decode = pipe.vae.decode
-        captured_latent = []
+        captured = {}  # Will hold {'latent': cpu_tensor, ...} after first decode
         
         def hooked_decode(latent, *args, **kwargs):
-            # Capture the latent before decode
-            if len(captured_latent) == 0:  # Only capture once
-                captured_latent.append(latent.clone())
-                self._save_latent_tensor(latent, save_path)
+            if not captured:  # Only capture once
+                # detach().cpu() copies to CPU without keeping a GPU clone
+                captured['latent'] = latent.detach().cpu()
+                captured['shape'] = list(latent.shape)
+                captured['dtype'] = str(latent.dtype)
             return original_decode(latent, *args, **kwargs)
         
         # Install hook
         pipe.vae.decode = hooked_decode
         
-        # Return cleanup function
+        # Return cleanup function — saves to disk AFTER generation
         def cleanup():
             pipe.vae.decode = original_decode
+            if captured:
+                save_path.parent.mkdir(parents=True, exist_ok=True)
+                torch.save(captured, str(save_path))
+                _log("BACKEND", f"Latent tensor saved: {save_path} (shape: {captured['shape']})")
+                captured.clear()  # Free the CPU tensor
             
         return cleanup
 

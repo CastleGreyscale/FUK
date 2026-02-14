@@ -208,7 +208,7 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
     
     try {
       // Choose endpoint based on video mode
-      const endpoint = isVideoMode ? `${API_URL}/export/exr/sequence` : `${API_URL}/export/exr`;
+      const endpoint = isVideoMode ? `${API_URL}/export/exr-sequence` : `${API_URL}/export/exr`;
       
       const payload = {
         layers: {

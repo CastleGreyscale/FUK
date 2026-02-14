@@ -272,6 +272,60 @@ except ImportError as e:
     sys.exit(1)
 
 # ============================================================================
+# EXR Export Helpers (Latent-Only)
+# ============================================================================
+
+def save_layer_generation_metadata(cache_dir: Path, original_gen_dir: Path):
+    """
+    Save metadata linking cached layers to original generation.
+    
+    This allows EXR export to find the latents later.
+    
+    Args:
+        cache_dir: /cache/video_layers_004/
+        original_gen_dir: /output/2025-02-13/video_001/
+    """
+    import json
+    
+    metadata = {
+        "original_generation": str(original_gen_dir),
+        "latents_dir": str(original_gen_dir / "latents"),
+    }
+    
+    metadata_file = cache_dir / "generation_source.json"
+    with open(metadata_file, 'w') as f:
+        json.dump(metadata, f, indent=2)
+    
+    log.info("Cache", f"Saved generation metadata: {metadata_file}")
+
+
+def get_original_generation_from_cache(cache_dir: Path) -> Optional[Path]:
+    """
+    Get the original generation directory from cached layers.
+    
+    Returns:
+        Path to original generation directory, or None if not found
+    """
+    import json
+    
+    metadata_file = cache_dir / "generation_source.json"
+    
+    if not metadata_file.exists():
+        return None
+    
+    try:
+        with open(metadata_file) as f:
+            metadata = json.load(f)
+        
+        gen_path = Path(metadata.get("original_generation"))
+        if gen_path.exists():
+            return gen_path
+    except Exception as e:
+        log.warning("Cache", f"Failed to read generation metadata: {e}")
+    
+    return None
+
+# ============================================================================
 # Configuration
 # ============================================================================
 
@@ -2589,29 +2643,32 @@ class ExportEXRRequest(BaseModel):
     filename: Optional[str] = None  # Custom filename (without extension)
     export_path: Optional[str] = None  # Custom save directory (empty = use project cache)
 
-class ExportEXRSequenceRequest(BaseModel):
-    """Request to export video layers to EXR sequence"""
-    layers: Dict[str, Optional[str]]  # layer_name -> video_path (MP4) or None
+class EXRSequenceExportRequest(BaseModel):
+    """EXR sequence export request
     
-    # EXR settings
-    bit_depth: int = 32  # 16 or 32
+    Accepts two payload formats:
+    1. Frontend format: layers={beauty, depth, normals, crypto} 
+       (derives latent path from beauty file location)
+    2. Direct format: beauty_latent or generation_path + aov_layers
+    """
+    
+    # Frontend format (layers dict like image export)
+    layers: Dict[str, Optional[str]] = {}
+    
+    # Direct latent format
+    generation_path: Optional[str] = None
+    beauty_latent: Optional[str] = None
+    aov_layers: Dict[str, Optional[str]] = {}
+    
+    # Export settings
+    export_path: Optional[str] = None
+    filename: str = "export"
+    filename_pattern: Optional[str] = None
+    bit_depth: int = 32
     compression: str = "ZIP"
-    color_space: str = "Linear"  # 'Linear' or 'sRGB'
-    
-    # Export mode
-    multi_layer: bool = True  # Each frame is multi-layer EXR
-    single_files: bool = False  # Also export separate sequences per layer
-    
-    # True latent export (DISABLED - VAE mismatch causes artifacts)
-    use_latent: bool = False  # Latent-to-EXR disabled until VAE matching is resolved
-    
-    # Output naming and location
-    filename: str = "export"  # Base filename for sequence
-    export_path: Optional[str] = None  # Custom save directory (empty = use project cache)
-    
-    # Sequence-specific
-    start_frame: int = 1  # First frame number
-    filename_pattern: Optional[str] = None  # e.g. "{name}.{frame:04d}.exr"
+    color_space: str = "Linear"
+    start_frame: int = 1001
+    model_type: str = "auto"
 
 
 @app.post("/api/export/exr")
@@ -2825,28 +2882,18 @@ async def export_to_exr(request: ExportEXRRequest):
         log.exception("Export", e)
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/export/exr/sequence")
-async def export_video_to_exr_sequence(request: ExportEXRSequenceRequest):
+@app.post("/api/export/exr-sequence")
+async def export_exr_sequence(request: EXRSequenceExportRequest):
     """
-    Export video AOV layers to EXR image sequence
+    Export multilayer EXR sequence (LATENT-ONLY VERSION)
     
-    Takes video files (MP4) for each layer and exports as frame-by-frame
-    multi-layer EXR sequence.
-    
-    If use_latent=True and latent.safetensors exists alongside the beauty layer,
-    uses true latent-to-EXR path (bypasses lossy MP4 compression entirely).
-    
-    Output: {filename}.0001.exr, {filename}.0002.exr, ...
-    Each frame contains all AOVs (beauty RGB, depth Z, normals N.XYZ, crypto)
+    REQUIREMENTS:
+    - Beauty latent file MUST exist (no fallback to MP4)
+    - AOVs should have raw .npy files (but can fallback to MP4)
     """
     try:
-        log.header("EXR SEQUENCE EXPORT")
-        log.info("SeqExport", f"Layers: {list(k for k, v in request.layers.items() if v)}")
-        log.info("SeqExport", f"Bit Depth: {request.bit_depth}")
-        log.info("SeqExport", f"Start Frame: {request.start_frame}")
-        log.info("SeqExport", f"Use Latent: {request.use_latent}")
+        log.header("EXR SEQUENCE EXPORT (LATENT-ONLY)")
         
-        # Import exporter
         from core.exr_exporter import EXRExporter
         
         # Determine output location
@@ -2856,211 +2903,147 @@ async def export_video_to_exr_sequence(request: ExportEXRSequenceRequest):
             export_dir = Path(request.export_path)
             if not export_dir.exists():
                 export_dir.mkdir(parents=True, exist_ok=True)
-            gen_dir = export_dir
             log.info("SeqExport", f"Custom export path: {export_dir}")
         else:
-            gen_dir = get_generation_output_dir("export_exr_seq")
-            export_dir = gen_dir
-            log.info("SeqExport", f"Cache path: {gen_dir}")
+            export_dir = get_generation_output_dir("export_exr_seq")
+            log.info("SeqExport", f"Cache path: {export_dir}")
         
-        # Resolve layer paths (video files)
-        resolved_layers = {}
-        latent_path = None
+        # ----------------------------------------------------------------
+        # Resolve beauty latent and AOV layers
+        # Supports both frontend format (layers dict) and direct format
+        # ----------------------------------------------------------------
+        beauty_latent = None
+        resolved_aovs = {}
         
-        for layer_name, layer_path in request.layers.items():
+        # If frontend sent layers dict, derive latent + aov paths from it
+        if request.layers and request.layers.get('beauty'):
+            beauty_path_str = request.layers['beauty']
+            resolved_beauty = resolve_input_path(beauty_path_str)
+            
+            if resolved_beauty and resolved_beauty.exists():
+                # Find latent file next to beauty file
+                latent_dir = resolved_beauty.parent / "latents"
+                if latent_dir.exists():
+                    # Try matching filename first
+                    latent_file = latent_dir / f"{resolved_beauty.stem}.latent.pt"
+                    if not latent_file.exists():
+                        base_name = resolved_beauty.stem.split('.')[0]
+                        latent_file = latent_dir / f"{base_name}.latent.pt"
+                    
+                    if not latent_file.exists():
+                        # Try any latent file in the directory
+                        latent_files = list(latent_dir.glob("*.latent.pt"))
+                        if latent_files:
+                            latent_file = latent_files[0]
+                    
+                    if latent_file.exists():
+                        beauty_latent = latent_file
+                        log.info("SeqExport", f"Found latent from beauty path: {beauty_latent}")
+                    else:
+                        log.warning("SeqExport", f"No latent files found in {latent_dir}")
+                else:
+                    log.warning("SeqExport", f"No latents/ directory at {resolved_beauty.parent}")
+            
+            # Extract AOV layers from layers dict (everything except beauty)
+            for layer_name in ['depth', 'normals', 'crypto']:
+                layer_path = request.layers.get(layer_name)
+                if layer_path:
+                    resolved = resolve_input_path(layer_path)
+                    if resolved and resolved.exists():
+                        resolved_aovs[layer_name] = str(resolved)
+        
+        # Direct beauty_latent path (overrides layers-derived path)
+        if request.beauty_latent:
+            beauty_latent = Path(request.beauty_latent)
+            if not beauty_latent.exists():
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Beauty latent not found: {request.beauty_latent}"
+                )
+        
+        # generation_path fallback
+        if beauty_latent is None and request.generation_path:
+            gen_path = Path(request.generation_path)
+            latent_dir = gen_path / "latents"
+            
+            if not latent_dir.exists():
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"No latents directory found in generation: {gen_path}"
+                )
+            
+            # Try to find a latent file
+            latent_files = list(latent_dir.glob("*.latent.pt"))
+            if not latent_files:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"No .latent.pt files found in {latent_dir}"
+                )
+            
+            beauty_latent = latent_files[0]
+        
+        # Direct aov_layers (merge with any layers-derived ones)
+        for layer_name, layer_path in request.aov_layers.items():
             if layer_path is None:
                 continue
-            
             resolved_path = resolve_input_path(layer_path)
             if resolved_path and resolved_path.exists():
-                resolved_layers[layer_name] = str(resolved_path)
-                log.info("SeqExport", f"  {layer_name}: {resolved_path.name}")
-                
-                # Check for latent.safetensors alongside beauty layer
-                
-                if layer_name == 'beauty' and request.use_latent:
-                    latent_dir = resolved_path.parent / "latents"
-                    if latent_dir.exists():
-                        # Try matching filename
-                        potential_latent = latent_dir / f"{resolved_path.stem}.latent.pt"
-                        if potential_latent.exists():
-                            latent_path = potential_latent
-                            log.info("SeqExport", f"  Found latent: {latent_path.name}")
-
+                resolved_aovs[layer_name] = str(resolved_path)
+        
+        # Final validation
+        if beauty_latent is None:
+            raise HTTPException(
+                status_code=400,
+                detail="No beauty latent found. Provide layers.beauty (with latents/ dir), beauty_latent, or generation_path"
+            )
+        
+        log.info("SeqExport", f"Beauty Latent: {beauty_latent}")
+        
+        # Log resolved AOVs
+        for layer_name, layer_path in resolved_aovs.items():
+            resolved_path = Path(layer_path)
+            raw_path = resolved_path.parent / f"{resolved_path.stem}_raw.npy"
+            if raw_path.exists():
+                log.info("SeqExport", f"  {layer_name}: {resolved_path.name} (with raw .npy)")
             else:
-                log.warning("SeqExport", f"  {layer_name}: not found ({layer_path})")
-        
-        if not resolved_layers:
-            raise HTTPException(status_code=400, detail="No valid video layers to export")
-        
-        exporter = EXRExporter()
+                log.warning("SeqExport", f"  {layer_name}: {resolved_path.name} (NO raw .npy - using MP4!)")
         
         # Build filename pattern
         base_filename = request.filename or "export"
         filename_pattern = request.filename_pattern or f"{base_filename}.{{frame:04d}}.exr"
         
-        used_latent = False
+        # Export using LATENT-ONLY API
+        exporter = EXRExporter()
         
-        # Export video sequence
-        if request.multi_layer:
-            # Check if we can use true latent export (beauty layer only)
-            if latent_path and 'beauty' in resolved_layers and len(resolved_layers) == 1:
-                # TRUE LATENT PATH - bypasses MP4 entirely
-                log.info("SeqExport", "Using TRUE LATENT-to-EXR path (no MP4 compression)")
-                
-                # Get VAE path from models config
-                vae_path = None
-                # TODO: Use DiffSynth backend VAE directly instead of standalone VAE file
-                
-                try:
-                    models_config = CONFIG_DIR / "models.json"
-                    if models_config.exists():
-                        import json
-                        with open(models_config) as f:
-                            models = json.load(f)
-                        # Try Wan VAE (for video), fall back to Qwen
-                        for model_key in ["wan_i2v_14b", "wan_t2v_14b", "wan_i2v_480p", "qwen_image"]:
-                            if model_key in models.get("models", {}):
-                                vae_path = models["models"][model_key].get("vae")
-                                if vae_path:
-                                    break
-                except Exception as e:
-                    log.warning("SeqExport", f"Could not get VAE path: {e}")
-                
-                if vae_path and Path(vae_path).exists():
-                    try:
-                        result = exporter.export_from_latent_sequence(
-                            latent_path=latent_path,
-                            output_dir=export_dir,
-                            vae_path=vae_path,
-                            musubi_path=None,
-                            filename_pattern=filename_pattern,
-                            bit_depth=request.bit_depth,
-                            compression=request.compression,
-                            start_frame=request.start_frame,
-                        )
-                        used_latent = True
-                        log.success("SeqExport", f"TRUE LATENT: Exported {result['frame_count']} frames")
-                    except Exception as e:
-                        log.warning("SeqExport", f"Latent export failed, falling back to MP4: {e}")
-                        # Fall back to MP4 path
-                        result = exporter.export_video_sequence(
-                            layers=resolved_layers,
-                            output_dir=export_dir,
-                            filename_pattern=filename_pattern,
-                            bit_depth=request.bit_depth,
-                            compression=request.compression,
-                            linear=(request.color_space == "Linear"),
-                            start_frame=request.start_frame,
-                            backend=generation_backend,  # NEW!
-                            auto_decode_beauty_latents=request.use_latent,  # NEW!
-                        )
-
-                else:
-                    log.warning("SeqExport", f"VAE not found at {vae_path}, falling back to MP4 path")
-                    result = exporter.export_video_sequence(
-                        layers=resolved_layers,
-                        output_dir=export_dir,
-                        filename_pattern=filename_pattern,
-                        bit_depth=request.bit_depth,
-                        compression=request.compression,
-                        linear=(request.color_space == "Linear"),
-                        start_frame=request.start_frame,
-                    )
-            else:
-                # Standard MP4 path (multiple layers or no latent)
-                if latent_path and len(resolved_layers) > 1:
-                    log.info("SeqExport", "Multiple layers - using MP4 path (latent only supports beauty)")
-                
-                result = exporter.export_video_sequence(
-                    layers=resolved_layers,
-                    output_dir=export_dir,
-                    filename_pattern=filename_pattern,
-                    bit_depth=request.bit_depth,
-                    compression=request.compression,
-                    linear=(request.color_space == "Linear"),
-                    start_frame=request.start_frame,
-                )
-            
-            log.success("SeqExport", f"Exported {result['frame_count']} frames")
-            
-            results = {
-                "success": True,
-                "output_dir": str(export_dir),
-                "frame_count": result["frame_count"],
-                "start_frame": result.get("start_frame", request.start_frame),
-                "end_frame": result.get("end_frame", request.start_frame + result["frame_count"] - 1),
-                "total_size": result.get("total_size", 0),
-                "total_size_mb": result.get("total_size_mb", result.get("total_size", 0) / (1024*1024)),
-                "filename_pattern": filename_pattern,
-                "layers_included": result.get("layers_included", list(resolved_layers.keys())),
-                "custom_export": custom_export,
-                "used_latent": used_latent,
-            }
-            
-            # Add URL for cache exports
-            if not custom_export:
-                results["url"] = get_project_relative_url(export_dir)
-            
-        else:
-            # Single files mode - export separate sequence per layer
-            results = {
-                "success": True,
-                "output_dir": str(export_dir),
-                "layers": {},
-                "custom_export": custom_export,
-                "used_latent": False,  # Single files mode doesn't support latent yet
-            }
-            
-            total_frames = 0
-            for layer_name, layer_path in resolved_layers.items():
-                layer_pattern = f"{base_filename}_{layer_name}.{{frame:04d}}.exr"
-                
-                layer_result = exporter.export_video_sequence(
-                    layers={layer_name: layer_path},
-                    output_dir=export_dir,
-                    filename_pattern=layer_pattern,
-                    bit_depth=request.bit_depth,
-                    compression=request.compression,
-                    linear=(request.color_space == "Linear") if layer_name == "beauty" else False,
-                    start_frame=request.start_frame,
-                )
-                
-                results["layers"][layer_name] = {
-                    "frame_count": layer_result["frame_count"],
-                    "pattern": layer_pattern,
-                }
-                total_frames = max(total_frames, layer_result["frame_count"])
-            
-            results["frame_count"] = total_frames
+        result = exporter.export_video_sequence(
+            beauty_latent=beauty_latent,
+            aov_layers=resolved_aovs,
+            backend=generation_backend,
+            output_dir=export_dir,
+            filename_pattern=filename_pattern,
+            bit_depth=request.bit_depth,
+            compression=request.compression,
+            start_frame=request.start_frame,
+            model_type=request.model_type,
+        )
         
-        # Save metadata (only in project cache)
-        if not custom_export:
-            save_generation_metadata(
-                gen_dir=gen_dir,
-                prompt=f"EXR Sequence Export ({len(resolved_layers)} layers)",
-                model="exr_sequence_export",
-                seed=None,
-                image_size=(0, 0),
-                source_image=None,
-                parameters={
-                    "layers": list(resolved_layers.keys()),
-                    "bit_depth": request.bit_depth,
-                    "compression": request.compression,
-                    "color_space": request.color_space,
-                    "filename": base_filename,
-                    "frame_count": results.get("frame_count", 0),
-                    "start_frame": request.start_frame,
-                    "used_latent": used_latent,
-                },
-            )
+        log.success("SeqExport", f"Exported {result['frame_count']} frames (LATENT-ONLY)")
         
-        log.success("SeqExport", "EXR sequence export complete")
-        
-        return results
+        return {
+            "success": True,
+            "output_dir": str(export_dir),
+            "frame_count": result["frame_count"],
+            "start_frame": result.get("start_frame", request.start_frame),
+            "end_frame": result.get("end_frame"),
+            "total_size_mb": result.get("total_size_mb"),
+            "filename_pattern": filename_pattern,
+            "layers_included": result.get("layers_included"),
+            "custom_export": custom_export,
+            "used_latent": True,
+        }
         
     except Exception as e:
-        log.exception("SeqExport", e)
+        log.error("SeqExport", f"Export failed: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

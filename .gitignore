@@ -19,6 +19,7 @@
 
 
 # Exclude sensitive/cache data
+fuk/core/old/
 fuk/testing/
 **/*.log
 **/*.bak

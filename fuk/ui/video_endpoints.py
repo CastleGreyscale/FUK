@@ -12,8 +12,6 @@ Import and register these routes in the main server file.
 
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
-from fuk.core.preprocessors.depth_video_batch import VideoDepthBatchProcessor
-from fuk.core.preprocessors.crypto_video_batch import VideoCryptoBatchProcessor
 from pydantic import BaseModel, Field
 from pathlib import Path
 from typing import Optional, Dict, Any, List
@@ -21,6 +19,12 @@ from enum import Enum
 import asyncio
 import json
 import time
+
+# Shared video utilities (single source of truth)
+from core.video_utils import (
+    get_video_info as _get_video_info,
+    extract_thumbnail,
+)
 
 # Create router for video endpoints
 router = APIRouter(prefix="/api", tags=["video"])
@@ -140,8 +144,58 @@ def setup_video_routes(
     """
     
     from core.video_processor import VideoProcessor, OutputMode
+    from core.preprocessors.depth import DepthPreprocessor
+    from core.preprocessors.crypto import CryptoPreprocessor
     
     video_processor = VideoProcessor()
+    
+    # ==================================================================
+    # Shared model string -> enum maps (defined once, used everywhere)
+    # ==================================================================
+    
+    DEPTH_MODEL_MAP = {
+        "midas_small": DepthModel.MIDAS_SMALL,
+        "midas_large": DepthModel.MIDAS_LARGE,
+        "depth_anything_v2": DepthModel.DEPTH_ANYTHING_V2,
+        "depth_anything_v3": DepthModel.DEPTH_ANYTHING_V3,
+        "da3_mono_large": DepthModel.DA3_MONO_LARGE,
+        "da3_metric_large": DepthModel.DA3_METRIC_LARGE,
+        "da3_large": DepthModel.DA3_LARGE,
+        "da3_giant": DepthModel.DA3_GIANT,
+        "zoedepth": DepthModel.ZOEDEPTH,
+    }
+    
+    SAM_MODEL_MAP = {
+        "sam2_hiera_tiny": SAMModel.TINY,
+        "sam2_hiera_small": SAMModel.SMALL,
+        "sam2_hiera_base_plus": SAMModel.BASE,
+        "sam2_hiera_large": SAMModel.LARGE,
+    }
+    
+    NORMALS_METHOD_MAP = {
+        "from_depth": NormalsMethod.FROM_DEPTH,
+        "dsine": NormalsMethod.DSINE,
+    }
+    
+    # ==================================================================
+    # Response Builders
+    # ==================================================================
+    
+    def _generate_thumbnail(output_path: Path) -> Optional[Path]:
+        """Generate thumbnail for MP4 output, returns thumb path or None"""
+        if not output_path.exists():
+            return None
+        thumb_path = output_path.with_suffix('.thumb.jpg')
+        if thumb_path.exists():
+            return thumb_path
+        try:
+            result = extract_thumbnail(output_path, thumb_path)
+            if result:
+                log.info("VideoEndpoints", f"Generated thumbnail: {thumb_path.name}")
+                return result
+        except Exception as e:
+            log.error("VideoEndpoints", f"Failed to generate thumbnail: {e}")
+        return None
     
     def build_sequence_response(
         output_path: Path,
@@ -182,24 +236,15 @@ def setup_video_routes(
     def build_video_response(
         output_path: Path,
         result: Dict[str, Any],
-        video_processor=None
     ) -> Dict[str, Any]:
         """Build response data for MP4 output mode."""
         output_url = get_project_relative_url(output_path)
         
-        # Generate thumbnail if video exists and processor is available
+        # Generate thumbnail
         thumbnail_url = None
-        if video_processor and output_path.exists():
-            thumb_path = output_path.with_suffix('.thumb.jpg')
-            if not thumb_path.exists():  # Only generate if not already present
-                try:
-                    video_processor.extract_thumbnail(output_path, thumb_path)
-                    if thumb_path.exists():
-                        thumbnail_url = get_project_relative_url(thumb_path)
-                except Exception as e:
-                    print(f"[VideoEndpoints] Failed to generate thumbnail: {e}")
-            elif thumb_path.exists():
-                thumbnail_url = get_project_relative_url(thumb_path)
+        thumb_path = _generate_thumbnail(output_path)
+        if thumb_path:
+            thumbnail_url = get_project_relative_url(thumb_path)
         
         response = {
             "output_url": output_url,
@@ -212,6 +257,13 @@ def setup_video_routes(
         
         return response
     
+    def _build_response(output_path: Path, result: Dict, output_mode, gen_dir: Path) -> Dict:
+        """Build response based on output mode (convenience wrapper)"""
+        if output_mode == OutputMode.SEQUENCE:
+            return build_sequence_response(output_path, result, gen_dir)
+        else:
+            return build_video_response(output_path, result)
+    
     # ========================================================================
     # Video Preprocess Endpoint
     # ========================================================================
@@ -222,7 +274,13 @@ def setup_video_routes(
         Apply preprocessing to a video frame-by-frame
         
         Supports: canny, depth, normals, openpose, crypto
+        
+        Depth and crypto use their unified preprocessors which handle
+        batch inference / temporal tracking internally.
+        Canny, normals, openpose go through frame-by-frame VideoProcessor.
         """
+        gen_dir = None
+        
         try:
             # Resolve input path
             input_path = resolve_input_path(request.video_path)
@@ -247,16 +305,17 @@ def setup_video_routes(
                 output_path = gen_dir / f"{request.method}.mp4"
             else:
                 output_path = gen_dir / request.method
-                # Don't create yet - let video_processor handle it
+                # Don't create yet - let processor handle it
             
             log.info("VideoPreprocess", f"Output path: {output_path}")
             
             # Get video info
-            video_info = video_processor.get_video_info(input_path)
+            video_info = _get_video_info(input_path)
             
             # Build processor kwargs based on method
             processor_kwargs = {}
             
+            # ---- CANNY (frame-by-frame) ----
             if request.method == "canny":
                 def frame_processor(inp, out):
                     return preprocessor_manager.canny(
@@ -266,7 +325,7 @@ def setup_video_routes(
                         high_threshold=request.high_threshold,
                         invert=request.canny_invert,
                         blur_kernel=request.blur_kernel,
-                        exact_output=True,  # Use exact path for video frames
+                        exact_output=True,
                     )
                 processor_kwargs = {
                     "low_threshold": request.low_threshold,
@@ -274,119 +333,48 @@ def setup_video_routes(
                 }
                 batch_processed = False
                     
+            # ---- DEPTH (unified — handles batch vs frame-by-frame internally) ----
             elif request.method == "depth":
-                depth_model_map = {
-                    "midas_small": DepthModel.MIDAS_SMALL,
-                    "midas_large": DepthModel.MIDAS_LARGE,
-                    "depth_anything_v2": DepthModel.DEPTH_ANYTHING_V2,
-                    "depth_anything_v3": DepthModel.DEPTH_ANYTHING_V3,
-                    "da3_mono_large": DepthModel.DA3_MONO_LARGE,
-                    "da3_metric_large": DepthModel.DA3_METRIC_LARGE,
-                    "da3_large": DepthModel.DA3_LARGE,
-                    "da3_giant": DepthModel.DA3_GIANT,
-                    "zoedepth": DepthModel.ZOEDEPTH,
-                }
-                depth_model = depth_model_map.get(request.depth_model, DepthModel.DEPTH_ANYTHING_V2)
+                depth_model = DEPTH_MODEL_MAP.get(request.depth_model, DepthModel.DEPTH_ANYTHING_V2)
                 
-                # Check if we should use batch processing (DA3 models only)
-                use_batch = depth_model in [
-                    DepthModel.DEPTH_ANYTHING_V3,
-                    DepthModel.DA3_MONO_LARGE,
-                    DepthModel.DA3_METRIC_LARGE,
-                    DepthModel.DA3_LARGE,
-                    DepthModel.DA3_GIANT,
-                ]
+                log.info("VideoPreprocess", f"Depth model: {depth_model.value}")
                 
-                if use_batch:
-                    # Use batch processor for DA3 models (temporal consistency)
-                    log.info("VideoPreprocess", "Using BATCH processing for DA3 (temporal consistency)")
-                    
-                    # For video, prefer DA3_LARGE (multi-view capable) over DA3_MONO_LARGE
-                    # unless user specifically requested a different model
-                    effective_model = depth_model
-                    if depth_model == DepthModel.DA3_MONO_LARGE:
-                        log.info("VideoPreprocess", "Recommending DA3_LARGE for video (multi-view capable)")
-                        # Keep user choice but note the recommendation
-                    
-                    # Initialize depth model
-                    from fuk.core.preprocessors.depth import DepthPreprocessor
-                    depth_processor = DepthPreprocessor(model_type=effective_model)
-
-                    # Create batch processor
-                    batch_processor = VideoDepthBatchProcessor()
-                    
-                    # Process with batch inference (includes timing)
-                    start_time = time.time()
-                    
-                    result = batch_processor.process_video_batch(
-                        video_path=input_path,
-                        output_path=output_path,
-                        depth_model=depth_processor,
-                        model_type=depth_model,
-                        temporal_smooth=5,
-                        invert=request.depth_invert,
-                        normalize=request.depth_normalize,
-                        colormap=request.depth_colormap,
-                        # process_res and process_res_method now read from depth-anything-v3.json config
-                        output_mode="mp4" if output_mode == OutputMode.MP4 else "sequence",
-                    )
-                    
-                    elapsed = time.time() - start_time
-                    log.timing("VideoPreprocess", start_time, f"Complete (batch) - {result.get('frame_count', 0)} frames")
-                    
-                    # Generate thumbnail for MP4 output
-                    if output_mode == OutputMode.MP4 and output_path.exists():
-                        thumb_path = output_path.with_suffix('.thumb.jpg')
-                        try:
-                            video_processor.extract_thumbnail(output_path, thumb_path)
-                            log.info("VideoPreprocess", f"Generated thumbnail: {thumb_path.name}")
-                        except Exception as e:
-                            log.error("VideoPreprocess", f"Failed to generate thumbnail: {e}")
-                    
-                    # Build response
-                    if output_mode == OutputMode.SEQUENCE:
-                        url_data = build_sequence_response(output_path, result, gen_dir)
-                    else:
-                        url_data = build_video_response(output_path, result, video_processor)
-                    
-                    processor_kwargs = {"depth_model": request.depth_model}
-                    
-                    # Set flag to skip common video_processor call
-                    batch_processed = True
+                # The unified DepthPreprocessor handles everything:
+                #   DA3 models -> batch inference with global normalization
+                #   Other models -> frame-by-frame via base class
+                depth_processor = DepthPreprocessor(model_type=depth_model)
                 
-                else:
-                    # Frame-by-frame for other models (V2, MiDaS, ZoeDepth)
-                    def frame_processor(inp, out):
-                        return preprocessor_manager.depth(
-                            image_path=inp,
-                            output_path=out,
-                            model=depth_model,
-                            invert=request.depth_invert,
-                            normalize=request.depth_normalize,
-                            colormap=request.depth_colormap,
-                            exact_output=True,
-                        )
-                    processor_kwargs = {"depth_model": request.depth_model}
-                    batch_processed = False  
+                start_time = time.time()
+                
+                result = depth_processor.process_video(
+                    video_path=input_path,
+                    output_path=output_path,
+                    output_mode="mp4" if output_mode == OutputMode.MP4 else "sequence",
+                    invert=request.depth_invert,
+                    normalize=request.depth_normalize,
+                    colormap=request.depth_colormap,
+                    temporal_smooth=5,
+                )
+                
+                elapsed = time.time() - start_time
+                log.timing("VideoPreprocess", start_time, f"Complete - {result.get('frame_count', 0)} frames")
+                
+                # Thumbnail for MP4
+                if output_mode == OutputMode.MP4:
+                    _generate_thumbnail(output_path)
+                
+                url_data = _build_response(output_path, result, output_mode, gen_dir)
+                processor_kwargs = {"depth_model": request.depth_model}
+                
+                # Unload model to free VRAM
+                depth_processor.unload()
+                
+                batch_processed = True
+                
+            # ---- NORMALS (frame-by-frame) ----
             elif request.method == "normals":
-                normals_method_map = {
-                    "from_depth": NormalsMethod.FROM_DEPTH,
-                    "dsine": NormalsMethod.DSINE,
-                }
-                depth_model_map = {
-                    "midas_small": DepthModel.MIDAS_SMALL,
-                    "midas_large": DepthModel.MIDAS_LARGE,
-                    "depth_anything_v2": DepthModel.DEPTH_ANYTHING_V2,
-                    "depth_anything_v3": DepthModel.DEPTH_ANYTHING_V3,
-                    "da3_mono_large": DepthModel.DA3_MONO_LARGE,
-                    "da3_metric_large": DepthModel.DA3_METRIC_LARGE,
-                    "da3_large": DepthModel.DA3_LARGE,
-                    "da3_giant": DepthModel.DA3_GIANT,
-                    "zoedepth": DepthModel.ZOEDEPTH,
-                }
-                
-                normals_method = normals_method_map.get(request.normals_method, NormalsMethod.FROM_DEPTH)
-                depth_model = depth_model_map.get(request.normals_depth_model, DepthModel.DEPTH_ANYTHING_V2)
+                normals_method = NORMALS_METHOD_MAP.get(request.normals_method, NormalsMethod.FROM_DEPTH)
+                depth_model = DEPTH_MODEL_MAP.get(request.normals_depth_model, DepthModel.DEPTH_ANYTHING_V2)
                 
                 def frame_processor(inp, out):
                     return preprocessor_manager.normals(
@@ -398,11 +386,12 @@ def setup_video_routes(
                         flip_y=request.normals_flip_y,
                         flip_x=request.normals_flip_x,
                         intensity=request.normals_intensity,
-                        exact_output=True,  # Use exact path for video frames
+                        exact_output=True,
                     )
                 processor_kwargs = {"normals_method": request.normals_method}
                 batch_processed = False
                     
+            # ---- OPENPOSE (frame-by-frame) ----
             elif request.method == "openpose":
                 def frame_processor(inp, out):
                     return preprocessor_manager.openpose(
@@ -411,7 +400,7 @@ def setup_video_routes(
                         detect_body=request.detect_body,
                         detect_hand=request.detect_hand,
                         detect_face=request.detect_face,
-                        exact_output=True,  # Use exact path for video frames
+                        exact_output=True,
                     )
                 processor_kwargs = {
                     "detect_body": request.detect_body,
@@ -420,75 +409,48 @@ def setup_video_routes(
                 }
                 batch_processed = False
                     
+            # ---- CRYPTO (unified — temporal tracking via SAM2VideoPredictor) ----
             elif request.method == "crypto":
-                sam_model_map = {
-                    "sam2_hiera_tiny": SAMModel.TINY,
-                    "sam2_hiera_small": SAMModel.SMALL,
-                    "sam2_hiera_base_plus": SAMModel.BASE,
-                    "sam2_hiera_large": SAMModel.LARGE,
-                }
-                sam_model = sam_model_map.get(request.crypto_model, SAMModel.LARGE)
+                sam_model = SAM_MODEL_MAP.get(request.crypto_model, SAMModel.LARGE)
                 
-                # ALWAYS use batch processing for crypto (video tracking for temporal consistency)
-                log.info("VideoPreprocess", "Using VIDEO TRACKING for crypto (temporal consistency)")
+                log.info("VideoPreprocess", f"Crypto model: {sam_model.value} (video tracking)")
                 
-                # Map SAMModel enum to model size string
-                model_size_map = {
-                    SAMModel.TINY: "tiny",
-                    SAMModel.SMALL: "small",
-                    SAMModel.BASE: "base",
-                    SAMModel.LARGE: "large",
-                }
-                model_size = model_size_map.get(sam_model, "large")
+                # The unified CryptoPreprocessor handles everything:
+                #   process_video() -> SAM2VideoPredictor for temporal consistency
+                crypto_processor = CryptoPreprocessor(model_size=sam_model)
                 
-                # Create batch processor
-                crypto_batch_processor = VideoCryptoBatchProcessor()
-                
-                # Process with video tracking (consistent object IDs across frames)
                 start_time = time.time()
                 
-                result = crypto_batch_processor.process_video_batch(
+                result = crypto_processor.process_video(
                     video_path=input_path,
                     output_path=output_path,
-                    model_size=model_size,
+                    output_mode="mp4" if output_mode == OutputMode.MP4 else "sequence",
                     max_objects=request.crypto_max_objects,
                     min_area=request.crypto_min_area,
-                    output_mode="mp4" if output_mode == OutputMode.MP4 else "sequence",
                 )
-                
-                # Clean up GPU memory
-                crypto_batch_processor.cleanup()
                 
                 elapsed = time.time() - start_time
                 log.timing("VideoPreprocess", start_time, f"Complete (video tracking) - {result.get('frame_count', 0)} frames, {result.get('num_objects', 0)} objects")
                 
-                # Generate thumbnail for MP4 output
-                if output_mode == OutputMode.MP4 and output_path.exists():
-                    thumb_path = output_path.with_suffix('.thumb.jpg')
-                    try:
-                        video_processor.extract_thumbnail(output_path, thumb_path)
-                        log.info("VideoPreprocess", f"Generated thumbnail: {thumb_path.name}")
-                    except Exception as e:
-                        log.error("VideoPreprocess", f"Failed to generate thumbnail: {e}")
+                # Thumbnail for MP4
+                if output_mode == OutputMode.MP4:
+                    _generate_thumbnail(output_path)
                 
-                # Build response
-                if output_mode == OutputMode.SEQUENCE:
-                    url_data = build_sequence_response(output_path, result, gen_dir)
-                else:
-                    url_data = build_video_response(output_path, result, video_processor)
-                
+                url_data = _build_response(output_path, result, output_mode, gen_dir)
                 processor_kwargs = {
                     "crypto_model": request.crypto_model,
                     "num_objects": result.get("num_objects", 0),
                     "sam_version": result.get("sam_version", "unknown"),
                 }
                 
-                # Set flag to skip common video_processor call
+                # Unload models to free VRAM
+                crypto_processor.unload()
+                
                 batch_processed = True
             else:
                 raise HTTPException(status_code=400, detail=f"Unknown method: {request.method}")
             
-            # Process video (skip if already batch processed)
+            # ---- Frame-by-frame path (canny, normals, openpose) ----
             if not batch_processed:
                 start_time = time.time()
                 
@@ -502,20 +464,11 @@ def setup_video_routes(
                 elapsed = time.time() - start_time
                 log.timing("VideoPreprocess", start_time, f"Complete - {result.get('frame_count', 0)} frames")
                 
-                # Generate thumbnail for MP4 output
-                if output_mode == OutputMode.MP4 and output_path.exists():
-                    thumb_path = output_path.with_suffix('.thumb.jpg')
-                    try:
-                        video_processor.extract_thumbnail(output_path, thumb_path)
-                        log.info("VideoPreprocess", f"Generated thumbnail: {thumb_path.name}")
-                    except Exception as e:
-                        log.error("VideoPreprocess", f"Failed to generate thumbnail: {e}")
+                # Thumbnail for MP4
+                if output_mode == OutputMode.MP4:
+                    _generate_thumbnail(output_path)
                 
-                # Build response based on output mode
-                if output_mode == OutputMode.SEQUENCE:
-                    url_data = build_sequence_response(output_path, result, gen_dir)
-                else:
-                    url_data = build_video_response(output_path, result, video_processor)
+                url_data = _build_response(output_path, result, output_mode, gen_dir)
             
             # Save metadata
             save_generation_metadata(
@@ -603,7 +556,7 @@ def setup_video_routes(
             log.info("VideoUpscale", f"Output path: {output_path}")
             
             # Get video info
-            video_info = video_processor.get_video_info(input_path)
+            video_info = _get_video_info(input_path)
             
             # Frame processor for upscaling
             def frame_processor(inp, out):
@@ -626,19 +579,14 @@ def setup_video_routes(
             )
 
             # Generate thumbnail for the upscaled video
-            if output_mode == OutputMode.MP4 and output_path.exists():
-                thumb_path = output_path.with_suffix('.thumb.jpg')
-                video_processor.extract_thumbnail(output_path, thumb_path)
-
+            if output_mode == OutputMode.MP4:
+                _generate_thumbnail(output_path)
 
             elapsed = time.time() - start_time
             log.timing("VideoUpscale", start_time, f"Complete - {result.get('frame_count', 0)} frames")
             
             # Build response based on output mode
-            if output_mode == OutputMode.SEQUENCE:
-                url_data = build_sequence_response(output_path, result, gen_dir)
-            else:
-                url_data = build_video_response(output_path, result, video_processor)
+            url_data = _build_response(output_path, result, output_mode, gen_dir)
             
             # Calculate output dimensions
             input_width = video_info.get("width", 0)
@@ -698,6 +646,10 @@ def setup_video_routes(
         Generate multiple AOV layers from a video
         
         Produces one output video (or sequence) per enabled layer.
+        
+        Depth and crypto are processed via their unified preprocessors
+        which handle batch inference / temporal tracking internally.
+        Normals goes through frame-by-frame VideoProcessor.
         """
         try:
             # Resolve input path
@@ -722,71 +674,80 @@ def setup_video_routes(
             log.info("VideoLayers", f"Output dir: {gen_dir}")
             
             # Get video info
-            video_info = video_processor.get_video_info(input_path)
+            video_info = _get_video_info(input_path)
             
             # Copy source video for history preview (symlink to save space)
             import shutil
             source_copy = gen_dir / f"source{input_path.suffix}"
             try:
-                # Try symlink first (saves disk space)
                 source_copy.symlink_to(input_path)
                 log.info("VideoLayers", f"Linked source: {source_copy.name}")
             except (OSError, NotImplementedError):
-                # Fall back to copy if symlinks not supported
                 shutil.copy2(input_path, source_copy)
                 log.info("VideoLayers", f"Copied source: {source_copy.name}")
             
             output_mode = OutputMode.SEQUENCE if request.output_mode == "sequence" else OutputMode.MP4
+            output_mode_str = "mp4" if output_mode == OutputMode.MP4 else "sequence"
             
-            # Build layer processors
-            layer_processors = {}
+            if not enabled_layers:
+                raise HTTPException(status_code=400, detail="No layers enabled")
             
+            start_time = time.time()
+            
+            # Collect all layer results here
+            all_layer_results: Dict[str, Dict[str, Any]] = {}
+            
+            # ----------------------------------------------------------
+            # Depth layer (unified preprocessor — batch or frame-by-frame)
+            # ----------------------------------------------------------
             if request.layers.get("depth"):
-                depth_model_map = {
-                    "midas_small": DepthModel.MIDAS_SMALL,
-                    "midas_large": DepthModel.MIDAS_LARGE,
-                    "depth_anything_v2": DepthModel.DEPTH_ANYTHING_V2,
-                    "depth_anything_v3": DepthModel.DEPTH_ANYTHING_V3,
-                    "da3_mono_large": DepthModel.DA3_MONO_LARGE,
-                    "da3_metric_large": DepthModel.DA3_METRIC_LARGE,
-                    "da3_large": DepthModel.DA3_LARGE,
-                    "da3_giant": DepthModel.DA3_GIANT,
-                    "zoedepth": DepthModel.ZOEDEPTH,
-                }
-                depth_model = depth_model_map.get(request.depth_model, DepthModel.DEPTH_ANYTHING_V2)
+                depth_model = DEPTH_MODEL_MAP.get(request.depth_model, DepthModel.DEPTH_ANYTHING_V2)
+                log.info("VideoLayers", f"Processing depth layer ({depth_model.value})...")
                 
-                def depth_processor(inp, out):
-                    return preprocessor_manager.depth(
-                        image_path=inp,
-                        output_path=out,
-                        model=depth_model,
-                        invert=request.depth_invert,
-                        normalize=request.depth_normalize,
-                        colormap=request.depth_colormap,
-                        exact_output=True,  # Use exact path for video frames
-                    )
-                layer_processors["depth"] = depth_processor
+                if output_mode == OutputMode.MP4:
+                    depth_output = gen_dir / "depth.mp4"
+                else:
+                    depth_output = gen_dir / "depth"
+                
+                depth_processor = DepthPreprocessor(model_type=depth_model)
+                
+                depth_result = depth_processor.process_video(
+                    video_path=input_path,
+                    output_path=depth_output,
+                    output_mode=output_mode_str,
+                    invert=request.depth_invert,
+                    normalize=request.depth_normalize,
+                    colormap=request.depth_colormap,
+                    temporal_smooth=5,
+                )
+                
+                depth_processor.unload()
+                
+                all_layer_results["depth"] = {
+                    "output_path": depth_result["output_path"],
+                    "frame_count": depth_result.get("frame_count", 0),
+                    "errors": 0,
+                }
+                if output_mode == OutputMode.SEQUENCE:
+                    all_layer_results["depth"]["first_frame"] = depth_result.get("first_frame")
+                    all_layer_results["depth"]["frames"] = depth_result.get("frames", [])
+                
+                log.info("VideoLayers", f"Depth complete: {depth_result.get('frame_count', 0)} frames")
             
+            # ----------------------------------------------------------
+            # Normals layer (frame-by-frame via VideoProcessor)
+            # ----------------------------------------------------------
             if request.layers.get("normals"):
-                normals_method_map = {
-                    "from_depth": NormalsMethod.FROM_DEPTH,
-                    "dsine": NormalsMethod.DSINE,
-                }
-                depth_model_map = {
-                    "midas_small": DepthModel.MIDAS_SMALL,
-                    "midas_large": DepthModel.MIDAS_LARGE,
-                    "depth_anything_v2": DepthModel.DEPTH_ANYTHING_V2,
-                    "depth_anything_v3": DepthModel.DEPTH_ANYTHING_V3,
-                    "da3_mono_large": DepthModel.DA3_MONO_LARGE,
-                    "da3_metric_large": DepthModel.DA3_METRIC_LARGE,
-                    "da3_large": DepthModel.DA3_LARGE,
-                    "da3_giant": DepthModel.DA3_GIANT,
-                    "zoedepth": DepthModel.ZOEDEPTH,
-                }
-                normals_method = normals_method_map.get(request.normals_method, NormalsMethod.FROM_DEPTH)
-                depth_model = depth_model_map.get(request.normals_depth_model, DepthModel.DEPTH_ANYTHING_V2)
+                normals_method = NORMALS_METHOD_MAP.get(request.normals_method, NormalsMethod.FROM_DEPTH)
+                depth_model = DEPTH_MODEL_MAP.get(request.normals_depth_model, DepthModel.DEPTH_ANYTHING_V2)
+                log.info("VideoLayers", f"Processing normals layer (method={normals_method.value})...")
                 
-                def normals_processor(inp, out):
+                if output_mode == OutputMode.MP4:
+                    normals_output = gen_dir / "normals.mp4"
+                else:
+                    normals_output = gen_dir / "normals"
+                
+                def normals_frame_processor(inp, out):
                     return preprocessor_manager.normals(
                         image_path=inp,
                         output_path=out,
@@ -795,104 +756,73 @@ def setup_video_routes(
                         space=request.normals_space,
                         flip_y=request.normals_flip_y,
                         intensity=request.normals_intensity,
-                        exact_output=True,  # Use exact path for video frames
+                        exact_output=True,
                     )
-                layer_processors["normals"] = normals_processor
-            
-            if request.layers.get("crypto"):
-                # Crypto uses batch processing for temporal consistency - handle separately
-                log.info("VideoLayers", "Processing crypto layer with VIDEO TRACKING (temporal consistency)")
                 
-                sam_model_map = {
-                    "sam2_hiera_tiny": SAMModel.TINY,
-                    "sam2_hiera_small": SAMModel.SMALL,
-                    "sam2_hiera_base_plus": SAMModel.BASE,
-                    "sam2_hiera_large": SAMModel.LARGE,
-                }
-                sam_model = sam_model_map.get(request.crypto_model, SAMModel.LARGE)
-                model_size_map = {
-                    SAMModel.TINY: "tiny",
-                    SAMModel.SMALL: "small",
-                    SAMModel.BASE: "base",
-                    SAMModel.LARGE: "large",
-                }
-                model_size = model_size_map.get(sam_model, "large")
-                
-                # NOTE: Crypto is processed separately using batch video tracking
-                # It will be added to results after processing other layers
-                crypto_batch_processor = VideoCryptoBatchProcessor()
-                crypto_enabled = True
-            else:
-                crypto_enabled = False
-            
-            if not layer_processors and not crypto_enabled:
-                raise HTTPException(status_code=400, detail="No layers enabled")
-            
-            # Process frame-by-frame layers (depth, normals) if any
-            start_time = time.time()
-            
-            if layer_processors:
-                result = video_processor.process_video_layers(
+                normals_result = video_processor.process_video(
                     input_video=input_path,
-                    output_dir=gen_dir,
-                    layer_processors=layer_processors,
+                    output_path=normals_output,
+                    frame_processor=normals_frame_processor,
                     output_mode=output_mode,
                 )
-            else:
-                # No frame-by-frame layers, initialize empty result
-                result = {
-                    "layers": {},
-                    "frame_count": video_info.get("frame_count", 0),
-                    "fps": video_info.get("fps", 0),
-                    "errors": {},
+                
+                all_layer_results["normals"] = {
+                    "output_path": str(normals_output),
+                    "frame_count": normals_result.get("frame_count", 0),
+                    "errors": len(normals_result.get("errors", [])),
                 }
+                if output_mode == OutputMode.SEQUENCE:
+                    all_layer_results["normals"]["first_frame"] = normals_result.get("first_frame")
+                    all_layer_results["normals"]["frames"] = normals_result.get("frames", [])
+                
+                log.info("VideoLayers", f"Normals complete: {normals_result.get('frame_count', 0)} frames")
             
-            # Process crypto layer with batch video tracking
-            if crypto_enabled:
-                log.info("VideoLayers", "Running crypto batch processing...")
+            # ----------------------------------------------------------
+            # Crypto layer (unified preprocessor — temporal tracking)
+            # ----------------------------------------------------------
+            if request.layers.get("crypto"):
+                sam_model = SAM_MODEL_MAP.get(request.crypto_model, SAMModel.LARGE)
+                log.info("VideoLayers", f"Processing crypto layer ({sam_model.value}, video tracking)...")
                 
                 if output_mode == OutputMode.MP4:
-                    crypto_output_path = gen_dir / "crypto.mp4"
+                    crypto_output = gen_dir / "crypto.mp4"
                 else:
-                    crypto_output_path = gen_dir / "crypto"
+                    crypto_output = gen_dir / "crypto"
                 
-                crypto_result = crypto_batch_processor.process_video_batch(
+                crypto_processor = CryptoPreprocessor(model_size=sam_model)
+                
+                crypto_result = crypto_processor.process_video(
                     video_path=input_path,
-                    output_path=crypto_output_path,
-                    model_size=model_size,
+                    output_path=crypto_output,
+                    output_mode=output_mode_str,
                     max_objects=request.crypto_max_objects,
                     min_area=request.crypto_min_area,
-                    output_mode="mp4" if output_mode == OutputMode.MP4 else "sequence",
                 )
                 
-                # Clean up GPU memory
-                crypto_batch_processor.cleanup()
+                crypto_processor.unload()
                 
-                # Add crypto to result layers
-                result["layers"]["crypto"] = {
+                all_layer_results["crypto"] = {
                     "output_path": crypto_result["output_path"],
                     "frame_count": crypto_result.get("frame_count", 0),
                     "num_objects": crypto_result.get("num_objects", 0),
                     "sam_version": crypto_result.get("sam_version", "unknown"),
                     "errors": 0,
                 }
-                
                 if output_mode == OutputMode.SEQUENCE:
-                    result["layers"]["crypto"]["first_frame"] = crypto_result.get("first_frame")
-                    result["layers"]["crypto"]["frames"] = crypto_result.get("frames", [])
+                    all_layer_results["crypto"]["first_frame"] = crypto_result.get("first_frame")
+                    all_layer_results["crypto"]["frames"] = crypto_result.get("frames", [])
                 
-                log.info("VideoLayers", f"Crypto: {crypto_result.get('num_objects', 0)} objects tracked")
+                log.info("VideoLayers", f"Crypto complete: {crypto_result.get('num_objects', 0)} objects tracked")
             
             elapsed = time.time() - start_time
-            log.timing("VideoLayers", start_time, f"Complete - {len(result.get('layers', {}))} layers")
+            log.timing("VideoLayers", start_time, f"Complete - {len(all_layer_results)} layers")
             
             # Build response with URLs for each layer
             layers_response = {}
-            for layer_name, layer_data in result.get("layers", {}).items():
+            for layer_name, layer_data in all_layer_results.items():
                 layer_path = Path(layer_data["output_path"])
                 
                 if output_mode == OutputMode.SEQUENCE:
-                    # For sequences, include preview URL (first frame)
                     first_frame = layer_data.get("first_frame")
                     preview_url = None
                     if first_frame:
@@ -909,7 +839,6 @@ def setup_video_routes(
                         "errors": layer_data.get("errors", 0),
                     }
                 else:
-                    # For MP4, URL is the video itself
                     layers_response[layer_name] = {
                         "url": get_project_relative_url(layer_path),
                         "preview_url": get_project_relative_url(layer_path),
@@ -932,8 +861,8 @@ def setup_video_routes(
                 parameters={
                     "layers": enabled_layers,
                     "output_mode": request.output_mode,
-                    "frame_count": result.get("frame_count", 0),
-                    "fps": result.get("fps", 0),
+                    "frame_count": video_info.get("frame_count", 0),
+                    "fps": video_info.get("fps", 0),
                 },
             )
             
@@ -941,10 +870,10 @@ def setup_video_routes(
                 "success": True,
                 "layers": layers_response,
                 "output_mode": request.output_mode,
-                "frame_count": result.get("frame_count", 0),
-                "fps": result.get("fps", 0),
+                "frame_count": video_info.get("frame_count", 0),
+                "fps": video_info.get("fps", 0),
                 "elapsed_seconds": elapsed,
-                "errors": result.get("errors", {}),
+                "errors": {},
             }
             
         except Exception as e:
@@ -956,7 +885,7 @@ def setup_video_routes(
     # ========================================================================
     
     @app.post("/api/video/info")
-    async def get_video_info(video_path: str):
+    async def video_info_endpoint(video_path: str):
         """Get video metadata (fps, duration, dimensions, etc.)"""
         try:
             input_path = resolve_input_path(video_path)
@@ -967,7 +896,7 @@ def setup_video_routes(
             if not input_path.exists():
                 raise HTTPException(status_code=404, detail=f"Video not found: {video_path}")
             
-            info = video_processor.get_video_info(input_path)
+            info = _get_video_info(input_path)
             
             return {
                 "success": True,
