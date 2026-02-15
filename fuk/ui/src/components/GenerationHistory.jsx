@@ -6,11 +6,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Film, Camera, Clock, Trash2, RefreshCw, ChevronDown, ChevronRight, Enhance, Zap, ArrowUp, Layers, Download, PinIcon, ImportIcon, SequenceIcon } from './Icons';
 import { buildImageUrl, API_URL } from '../utils/constants';
+import { useVideoPlayback } from '../hooks/useVideoPlayback';
 
 
 
 // Hover preview popup component
-function HoverPreview({ generation, position }) {
+function HoverPreview({ generation, position, videoRef }) {
   const isVideo = generation.type === 'video' || generation.type === 'interpolate' || 
                   (generation.type === 'preprocess' && generation.subtype === 'video');
   const isSequence = generation.isSequence;
@@ -43,6 +44,7 @@ function HoverPreview({ generation, position }) {
           <img src={previewUrl} alt={displayName} />
         ) : isVideo ? (
           <video 
+            ref={videoRef}
             src={previewUrl}
             autoPlay
             muted
@@ -65,7 +67,7 @@ function HoverPreview({ generation, position }) {
 }
 
 // Draggable thumbnail component
-function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned, onHover, onHoverEnd }) {
+function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned, onHover, onHoverEnd, videoRefPlayback }) {
   const [imageError, setImageError] = useState(false);
   const videoRef = useRef(null);
   const isVideo = generation.type === 'video' || 
@@ -257,6 +259,7 @@ function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned, onHov
             </div>
           ) : isVideo ? (
             <video 
+              ref={videoRefPlayback}
               src={previewUrl}
               muted
               loop
@@ -345,13 +348,18 @@ function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned, onHov
   );
 }
 
-export default function GenerationHistory({ project, collapsed, onToggle }) {
+export default function GenerationHistory({ project, collapsed, onToggle, playbackSpeed }) {
   const [generations, setGenerations] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [hasMore, setHasMore] = useState(false);
-  const [daysLoaded, setDaysLoaded] = useState(1);
+  const [imgLimit, setImgLimit] = useState(5);
+  const [videoLimit, setVideoLimit] = useState(5);
+  const [hasMore, setHasMore] = useState({ image: false, video: false });
   
+  // Video playback speed refs
+  const hoverVideoRef = useVideoPlayback(playbackSpeed);
+  const thumbVideoRef = useVideoPlayback(playbackSpeed);
+
   // Hover preview state
   const [hoveredItem, setHoveredItem] = useState(null);
   const [hoverPosition, setHoverPosition] = useState({ x: 0, y: 0 });
@@ -403,20 +411,20 @@ export default function GenerationHistory({ project, collapsed, onToggle }) {
   }, [project?.updatePinnedGenerations, pinnedIds]);
 
   // Fetch generations from API
-  const fetchGenerations = useCallback(async (days = 1, force = false) => {
+  const fetchGenerations = useCallback(async (imgLimitParam = 5, videoLimitParam = 5, force = false) => {
     if (!force && !project?.isProjectLoaded) {
       console.log('[History] Skipping fetch - no project loaded');
       setGenerations([]);
       return;
     }
     
-    console.log(`[History] Fetching generations (days=${days})...`);
+    console.log(`[History] Fetching generations (img_limit=${imgLimitParam}, video_limit=${videoLimitParam})...`);
     setLoading(true);
     setError(null);
     
     try {
       const pinnedParam = pinnedIds.join(',');
-      const res = await fetch(`${API_URL}/project/generations?days=${days}&pinned=${encodeURIComponent(pinnedParam)}`);
+      const res = await fetch(`${API_URL}/project/generations?img_limit=${imgLimitParam}&video_limit=${videoLimitParam}&pinned=${encodeURIComponent(pinnedParam)}`);
       console.log('[History] Response status:', res.status);
       
       if (!res.ok) {
@@ -430,8 +438,9 @@ export default function GenerationHistory({ project, collapsed, onToggle }) {
       }
       
       setGenerations(data.generations || []);
-      setHasMore(data.hasMore || false);
-      setDaysLoaded(days);
+      setHasMore(data.hasMore || { image: false, video: false });
+      setImgLimit(imgLimitParam);
+      setVideoLimit(videoLimitParam);
     } catch (err) {
       console.error('[History] Failed to fetch generations:', err);
       setError(err.message);
@@ -442,13 +451,13 @@ export default function GenerationHistory({ project, collapsed, onToggle }) {
 
   // Fetch on mount and when project changes
   useEffect(() => {
-    fetchGenerations(1);
+    fetchGenerations(5, 5);
   }, [project?.currentFilename]);
   
   // Refetch when pins change (to update sort order)
   useEffect(() => {
     if (generations.length > 0) {
-      fetchGenerations(daysLoaded);
+      fetchGenerations(imgLimit, videoLimit);
     }
   }, [pinnedIds]);
   
@@ -467,7 +476,7 @@ export default function GenerationHistory({ project, collapsed, onToggle }) {
       }
       
       // Refresh to show the new import
-      fetchGenerations(daysLoaded, true);
+      fetchGenerations(imgLimit, videoLimit, true);
 
       
 
@@ -475,14 +484,15 @@ export default function GenerationHistory({ project, collapsed, onToggle }) {
 
     window.addEventListener('fuk-import-registered', handleImportRegistered);
     return () => window.removeEventListener('fuk-import-registered', handleImportRegistered);
-  }, [daysLoaded, fetchGenerations]);
+  }, [imgLimit, videoLimit, fetchGenerations]);
 
   useEffect(() => {
     const handleProjectChange = (event) => {
       console.log('[History] Project changed, refreshing...', event.detail);
       setGenerations([]);
-      setDaysLoaded(1);
-      fetchGenerations(1, true);
+      setImgLimit(5);
+      setVideoLimit(5);
+      fetchGenerations(5, 5, true);
     };
     
     window.addEventListener('fuk-project-changed', handleProjectChange);
@@ -493,26 +503,28 @@ export default function GenerationHistory({ project, collapsed, onToggle }) {
   useEffect(() => {
     const handleGenerationComplete = (event) => {
       console.log('[History] Generation complete, auto-refreshing...', event.detail);
-      fetchGenerations(daysLoaded, true);
+      fetchGenerations(imgLimit, videoLimit, true);
     };
     
     window.addEventListener('fuk-generation-complete', handleGenerationComplete);
     return () => window.removeEventListener('fuk-generation-complete', handleGenerationComplete);
-  }, [daysLoaded, fetchGenerations]);
+  }, [imgLimit, videoLimit, fetchGenerations]);
 
 
   const handleRefresh = () => {
     console.log('[History] Manual refresh clicked');
-    fetchGenerations(daysLoaded, true);
+    fetchGenerations(imgLimit, videoLimit, true);
   };
   
   const handleLoadMore = () => {
-    const newDays = daysLoaded + 7; // Load another week
-    fetchGenerations(newDays, true);
+    const newImgLimit = imgLimit + 5;
+    const newVideoLimit = videoLimit + 5;
+    fetchGenerations(newImgLimit, newVideoLimit, true);
   };
-  
+
   const handleLoadAll = () => {
-    fetchGenerations(0, true); // 0 = all
+    // Load a large number to get everything
+    fetchGenerations(1000, 1000, true);
   };
 
   const handleTogglePin = (generation) => {
@@ -585,7 +597,7 @@ export default function GenerationHistory({ project, collapsed, onToggle }) {
         
         <div className="gen-history-header-actions">
           <span className="gen-history-days-label">
-            {daysLoaded === 0 ? 'All' : `${daysLoaded}d`}
+            {imgLimit >= 1000 ? 'All' : `${imgLimit}/${videoLimit}`}
           </span>
           <button 
             className="gen-history-refresh"
@@ -630,6 +642,7 @@ export default function GenerationHistory({ project, collapsed, onToggle }) {
                       isPinned={true}
                       onHover={handleItemHover}
                       onHoverEnd={handleItemHoverEnd}
+                      videoRefPlayback={thumbVideoRef}
                     />
                   ))}
                 </div>
@@ -651,16 +664,17 @@ export default function GenerationHistory({ project, collapsed, onToggle }) {
                     isPinned={false}
                     onHover={handleItemHover}
                     onHoverEnd={handleItemHoverEnd}
+                    videoRefPlayback={thumbVideoRef}
                   />
                 ))}
               </div>
             </div>
             
             {/* Load more */}
-            {hasMore && (
+            {(hasMore.image || hasMore.video) &&(
               <div className="gen-history-load-more">
                 <button onClick={handleLoadMore} disabled={loading}>
-                  Load More (+7 days)
+                  Load More (+5 each)
                 </button>
                 <button onClick={handleLoadAll} disabled={loading} className="secondary">
                   Load All
@@ -679,7 +693,8 @@ export default function GenerationHistory({ project, collapsed, onToggle }) {
       {hoveredItem && (
         <HoverPreview 
           generation={hoveredItem} 
-          position={hoverPosition} 
+          position={hoverPosition}
+          videoRef={hoverVideoRef}
         />
       )}
     </div>

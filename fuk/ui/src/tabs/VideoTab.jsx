@@ -19,6 +19,7 @@ import GenerationModal from '../components/GenerationModal';
 import { useGeneration } from '../hooks/useGeneration';
 import { useLocalStorage } from '../../src/hooks/useLocalStorage';
 import { useSavedSeeds } from '../hooks/useSavedSeeds';
+import { useVideoPlayback } from '../hooks/useVideoPlayback';
 import { startVideoGeneration } from '../../src/utils/api';
 import { formatTime } from '../utils/helpers.js';
 import { 
@@ -53,7 +54,8 @@ function getFrameDuration(frames, fps = 24) {
   return `${seconds.toFixed(2)}s`;
 }
 
-export default function VideoTab({ config, activeTab, setActiveTab, project }) {
+export default function VideoTab({ config, activeTab, setActiveTab, project, playbackSpeed }) {
+  const videoRef = useVideoPlayback(playbackSpeed);
   // Get defaults from backend config
   const videoDefaults = config?.defaults?.video || {};
   
@@ -322,6 +324,7 @@ export default function VideoTab({ config, activeTab, setActiveTab, project }) {
           {previewVideo ? (
             <div className="fuk-preview-container">
               <video
+                ref={videoRef}
                 src={buildImageUrl(previewVideo)}
                 controls
                 loop

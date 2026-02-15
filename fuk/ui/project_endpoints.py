@@ -758,45 +758,52 @@ async def get_cache_info():
 
 @router.get("/generations")
 async def list_generations(
-    days: int = Query(default=1, description="Number of days to load (0 = all)"),
+    img_limit: int = Query(default=5, description="Max number of img_gen to load"),
+    video_limit: int = Query(default=5, description="Max number of videos to load"),
     pinned: str = Query(default="", description="Comma-separated list of pinned IDs to always include")
 ):
     """
-    List generations in the project cache with pagination support.
+    List generations in the project cache with type-based limits.
     
     Args:
-        days: Number of days of history to load (default 1 = today only, 0 = all)
-        pinned: Comma-separated pinned item IDs to always include regardless of date
+        img_limit: Max img_gen items to load (default 5)
+        video_limit: Max video items to load (default 5)
+        pinned: Comma-separated pinned item IDs to always include regardless of limits
     
-    Returns generation metadata for the history panel.
+    Returns generation metadata organized by type with has_more flags.
     """
-    print(f"[HISTORY] Fetching generations (days={days}, pinned={pinned[:50]}...)", flush=True)
+    print(f"[HISTORY] Fetching generations (img_limit={img_limit}, video_limit={video_limit})", flush=True)
     
     if not _cache_root:
         print("[HISTORY] No cache root set", flush=True)
-        return {"generations": [], "error": "No project loaded", "hasMore": False}
+        return {
+            "generations": [], 
+            "error": "No project loaded", 
+            "hasMore": {"image": False, "video": False}
+        }
     
     try:
         project_cache = get_project_cache_dir()
     except RuntimeError:
-        return {"generations": [], "error": "Project system not initialized", "hasMore": False}
+        return {
+            "generations": [], 
+            "error": "Project system not initialized", 
+            "hasMore": {"image": False, "video": False}
+        }
     
     if not project_cache.exists():
-        return {"generations": [], "hasMore": False}
+        return {"generations": [], "hasMore": {"image": False, "video": False}}
     
     # Parse pinned IDs
     pinned_ids = set(p.strip() for p in pinned.split(",") if p.strip())
     
-    # Calculate cutoff time
-    if days > 0:
-        cutoff = datetime.now() - timedelta(days=days)
-    else:
-        cutoff = None
-    
+    # Track counts by type
+    type_counts = {"image": 0, "video": 0}
+    has_more = {"image": False, "video": False}
     generations = []
-    has_more = False
-    
+
     # Scan generation directories
+    # Scan generation directories (most recent first)
     for gen_dir in sorted(project_cache.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
         if not gen_dir.is_dir():
             continue
@@ -811,16 +818,12 @@ async def list_generations(
         except ValueError:
             rel_path = Path(gen_dir.name)
         
-        # Get modification time
-        mtime = datetime.fromtimestamp(gen_dir.stat().st_mtime)
-        
-        # Check if within date range or pinned (check both full path and just dir name for backwards compat)
+        # Check if pinned (check both full path and just dir name for backwards compat)
         is_pinned = str(rel_path) in pinned_ids or gen_dir.name in pinned_ids
-        if cutoff and mtime < cutoff and not is_pinned:
-            has_more = True
-            continue
         
-        # Load metadata if exists
+        # Get modification time for display
+        mtime = datetime.fromtimestamp(gen_dir.stat().st_mtime)        # Load metadata if exists
+
         metadata_path = gen_dir / "metadata.json"
         metadata = {}
         if metadata_path.exists():
@@ -1067,7 +1070,7 @@ async def list_generations(
             "frameCount": frame_count,  # Number of frames for sequences
         }
         
-        # Include metadata for special types that need extra data
+        #Include metadata for special types that need extra data
         # Layers need available_layers for drag-to-export functionality
         if gen_type == "layers" and metadata.get("available_layers"):
             gen_obj["metadata"] = {
@@ -1076,8 +1079,27 @@ async def list_generations(
                 "is_video": metadata.get("is_video", False),
             }
         
-        generations.append(gen_obj)
+        # Apply type-based limits (only for image and video, unlimited for preprocessors/layers)
+        should_include = True
+        
+        if gen_type == "image" and not is_pinned:
+            if type_counts["image"] >= img_limit:
+                has_more["image"] = True
+                should_include = False
+            else:
+                type_counts["image"] += 1
+        elif gen_type == "video" and not is_pinned:
+            if type_counts["video"] >= video_limit:
+                has_more["video"] = True
+                should_include = False
+            else:
+                type_counts["video"] += 1
+        # All other types (preprocess, layers, etc.) are unlimited
+        
+        if should_include:
+            generations.append(gen_obj)
     
+    print(f"[HISTORY] Loaded {len(generations)} generations (img: {type_counts['image']}/{img_limit}, video: {type_counts['video']}/{video_limit})", flush=True)
     return {"generations": generations, "hasMore": has_more}
 
 @router.get("/generations/layers")

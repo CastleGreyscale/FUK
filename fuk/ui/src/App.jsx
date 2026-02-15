@@ -22,6 +22,10 @@ export default function App() {
   const [config, setConfig] = useState(null);
   const [status, setStatus] = useState('loading');
   const [historyCollapsed, setHistoryCollapsed] = useState(false);
+  const [playbackFPS, setPlaybackFPS] = useState(24); // Video playback FPS (6-48)
+  
+  // Convert FPS to playback rate (assuming 24fps source)
+  const playbackSpeed = playbackFPS / 24;
 
  
   // Load config on mount
@@ -32,8 +36,8 @@ export default function App() {
   const loadConfig = async () => {
     try {
       const data = await fetchConfig();
-      console.log('âœ“ Config loaded:', data);
-      console.log('âœ“ Available LoRAs:', data.models.loras);
+      console.log('Config loaded:', data);
+      console.log('Available LoRAs:', data.models.loras);
       setConfig(data);
       setStatus('ready');
     } catch (error) {
@@ -142,6 +146,7 @@ export default function App() {
       activeTab,
       setActiveTab,
       project, // Pass project for state access
+      playbackSpeed, // Global video playback speed
     };
 
     switch (activeTab) {
@@ -175,6 +180,22 @@ export default function App() {
               <h1 className="fuk-title">Framework for Unified Kreation</h1>
             
             </div>
+            
+            {/* Playback FPS Control - Right Side */}
+            <div className="fuk-playback-control" style={{ marginLeft: 'auto' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ width: '60px', fontFamily: 'monospace' }}>FPS: {playbackFPS}</span>
+                <input
+                  type="range"
+                  min="6"
+                  max="48"
+                  step="6"
+                  value={playbackFPS}
+                  onChange={(e) => setPlaybackFPS(parseInt(e.target.value))}
+                  style={{ width: '100px' }}
+                />
+              </label>
+            </div>
           </div>
         </div>
       </header>
@@ -207,6 +228,7 @@ export default function App() {
           project={project}
           collapsed={historyCollapsed}
           onToggle={() => setHistoryCollapsed(!historyCollapsed)}
+          playbackSpeed={playbackSpeed}
         />
     </div>
   );

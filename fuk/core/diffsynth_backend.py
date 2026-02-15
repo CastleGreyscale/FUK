@@ -397,6 +397,18 @@ class DiffSynthBackend:
     # Pipeline construction — fully data-driven
     # ------------------------------------------------------------------
 
+    def _get_model_config_class(self, entry: dict):
+        """Return the correct ModelConfig class for a pipeline type.
+        
+        Wan and Qwen pipelines may have different ModelConfig classes
+        with different fields/validation. Using the wrong one forces
+        unnecessary re-processing during from_pretrained().
+        """
+        pipeline_type = entry.get("pipeline", "qwen")
+        if pipeline_type == "wan":
+            return self.WanModelConfig
+        return self.ModelConfig
+
     def _build_model_configs(self, entry: dict, vram_config: dict = None) -> list:
         """Build ModelConfig list from a model entry's components.
         
@@ -405,6 +417,7 @@ class DiffSynthBackend:
             vram_config: Resolved VRAM offload dict, or None for no offloading
         """
         primary_id = entry["model_id"]
+        ConfigCls = self._get_model_config_class(entry)
 
         configs = []
         for comp in entry.get("components", []):
@@ -416,16 +429,17 @@ class DiffSynthBackend:
             # Only apply offload config when a preset is active
             if vram_config is not None:
                 kwargs.update(vram_config)
-            configs.append(self.ModelConfig(**kwargs))
+            configs.append(ConfigCls(**kwargs))
         return configs
 
-    def _build_extra_config(self, entry: dict, key: str) -> Optional[ModelConfig]:
+    def _build_extra_config(self, entry: dict, key: str):
         """Build a tokenizer_config or processor_config from entry."""
         cfg = entry.get(key)
         if cfg is None:
             return None
+        ConfigCls = self._get_model_config_class(entry)
         mid = cfg.get("model_id", entry["model_id"])
-        return self.ModelConfig(model_id=mid, origin_file_pattern=cfg["pattern"])
+        return ConfigCls(model_id=mid, origin_file_pattern=cfg["pattern"])
 
     def get_pipeline(self, model_type: str, vram_preset: str = None):
         """Get or create a cached pipeline.
@@ -454,6 +468,26 @@ class DiffSynthBackend:
 
         entry = self.get_model_entry(model_type)
         pipeline_name = entry["pipeline"]
+
+        # Evict pipelines from OTHER families to free VRAM
+        # (e.g. clear Qwen before loading Wan 14B and vice versa)
+        other_family = [
+            k for k in list(self.pipelines.keys())
+            if not k.startswith(f"{model_type}:")
+            and self.get_model_entry(k.split(":")[0]).get("pipeline") != pipeline_name
+        ]
+        if other_family:
+            for k in other_family:
+                _log("BACKEND", f"Evicting pipeline (different family): {k}")
+                del self.pipelines[k]
+                self._active_user_lora.pop(k, None)
+                self._model_lora_config.pop(k, None)
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            import gc
+            gc.collect()
+            _log("BACKEND", f"Freed VRAM from {len(other_family)} cross-family pipeline(s)", "success")
+
         PipelineCls = PIPELINE_CLASSES.get(pipeline_name)
         if PipelineCls is None:
             raise ValueError(f"Unknown pipeline '{pipeline_name}'. Available: {list(PIPELINE_CLASSES.keys())}")
@@ -646,7 +680,8 @@ class DiffSynthBackend:
             _log("BACKEND", f"Latent capture enabled → {latent_path}")
 
         try:
-            image = pipe(**pipe_kwargs)
+            with torch.inference_mode():
+                image = pipe(**pipe_kwargs)
             image.save(output_path)
 
             elapsed = time.time() - start_time
@@ -828,13 +863,16 @@ class DiffSynthBackend:
             _log("BACKEND", f"Latent capture enabled → {latent_path}")
 
         try:
-            video = pipe(**pipe_kwargs)
+            with torch.inference_mode():
+                video = pipe(**pipe_kwargs)
 
             if progress_callback:
                 progress_callback("saving", 0, 1)
 
             from diffsynth.utils.data import save_video
-            save_video(video, str(output_path), fps=24, quality=5)
+            # quality=8 is visually identical for preview MP4 and encodes 3-5x
+            # faster than quality=5. Lossless output goes through latent→EXR path.
+            save_video(video, str(output_path), fps=24, quality=8)
 
             elapsed = time.time() - start_time
             _log("BACKEND", f"Video saved: {output_path} ({elapsed:.1f}s)", "success")
@@ -1024,9 +1062,9 @@ class DiffSynthBackend:
         """
         Install a hook to capture latent before VAE decode.
         
-        Captures a CPU copy of the latent with minimal GPU disruption.
-        The actual torch.save() happens in cleanup, AFTER decode completes,
-        so disk I/O doesn't block the GPU pipeline during generation.
+        Uses non-blocking copy to avoid stalling the GPU pipeline during
+        the PCIe transfer. The actual torch.save() happens in cleanup,
+        AFTER decode completes, so disk I/O doesn't block generation.
         
         Args:
             pipe: The pipeline instance
@@ -1040,8 +1078,12 @@ class DiffSynthBackend:
         
         def hooked_decode(latent, *args, **kwargs):
             if not captured:  # Only capture once
-                # detach().cpu() copies to CPU without keeping a GPU clone
-                captured['latent'] = latent.detach().cpu()
+                # non_blocking=True overlaps the PCIe transfer with decode
+                # computation instead of stalling the GPU pipeline.
+                # pin_memory on the destination enables async DMA.
+                cpu_latent = torch.empty_like(latent, device='cpu').pin_memory()
+                cpu_latent.copy_(latent.detach(), non_blocking=True)
+                captured['latent'] = cpu_latent
                 captured['shape'] = list(latent.shape)
                 captured['dtype'] = str(latent.dtype)
             return original_decode(latent, *args, **kwargs)
@@ -1053,6 +1095,9 @@ class DiffSynthBackend:
         def cleanup():
             pipe.vae.decode = original_decode
             if captured:
+                # Synchronize to ensure non-blocking copy completed
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
                 save_path.parent.mkdir(parents=True, exist_ok=True)
                 torch.save(captured, str(save_path))
                 _log("BACKEND", f"Latent tensor saved: {save_path} (shape: {captured['shape']})")

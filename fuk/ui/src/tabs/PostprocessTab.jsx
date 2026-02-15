@@ -15,6 +15,7 @@ import MediaUploader, { isVideoFile } from '../components/MediaUploader';
 import ZoomableImage from '../components/ZoomableImage';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { buildImageUrl } from '../utils/constants';
+import { useVideoPlayback } from '../hooks/useVideoPlayback';
 import Footer from '../components/Footer';
 
 const API_URL = '/api';
@@ -34,9 +35,10 @@ const DEFAULT_SETTINGS = {
   videoOutputMode: 'mp4',
 };
 
-export default function PostprocessTab({ config, activeTab, setActiveTab, project }) {
+export default function PostprocessTab({ config, activeTab, setActiveTab, project, playbackSpeed }) {
   // Settings (localStorage fallback)
   const [localSettings, setLocalSettings] = useLocalStorage('fuk_postprocess_settings', DEFAULT_SETTINGS);
+  const videoRef = useVideoPlayback(playbackSpeed);
   
   const settings = useMemo(() => {
     if (project?.projectState?.tabs?.postprocess) {
