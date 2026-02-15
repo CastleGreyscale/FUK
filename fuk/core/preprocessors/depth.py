@@ -34,7 +34,7 @@ import json
 from .base import BasePreprocessor
 from core.video_utils import (
     get_video_info, extract_frames, assemble_video,
-    apply_depth_colormap, is_video_file,
+    apply_depth_greyscale, apply_depth_colormap, is_video_file,
 )
 
 
@@ -332,7 +332,8 @@ class DepthPreprocessor(BasePreprocessor):
             **kwargs:
                 invert: Invert depth (far=white, near=black)
                 normalize: Normalize depth to [0, 1]
-                colormap: Apply colormap (None, 'inferno', 'viridis', 'magma', 'plasma')
+                range_min: Low end of depth range remap (0.0-1.0)
+                range_max: High end of depth range remap (0.0-1.0)
                 exact_output: If True, write to exact output_path (for video frames)
                 process_res: DA3 processing resolution (default from config)
                 process_res_method: DA3 resize method (default from config)
@@ -341,7 +342,8 @@ class DepthPreprocessor(BasePreprocessor):
         
         invert = kwargs.get('invert', False)
         normalize = kwargs.get('normalize', True)
-        colormap = kwargs.get('colormap', 'inferno')
+        range_min = kwargs.get('range_min', 0.0)
+        range_max = kwargs.get('range_max', 1.0)
         exact_output = kwargs.get('exact_output', False)
         process_res = kwargs.get('process_res', self.da3_process_res)
         process_res_method = kwargs.get('process_res_method', self.da3_process_res_method)
@@ -360,14 +362,15 @@ class DepthPreprocessor(BasePreprocessor):
         if invert:
             depth = 1.0 - depth
         
-        output_image = apply_depth_colormap(depth, colormap)
+        output_image = apply_depth_greyscale(depth, range_min=range_min, range_max=range_max)
         
         params = {
             'method': 'depth',
             'model': self.model_type.value,
             'invert': invert,
             'normalize': normalize,
-            'colormap': colormap,
+            'range_min': range_min,
+            'range_max': range_max,
         }
         final_output = self._make_unique_path(output_path, params, exact_output=exact_output)
         cv2.imwrite(str(final_output), output_image)
@@ -408,7 +411,8 @@ class DepthPreprocessor(BasePreprocessor):
             **kwargs:
                 invert: Invert depth values
                 normalize: Normalize to 0-1 (uses GLOBAL min/max)
-                colormap: Colormap to apply
+                range_min: Low end of depth range remap (0.0-1.0)
+                range_max: High end of depth range remap (0.0-1.0)
                 process_res: DA3 processing resolution
                 process_res_method: DA3 resize method
                 temporal_smooth: Temporal median filter window (0=off, default 3)
@@ -431,7 +435,8 @@ class DepthPreprocessor(BasePreprocessor):
         
         invert = kwargs.get('invert', False)
         normalize = kwargs.get('normalize', True)
-        colormap = kwargs.get('colormap', 'inferno')
+        range_min = kwargs.get('range_min', 0.0)
+        range_max = kwargs.get('range_max', 1.0)
         process_res = kwargs.get('process_res', self.da3_process_res)
         process_res_method = kwargs.get('process_res_method', self.da3_process_res_method)
         temporal_smooth = kwargs.get('temporal_smooth', 3)
@@ -506,7 +511,7 @@ class DepthPreprocessor(BasePreprocessor):
             if progress_callback:
                 progress_callback(0.6, "Post-processing depth maps...")
             
-            # Step 6: Colorize each frame
+            # Step 6: Convert to greyscale with range remap
             print(f"[Depth] Post-processing depth maps...")
             for i, (frame_path, depth_map) in enumerate(zip(frame_paths, all_depths)):
                 output_frame_path = output_frames_dir / frame_path.name
@@ -515,7 +520,7 @@ class DepthPreprocessor(BasePreprocessor):
                 if depth_map.shape[:2] != (original_size[1], original_size[0]):
                     depth_map = cv2.resize(depth_map, original_size, interpolation=cv2.INTER_LINEAR)
                 
-                output_image = apply_depth_colormap(depth_map, colormap)
+                output_image = apply_depth_greyscale(depth_map, range_min=range_min, range_max=range_max)
                 cv2.imwrite(str(output_frame_path), output_image)
                 
                 if (i + 1) % 10 == 0:
@@ -523,7 +528,7 @@ class DepthPreprocessor(BasePreprocessor):
                     if progress_callback:
                         progress_callback(
                             0.6 + 0.3 * ((i + 1) / len(frame_paths)),
-                            f"Colorizing frame {i+1}/{len(frame_paths)}"
+                            f"Processing frame {i+1}/{len(frame_paths)}"
                         )
             
             # Step 7: Assemble output

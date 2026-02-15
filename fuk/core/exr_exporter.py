@@ -194,7 +194,9 @@ class EXRExporter:
         full pipeline.
         
         Returns:
-            (vae, needs_device_arg) — the VAE module and whether decode() needs a device kwarg
+            (vae, needs_device_arg, is_borrowed) — the VAE module, whether
+            decode() needs a device kwarg, and whether the VAE belongs to a
+            cached pipeline (borrowed=True means we must NOT mutate it in place)
         """
         import inspect
         
@@ -204,7 +206,7 @@ class EXRExporter:
                 print(f"  📄 Reusing VAE from cached pipeline: {key}")
                 vae = pipe.vae
                 needs_device = 'device' in inspect.signature(vae.decode).parameters
-                return vae, needs_device
+                return vae, needs_device, True  # borrowed from live pipeline
         
         # 2. No cached pipeline — load VAE-only via DiffSynth
         entry = backend.get_model_entry(model_type)
@@ -245,7 +247,7 @@ class EXRExporter:
         
         needs_device = 'device' in inspect.signature(vae.decode).parameters
         print(f"  📄 VAE loaded to CPU ({type(vae).__name__})")
-        return vae, needs_device
+        return vae, needs_device, False  # standalone, safe to mutate
 
     def _decode_beauty_latents(
         self,
@@ -298,13 +300,23 @@ class EXRExporter:
         # ------------------------------------------------------------------
         # Load VAE only — no DiT, no text encoder, no VRAM usage
         # ------------------------------------------------------------------
-        vae, needs_device_arg = self._load_vae_only(backend, model_type)
+        vae, needs_device_arg, is_borrowed = self._load_vae_only(backend, model_type)
         
         # ------------------------------------------------------------------
         # Decode: GPU (float32) first, CPU fallback
         # float32 avoids the bf16 conv3d kernel issue (cuDNN handles f32).
         # VAE-only load (~1.3GB) leaves ~22GB free on a 24GB card.
+        #
+        # IMPORTANT: If VAE is borrowed from a cached pipeline, we must
+        # restore its original dtype and device after decode — otherwise
+        # all subsequent standard generations will run with a VAE stuck
+        # on CPU in float32 instead of CUDA bfloat16.
         # ------------------------------------------------------------------
+        if is_borrowed:
+            original_dtype = next(vae.parameters()).dtype
+            original_device = next(vae.parameters()).device
+            print(f"  📄 Borrowed VAE (will restore to {original_dtype} on {original_device} after decode)")
+        
         vae = vae.to(dtype=torch.float32).eval()
         latent = latent.to(dtype=torch.float32)
         
@@ -343,8 +355,15 @@ class EXRExporter:
             print(f"  📄 CPU decode complete")
         
         # Clean up VAE
-        vae.cpu()
-        del vae, latent
+        if is_borrowed:
+            # Restore pipeline's VAE to its original state
+            vae.to(dtype=original_dtype, device=original_device)
+            print(f"  📄 Restored borrowed VAE to {original_dtype} on {original_device}")
+            del latent
+        else:
+            # Standalone VAE — discard entirely
+            vae.cpu()
+            del vae, latent
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
         

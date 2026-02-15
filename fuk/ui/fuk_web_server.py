@@ -663,7 +663,8 @@ class PreprocessRequest(BaseModel):
     depth_model: str = "da3_mono_large"
     depth_invert: bool = False
     depth_normalize: bool = True
-    depth_colormap: Optional[str] = "inferno"
+    depth_range_min: float = 0.0
+    depth_range_max: float = 1.0
     depth_process_res: int = 756  # NEW - higher res for better quality
     depth_process_res_method: str = "lower_bound_resize"  # NEW
 
@@ -1526,7 +1527,8 @@ class PreprocessRequest(BaseModel):
     depth_model: str = "da3_mono_large"  # Changed from depth_anything_v2
     depth_invert: bool = False
     depth_normalize: bool = True
-    depth_colormap: Optional[str] = "inferno"
+    depth_range_min: float = 0.0
+    depth_range_max: float = 1.0
     
     # Normals parameters
     normals_method: str = "from_depth"  # 'from_depth' or 'dsine'
@@ -1631,7 +1633,8 @@ async def preprocess_image(request: PreprocessRequest):
                 model=depth_model,
                 invert=request.depth_invert,
                 normalize=request.depth_normalize,
-                colormap=request.depth_colormap,
+                range_min=request.depth_range_min,
+                range_max=request.depth_range_max,
             )
 
         elif request.method == "normals":
@@ -1775,11 +1778,8 @@ async def get_preprocessor_models():
             "parameters": {
                 "invert": {"type": "bool", "default": False},
                 "normalize": {"type": "bool", "default": True},
-                "colormap": {
-                    "type": "select",
-                    "default": "inferno",
-                    "options": [None, "inferno", "viridis", "magma", "plasma", "turbo"]
-                },
+                "range_min": {"type": "float", "default": 0.0, "min": 0.0, "max": 1.0},
+                "range_max": {"type": "float", "default": 1.0, "min": 0.0, "max": 1.0},
             }
         },
         "normals": {
@@ -2109,7 +2109,8 @@ class PreprocessRequest(BaseModel):
     depth_model: str = "depth_anything_v2"
     depth_invert: bool = False
     depth_normalize: bool = True
-    depth_colormap: Optional[str] = "inferno"
+    depth_range_min: float = 0.0
+    depth_range_max: float = 1.0
     
     # Normals parameters
     normals_method: str = "from_depth"  # 'from_depth' or 'dsine'
@@ -2206,7 +2207,8 @@ async def preprocess_image(request: PreprocessRequest):
                 model=depth_model,
                 invert=request.depth_invert,
                 normalize=request.depth_normalize,
-                colormap=request.depth_colormap,
+                range_min=request.depth_range_min,
+                range_max=request.depth_range_max,
             )
         
         elif request.method == "normals":
@@ -2336,11 +2338,8 @@ async def get_preprocessor_models():
             "parameters": {
                 "invert": {"type": "bool", "default": False},
                 "normalize": {"type": "bool", "default": True},
-                "colormap": {
-                    "type": "select",
-                    "default": "inferno",
-                    "options": [None, "inferno", "viridis", "magma", "plasma", "turbo"]
-                },
+                "range_min": {"type": "float", "default": 0.0, "min": 0.0, "max": 1.0},
+                "range_max": {"type": "float", "default": 1.0, "min": 0.0, "max": 1.0},
             }
         },
         "normals": {
@@ -2414,7 +2413,8 @@ class LayersRequest(BaseModel):
     depth_model: str = "depth_anything_v2"
     depth_invert: bool = False
     depth_normalize: bool = True
-    depth_colormap: Optional[str] = "inferno"
+    depth_range_min: float = 0.0
+    depth_range_max: float = 1.0
     
     # Normals settings
     normals_method: str = "from_depth"
@@ -2484,7 +2484,8 @@ async def generate_layers(request: LayersRequest):
                     model=depth_model_map.get(request.depth_model, DepthModel.DEPTH_ANYTHING_V2),
                     invert=request.depth_invert,
                     normalize=request.depth_normalize,
-                    colormap=request.depth_colormap,
+                    range_min=request.depth_range_min,
+                    range_max=request.depth_range_max,
                 )
                 
                 results["layers"]["depth"] = {
@@ -2646,14 +2647,11 @@ class ExportEXRRequest(BaseModel):
 class EXRSequenceExportRequest(BaseModel):
     """EXR sequence export request (LATENT-ONLY VERSION)"""
     
-    # Layers from frontend (beauty path used to find latents)
-    layers: Dict[str, Optional[str]] = {}  # {beauty, depth, normals, crypto}
-    
     # Original generation info (where latents live)
     generation_path: Optional[str] = None  # Path to original generation output
     beauty_latent: Optional[str] = None     # Or direct path to latent file
     
-    # AOV layers (processed cache) — overridden by layers if provided
+    # AOV layers (processed cache)
     aov_layers: Dict[str, Optional[str]] = {}  # {depth, normals, crypto}
     
     # Export settings
@@ -2925,6 +2923,7 @@ async def export_exr_sequence(request: EXRSequenceExportRequest):
                     detail=f"No latents directory found in generation: {gen_path}"
                 )
             
+            # Try to find a latent file
             latent_files = list(latent_dir.glob("*.latent.pt"))
             if not latent_files:
                 raise HTTPException(
@@ -2932,53 +2931,20 @@ async def export_exr_sequence(request: EXRSequenceExportRequest):
                     detail=f"No .latent.pt files found in {latent_dir}"
                 )
             
+            # Use the first one (there should only be one)
             beauty_latent = latent_files[0]
-        elif request.layers.get("beauty"):
-            # Derive latent from beauty mp4/image path
-            # video_002/generated.mp4 -> video_002/latents/generated.latent.pt
-            beauty_path = resolve_input_path(request.layers["beauty"])
-            if beauty_path and beauty_path.exists():
-                latent_dir = beauty_path.parent / "latents"
-                log.info("SeqExport", f"Looking for latents in: {latent_dir}")
-                
-                if latent_dir.exists():
-                    # Try exact match first: generated.mp4 -> generated.latent.pt
-                    exact_latent = latent_dir / f"{beauty_path.stem}.latent.pt"
-                    if exact_latent.exists():
-                        beauty_latent = exact_latent
-                    else:
-                        # Fallback: any .latent.pt in the directory
-                        latent_files = list(latent_dir.glob("*.latent.pt"))
-                        if latent_files:
-                            beauty_latent = latent_files[0]
-                
-                if beauty_latent is None:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"No latents/ directory found alongside beauty: {beauty_path.parent}"
-                    )
-            else:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Could not resolve beauty path: {request.layers['beauty']}"
-                )
         else:
             raise HTTPException(
                 status_code=400,
-                detail="No beauty latent found. Provide layers.beauty (with latents/ dir), beauty_latent, or generation_path"
+                detail="Must provide either beauty_latent or generation_path"
             )
         
         log.info("SeqExport", f"Beauty Latent: {beauty_latent}")
         
         # Resolve AOV layer paths
-        # Use aov_layers if provided, otherwise extract from layers (frontend sends all in layers)
-        aov_source = request.aov_layers
-        if not aov_source and request.layers:
-            aov_source = {k: v for k, v in request.layers.items() if k != 'beauty' and v}
-        
         resolved_aovs = {}
         
-        for layer_name, layer_path in aov_source.items():
+        for layer_name, layer_path in request.aov_layers.items():
             if layer_path is None:
                 continue
             

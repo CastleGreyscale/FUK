@@ -31,7 +31,8 @@ const DEFAULT_SETTINGS = {
   depthModel: 'da3_mono_large',
   depthInvert: false,
   depthNormalize: true,
-  depthColormap: 'inferno',
+  depthRangeMin: 0.0,
+  depthRangeMax: 1.0,
   
   // Normals settings
   normalsMethod: 'from_depth',
@@ -44,6 +45,9 @@ const DEFAULT_SETTINGS = {
   cryptoModel: 'sam2_hiera_large',
   cryptoMaxObjects: 50,
   cryptoMinArea: 500,
+  
+  // Video output mode
+  videoOutputMode: 'mp4',
 };
 
 export default function LayersTab({ config, activeTab, setActiveTab, project }) {
@@ -207,7 +211,8 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
           depth_model: settings.depthModel,
           depth_invert: settings.depthInvert,
           depth_normalize: settings.depthNormalize,
-          depth_colormap: settings.depthColormap,
+          depth_range_min: settings.depthRangeMin ?? 0.0,
+          depth_range_max: settings.depthRangeMax ?? 1.0,
           
           normals_method: settings.normalsMethod,
           normals_depth_model: settings.normalsDepthModel,
@@ -229,7 +234,8 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
           depth_model: settings.depthModel,
           depth_invert: settings.depthInvert,
           depth_normalize: settings.depthNormalize,
-          depth_colormap: settings.depthColormap,
+          depth_range_min: settings.depthRangeMin ?? 0.0,
+          depth_range_max: settings.depthRangeMax ?? 1.0,
           
           normals_method: settings.normalsMethod,
           normals_depth_model: settings.normalsDepthModel,
@@ -439,6 +445,26 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
               </div>
             )}
             
+            {/* Video output mode */}
+            {isVideo && (
+              <div className="fuk-form-group-compact fuk-mt-4 fuk-pt-4 fuk-border-top">
+                <label className="fuk-label">Output Format</label>
+                <select
+                  className="fuk-select"
+                  value={settings.videoOutputMode}
+                  onChange={(e) => updateSettings({ videoOutputMode: e.target.value })}
+                  disabled={processing}
+                >
+                  <option value="mp4">MP4 Video (per layer)</option>
+                  <option value="sequence">Image Sequences</option>
+                </select>
+                <p className="fuk-help-text">
+                  {settings.videoOutputMode === 'mp4' 
+                    ? 'Each layer as separate video' 
+                    : 'Frame sequences for EXR workflow'}
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Layer Selection Card */}
@@ -491,7 +517,7 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
             
             <p className="fuk-help-text fuk-mt-3">
               {enabledLayersCount} layer{enabledLayersCount !== 1 ? 's' : ''} selected
-              {isVideo && ` (Ã— video frames)`}
+              {isVideo && ` (video frames)`}
             </p>
           </div>
 
@@ -516,20 +542,73 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
               </div>
               
               <div className="fuk-form-group-compact">
-                <label className="fuk-label">Colormap</label>
-                <select
-                  className="fuk-select"
-                  value={settings.depthColormap || ''}
-                  onChange={(e) => updateSettings({ depthColormap: e.target.value || null })}
-                  disabled={processing}
-                >
-                  <option value="grayscale">Grayscale</option>
-                  <option value="inferno">Inferno (Heat)</option>
-                  <option value="viridis">Viridis (Green-Blue)</option>
-                  <option value="magma">Magma (Purple-Orange)</option>
-                  <option value="plasma">Plasma (Purple-Yellow)</option>
-                  <option value="turbo">Turbo (Rainbow)</option>
-                </select>
+                <label className="fuk-label">
+                  Range Min: {(settings.depthRangeMin ?? 0).toFixed(2)}
+                </label>
+                <div className="fuk-input-inline">
+                  <input
+                    type="range"
+                    className="fuk-input fuk-input--flex-2"
+                    value={settings.depthRangeMin ?? 0}
+                    onChange={(e) => {
+                      const val = parseFloat(e.target.value);
+                      const updates = { depthRangeMin: val };
+                      if (val >= (settings.depthRangeMax ?? 1)) {
+                        updates.depthRangeMax = Math.min(val + 0.01, 1.0);
+                      }
+                      updateSettings(updates);
+                    }}
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    disabled={processing}
+                  />
+                  <input
+                    type="number"
+                    className="fuk-input fuk-input--w-80"
+                    value={settings.depthRangeMin ?? 0}
+                    onChange={(e) => updateSettings({ depthRangeMin: parseFloat(e.target.value) || 0 })}
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    disabled={processing}
+                  />
+                </div>
+              </div>
+              
+              <div className="fuk-form-group-compact">
+                <label className="fuk-label">
+                  Range Max: {(settings.depthRangeMax ?? 1).toFixed(2)}
+                </label>
+                <div className="fuk-input-inline">
+                  <input
+                    type="range"
+                    className="fuk-input fuk-input--flex-2"
+                    value={settings.depthRangeMax ?? 1}
+                    onChange={(e) => {
+                      const val = parseFloat(e.target.value);
+                      const updates = { depthRangeMax: val };
+                      if (val <= (settings.depthRangeMin ?? 0)) {
+                        updates.depthRangeMin = Math.max(val - 0.01, 0.0);
+                      }
+                      updateSettings(updates);
+                    }}
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    disabled={processing}
+                  />
+                  <input
+                    type="number"
+                    className="fuk-input fuk-input--w-80"
+                    value={settings.depthRangeMax ?? 1}
+                    onChange={(e) => updateSettings({ depthRangeMax: parseFloat(e.target.value) || 1 })}
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    disabled={processing}
+                  />
+                </div>
               </div>
               
               <div className="fuk-form-group-compact">

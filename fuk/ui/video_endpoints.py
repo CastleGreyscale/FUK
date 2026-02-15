@@ -63,7 +63,8 @@ class VideoPreprocessRequest(BaseModel):
     depth_model: str = "depth_anything_v2"
     depth_invert: bool = False
     depth_normalize: bool = True
-    depth_colormap: Optional[str] = "inferno"
+    depth_range_min: float = 0.0
+    depth_range_max: float = 1.0
     
     # Normals parameters
     normals_method: str = "from_depth"
@@ -102,7 +103,8 @@ class VideoLayersRequest(BaseModel):
     depth_model: str = "depth_anything_v2"
     depth_invert: bool = False
     depth_normalize: bool = True
-    depth_colormap: Optional[str] = "inferno"
+    depth_range_min: float = 0.0
+    depth_range_max: float = 1.0
     
     # Normals settings
     normals_method: str = "from_depth"
@@ -725,7 +727,8 @@ def setup_video_routes(
                     output_mode="mp4",
                     invert=request.depth_invert,
                     normalize=request.depth_normalize,
-                    colormap=request.depth_colormap,
+                    range_min=request.depth_range_min,
+                    range_max=request.depth_range_max,
                     temporal_smooth=5,
                 )
                 

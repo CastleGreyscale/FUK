@@ -224,7 +224,8 @@ class PreprocessorManager:
         model: Optional[DepthModel] = None,
         invert: Optional[bool] = None,
         normalize: Optional[bool] = None,
-        colormap: Optional[str] = None,
+        range_min: float = 0.0,
+        range_max: float = 1.0,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -238,7 +239,8 @@ class PreprocessorManager:
             model: Depth model to use
             invert: Invert depth (far = white)
             normalize: Normalize to [0, 1]
-            colormap: Apply colormap (None for grayscale)
+            range_min: Low end of depth range remap (0.0-1.0)
+            range_max: High end of depth range remap (0.0-1.0)
         """
         # Apply defaults
         depth_defaults = self._defaults.get("depth", {})
@@ -256,7 +258,6 @@ class PreprocessorManager:
         
         invert = invert if invert is not None else depth_defaults.get("invert", False)
         normalize = normalize if normalize is not None else depth_defaults.get("normalize", True)
-        colormap = colormap if colormap is not None else depth_defaults.get("colormap", "inferno")
         
         # Cache depth processors by model type
         if model not in self._depth_cache:
@@ -273,7 +274,8 @@ class PreprocessorManager:
             output_path=output_path,
             invert=invert,
             normalize=normalize,
-            colormap=colormap,
+            range_min=range_min,
+            range_max=range_max,
             **kwargs
         )
     

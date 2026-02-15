@@ -458,25 +458,46 @@ def generate_color_palette(num_colors: int) -> List[Tuple[int, int, int]]:
 # Colormap Application (shared by depth processors)
 # ============================================================================
 
-def apply_depth_colormap(
+def apply_depth_greyscale(
     depth: np.ndarray,
-    colormap: Optional[str] = "inferno",
+    range_min: float = 0.0,
+    range_max: float = 1.0,
 ) -> np.ndarray:
     """
-    Apply colormap to a normalized [0,1] depth map.
+    Convert normalized [0,1] depth map to greyscale with optional range remapping.
+    
+    Always outputs greyscale — colormaps distort results when used as
+    control inputs for generation models.
+    
+    Range remapping clips and rescales:
+      - Values below range_min become black (0)
+      - Values above range_max become white (255)
+      - Values between are linearly stretched to fill 0-255
     
     Args:
         depth: Normalized float depth array [0, 1]
-        colormap: OpenCV colormap name (inferno, viridis, magma, plasma)
-                  or None for grayscale
+        range_min: Low end of range remap (default 0.0)
+        range_max: High end of range remap (default 1.0)
                   
     Returns:
         BGR uint8 image suitable for cv2.imwrite()
     """
-    depth_uint8 = (np.clip(depth, 0, 1) * 255).astype(np.uint8)
+    # Apply range remapping
+    if range_min != 0.0 or range_max != 1.0:
+        # Clamp range_max > range_min to avoid division by zero
+        effective_range = max(range_max - range_min, 1e-6)
+        depth = (np.clip(depth, range_min, range_max) - range_min) / effective_range
     
-    if colormap:
-        colormap_func = getattr(cv2, f"COLORMAP_{colormap.upper()}", cv2.COLORMAP_INFERNO)
-        return cv2.applyColorMap(depth_uint8, colormap_func)
-    else:
-        return cv2.cvtColor(depth_uint8, cv2.COLOR_GRAY2BGR)
+    depth_uint8 = (np.clip(depth, 0, 1) * 255).astype(np.uint8)
+    return cv2.cvtColor(depth_uint8, cv2.COLOR_GRAY2BGR)
+
+
+# Keep old name as alias for backward compatibility during transition
+def apply_depth_colormap(
+    depth: np.ndarray,
+    colormap: Optional[str] = None,
+    range_min: float = 0.0,
+    range_max: float = 1.0,
+) -> np.ndarray:
+    """Backward-compatible wrapper — ignores colormap, always greyscale."""
+    return apply_depth_greyscale(depth, range_min=range_min, range_max=range_max)

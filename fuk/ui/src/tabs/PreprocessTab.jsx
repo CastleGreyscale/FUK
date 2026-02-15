@@ -33,7 +33,8 @@ const DEFAULT_SETTINGS = {
     depth_model: 'da3_mono_large',  // Changed from depth_anything_v2
     depth_invert: false,
     depth_normalize: true,
-    depth_colormap: 'inferno',
+    depth_range_min: 0.0,
+    depth_range_max: 1.0,
   },
   // Video-specific settings
   video: {
@@ -476,19 +477,69 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
           </div>
           
           <div className="fuk-form-group-compact">
-            <label className="fuk-label">Colormap</label>
-            <select
-              className="fuk-select"
-              value={currentSettings.depth_colormap || ''}
-              onChange={(e) => setCurrentSettings({ depth_colormap: e.target.value || null })}
-            >
-              <option value="grayscale">Grayscale</option>
-              <option value="inferno">Inferno (Heat)</option>
-              <option value="viridis">Viridis (Green-Blue)</option>
-              <option value="magma">Magma (Purple-Orange)</option>
-              <option value="plasma">Plasma (Purple-Yellow)</option>
-              <option value="turbo">Turbo (Rainbow)</option>
-            </select>
+            <label className="fuk-label">
+              Range Min: {(currentSettings.depth_range_min ?? 0).toFixed(2)}
+            </label>
+            <div className="fuk-input-inline">
+              <input
+                type="range"
+                className="fuk-input fuk-input--flex-2"
+                value={currentSettings.depth_range_min ?? 0}
+                onChange={(e) => {
+                  const val = parseFloat(e.target.value);
+                  const updates = { depth_range_min: val };
+                  if (val >= (currentSettings.depth_range_max ?? 1)) {
+                    updates.depth_range_max = Math.min(val + 0.01, 1.0);
+                  }
+                  setCurrentSettings(updates);
+                }}
+                min={0}
+                max={1}
+                step={0.01}
+              />
+              <input
+                type="number"
+                className="fuk-input fuk-input--w-80"
+                value={currentSettings.depth_range_min ?? 0}
+                onChange={(e) => setCurrentSettings({ depth_range_min: parseFloat(e.target.value) || 0 })}
+                min={0}
+                max={1}
+                step={0.01}
+              />
+            </div>
+          </div>
+          
+          <div className="fuk-form-group-compact">
+            <label className="fuk-label">
+              Range Max: {(currentSettings.depth_range_max ?? 1).toFixed(2)}
+            </label>
+            <div className="fuk-input-inline">
+              <input
+                type="range"
+                className="fuk-input fuk-input--flex-2"
+                value={currentSettings.depth_range_max ?? 1}
+                onChange={(e) => {
+                  const val = parseFloat(e.target.value);
+                  const updates = { depth_range_max: val };
+                  if (val <= (currentSettings.depth_range_min ?? 0)) {
+                    updates.depth_range_min = Math.max(val - 0.01, 0.0);
+                  }
+                  setCurrentSettings(updates);
+                }}
+                min={0}
+                max={1}
+                step={0.01}
+              />
+              <input
+                type="number"
+                className="fuk-input fuk-input--w-80"
+                value={currentSettings.depth_range_max ?? 1}
+                onChange={(e) => setCurrentSettings({ depth_range_max: parseFloat(e.target.value) || 1 })}
+                min={0}
+                max={1}
+                step={0.01}
+              />
+            </div>
           </div>
           
           <div className="fuk-form-group-compact">
@@ -516,15 +567,14 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
           </div>
           
           <p className="fuk-help-text fuk-mt-4">
-            {currentSettings.depth_model === 'da3_mono_large' && '✓ Recommended: Latest SOTA for single images'}
-            {currentSettings.depth_model === 'da3_metric_large' && '📏 Metric depth in meters (real-world scale)'}
-            {currentSettings.depth_model === 'da3_large' && '🔄 Supports multi-view consistency'}
-            {currentSettings.depth_model === 'da3_giant' && '🏆 Highest quality, 1.15B params'}
-            {currentSettings.depth_model === 'depth_anything_v2' && '⚡ V2 fallback, great quality'}
-            {currentSettings.depth_model === 'midas_small' && '⚡ Fastest processing'}
-            {currentSettings.depth_model === 'midas_large' && 'Good quality, widely compatible'}
-            {currentSettings.depth_model === 'zoedepth' && 'Metric depth estimation'}
+            Greyscale output. Adjust range to clip and remap depth values.
           </p>
+          
+          {(currentSettings.depth_range_min > 0 || currentSettings.depth_range_max < 1) && (
+            <p className="fuk-help-text">
+              Remap: [{(currentSettings.depth_range_min ?? 0).toFixed(2)} &ndash; {(currentSettings.depth_range_max ?? 1).toFixed(2)}] &rarr; [0 &ndash; 1]
+            </p>
+          )}
         </>
       );
     }
