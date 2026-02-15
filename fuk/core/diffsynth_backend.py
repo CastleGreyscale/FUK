@@ -6,6 +6,8 @@ Fully data-driven — all model definitions live in models.json.
 Add new models by editing JSON, no code changes needed.
 """
 
+from __future__ import annotations  # Makes type hints lazy (Python 3.7+)
+
 import sys
 from pathlib import Path
 
@@ -26,28 +28,19 @@ else:
 # ---------------------------------------------------------------------------
 
 import os
-os.environ["DIFFSYNTH_MODEL_BASE_PATH"] = "/home/brad/ai/models"
-os.environ["DIFFSYNTH_SKIP_DOWNLOAD"] = "TRUE"
-
 import torch
 from typing import Optional, Dict, Any, List, Union
 import json
 import time
 from PIL import Image
 
-from diffsynth.pipelines.qwen_image import QwenImagePipeline, ModelConfig
-from diffsynth.pipelines.wan_video import WanVideoPipeline, ModelConfig as WanModelConfig
-
 #from latent_manager import LatentManager
 
 
 # ---------------------------------------------------------------------------
-# Pipeline class registry
+# Pipeline class registry (populated after DiffSynth import)
 # ---------------------------------------------------------------------------
-PIPELINE_CLASSES = {
-    "qwen": QwenImagePipeline,
-    "wan":  WanVideoPipeline,
-}
+PIPELINE_CLASSES = {}
 
 
 def _log(category: str, message: str, level: str = "info"):
@@ -77,6 +70,9 @@ class DiffSynthBackend:
         self.models_config = self._load_config("models.json")
         self.defaults_config = self._load_config("defaults.json")
 
+        # Setup DiffSynth environment and import pipelines
+        self._setup_diffsynth_env()
+
         # Build alias lookup  (e.g. "i2v-A14B" → "wan_i2v_a14b")
         self._alias_map: Dict[str, str] = {}
         for key, entry in self.models_config.items():
@@ -87,7 +83,8 @@ class DiffSynthBackend:
 
         # Cached pipelines keyed by model_type
         self.pipelines: Dict[str, Any] = {}
-        self._active_user_lora: Dict[str, str] = {}  # cache_key → lora_path currently loaded
+        self._active_user_lora: Dict[str, str] = {}  # cache_key → user lora_path currently loaded
+        self._model_lora_config: Dict[str, dict] = {}  # cache_key → model lora config from models.json
         #self.latent_manager = LatentManager()
 
         # Scan for available LoRA files
@@ -102,6 +99,44 @@ class DiffSynthBackend:
             _log("BACKEND", f"Aliases: {dict(self._alias_map)}")
         if self._lora_registry:
             _log("BACKEND", f"LoRAs: {list(self._lora_registry.keys())}")
+
+    # ------------------------------------------------------------------
+    # DiffSynth environment setup
+    # ------------------------------------------------------------------
+
+    def _setup_diffsynth_env(self):
+        """
+        Setup DiffSynth environment variables and import pipelines.
+        Called after configs are loaded so we can read models path from defaults.json.
+        """
+        global PIPELINE_CLASSES
+        
+        # Read models base path from config (with fallback)
+        # Try top-level first (FUK convention), then nested paths.models_root
+        models_root = self.defaults_config.get("models_root")
+        if not models_root:
+            models_root = self.defaults_config.get("paths", {}).get("models_root", "/home/brad/ai/models")
+        
+        # Store for constructing local model paths
+        self.models_root = Path(models_root)
+        
+        # Setup environment
+        os.environ["DIFFSYNTH_MODEL_BASE_PATH"] = models_root
+        os.environ["DIFFSYNTH_SKIP_DOWNLOAD"] = "TRUE"
+        
+        _log("BACKEND", f"Models base path: {models_root}")
+        
+        # Import DiffSynth pipelines (must happen after env setup)
+        from diffsynth.pipelines.qwen_image import QwenImagePipeline, ModelConfig
+        from diffsynth.pipelines.wan_video import WanVideoPipeline, ModelConfig as WanModelConfig
+        
+        # Store ModelConfig classes as instance attributes for use in other methods
+        self.ModelConfig = ModelConfig
+        self.WanModelConfig = WanModelConfig
+        
+        # Populate pipeline registry
+        PIPELINE_CLASSES["qwen"] = QwenImagePipeline
+        PIPELINE_CLASSES["wan"] = WanVideoPipeline
 
     # ------------------------------------------------------------------
     # Config helpers
@@ -177,44 +212,44 @@ class DiffSynthBackend:
         _log("BACKEND", f"LoRA not found: {lora_name}", "warning")
         return None
 
-    def _fuse_model_lora(self, pipeline, lora_cfg: dict):
+    def _load_model_lora(self, pipeline, lora_cfg: dict):
         """
-        Permanently fuse a model-bundled LoRA (e.g. Control-Union) into pipeline weights.
+        Load a model-bundled LoRA (e.g. Control-Union) from local models directory.
         
-        Uses GeneralLoRALoader.fuse_lora_to_base_model() so these survive
-        pipe.clear_lora() when swapping user LoRAs.
+        Constructs path as: {models_root}/{model_id}/{pattern}
+        All models should be pre-downloaded via download_models.py.
         """
-        from huggingface_hub import hf_hub_download
-        from safetensors.torch import load_file
-        from diffsynth.extensions.lora.general import GeneralLoRALoader
-
         model_id = lora_cfg["model_id"]
         pattern = lora_cfg["pattern"]
         target = lora_cfg.get("target", "dit")
-        alpha = lora_cfg.get("alpha", 1.5)
+        alpha = lora_cfg.get("alpha", 1.0)
 
-        _log("BACKEND", f"Fusing model LoRA: {model_id}/{pattern} → pipe.{target}")
+        # Construct local path (models are pre-downloaded)
+        lora_path = self.models_root / model_id / pattern
+        
+        if not lora_path.exists():
+            raise FileNotFoundError(
+                f"Model LoRA not found: {lora_path}\n"
+                f"Run download_models.py to download {model_id}"
+            )
 
-        try:
-            lora_path = hf_hub_download(repo_id=model_id, filename=pattern)
-        except Exception as e:
-            _log("BACKEND", f"LoRA download failed: {e}", "error")
-            raise
+        _log("BACKEND", f"Loading model LoRA: {model_id}/{pattern} → pipe.{target} (α={alpha})")
 
         target_module = getattr(pipeline, target, None)
         if target_module is None:
             raise ValueError(f"Pipeline has no attribute '{target}' for LoRA target")
 
-        state_dict = load_file(lora_path)
-        loader = GeneralLoRALoader(device="cpu", torch_dtype=torch.bfloat16)
-        loader.fuse_lora_to_base_model(target_module, state_dict, alpha=alpha)
-        _log("BACKEND", f"Model LoRA fused (permanent): {model_id}", "success")
+        # Use standard DiffSynth API (supports alpha parameter)
+        pipeline.load_lora(target_module, str(lora_path), alpha=alpha)
+        _log("BACKEND", f"Model LoRA loaded: {lora_path.name}", "success")
 
     def _apply_user_lora(self, pipeline, cache_key: str, lora_path: str, alpha: float = 1.0):
         """
-        Load a user-selected LoRA onto a pipeline, clearing any previous user LoRA.
+        Load a user-selected LoRA onto a pipeline.
         
-        Uses the reversible pipe.load_lora() — does NOT affect fused model LoRAs.
+        For models with bundled LoRAs: clears all, reloads model LoRA, then adds user LoRA on top.
+        For models without bundled LoRAs: just loads the user LoRA.
+        
         Tracks state to avoid unnecessary reload if same LoRA is already active.
         """
         current = self._active_user_lora.get(cache_key)
@@ -222,18 +257,23 @@ class DiffSynthBackend:
             _log("BACKEND", f"User LoRA already loaded: {Path(lora_path).stem}")
             return
 
-        # Clear previous user LoRA (safe — fused LoRAs are unaffected)
-        if current is not None:
-            try:
-                pipeline.clear_lora()
+        # Clear all LoRAs (both model and user)
+        try:
+            pipeline.clear_lora()
+            if current:
                 _log("BACKEND", f"Cleared previous user LoRA: {Path(current).stem}")
-            except Exception as e:
-                _log("BACKEND", f"clear_lora() failed (non-fatal): {e}", "warning")
+        except Exception as e:
+            _log("BACKEND", f"clear_lora() failed (non-fatal): {e}", "warning")
 
-        # Load new LoRA
+        # Reload model LoRA if this pipeline has one
+        model_lora_cfg = self._model_lora_config.get(cache_key)
+        if model_lora_cfg:
+            self._load_model_lora(pipeline, model_lora_cfg)
+
+        # Load user LoRA on top
         target_module = getattr(pipeline, "dit", None)
         if target_module is None:
-            _log("BACKEND", "Pipeline has no 'dit' — cannot load LoRA", "error")
+            _log("BACKEND", "Pipeline has no 'dit' — cannot load user LoRA", "error")
             return
 
         _log("BACKEND", f"Loading user LoRA: {Path(lora_path).stem} (α={alpha})")
@@ -242,14 +282,27 @@ class DiffSynthBackend:
         _log("BACKEND", f"User LoRA active: {Path(lora_path).stem}", "success")
 
     def _clear_user_lora(self, pipeline, cache_key: str):
-        """Clear user LoRA if one is active."""
-        if cache_key in self._active_user_lora:
-            try:
-                pipeline.clear_lora()
-                _log("BACKEND", f"Cleared user LoRA: {Path(self._active_user_lora[cache_key]).stem}")
-            except Exception:
-                pass
-            del self._active_user_lora[cache_key]
+        """
+        Clear user LoRA if one is active.
+        
+        For models with bundled LoRAs: clears all, then reloads model LoRA.
+        For models without bundled LoRAs: just clears.
+        """
+        if cache_key not in self._active_user_lora:
+            return
+            
+        try:
+            pipeline.clear_lora()
+            _log("BACKEND", f"Cleared user LoRA: {Path(self._active_user_lora[cache_key]).stem}")
+        except Exception:
+            pass
+        
+        # Reload model LoRA if this pipeline has one
+        model_lora_cfg = self._model_lora_config.get(cache_key)
+        if model_lora_cfg:
+            self._load_model_lora(pipeline, model_lora_cfg)
+        
+        del self._active_user_lora[cache_key]
 
     def _resolve_vram_preset(self, preset_name: str = None) -> tuple:
         """
@@ -363,7 +416,7 @@ class DiffSynthBackend:
             # Only apply offload config when a preset is active
             if vram_config is not None:
                 kwargs.update(vram_config)
-            configs.append(ModelConfig(**kwargs))
+            configs.append(self.ModelConfig(**kwargs))
         return configs
 
     def _build_extra_config(self, entry: dict, key: str) -> Optional[ModelConfig]:
@@ -372,7 +425,7 @@ class DiffSynthBackend:
         if cfg is None:
             return None
         mid = cfg.get("model_id", entry["model_id"])
-        return ModelConfig(model_id=mid, origin_file_pattern=cfg["pattern"])
+        return self.ModelConfig(model_id=mid, origin_file_pattern=cfg["pattern"])
 
     def get_pipeline(self, model_type: str, vram_preset: str = None):
         """Get or create a cached pipeline.
@@ -438,36 +491,14 @@ class DiffSynthBackend:
         pipeline = PipelineCls.from_pretrained(**kwargs)
         _log("BACKEND", f"Pipeline loaded: {cache_key}", "success")
 
-        # Model-bundled LoRA (e.g. Control-Union) — fuse permanently
+        # Model-bundled LoRA (e.g. Control-Union) — load and track config
         lora_cfg = entry.get("lora")
         if lora_cfg:
-            self._fuse_model_lora(pipeline, lora_cfg)
+            self._load_model_lora(pipeline, lora_cfg)
+            self._model_lora_config[cache_key] = lora_cfg  # Track for reloading
 
         self.pipelines[cache_key] = pipeline
         return pipeline
-
-    def _load_lora(self, pipeline, lora_cfg: dict):
-        """Legacy: Load a LoRA defined in models.json (reversible). Use _fuse_model_lora instead."""
-        from huggingface_hub import hf_hub_download
-
-        model_id = lora_cfg["model_id"]
-        pattern = lora_cfg["pattern"]
-        target = lora_cfg.get("target", "dit")
-
-        _log("BACKEND", f"Loading LoRA: {model_id}/{pattern} → pipe.{target}")
-
-        try:
-            lora_path = hf_hub_download(repo_id=model_id, filename=pattern)
-        except Exception as e:
-            _log("BACKEND", f"LoRA download failed: {e}", "error")
-            raise
-
-        target_module = getattr(pipeline, target, None)
-        if target_module is None:
-            raise ValueError(f"Pipeline has no attribute '{target}' for LoRA target")
-
-        pipeline.load_lora(target_module, lora_path)
-        _log("BACKEND", f"LoRA loaded: {model_id}", "success")
 
     def unload_pipeline(self, model_type: str):
         """Unload all cached pipelines for a model type (any preset)."""
@@ -476,6 +507,7 @@ class DiffSynthBackend:
         for k in stale:
             del self.pipelines[k]
             self._active_user_lora.pop(k, None)
+            self._model_lora_config.pop(k, None)
         if stale and torch.cuda.is_available():
             torch.cuda.empty_cache()
             _log("BACKEND", f"Unloaded pipeline(s): {stale}")
@@ -533,9 +565,6 @@ class DiffSynthBackend:
         negative_prompt = negative_prompt or defaults.get("negative_prompt", "")
         denoise = denoising_strength if denoising_strength is not None else defaults.get("denoising_strength", 0.85)
 
-        if lora:
-            _log("BACKEND", f"Standalone LoRA ({lora}) — not yet implemented", "warning")
-
         _log("BACKEND", "=" * 60)
         _log("BACKEND", "IMAGE GENERATION")
         _log("BACKEND", f"  Model: {model_type} — {entry.get('description', '')}")
@@ -544,6 +573,8 @@ class DiffSynthBackend:
         exponential_shift_mu = kwargs.get('exponential_shift_mu')
         if exponential_shift_mu is not None:
             _log("BACKEND", f"  Exponential shift mu: {exponential_shift_mu}")
+        if lora:
+            _log("BACKEND", f"  User LoRA: {lora} (α={lora_multiplier})")
         _log("BACKEND", "=" * 60)
 
         pipe = self.get_pipeline(model_type, vram_preset=vram_preset)
@@ -551,6 +582,7 @@ class DiffSynthBackend:
         # --- User LoRA ---
         active_preset = vram_preset or self.defaults_config.get("vram", {}).get("preset", "low")
         cache_key = f"{model_type}:{active_preset}"
+        
         if lora:
             lora_path = self._resolve_lora_path(lora)
             if lora_path:
@@ -582,26 +614,23 @@ class DiffSynthBackend:
         if "negative_prompt" in supports and negative_prompt:
             pipe_kwargs["negative_prompt"] = negative_prompt
 
-        # Edit images (Qwen-Edit-2511: list of PIL Images)
-        if "edit_image" in supports:
-            images = self._resolve_image_list(control_image)
-            if images:
-                pipe_kwargs["edit_image"] = images
-                _log("BACKEND", f"  Edit images: {len(images)}")
-
-        # Context image (Control-Union: single preprocessed image)
-        if "context_image" in supports and (context_image or control_image):
-            ctx = context_image
-            if ctx is None and control_image:
-                # Use first control image as context
-                paths = control_image if isinstance(control_image, list) else [control_image]
-                if paths:
-                    ctx = Image.open(str(paths[0]))
-            if isinstance(ctx, (str, Path)):
-                ctx = Image.open(str(ctx))
-            if ctx is not None:
-                pipe_kwargs["context_image"] = ctx
-                _log("BACKEND", f"  Context image provided")
+        # Map semantic inputs to model-specific parameters
+        semantic_inputs = {}
+        if control_image:
+            # For edit_targets, pass as-is (can be list or single)
+            semantic_inputs["edit_targets"] = control_image
+            
+            # For control_input (single image), extract first if list
+            if isinstance(control_image, list):
+                semantic_inputs["control_input"] = control_image[0] if control_image else None
+            else:
+                semantic_inputs["control_input"] = control_image
+                
+        if context_image:
+            semantic_inputs["control_input"] = context_image
+            
+        mapped_inputs = self._map_inputs(model_type, semantic_inputs, width, height)
+        pipe_kwargs.update(mapped_inputs)
 
         # Merge pipeline_kwargs from models.json
         pipe_kwargs.update(pipe_defaults)
@@ -732,6 +761,7 @@ class DiffSynthBackend:
         # --- User LoRA ---
         active_preset = vram_preset or self.defaults_config.get("vram", {}).get("preset", "low")
         cache_key = f"{model_type}:{active_preset}"
+        
         if lora:
             lora_path = self._resolve_lora_path(lora)
             if lora_path:
@@ -739,6 +769,7 @@ class DiffSynthBackend:
             else:
                 _log("BACKEND", f"LoRA not found, skipping: {lora}", "warning")
         else:
+            # No LoRA requested — clear any previously loaded user LoRA
             self._clear_user_lora(pipe, cache_key)
 
         if progress_callback:
@@ -769,28 +800,15 @@ class DiffSynthBackend:
         if "negative_prompt" in supports and negative_prompt:
             pipe_kwargs["negative_prompt"] = negative_prompt
 
-        # Input image (i2v models — Wan 2.1 and 2.2)
-        if "input_image" in supports and image_path:
-            img = self._load_image(image_path, width, height)
-            if img:
-                pipe_kwargs["input_image"] = img
-                _log("BACKEND", f"  Loaded input image: {image_path}")
-
-        # VACE control video (Wan 2.2 Fun)
-        if "vace_video" in supports and control_path:
-            vace = self._load_video_data(control_path, height=height, width=width)
-            if vace is not None:
-                pipe_kwargs["vace_video"] = vace
-                _log("BACKEND", f"  Loaded VACE control video")
-
-        # VACE reference image (Wan 2.2 Fun — falls back to image_path)
-        if "vace_reference_image" in supports:
-            ref_path = image_path  # UI's image_path serves as reference for VACE
-            if ref_path:
-                ref = self._load_image(ref_path, width, height)
-                if ref:
-                    pipe_kwargs["vace_reference_image"] = ref
-                    _log("BACKEND", f"  Loaded VACE reference image")
+        # Map semantic inputs to model-specific parameters
+        semantic_inputs = {}
+        if image_path:
+            semantic_inputs["reference_image"] = image_path
+        if control_path:
+            semantic_inputs["control_input"] = control_path
+            
+        mapped_inputs = self._map_inputs(model_type, semantic_inputs, width, height)
+        pipe_kwargs.update(mapped_inputs)
 
         # Tiled (explicit from supports, may also come from pipe_defaults)
         if "tiled" in supports and "tiled" not in pipe_defaults:
@@ -850,6 +868,16 @@ class DiffSynthBackend:
 
     def _load_image(self, path, width: int = None, height: int = None) -> Optional[Image.Image]:
         """Load a PIL Image, optionally resizing."""
+        if path is None:
+            return None
+            
+        # Handle unexpected list (should be caught earlier, but be defensive)
+        if isinstance(path, list):
+            if not path:
+                return None
+            _log("BACKEND", f"Warning: _load_image received list, using first item", "warning")
+            path = path[0]
+            
         p = Path(str(path))
         if not p.exists():
             _log("BACKEND", f"Image not found: {p}", "warning")
@@ -888,6 +916,81 @@ class DiffSynthBackend:
 
         _log("BACKEND", f"Could not load video data from: {source}", "warning")
         return None
+
+    def _map_inputs(
+        self,
+        model_type: str,
+        semantic_inputs: dict,
+        width: int,
+        height: int,
+    ) -> dict:
+        """
+        Map semantic inputs to model-specific parameters using parameter_map.
+        
+        Args:
+            model_type: Model identifier (e.g. "qwen_image_edit_2511")
+            semantic_inputs: Dict with semantic keys like:
+                - reference_image: Path to style/reference image
+                - control_input: Path to control video/image
+                - edit_targets: Path or list of paths to images to edit
+            width, height: Target dimensions for loading
+            
+        Returns:
+            Dict of model-specific pipe() kwargs ready to pass to pipeline
+        """
+        entry = self.get_model_entry(model_type)
+        param_map = entry.get("parameter_map", {})
+        
+        pipe_kwargs = {}
+        
+        for semantic_name, model_param in param_map.items():
+            if semantic_name not in semantic_inputs:
+                continue
+                
+            value = semantic_inputs[semantic_name]
+            if value is None:
+                continue
+            
+            # Map to model-specific parameter and format
+            if model_param == "edit_image":
+                # Qwen-Edit wants list of PIL Images
+                images = self._resolve_image_list(value)
+                if images:
+                    pipe_kwargs["edit_image"] = images
+                    _log("BACKEND", f"  Mapped edit_targets → edit_image: {len(images)} images")
+                    
+            elif model_param == "context_image":
+                # Control-Union wants single PIL Image
+                img = self._load_image(value, width, height)
+                if img:
+                    pipe_kwargs["context_image"] = img
+                    _log("BACKEND", f"  Mapped control_input → context_image")
+                    
+            elif model_param == "input_image":
+                # Wan i2v wants single PIL Image
+                img = self._load_image(value, width, height)
+                if img:
+                    pipe_kwargs["input_image"] = img
+                    _log("BACKEND", f"  Mapped reference_image → input_image")
+                    
+            elif model_param == "vace_video":
+                # Wan VACE wants VideoData for control
+                vace = self._load_video_data(value, height, width)
+                if vace:
+                    pipe_kwargs["vace_video"] = vace
+                    _log("BACKEND", f"  Mapped control_input → vace_video")
+                    
+            elif model_param == "vace_reference_image":
+                # Wan VACE wants PIL Image for reference
+                img = self._load_image(value, width, height)
+                if img:
+                    pipe_kwargs["vace_reference_image"] = img
+                    _log("BACKEND", f"  Mapped reference_image → vace_reference_image")
+            
+            else:
+                _log("BACKEND", f"  Unknown parameter mapping: {semantic_name} → {model_param}", "warning")
+        
+        return pipe_kwargs
 
     # ------------------------------------------------------------------
     # Latent capture and management

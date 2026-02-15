@@ -222,6 +222,7 @@ class NormalsPreprocessor(BasePreprocessor):
             "method": "normals",
             "estimation": self.method.value,
             "parameters": params,
+            "raw_normals": normals,  # float32 [-1, 1] for lossless EXR export
         }
     
     def _normals_from_depth(self, image_path: Path, intensity: float = 1.0) -> np.ndarray:

@@ -2644,21 +2644,17 @@ class ExportEXRRequest(BaseModel):
     export_path: Optional[str] = None  # Custom save directory (empty = use project cache)
 
 class EXRSequenceExportRequest(BaseModel):
-    """EXR sequence export request
+    """EXR sequence export request (LATENT-ONLY VERSION)"""
     
-    Accepts two payload formats:
-    1. Frontend format: layers={beauty, depth, normals, crypto} 
-       (derives latent path from beauty file location)
-    2. Direct format: beauty_latent or generation_path + aov_layers
-    """
+    # Layers from frontend (beauty path used to find latents)
+    layers: Dict[str, Optional[str]] = {}  # {beauty, depth, normals, crypto}
     
-    # Frontend format (layers dict like image export)
-    layers: Dict[str, Optional[str]] = {}
+    # Original generation info (where latents live)
+    generation_path: Optional[str] = None  # Path to original generation output
+    beauty_latent: Optional[str] = None     # Or direct path to latent file
     
-    # Direct latent format
-    generation_path: Optional[str] = None
-    beauty_latent: Optional[str] = None
-    aov_layers: Dict[str, Optional[str]] = {}
+    # AOV layers (processed cache) — overridden by layers if provided
+    aov_layers: Dict[str, Optional[str]] = {}  # {depth, normals, crypto}
     
     # Export settings
     export_path: Optional[str] = None
@@ -2666,7 +2662,6 @@ class EXRSequenceExportRequest(BaseModel):
     filename_pattern: Optional[str] = None
     bit_depth: int = 32
     compression: str = "ZIP"
-    color_space: str = "Linear"
     start_frame: int = 1001
     model_type: str = "auto"
 
@@ -2908,61 +2903,19 @@ async def export_exr_sequence(request: EXRSequenceExportRequest):
             export_dir = get_generation_output_dir("export_exr_seq")
             log.info("SeqExport", f"Cache path: {export_dir}")
         
-        # ----------------------------------------------------------------
-        # Resolve beauty latent and AOV layers
-        # Supports both frontend format (layers dict) and direct format
-        # ----------------------------------------------------------------
+        # Find beauty latent
         beauty_latent = None
-        resolved_aovs = {}
         
-        # If frontend sent layers dict, derive latent + aov paths from it
-        if request.layers and request.layers.get('beauty'):
-            beauty_path_str = request.layers['beauty']
-            resolved_beauty = resolve_input_path(beauty_path_str)
-            
-            if resolved_beauty and resolved_beauty.exists():
-                # Find latent file next to beauty file
-                latent_dir = resolved_beauty.parent / "latents"
-                if latent_dir.exists():
-                    # Try matching filename first
-                    latent_file = latent_dir / f"{resolved_beauty.stem}.latent.pt"
-                    if not latent_file.exists():
-                        base_name = resolved_beauty.stem.split('.')[0]
-                        latent_file = latent_dir / f"{base_name}.latent.pt"
-                    
-                    if not latent_file.exists():
-                        # Try any latent file in the directory
-                        latent_files = list(latent_dir.glob("*.latent.pt"))
-                        if latent_files:
-                            latent_file = latent_files[0]
-                    
-                    if latent_file.exists():
-                        beauty_latent = latent_file
-                        log.info("SeqExport", f"Found latent from beauty path: {beauty_latent}")
-                    else:
-                        log.warning("SeqExport", f"No latent files found in {latent_dir}")
-                else:
-                    log.warning("SeqExport", f"No latents/ directory at {resolved_beauty.parent}")
-            
-            # Extract AOV layers from layers dict (everything except beauty)
-            for layer_name in ['depth', 'normals', 'crypto']:
-                layer_path = request.layers.get(layer_name)
-                if layer_path:
-                    resolved = resolve_input_path(layer_path)
-                    if resolved and resolved.exists():
-                        resolved_aovs[layer_name] = str(resolved)
-        
-        # Direct beauty_latent path (overrides layers-derived path)
         if request.beauty_latent:
+            # Direct latent path provided
             beauty_latent = Path(request.beauty_latent)
             if not beauty_latent.exists():
                 raise HTTPException(
                     status_code=400,
                     detail=f"Beauty latent not found: {request.beauty_latent}"
                 )
-        
-        # generation_path fallback
-        if beauty_latent is None and request.generation_path:
+        elif request.generation_path:
+            # Find latent in generation directory
             gen_path = Path(request.generation_path)
             latent_dir = gen_path / "latents"
             
@@ -2972,7 +2925,6 @@ async def export_exr_sequence(request: EXRSequenceExportRequest):
                     detail=f"No latents directory found in generation: {gen_path}"
                 )
             
-            # Try to find a latent file
             latent_files = list(latent_dir.glob("*.latent.pt"))
             if not latent_files:
                 raise HTTPException(
@@ -2981,17 +2933,36 @@ async def export_exr_sequence(request: EXRSequenceExportRequest):
                 )
             
             beauty_latent = latent_files[0]
-        
-        # Direct aov_layers (merge with any layers-derived ones)
-        for layer_name, layer_path in request.aov_layers.items():
-            if layer_path is None:
-                continue
-            resolved_path = resolve_input_path(layer_path)
-            if resolved_path and resolved_path.exists():
-                resolved_aovs[layer_name] = str(resolved_path)
-        
-        # Final validation
-        if beauty_latent is None:
+        elif request.layers.get("beauty"):
+            # Derive latent from beauty mp4/image path
+            # video_002/generated.mp4 -> video_002/latents/generated.latent.pt
+            beauty_path = resolve_input_path(request.layers["beauty"])
+            if beauty_path and beauty_path.exists():
+                latent_dir = beauty_path.parent / "latents"
+                log.info("SeqExport", f"Looking for latents in: {latent_dir}")
+                
+                if latent_dir.exists():
+                    # Try exact match first: generated.mp4 -> generated.latent.pt
+                    exact_latent = latent_dir / f"{beauty_path.stem}.latent.pt"
+                    if exact_latent.exists():
+                        beauty_latent = exact_latent
+                    else:
+                        # Fallback: any .latent.pt in the directory
+                        latent_files = list(latent_dir.glob("*.latent.pt"))
+                        if latent_files:
+                            beauty_latent = latent_files[0]
+                
+                if beauty_latent is None:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"No latents/ directory found alongside beauty: {beauty_path.parent}"
+                    )
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Could not resolve beauty path: {request.layers['beauty']}"
+                )
+        else:
             raise HTTPException(
                 status_code=400,
                 detail="No beauty latent found. Provide layers.beauty (with latents/ dir), beauty_latent, or generation_path"
@@ -2999,14 +2970,30 @@ async def export_exr_sequence(request: EXRSequenceExportRequest):
         
         log.info("SeqExport", f"Beauty Latent: {beauty_latent}")
         
-        # Log resolved AOVs
-        for layer_name, layer_path in resolved_aovs.items():
-            resolved_path = Path(layer_path)
-            raw_path = resolved_path.parent / f"{resolved_path.stem}_raw.npy"
-            if raw_path.exists():
-                log.info("SeqExport", f"  {layer_name}: {resolved_path.name} (with raw .npy)")
+        # Resolve AOV layer paths
+        # Use aov_layers if provided, otherwise extract from layers (frontend sends all in layers)
+        aov_source = request.aov_layers
+        if not aov_source and request.layers:
+            aov_source = {k: v for k, v in request.layers.items() if k != 'beauty' and v}
+        
+        resolved_aovs = {}
+        
+        for layer_name, layer_path in aov_source.items():
+            if layer_path is None:
+                continue
+            
+            resolved_path = resolve_input_path(layer_path)
+            if resolved_path and resolved_path.exists():
+                resolved_aovs[layer_name] = str(resolved_path)
+                
+                # Check for raw .npy
+                raw_path = resolved_path.parent / f"{resolved_path.stem}_raw.npy"
+                if raw_path.exists():
+                    log.info("SeqExport", f"  {layer_name}: {resolved_path.name} (with raw .npy)")
+                else:
+                    log.warning("SeqExport", f"  {layer_name}: {resolved_path.name} (NO raw .npy - using MP4!)")
             else:
-                log.warning("SeqExport", f"  {layer_name}: {resolved_path.name} (NO raw .npy - using MP4!)")
+                log.warning("SeqExport", f"  {layer_name}: not found ({layer_path})")
         
         # Build filename pattern
         base_filename = request.filename or "export"

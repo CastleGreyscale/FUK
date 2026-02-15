@@ -91,7 +91,6 @@ class VideoUpscaleRequest(BaseModel):
 class VideoLayersRequest(BaseModel):
     """Request to generate layers from a video"""
     video_path: str
-    output_mode: VideoOutputMode = VideoOutputMode.MP4
     
     layers: Dict[str, bool] = {
         "depth": True,
@@ -645,11 +644,11 @@ def setup_video_routes(
         """
         Generate multiple AOV layers from a video
         
-        Produces one output video (or sequence) per enabled layer.
+        Always produces MP4 previews + raw .npy data for each layer.
+        Raw data is used by the EXR exporter for lossless output.
         
-        Depth and crypto are processed via their unified preprocessors
-        which handle batch inference / temporal tracking internally.
-        Normals goes through frame-by-frame VideoProcessor.
+        Depth/crypto: raw .npy saved by their preprocessors
+        Normals: raw .npy accumulated from frame callbacks
         """
         try:
             # Resolve input path
@@ -662,11 +661,12 @@ def setup_video_routes(
                 raise HTTPException(status_code=404, detail=f"Video not found: {request.video_path}")
             
             enabled_layers = [k for k, v in request.layers.items() if v]
+            enabled_layers = [k for k, v in request.layers.items() if v]
             
             log.header("VIDEO LAYERS GENERATION")
             log.info("VideoLayers", f"Input: {input_path}")
             log.info("VideoLayers", f"Layers: {enabled_layers}")
-            log.info("VideoLayers", f"Output Mode: {request.output_mode}")
+            log.info("VideoLayers", f"Output: MP4 + raw .npy (always)")
             
             # Create output directory
             gen_dir = get_generation_output_dir("video_layers")
@@ -686,8 +686,20 @@ def setup_video_routes(
                 shutil.copy2(input_path, source_copy)
                 log.info("VideoLayers", f"Copied source: {source_copy.name}")
             
-            output_mode = OutputMode.SEQUENCE if request.output_mode == "sequence" else OutputMode.MP4
-            output_mode_str = "mp4" if output_mode == OutputMode.MP4 else "sequence"
+            # Copy latents from source generation dir so layers folder is self-contained
+            # e.g. video_002/latents/generated.latent.pt -> video_layers_005/latents/
+            source_latent_dir = input_path.parent / "latents"
+            if source_latent_dir.exists():
+                dest_latent_dir = gen_dir / "latents"
+                dest_latent_dir.mkdir(exist_ok=True)
+                latent_count = 0
+                for latent_file in source_latent_dir.glob("*.latent.pt"):
+                    shutil.copy2(latent_file, dest_latent_dir / latent_file.name)
+                    latent_count += 1
+                if latent_count:
+                    log.info("VideoLayers", f"Copied {latent_count} latent(s) to layers dir ({sum(f.stat().st_size for f in dest_latent_dir.iterdir()) / (1024*1024):.1f} MiB)")
+            else:
+                log.warning("VideoLayers", f"No latents/ found at {source_latent_dir} — EXR export will need beauty_latent path")
             
             if not enabled_layers:
                 raise HTTPException(status_code=400, detail="No layers enabled")
@@ -698,23 +710,19 @@ def setup_video_routes(
             all_layer_results: Dict[str, Dict[str, Any]] = {}
             
             # ----------------------------------------------------------
-            # Depth layer (unified preprocessor — batch or frame-by-frame)
+            # Depth layer - always MP4 + raw .npy (saved by preprocessor)
             # ----------------------------------------------------------
             if request.layers.get("depth"):
                 depth_model = DEPTH_MODEL_MAP.get(request.depth_model, DepthModel.DEPTH_ANYTHING_V2)
                 log.info("VideoLayers", f"Processing depth layer ({depth_model.value})...")
                 
-                if output_mode == OutputMode.MP4:
-                    depth_output = gen_dir / "depth.mp4"
-                else:
-                    depth_output = gen_dir / "depth"
-                
+                depth_output = gen_dir / "depth.mp4"
                 depth_processor = DepthPreprocessor(model_type=depth_model)
                 
                 depth_result = depth_processor.process_video(
                     video_path=input_path,
                     output_path=depth_output,
-                    output_mode=output_mode_str,
+                    output_mode="mp4",
                     invert=request.depth_invert,
                     normalize=request.depth_normalize,
                     colormap=request.depth_colormap,
@@ -728,27 +736,22 @@ def setup_video_routes(
                     "frame_count": depth_result.get("frame_count", 0),
                     "errors": 0,
                 }
-                if output_mode == OutputMode.SEQUENCE:
-                    all_layer_results["depth"]["first_frame"] = depth_result.get("first_frame")
-                    all_layer_results["depth"]["frames"] = depth_result.get("frames", [])
-                
                 log.info("VideoLayers", f"Depth complete: {depth_result.get('frame_count', 0)} frames")
             
             # ----------------------------------------------------------
-            # Normals layer (frame-by-frame via VideoProcessor)
+            # Normals layer - MP4 preview + raw .npy for lossless EXR
+            # Accumulates float32 normals from each frame callback
             # ----------------------------------------------------------
             if request.layers.get("normals"):
                 normals_method = NORMALS_METHOD_MAP.get(request.normals_method, NormalsMethod.FROM_DEPTH)
                 depth_model = DEPTH_MODEL_MAP.get(request.normals_depth_model, DepthModel.DEPTH_ANYTHING_V2)
                 log.info("VideoLayers", f"Processing normals layer (method={normals_method.value})...")
                 
-                if output_mode == OutputMode.MP4:
-                    normals_output = gen_dir / "normals.mp4"
-                else:
-                    normals_output = gen_dir / "normals"
+                normals_output = gen_dir / "normals.mp4"
+                raw_normals_frames = []
                 
                 def normals_frame_processor(inp, out):
-                    return preprocessor_manager.normals(
+                    result = preprocessor_manager.normals(
                         image_path=inp,
                         output_path=out,
                         method=normals_method,
@@ -758,43 +761,48 @@ def setup_video_routes(
                         intensity=request.normals_intensity,
                         exact_output=True,
                     )
+                    # Capture raw float32 normals [-1, 1] for lossless export
+                    if "raw_normals" in result:
+                        raw_normals_frames.append(result["raw_normals"])
+                    return result
                 
                 normals_result = video_processor.process_video(
                     input_video=input_path,
                     output_path=normals_output,
                     frame_processor=normals_frame_processor,
-                    output_mode=output_mode,
+                    output_mode=OutputMode.MP4,
                 )
+                
+                # Save raw normals alongside MP4
+                if raw_normals_frames:
+                    import numpy as np
+                    raw_normals_array = np.stack(raw_normals_frames, axis=0)  # [N, H, W, 3]
+                    raw_normals_path = gen_dir / "normals_raw.npy"
+                    np.save(str(raw_normals_path), raw_normals_array.astype(np.float32))
+                    log.info("VideoLayers", f"Saved raw normals: {raw_normals_path} (shape: {raw_normals_array.shape})")
+                    del raw_normals_frames, raw_normals_array
                 
                 all_layer_results["normals"] = {
                     "output_path": str(normals_output),
                     "frame_count": normals_result.get("frame_count", 0),
                     "errors": len(normals_result.get("errors", [])),
                 }
-                if output_mode == OutputMode.SEQUENCE:
-                    all_layer_results["normals"]["first_frame"] = normals_result.get("first_frame")
-                    all_layer_results["normals"]["frames"] = normals_result.get("frames", [])
-                
                 log.info("VideoLayers", f"Normals complete: {normals_result.get('frame_count', 0)} frames")
             
             # ----------------------------------------------------------
-            # Crypto layer (unified preprocessor — temporal tracking)
+            # Crypto layer - always MP4 + raw .npy (saved by preprocessor)
             # ----------------------------------------------------------
             if request.layers.get("crypto"):
                 sam_model = SAM_MODEL_MAP.get(request.crypto_model, SAMModel.LARGE)
                 log.info("VideoLayers", f"Processing crypto layer ({sam_model.value}, video tracking)...")
                 
-                if output_mode == OutputMode.MP4:
-                    crypto_output = gen_dir / "crypto.mp4"
-                else:
-                    crypto_output = gen_dir / "crypto"
-                
+                crypto_output = gen_dir / "crypto.mp4"
                 crypto_processor = CryptoPreprocessor(model_size=sam_model)
                 
                 crypto_result = crypto_processor.process_video(
                     video_path=input_path,
                     output_path=crypto_output,
-                    output_mode=output_mode_str,
+                    output_mode="mp4",
                     max_objects=request.crypto_max_objects,
                     min_area=request.crypto_min_area,
                 )
@@ -808,45 +816,24 @@ def setup_video_routes(
                     "sam_version": crypto_result.get("sam_version", "unknown"),
                     "errors": 0,
                 }
-                if output_mode == OutputMode.SEQUENCE:
-                    all_layer_results["crypto"]["first_frame"] = crypto_result.get("first_frame")
-                    all_layer_results["crypto"]["frames"] = crypto_result.get("frames", [])
-                
                 log.info("VideoLayers", f"Crypto complete: {crypto_result.get('num_objects', 0)} objects tracked")
             
             elapsed = time.time() - start_time
             log.timing("VideoLayers", start_time, f"Complete - {len(all_layer_results)} layers")
             
-            # Build response with URLs for each layer
+            # Build response — always MP4, no sequence handling
             layers_response = {}
             for layer_name, layer_data in all_layer_results.items():
                 layer_path = Path(layer_data["output_path"])
                 
-                if output_mode == OutputMode.SEQUENCE:
-                    first_frame = layer_data.get("first_frame")
-                    preview_url = None
-                    if first_frame:
-                        first_frame_path = layer_path / first_frame
-                        preview_url = get_project_relative_url(first_frame_path)
-                    
-                    layers_response[layer_name] = {
-                        "url": get_project_relative_url(layer_path),
-                        "preview_url": preview_url,
-                        "path": str(layer_path),
-                        "frame_count": layer_data.get("frame_count", 0),
-                        "frames": layer_data.get("frames", []),
-                        "is_sequence": True,
-                        "errors": layer_data.get("errors", 0),
-                    }
-                else:
-                    layers_response[layer_name] = {
-                        "url": get_project_relative_url(layer_path),
-                        "preview_url": get_project_relative_url(layer_path),
-                        "path": str(layer_path),
-                        "frame_count": layer_data.get("frame_count", 0),
-                        "is_sequence": False,
-                        "errors": layer_data.get("errors", 0),
-                    }
+                layers_response[layer_name] = {
+                    "url": get_project_relative_url(layer_path),
+                    "preview_url": get_project_relative_url(layer_path),
+                    "path": str(layer_path),
+                    "frame_count": layer_data.get("frame_count", 0),
+                    "is_sequence": False,
+                    "errors": layer_data.get("errors", 0),
+                }
                 
                 log.info("VideoLayers", f"  {layer_name}: {layer_path}")
             
@@ -860,7 +847,7 @@ def setup_video_routes(
                 source_image=str(request.video_path),
                 parameters={
                     "layers": enabled_layers,
-                    "output_mode": request.output_mode,
+                    "output_mode": "mp4",
                     "frame_count": video_info.get("frame_count", 0),
                     "fps": video_info.get("fps", 0),
                 },
@@ -869,7 +856,9 @@ def setup_video_routes(
             return {
                 "success": True,
                 "layers": layers_response,
-                "output_mode": request.output_mode,
+                "beauty_source": get_project_relative_url(source_copy),
+                "has_latents": (gen_dir / "latents").exists(),
+                "output_mode": "mp4",
                 "frame_count": video_info.get("frame_count", 0),
                 "fps": video_info.get("fps", 0),
                 "elapsed_seconds": elapsed,

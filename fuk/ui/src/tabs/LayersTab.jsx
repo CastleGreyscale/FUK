@@ -44,9 +44,6 @@ const DEFAULT_SETTINGS = {
   cryptoModel: 'sam2_hiera_large',
   cryptoMaxObjects: 50,
   cryptoMinArea: 500,
-  
-  // Video output mode
-  videoOutputMode: 'mp4',
 };
 
 export default function LayersTab({ config, activeTab, setActiveTab, project }) {
@@ -442,26 +439,6 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
               </div>
             )}
             
-            {/* Video output mode */}
-            {isVideo && (
-              <div className="fuk-form-group-compact fuk-mt-4 fuk-pt-4 fuk-border-top">
-                <label className="fuk-label">Output Format</label>
-                <select
-                  className="fuk-select"
-                  value={settings.videoOutputMode}
-                  onChange={(e) => updateSettings({ videoOutputMode: e.target.value })}
-                  disabled={processing}
-                >
-                  <option value="mp4">MP4 Video (per layer)</option>
-                  <option value="sequence">Image Sequences</option>
-                </select>
-                <p className="fuk-help-text">
-                  {settings.videoOutputMode === 'mp4' 
-                    ? 'Each layer as separate video' 
-                    : 'Frame sequences for EXR workflow'}
-                </p>
-              </div>
-            )}
           </div>
 
           {/* Layer Selection Card */}
