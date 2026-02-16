@@ -15,18 +15,20 @@ export function formatTime(seconds) {
 
 /**
  * Calculate dimensions based on aspect ratio and width
+ * Width rounds to nearest 64 (safe for all diffusion models)
+ * Height rounds to nearest 16 (finer granularity, prevents ratio collisions)
+ * 
  * @param {string} aspectRatioValue - The aspect ratio value (e.g., "1.78:1")
  * @param {number} width - Target width
  * @param {Array} aspectRatios - Array of aspect ratio objects from config
- * @returns {{width: number, height: number}} Dimensions rounded to nearest 64
+ * @returns {{width: number, height: number}}
  */
 export function calculateDimensions(aspectRatioValue, width, aspectRatios = []) {
   const ratio = aspectRatios.find(ar => ar.value === aspectRatioValue)?.ratio || 1;
-  const height = Math.round(width / ratio);
-  // Round to nearest 64 (required by diffusion models)
+  const rawHeight = width / ratio;
   return {
-    width: Math.round(width / 64) * 64,
-    height: Math.round(height / 64) * 64
+    width: Math.round(width / 16) * 16,
+    height: Math.round(rawHeight / 16) * 16
   };
 }
 

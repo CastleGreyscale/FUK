@@ -107,6 +107,8 @@ export function generateProjectFilename(projectName, shotNumber, version) {
  * Create empty project state structure
  * This is what gets saved to the .json file
  * 
+ * Field names must match defaults.json exactly (camelCase).
+ * 
  * @param {Object} defaults - User defaults from defaults.json (optional)
  */
 export function createEmptyProjectState(defaults = {}) {
@@ -134,47 +136,60 @@ export function createEmptyProjectState(defaults = {}) {
     },
     
     // Tab states - all generation settings
+    // Field names match defaults.json keys (camelCase)
     tabs: {
       image: {
-        prompt: imageDefaults.positive_prompt || '',
-        model: 'qwen_image',
+        prompt: imageDefaults.prompt || '',
         negative_prompt: imageDefaults.negative_prompt || '',
-        aspectRatio: imageDefaults.aspect_ratio || 'Widescreen',
-        width: imageDefaults.width || 1344,
+        model: imageDefaults.model || 'qwen_image',
+        aspectRatio: imageDefaults.aspectRatio || '1.78:1',
+        width: imageDefaults.width || 1280,
         height: null,  // Calculated from width and aspect ratio
-        steps: imageDefaults.infer_steps || 20,
-        stepsMode: 'preset',
-        guidance_scale: imageDefaults.guidance_scale ?? 2.1,
-        flow_shift: imageDefaults.flow_shift ?? 2.1,
-        seed: imageDefaults.seed,
-        seedMode: 'random',  // 'random', 'fixed', 'increment'
+        steps: imageDefaults.steps || 20,
+        stepsMode: imageDefaults.stepsMode || 'preset',
+        guidance_scale: imageDefaults.guidance_scale ?? 4,
+        cfg_scale: imageDefaults.cfg_scale ?? 5.0,
+        denoising_strength: imageDefaults.denoising_strength ?? 1,
+        seed: imageDefaults.seed ?? null,
+        seedMode: imageDefaults.seedMode || 'random',
         lastUsedSeed: null,
-        lora: null,
+        lora: imageDefaults.lora ?? null,
         lora_multiplier: imageDefaults.lora_multiplier ?? 1.0,
-        blocks_to_swap: imageDefaults.blocks_to_swap ?? 0,
-        output_format: 'png',
-        edit_strength: 0.7,
-        control_image_paths: [],
+        output_format: imageDefaults.output_format || 'png',
+        edit_strength: imageDefaults.edit_strength ?? 1,
+        exponential_shift_mu: imageDefaults.exponential_shift_mu ?? null,
+        save_latent: imageDefaults.save_latent ?? true,
+        control_image_paths: imageDefaults.control_image_paths || [],
       },
       video: {
-        prompt: videoDefaults.positive_prompt || '',
-        task: videoDefaults.task || 'i2v-A14B',
+        prompt: videoDefaults.prompt || '',
         negative_prompt: videoDefaults.negative_prompt || '',
-        width: 832,
-        height: 480,
-        video_length: videoDefaults.length || 41,
-        steps: videoDefaults.infer_steps || 20,
-        guidance_scale: videoDefaults.guidance_scale ?? 5.0,
-        flow_shift: videoDefaults.flow_shift ?? 2.1,
-        seed: videoDefaults.seed,
-        seedMode: 'random',
-        lastUsedSeed: null,
-        lora: null,
-        lora_multiplier: videoDefaults.lora_multiplier ?? 1.0,
-        blocks_to_swap: videoDefaults.blocks_to_swap ?? 5,
+        model: videoDefaults.model || 'wan_t2v_14b',
+        task: videoDefaults.task || 'i2v-A14B',
+        video_length: videoDefaults.video_length || 41,
         scale_factor: videoDefaults.scale_factor ?? 1.0,
+        steps: videoDefaults.steps || 20,
+        stepsMode: videoDefaults.stepsMode || 'preset',
+        guidance_scale: videoDefaults.guidance_scale ?? 5.0,
+        cfg_scale: videoDefaults.cfg_scale ?? 6.0,
+        denoising_strength: videoDefaults.denoising_strength ?? 1.0,
+        sigma_shift: videoDefaults.sigma_shift ?? 5.0,
+        sliding_window_size: videoDefaults.sliding_window_size ?? null,
+        sliding_window_stride: videoDefaults.sliding_window_stride ?? null,
+        motion_bucket_id: videoDefaults.motion_bucket_id ?? null,
+        seed: videoDefaults.seed ?? null,
+        seedMode: videoDefaults.seedMode || 'random',
+        lastUsedSeed: null,
+        lora: videoDefaults.lora ?? null,
+        lora_multiplier: videoDefaults.lora_multiplier ?? 1.0,
+        save_latent: videoDefaults.save_latent ?? true,
+        width: videoDefaults.width ?? null,
+        height: videoDefaults.height ?? null,
+        source_width: videoDefaults.source_width ?? null,
+        source_height: videoDefaults.source_height ?? null,
         image_path: null,
         end_image_path: null,
+        control_path: null,
       },
       preprocess: preprocessDefaults,
       postprocess: postprocessDefaults,
@@ -184,49 +199,30 @@ export function createEmptyProjectState(defaults = {}) {
     
     // Imported assets (control images, reference images, etc.)
     assets: {
-      controlImages: [],      // Paths relative to project
+      controlImages: [],
       referenceImages: [],
       inputVideos: [],
     },
     
     // Last state for "restore where you left off"
     lastState: {
-      // Active tab - restored when project loads
       activeTab: 'image',
-      
-      // Last cache folder used
       lastCacheFolder: null,
-      
-      // Image tab preview
       lastImagePreview: null,
-      
-      // Video tab preview
       lastVideoPreview: null,
-      
-      // Preprocess tab preview
       lastPreprocessPreview: null,
-      lastPreprocessMeta: null,  // { isVideo, isSequence, method, sourceInput, frameCount, params }
-      
-      // Postprocess tab preview
+      lastPreprocessMeta: null,
       lastPostprocessPreview: null,
-      lastPostprocessMeta: null,  // { isVideo, processType, sourceInput, scale, inputSize, outputSize, etc }
-      
-      // Layers tab preview
+      lastPostprocessMeta: null,
       lastLayersPreview: null,
-      lastLayersMeta: null,  // { isVideo, sourceInput, generatedLayers, frameCount }
-      
-      // Export tab - last export result
+      lastLayersMeta: null,
       lastExportPath: null,
     },
     
-    // Notes - free text for artist notes
     notes: '',
-    
-    // Pinned generation IDs for history panel
     pinnedGenerations: [],
   };
 }
-
 /**
  * Merge loaded state with defaults (handles version upgrades)
  * Uses deep merge to properly handle nested configuration objects
