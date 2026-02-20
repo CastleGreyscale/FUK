@@ -10,6 +10,18 @@ from __future__ import annotations  # Makes type hints lazy (Python 3.7+)
 
 import sys
 from pathlib import Path
+# Ensure NVRTC can find JIT compilation builtins (pip-installed CUDA libs)
+import os, site
+_site_packages = site.getsitepackages()[0] if site.getsitepackages() else ""
+for _nvrtc_candidate in [
+    os.path.join(_site_packages, "nvidia", "cu13", "lib"),
+    os.path.join(_site_packages, "nvidia", "cuda_nvrtc", "lib"),
+]:
+    if os.path.isdir(_nvrtc_candidate):
+        os.environ["LD_LIBRARY_PATH"] = (
+            _nvrtc_candidate + ":" + os.environ.get("LD_LIBRARY_PATH", "")
+        )
+        break
 
 # ---------------------------------------------------------------------------
 # Vendor path setup – core/ and vendor/ are siblings under the same root
@@ -29,10 +41,9 @@ else:
 
 import os
 import torch
-from typing import Optional, Dict, Any, List, Union
+from typing import Optional, Dict, Any, List
 import json
-import time
-from PIL import Image
+
 
 #from latent_manager import LatentManager
 
@@ -83,13 +94,20 @@ class DiffSynthBackend:
 
         # Cached pipelines keyed by model_type
         self.pipelines: Dict[str, Any] = {}
-        self._active_user_lora: Dict[str, str] = {}  # cache_key → user lora_path currently loaded
+        self._active_user_loras: Dict[str, List[tuple]] = {}  # cache_key → [(path, alpha), ...]
         self._model_lora_config: Dict[str, dict] = {}  # cache_key → model lora config from models.json
         #self.latent_manager = LatentManager()
 
         # Scan for available LoRA files
         self._lora_registry: Dict[str, dict] = {}
         self._scan_lora_dirs()
+
+        # --- Pipeline runners ---
+        # Each runner handles one generation family (image, video, chain, etc.)
+        # Runners hold a back-reference to this hub for pipeline/LoRA access.
+        # Import here to avoid circular imports at module level.
+        self.runners: Dict[str, Any] = {}
+        self._register_runners()
 
         model_keys = [k for k in self.models_config if not k.startswith("_") and isinstance(self.models_config[k], dict)]
         _log("BACKEND", "DiffSynth Backend initialized", "success")
@@ -99,6 +117,49 @@ class DiffSynthBackend:
             _log("BACKEND", f"Aliases: {dict(self._alias_map)}")
         if self._lora_registry:
             _log("BACKEND", f"LoRAs: {list(self._lora_registry.keys())}")
+
+    # ------------------------------------------------------------------
+    # Runner registry
+    # ------------------------------------------------------------------
+
+    def _register_runners(self):
+        import importlib, sys
+        
+        # Ensure core/ is importable (runner files live alongside this file)
+        core_dir = str(Path(__file__).resolve().parent)
+        if core_dir not in sys.path:
+            sys.path.insert(0, core_dir)
+        
+        try:
+            from qwen_pipeline import QwenPipelineRunner
+            self.runners["image"] = QwenPipelineRunner(self)
+        except ImportError as e:
+            _log("BACKEND", f"QwenPipelineRunner not available: {e}", "warning")
+
+        try:
+            from wan_pipeline import WanPipelineRunner
+            self.runners["video"] = WanPipelineRunner(self)
+        except ImportError as e:
+            _log("BACKEND", f"WanPipelineRunner not available: {e}", "warning")
+
+        if self.runners:
+            _log("BACKEND", f"Runners: {list(self.runners.keys())}")
+    def run(self, family: str, **kwargs) -> Dict[str, Any]:
+        """
+        Dispatch generation to the appropriate runner.
+        
+        Usage:
+            backend.run("image", prompt="...", model="qwen_image", ...)
+            backend.run("video", prompt="...", task="wan_i2v_a14b", ...)
+        """
+        runner = self.runners.get(family)
+        if runner:
+            return runner.generate(**kwargs)
+        raise ValueError(
+            f"No runner for family '{family}'. "
+            f"Available: {list(self.runners.keys())}. "
+            f"Ensure pipeline runner files are in the core/ directory."
+        )
 
     # ------------------------------------------------------------------
     # DiffSynth environment setup
@@ -212,6 +273,48 @@ class DiffSynthBackend:
         _log("BACKEND", f"LoRA not found: {lora_name}", "warning")
         return None
 
+    def _resolve_lora_specs(
+        self,
+        lora: Optional[str],
+        lora_multiplier: float,
+        loras: Optional[List[Dict[str, Any]]],
+    ) -> List[tuple]:
+        """
+        Normalize LoRA inputs into a list of (resolved_path, alpha) tuples.
+        
+        Handles both the legacy single-LoRA params (lora + lora_multiplier)
+        and the new multi-LoRA list (loras). They combine — the legacy param
+        is prepended to the list if both are provided.
+        
+        Returns empty list if no LoRAs requested or none could be resolved.
+        """
+        specs = []
+
+        # Legacy single-LoRA param
+        if lora:
+            path = self._resolve_lora_path(lora)
+            if path:
+                specs.append((path, lora_multiplier))
+            else:
+                _log("BACKEND", f"LoRA not found, skipping: {lora}", "warning")
+
+        # Multi-LoRA list
+        if loras:
+            for entry in loras:
+                name = entry.get("name") or entry.get("path", "")
+                alpha = entry.get("alpha", 1.0)
+                if not name:
+                    continue
+                path = self._resolve_lora_path(name)
+                if path:
+                    # Avoid duplicates (same path already added via legacy param)
+                    if not any(p == path for p, _ in specs):
+                        specs.append((path, alpha))
+                else:
+                    _log("BACKEND", f"LoRA not found, skipping: {name}", "warning")
+
+        return specs
+
     def _load_model_lora(self, pipeline, lora_cfg: dict):
         """
         Load a model-bundled LoRA (e.g. Control-Union) from local models directory.
@@ -243,57 +346,81 @@ class DiffSynthBackend:
         pipeline.load_lora(target_module, str(lora_path), alpha=alpha)
         _log("BACKEND", f"Model LoRA loaded: {lora_path.name}", "success")
 
-    def _apply_user_lora(self, pipeline, cache_key: str, lora_path: str, alpha: float = 1.0):
+    def _apply_user_loras(self, pipeline, cache_key: str, lora_specs: List[tuple]):
         """
-        Load a user-selected LoRA onto a pipeline.
+        Load one or more user-selected LoRAs onto a pipeline.
         
-        For models with bundled LoRAs: clears all, reloads model LoRA, then adds user LoRA on top.
-        For models without bundled LoRAs: just loads the user LoRA.
+        Args:
+            pipeline: The DiffSynth pipeline instance
+            cache_key: Pipeline cache key (model_type:preset)
+            lora_specs: List of (resolved_path, alpha) tuples
         
-        Tracks state to avoid unnecessary reload if same LoRA is already active.
+        Compares the full spec list (paths + alphas) against what's currently
+        loaded. Only clears and rebuilds when something actually changed.
+        
+        For models with bundled LoRAs: clears all, reloads model LoRA,
+        then stacks user LoRAs on top.
         """
-        current = self._active_user_lora.get(cache_key)
-        if current == lora_path:
-            _log("BACKEND", f"User LoRA already loaded: {Path(lora_path).stem}")
+        current = self._active_user_loras.get(cache_key, [])
+        if current == lora_specs:
+            names = ", ".join(f"{Path(p).stem}(α={a})" for p, a in lora_specs)
+            _log("BACKEND", f"User LoRA(s) already loaded: {names}")
             return
 
-        # Clear all LoRAs (both model and user)
-        try:
-            pipeline.clear_lora()
-            if current:
-                _log("BACKEND", f"Cleared previous user LoRA: {Path(current).stem}")
-        except Exception as e:
-            _log("BACKEND", f"clear_lora() failed (non-fatal): {e}", "warning")
+        # Something changed — need to rebuild the LoRA stack
+        has_model_lora = cache_key in self._model_lora_config
+        
+        if current or has_model_lora:
+            # Must clear and rebuild when:
+            #   - swapping user LoRAs (current is non-empty), OR
+            #   - pipeline has a model LoRA (e.g. control-union) since
+            #     DiffSynth stacks LoRA deltas additively and the model
+            #     LoRA needs to be reloaded cleanly before user LoRA(s)
+            try:
+                pipeline.clear_lora()
+                if current:
+                    names = ", ".join(Path(p).stem for p, _ in current)
+                    _log("BACKEND", f"Cleared previous user LoRA(s): {names}")
+                elif has_model_lora:
+                    _log("BACKEND", "Cleared model LoRA for clean rebuild")
+            except Exception as e:
+                _log("BACKEND", f"clear_lora() failed (non-fatal): {e}", "warning")
 
-        # Reload model LoRA if this pipeline has one
-        model_lora_cfg = self._model_lora_config.get(cache_key)
-        if model_lora_cfg:
-            self._load_model_lora(pipeline, model_lora_cfg)
+            # Reload model LoRA since clear_lora() nukes everything
+            model_lora_cfg = self._model_lora_config.get(cache_key)
+            if model_lora_cfg:
+                self._load_model_lora(pipeline, model_lora_cfg)
+        # else: no model LoRA, no user LoRAs — just load directly
 
-        # Load user LoRA on top
+        # Load user LoRA(s) on top
         target_module = getattr(pipeline, "dit", None)
         if target_module is None:
             _log("BACKEND", "Pipeline has no 'dit' — cannot load user LoRA", "error")
             return
 
-        _log("BACKEND", f"Loading user LoRA: {Path(lora_path).stem} (α={alpha})")
-        pipeline.load_lora(target_module, lora_path, alpha=alpha)
-        self._active_user_lora[cache_key] = lora_path
-        _log("BACKEND", f"User LoRA active: {Path(lora_path).stem}", "success")
+        for lora_path, alpha in lora_specs:
+            _log("BACKEND", f"Loading user LoRA: {Path(lora_path).stem} (α={alpha})")
+            pipeline.load_lora(target_module, lora_path, alpha=alpha)
 
-    def _clear_user_lora(self, pipeline, cache_key: str):
+        self._active_user_loras[cache_key] = lora_specs
+        names = ", ".join(f"{Path(p).stem}(α={a})" for p, a in lora_specs)
+        _log("BACKEND", f"User LoRA(s) active: {names}", "success")
+
+    def _clear_user_loras(self, pipeline, cache_key: str):
         """
-        Clear user LoRA if one is active.
+        Clear all user LoRAs if any are active.
         
         For models with bundled LoRAs: clears all, then reloads model LoRA.
         For models without bundled LoRAs: just clears.
         """
-        if cache_key not in self._active_user_lora:
+        if cache_key not in self._active_user_loras:
             return
-            
+        
+        current = self._active_user_loras[cache_key]
         try:
             pipeline.clear_lora()
-            _log("BACKEND", f"Cleared user LoRA: {Path(self._active_user_lora[cache_key]).stem}")
+            names = ", ".join(Path(p).stem for p, _ in current)
+            _log("BACKEND", f"Cleared user LoRA(s): {names}")
         except Exception:
             pass
         
@@ -302,7 +429,7 @@ class DiffSynthBackend:
         if model_lora_cfg:
             self._load_model_lora(pipeline, model_lora_cfg)
         
-        del self._active_user_lora[cache_key]
+        del self._active_user_loras[cache_key]
 
     def _resolve_vram_preset(self, preset_name: str = None) -> tuple:
         """
@@ -462,7 +589,7 @@ class DiffSynthBackend:
         for k in stale:
             _log("BACKEND", f"Evicting pipeline (preset changed): {k}")
             del self.pipelines[k]
-            self._active_user_lora.pop(k, None)
+            self._active_user_loras.pop(k, None)
         if stale and torch.cuda.is_available():
             torch.cuda.empty_cache()
 
@@ -480,7 +607,7 @@ class DiffSynthBackend:
             for k in other_family:
                 _log("BACKEND", f"Evicting pipeline (different family): {k}")
                 del self.pipelines[k]
-                self._active_user_lora.pop(k, None)
+                self._active_user_loras.pop(k, None)
                 self._model_lora_config.pop(k, None)
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
@@ -540,495 +667,11 @@ class DiffSynthBackend:
         stale = [k for k in self.pipelines if k.startswith(f"{model_type}:")]
         for k in stale:
             del self.pipelines[k]
-            self._active_user_lora.pop(k, None)
+            self._active_user_loras.pop(k, None)
             self._model_lora_config.pop(k, None)
         if stale and torch.cuda.is_available():
             torch.cuda.empty_cache()
             _log("BACKEND", f"Unloaded pipeline(s): {stale}")
-
-    # ------------------------------------------------------------------
-    # Image generation
-    # ------------------------------------------------------------------
-
-    def generate_image(
-        self,
-        prompt: str,
-        output_path: Path,
-        model: str = "qwen_image",
-        # Size
-        width: int = None,
-        height: int = None,
-        # Generation params
-        seed: Optional[int] = None,
-        steps: Optional[int] = None,
-        guidance_scale: Optional[float] = None,
-        cfg_scale: Optional[float] = None,
-        denoising_strength: Optional[float] = None,
-        negative_prompt: Optional[str] = None,
-        # LoRA (standalone / user-selected, not model-bundled)
-        lora: Optional[str] = None,
-        lora_multiplier: float = 1.0,
-        # Control / edit inputs
-        control_image: Optional[Union[Path, List[Path]]] = None,
-        context_image: Optional[Any] = None,
-        # VRAM
-        vram_preset: Optional[str] = None,
-        # Misc
-        save_latent: bool = True,
-        infer_steps: Optional[int] = None,
-        **kwargs,
-    ) -> Dict[str, Any]:
-        """
-        Generate an image.  Drop-in replacement for QwenImageGenerator.generate().
-        """
-        start_time = time.time()
-        output_path = Path(output_path)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-
-        model_type = self.resolve_model_type(model)
-        entry = self.get_model_entry(model_type)
-        supports = set(entry.get("supports", []))
-        pipe_defaults = dict(entry.get("pipeline_kwargs", {}))
-
-        # Merge with defaults.json
-        defaults = self.defaults_config.get("image", {})
-        width = width or defaults.get("width", 1024)
-        height = height or defaults.get("height", 1024)
-        num_steps = steps or infer_steps or defaults.get("steps", 28)
-        effective_cfg = cfg_scale or guidance_scale or defaults.get("cfg_scale", 5.0)
-        negative_prompt = negative_prompt or defaults.get("negative_prompt", "")
-        denoise = denoising_strength if denoising_strength is not None else defaults.get("denoising_strength", 0.85)
-
-        _log("BACKEND", "=" * 60)
-        _log("BACKEND", "IMAGE GENERATION")
-        _log("BACKEND", f"  Model: {model_type} — {entry.get('description', '')}")
-        _log("BACKEND", f"  Prompt: {prompt[:80]}{'...' if len(prompt) > 80 else ''}")
-        _log("BACKEND", f"  Size: {width}x{height}  Steps: {num_steps}  CFG: {effective_cfg}  Denoise: {denoise}  Seed: {seed}")
-        exponential_shift_mu = kwargs.get('exponential_shift_mu')
-        if exponential_shift_mu is not None:
-            _log("BACKEND", f"  Exponential shift mu: {exponential_shift_mu}")
-        if lora:
-            _log("BACKEND", f"  User LoRA: {lora} (α={lora_multiplier})")
-        _log("BACKEND", "=" * 60)
-
-        pipe = self.get_pipeline(model_type, vram_preset=vram_preset)
-
-        # --- User LoRA ---
-        active_preset = vram_preset or self.defaults_config.get("vram", {}).get("preset", "low")
-        cache_key = f"{model_type}:{active_preset}"
-        
-        if lora:
-            lora_path = self._resolve_lora_path(lora)
-            if lora_path:
-                self._apply_user_lora(pipe, cache_key, lora_path, alpha=lora_multiplier)
-            else:
-                _log("BACKEND", f"LoRA not found, skipping: {lora}", "warning")
-        else:
-            # No LoRA requested — clear any previously loaded user LoRA
-            self._clear_user_lora(pipe, cache_key)
-
-        # --- Build pipe() kwargs ---
-        pipe_kwargs = dict(
-            prompt=prompt,
-            seed=seed,
-            num_inference_steps=num_steps,
-            height=height,
-            width=width,
-            cfg_scale=effective_cfg,
-            denoising_strength=denoise,
-        )
-
-        # Exponential shift mu (Qwen-specific timestep control)
-        exponential_shift_mu = kwargs.get('exponential_shift_mu')
-        if exponential_shift_mu is not None:
-            pipe_kwargs['exponential_shift_mu'] = exponential_shift_mu
-            _log("BACKEND", f"  Exponential shift mu: {exponential_shift_mu}")
-
-        # Negative prompt
-        if "negative_prompt" in supports and negative_prompt:
-            pipe_kwargs["negative_prompt"] = negative_prompt
-
-        # Map semantic inputs to model-specific parameters
-        semantic_inputs = {}
-        if control_image:
-            # For edit_targets, pass as-is (can be list or single)
-            semantic_inputs["edit_targets"] = control_image
-            
-            # For control_input (single image), extract first if list
-            if isinstance(control_image, list):
-                semantic_inputs["control_input"] = control_image[0] if control_image else None
-            else:
-                semantic_inputs["control_input"] = control_image
-                
-        if context_image:
-            semantic_inputs["control_input"] = context_image
-            
-        mapped_inputs = self._map_inputs(model_type, semantic_inputs, width, height)
-        pipe_kwargs.update(mapped_inputs)
-
-        # Merge pipeline_kwargs from models.json
-        pipe_kwargs.update(pipe_defaults)
-
-        # Setup latent capture if requested
-        latent_path = None
-        cleanup_hook = None
-        if save_latent:
-            latent_dir = output_path.parent / "latents"
-            latent_dir.mkdir(exist_ok=True)
-            latent_path = latent_dir / f"{output_path.stem}.latent.pt"
-            cleanup_hook = self._capture_latent_hook(pipe, latent_path)
-            _log("BACKEND", f"Latent capture enabled → {latent_path}")
-
-        try:
-            with torch.inference_mode():
-                image = pipe(**pipe_kwargs)
-            image.save(output_path)
-
-            elapsed = time.time() - start_time
-            _log("BACKEND", f"Image saved: {output_path} ({elapsed:.1f}s)", "success")
-
-            return {
-                "success": True,
-                "image": output_path,
-                "latent": latent_path,
-                "seed_used": seed,
-                "params": {
-                    "prompt": prompt, "seed": seed,
-                    "steps": num_steps, "size": f"{width}x{height}",
-                    "cfg_scale": effective_cfg,
-                    "denoising_strength": denoise,
-                },
-            }
-        except Exception as e:
-            _log("BACKEND", f"Image generation failed: {e}", "error")
-            raise
-        finally:
-            # Always cleanup hook if it was installed
-            if cleanup_hook:
-                cleanup_hook()
-
-    # ------------------------------------------------------------------
-    # Video generation
-    # ------------------------------------------------------------------
-
-    def generate_video(
-        self,
-        prompt: str,
-        output_path: Path,
-        task: str = "wan_t2v_14b",
-        # Size
-        width: int = None,
-        height: int = None,
-        video_length: int = None,
-        # Generation params
-        seed: Optional[int] = None,
-        steps: Optional[int] = None,
-        guidance_scale: Optional[float] = None,
-        cfg_scale: Optional[float] = None,
-        denoising_strength: Optional[float] = None,
-        negative_prompt: Optional[str] = None,
-        # Control inputs
-        image_path: Optional[Path] = None,
-        end_image_path: Optional[Path] = None,
-        control_path: Optional[Path] = None,
-        # LoRA
-        lora: Optional[str] = None,
-        lora_multiplier: float = 1.0,
-        # Progress
-        progress_callback=None,
-        # VRAM
-        vram_preset: Optional[str] = None,
-        # Misc
-        save_latent: bool = True,
-        infer_steps: Optional[int] = None,
-        **kwargs,
-    ) -> Dict[str, Any]:
-        """
-        Generate a video.  Drop-in replacement for WanVideoGenerator.generate_video().
-        """
-        start_time = time.time()
-        output_path = Path(output_path)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-
-        model_type = self.resolve_model_type(task)
-        entry = self.get_model_entry(model_type)
-        supports = set(entry.get("supports", []))
-        pipe_defaults = dict(entry.get("pipeline_kwargs", {}))
-
-        # Merge with defaults.json
-        defaults = self.defaults_config.get("video", {})
-        width = width or defaults.get("width") or 832
-        height = height or defaults.get("height") or 480
-        num_frames = video_length or defaults.get("video_length", 81)
-        num_steps = steps or infer_steps or defaults.get("steps", 50)
-        effective_cfg = cfg_scale or guidance_scale or defaults.get("cfg_scale", 6.0)
-        negative_prompt = negative_prompt or defaults.get("negative_prompt", "")
-        denoise = denoising_strength if denoising_strength is not None else defaults.get("denoising_strength", 1.0)
-
-        # Wan-specific params from kwargs or defaults
-        sigma_shift = kwargs.get('sigma_shift') if kwargs.get('sigma_shift') is not None else defaults.get("sigma_shift", 5.0)
-        motion_bucket_id = kwargs.get('motion_bucket_id') if 'motion_bucket_id' in kwargs else defaults.get("motion_bucket_id")
-        sliding_window_size = defaults.get("sliding_window_size")
-        sliding_window_stride = defaults.get("sliding_window_stride")
-
-        if lora:
-            _log("BACKEND", f"  LoRA: {lora} (α={lora_multiplier})")
-
-        _log("BACKEND", "=" * 60)
-        _log("BACKEND", "VIDEO GENERATION")
-        _log("BACKEND", f"  Task: {task} → {model_type} — {entry.get('description', '')}")
-        _log("BACKEND", f"  Prompt: {prompt[:80]}{'...' if len(prompt) > 80 else ''}")
-        _log("BACKEND", f"  Size: {width}x{height}  Frames: {num_frames}  Steps: {num_steps}  CFG: {effective_cfg}  Denoise: {denoise}  Seed: {seed}")
-        _log("BACKEND", f"  sigma_shift: {sigma_shift}  motion_bucket_id: {motion_bucket_id}")
-        if image_path:
-            _log("BACKEND", f"  Input image: {image_path}")
-        if control_path:
-            _log("BACKEND", f"  Control path: {control_path}")
-        if pipe_defaults:
-            _log("BACKEND", f"  Pipeline kwargs: {pipe_defaults}")
-        _log("BACKEND", "=" * 60)
-
-        if progress_callback:
-            progress_callback("loading_models", 0, 1)
-
-        pipe = self.get_pipeline(model_type, vram_preset=vram_preset)
-
-        # --- User LoRA ---
-        active_preset = vram_preset or self.defaults_config.get("vram", {}).get("preset", "low")
-        cache_key = f"{model_type}:{active_preset}"
-        
-        if lora:
-            lora_path = self._resolve_lora_path(lora)
-            if lora_path:
-                self._apply_user_lora(pipe, cache_key, lora_path, alpha=lora_multiplier)
-            else:
-                _log("BACKEND", f"LoRA not found, skipping: {lora}", "warning")
-        else:
-            # No LoRA requested — clear any previously loaded user LoRA
-            self._clear_user_lora(pipe, cache_key)
-
-        if progress_callback:
-            progress_callback("generating", 0, num_steps)
-
-        # --- Build pipe() kwargs ---
-        pipe_kwargs = dict(
-            prompt=prompt,
-            seed=seed,
-            num_inference_steps=num_steps,
-            height=height,
-            width=width,
-            num_frames=num_frames,
-            cfg_scale=effective_cfg,
-            denoising_strength=denoise,
-            sigma_shift=sigma_shift,
-        )
-
-        # Optional Wan params — only pass when explicitly set
-        if sliding_window_size is not None:
-            pipe_kwargs["sliding_window_size"] = sliding_window_size
-        if sliding_window_stride is not None:
-            pipe_kwargs["sliding_window_stride"] = sliding_window_stride
-        if motion_bucket_id is not None:
-            pipe_kwargs["motion_bucket_id"] = motion_bucket_id
-
-        # Negative prompt
-        if "negative_prompt" in supports and negative_prompt:
-            pipe_kwargs["negative_prompt"] = negative_prompt
-
-        # Map semantic inputs to model-specific parameters
-        semantic_inputs = {}
-        if image_path:
-            semantic_inputs["reference_image"] = image_path
-        if control_path:
-            semantic_inputs["control_input"] = control_path
-            
-        mapped_inputs = self._map_inputs(model_type, semantic_inputs, width, height)
-        pipe_kwargs.update(mapped_inputs)
-
-        # Tiled (explicit from supports, may also come from pipe_defaults)
-        if "tiled" in supports and "tiled" not in pipe_defaults:
-            pipe_kwargs["tiled"] = True
-
-        # Merge pipeline_kwargs from models.json (switch_DiT_boundary, tiled, etc.)
-        pipe_kwargs.update(pipe_defaults)
-
-        # Setup latent capture if requested
-        latent_path = None
-        cleanup_hook = None
-        if save_latent:
-            latent_dir = output_path.parent / "latents"
-            latent_dir.mkdir(exist_ok=True)
-            latent_path = latent_dir / f"{output_path.stem}.latent.pt"
-            cleanup_hook = self._capture_latent_hook(pipe, latent_path)
-            _log("BACKEND", f"Latent capture enabled → {latent_path}")
-
-        try:
-            with torch.inference_mode():
-                video = pipe(**pipe_kwargs)
-
-            if progress_callback:
-                progress_callback("saving", 0, 1)
-
-            from diffsynth.utils.data import save_video
-            # quality=8 is visually identical for preview MP4 and encodes 3-5x
-            # faster than quality=5. Lossless output goes through latent→EXR path.
-            save_video(video, str(output_path), fps=24, quality=8)
-
-            elapsed = time.time() - start_time
-            _log("BACKEND", f"Video saved: {output_path} ({elapsed:.1f}s)", "success")
-
-            if progress_callback:
-                progress_callback("complete", 1, 1)
-
-            return {
-                "success": True,
-                "video": output_path,
-                "latent": latent_path,
-                "seed_used": seed,
-                "params": {
-                    "prompt": prompt, "seed": seed,
-                    "steps": num_steps, "size": f"{width}x{height}",
-                    "frames": num_frames, "cfg_scale": effective_cfg,
-                    "denoising_strength": denoise, "sigma_shift": sigma_shift,
-                },
-            }
-        except Exception as e:
-            _log("BACKEND", f"Video generation failed: {e}", "error")
-            raise
-        finally:
-            # Always cleanup hook if it was installed
-            if cleanup_hook:
-                cleanup_hook()
-
-    # ------------------------------------------------------------------
-    # Input helpers
-    # ------------------------------------------------------------------
-
-    def _load_image(self, path, width: int = None, height: int = None) -> Optional[Image.Image]:
-        """Load a PIL Image, optionally resizing."""
-        if path is None:
-            return None
-            
-        # Handle unexpected list (should be caught earlier, but be defensive)
-        if isinstance(path, list):
-            if not path:
-                return None
-            _log("BACKEND", f"Warning: _load_image received list, using first item", "warning")
-            path = path[0]
-            
-        p = Path(str(path))
-        if not p.exists():
-            _log("BACKEND", f"Image not found: {p}", "warning")
-            return None
-        img = Image.open(str(p))
-        if width and height:
-            img = img.resize((width, height))
-        return img
-
-    def _resolve_image_list(
-        self, control_image: Optional[Union[Path, List[Path]]]
-    ) -> Optional[List[Image.Image]]:
-        """Convert control_image path(s) to a list of PIL Images for edit mode."""
-        if not control_image:
-            return None
-        paths = control_image if isinstance(control_image, list) else [control_image]
-        images = []
-        for p in paths:
-            p = Path(str(p))
-            if p.exists():
-                images.append(Image.open(str(p)))
-        return images if images else None
-
-    def _load_video_data(self, source, height: int, width: int):
-        """Load a video source into DiffSynth VideoData for VACE."""
-        from diffsynth.utils.data import VideoData
-
-        if hasattr(source, 'raw_data'):
-            return source
-
-        p = Path(str(source))
-        if p.exists() and p.suffix in ('.mp4', '.avi', '.mov', '.mkv'):
-            return VideoData(str(p), height=height, width=width)
-        if p.is_dir():
-            return VideoData(str(p), height=height, width=width)
-
-        _log("BACKEND", f"Could not load video data from: {source}", "warning")
-        return None
-
-    def _map_inputs(
-        self,
-        model_type: str,
-        semantic_inputs: dict,
-        width: int,
-        height: int,
-    ) -> dict:
-        """
-        Map semantic inputs to model-specific parameters using parameter_map.
-        
-        Args:
-            model_type: Model identifier (e.g. "qwen_image_edit_2511")
-            semantic_inputs: Dict with semantic keys like:
-                - reference_image: Path to style/reference image
-                - control_input: Path to control video/image
-                - edit_targets: Path or list of paths to images to edit
-            width, height: Target dimensions for loading
-            
-        Returns:
-            Dict of model-specific pipe() kwargs ready to pass to pipeline
-        """
-        entry = self.get_model_entry(model_type)
-        param_map = entry.get("parameter_map", {})
-        
-        pipe_kwargs = {}
-        
-        for semantic_name, model_param in param_map.items():
-            if semantic_name not in semantic_inputs:
-                continue
-                
-            value = semantic_inputs[semantic_name]
-            if value is None:
-                continue
-            
-            # Map to model-specific parameter and format
-            if model_param == "edit_image":
-                # Qwen-Edit wants list of PIL Images
-                images = self._resolve_image_list(value)
-                if images:
-                    pipe_kwargs["edit_image"] = images
-                    _log("BACKEND", f"  Mapped edit_targets → edit_image: {len(images)} images")
-                    
-            elif model_param == "context_image":
-                # Control-Union wants single PIL Image
-                img = self._load_image(value, width, height)
-                if img:
-                    pipe_kwargs["context_image"] = img
-                    _log("BACKEND", f"  Mapped control_input → context_image")
-                    
-            elif model_param == "input_image":
-                # Wan i2v wants single PIL Image
-                img = self._load_image(value, width, height)
-                if img:
-                    pipe_kwargs["input_image"] = img
-                    _log("BACKEND", f"  Mapped reference_image → input_image")
-                    
-            elif model_param == "vace_video":
-                # Wan VACE wants VideoData for control
-                vace = self._load_video_data(value, height, width)
-                if vace:
-                    pipe_kwargs["vace_video"] = vace
-                    _log("BACKEND", f"  Mapped control_input → vace_video")
-                    
-            elif model_param == "vace_reference_image":
-                # Wan VACE wants PIL Image for reference
-                img = self._load_image(value, width, height)
-                if img:
-                    pipe_kwargs["vace_reference_image"] = img
-                    _log("BACKEND", f"  Mapped reference_image → vace_reference_image")
-            
-            else:
-                _log("BACKEND", f"  Unknown parameter mapping: {semantic_name} → {model_param}", "warning")
-        
-        return pipe_kwargs
 
     # ------------------------------------------------------------------
     # Latent capture and management

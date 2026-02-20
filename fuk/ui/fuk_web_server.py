@@ -784,7 +784,8 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
         
         # Generate using DiffSynth backend
         result = await asyncio.to_thread(
-            generation_backend.generate_image,
+            generation_backend.run,
+            "image",
             prompt=request.prompt,
             output_path=paths["generated_png"],
             model=request.model,
@@ -956,7 +957,8 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
         
         # Generate video using DiffSynth backend
         result = await asyncio.to_thread(
-            generation_backend.generate_video,
+            generation_backend.run,
+            "video",
             prompt=request.prompt,
             output_path=paths["generated_mp4"],
             task=request.task,
