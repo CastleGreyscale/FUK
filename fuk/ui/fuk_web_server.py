@@ -596,6 +596,7 @@ class ImageGenerationRequest(BaseModel):
     vram_preset: Optional[str] = None  # none, low, medium, high
     denoising_strength: Optional[float] = None  # Edit strength when control images present
     exponential_shift_mu: Optional[float] = None  # Sampling timestep control (null = auto)
+    eligen_source: Optional[str] = None  # Path to EliGen masks (directory, .psd, or .ora)
     
 class VideoGenerationRequest(BaseModel):
     prompt: str
@@ -779,6 +780,19 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
             if resolved and resolved.exists():
                 control_images.append(resolved)
                 log.info("ImageGen", f"Control image: {resolved}")
+
+        # Handle EliGen mask source (directory or .psd/.ora file)
+        eligen_source_abs = None
+        if request.eligen_source:
+            eligen_path = Path(request.eligen_source)
+            if eligen_path.is_absolute() and (eligen_path.exists()):
+                eligen_source_abs = eligen_path
+            else:
+                resolved = resolve_input_path(request.eligen_source)
+                if resolved and resolved.exists():
+                    eligen_source_abs = resolved
+            if eligen_source_abs:
+                log.info("ImageGen", f"EliGen source: {eligen_source_abs}")
         
         log.info("ImageGen", "Starting generation...")
         
@@ -801,6 +815,7 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
             vram_preset=request.vram_preset,
             denoising_strength=request.denoising_strength,
             exponential_shift_mu=request.exponential_shift_mu,
+            eligen_source=eligen_source_abs, 
         )
         
         log.success("ImageGen", "Generation complete!")

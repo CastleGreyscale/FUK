@@ -6,7 +6,7 @@ Handles all Qwen-family image generation:
   - qwen_image_2512 (improved quality)
   - qwen_edit (multi-image editing)
   - qwen_control_union (in-context structural control)
-  - (future Qwen variants go here)
+  - qwen_eligen (entity-level composition via masks + prompts)
 
 Each variant is driven by models.json — adding a new Qwen model
 typically requires zero code changes here. Only override when a
@@ -52,6 +52,8 @@ class QwenPipelineRunner(PipelineRunner):
         # Control / edit inputs
         control_image: Optional[Union[Path, List[Path]]] = None,
         context_image: Optional[Any] = None,
+        # EliGen — entity masks (directory of PNGs or .psd file)
+        eligen_source: Optional[Union[str, Path]] = None,
         # VRAM
         vram_preset: Optional[str] = None,
         # Misc
@@ -80,7 +82,7 @@ class QwenPipelineRunner(PipelineRunner):
                    else defaults.get("denoising_strength", 0.85))
 
         # --- Logging ---
-        self.log_generation_header("IMAGE GENERATION", model_type, entry, {
+        log_params = {
             "prompt": prompt,
             "size": f"{width}x{height}",
             "steps": num_steps,
@@ -90,7 +92,10 @@ class QwenPipelineRunner(PipelineRunner):
             "exponential_shift_mu": kwargs.get("exponential_shift_mu"),
             "lora": f"{lora} (α={lora_multiplier})" if lora else None,
             "loras": [f"{l.get('name','?')} (α={l.get('alpha', 1.0)})" for l in (loras or [])],
-        })
+        }
+        if eligen_source:
+            log_params["eligen_source"] = str(eligen_source)
+        self.log_generation_header("IMAGE GENERATION", model_type, entry, log_params)
 
         # --- Pipeline + LoRA ---
         pipe = self.get_pipeline(model_type, vram_preset=vram_preset)
@@ -131,6 +136,11 @@ class QwenPipelineRunner(PipelineRunner):
         mapped_inputs = self.map_inputs(model_type, semantic_inputs, width, height)
         pipe_kwargs.update(mapped_inputs)
 
+        # --- EliGen entity masks ---
+        if eligen_source and "eligen" in supports:
+            eligen_kwargs = self._load_eligen_entities(eligen_source, width, height)
+            pipe_kwargs.update(eligen_kwargs)
+
         # Merge pipeline_kwargs from models.json
         pipe_kwargs.update(pipe_defaults)
 
@@ -164,3 +174,43 @@ class QwenPipelineRunner(PipelineRunner):
         finally:
             if cleanup_hook:
                 cleanup_hook()
+
+    # ------------------------------------------------------------------
+    # EliGen support
+    # ------------------------------------------------------------------
+
+    def _load_eligen_entities(
+        self,
+        source: Union[str, Path],
+        width: int,
+        height: int,
+    ) -> dict:
+        """
+        Load EliGen entity masks from a directory or PSD file.
+        
+        Returns pipe kwargs: eligen_entity_prompts + eligen_entity_masks
+        """
+        from eligen_loader import EliGenLoader
+
+        source = Path(source)
+        if not source.exists():
+            _log(self.log_prefix, f"EliGen source not found: {source}", "warning")
+            return {}
+
+        loader = EliGenLoader()
+        entities = loader.load(source, width=width, height=height)
+
+        if not entities:
+            _log(self.log_prefix, "No EliGen entities found", "warning")
+            return {}
+
+        prompts = [prompt for prompt, _ in entities]
+        masks = [mask for _, mask in entities]
+
+        _log(self.log_prefix,
+             f"EliGen: {len(entities)} entities — {', '.join(prompts)}", "success")
+
+        return {
+            "eligen_entity_prompts": prompts,
+            "eligen_entity_masks": masks,
+        }

@@ -148,6 +148,8 @@ class WanPipelineRunner(PipelineRunner):
         semantic_inputs = {}
         if image_path:
             semantic_inputs["reference_image"] = image_path
+        if end_image_path:                              # <-- ADD
+            semantic_inputs["end_image"] = end_image_path
         if control_path:
             semantic_inputs["control_input"] = control_path
 
@@ -219,6 +221,12 @@ class WanPipelineRunner(PipelineRunner):
             if img:
                 _log(self.log_prefix, f"  Mapped {semantic_name} → vace_reference_image")
                 return {"vace_reference_image": img}
+            return None
+        if model_param == "end_image":
+            img = self.load_image(value, width, height)
+            if img:
+                _log(self.log_prefix, f"  Mapped {semantic_name} → end_image")
+                return {"end_image": img}
             return None
 
         # Fall back to base implementation for common types

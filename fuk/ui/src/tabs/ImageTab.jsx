@@ -6,7 +6,7 @@
  */
 
 import { useEffect, useCallback, useMemo, useRef } from 'react';
-import { Camera, CheckCircle, X, Pipeline } from '../../src/components/Icons';
+import { Camera, CheckCircle, X, Pipeline, FolderOpen } from '../../src/components/Icons';
 import MediaUploader from '../components/MediaUploader';
 import ZoomableImage from '../components/ZoomableImage';
 import SeedControl from '../components/SeedControl';
@@ -68,6 +68,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
     edit_strength: imageDefaults.edit_strength ?? 0.85,
     exponential_shift_mu: imageDefaults.exponential_shift_mu ?? null,
     control_image_paths: imageDefaults.control_image_paths ?? [],
+    eligen_source: imageDefaults.eligen_source ?? '',
     vram_preset: config?.models?.vram_preset_default ?? 'low',
   }), [imageDefaults]);
   
@@ -237,6 +238,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
         : null,
       // Pass exponential_shift_mu (null = auto-calculate)
       exponential_shift_mu: formData.exponential_shift_mu,
+      eligen_source: formData.eligen_source || null,
     };
     
     console.log('Generation payload:', payload);
@@ -361,6 +363,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
           <div className="fuk-card">
             <h3 className="fuk-card-title fuk-mb-3">Image Tools</h3>
             
+            {/* Control Images — for edit and control-union models */}
             {(modelSupports(formData.model, 'edit_image') || modelSupports(formData.model, 'context_image')) ? (
               <>
                 <div className="fuk-form-group-compact">
@@ -408,11 +411,98 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                   Upload one or more images to guide the generation.
                 </p>
               </>
+
+            /* EliGen — entity composition masks */
+            ) : modelSupports(formData.model, 'eligen') ? (
+              <>
+                <div className="fuk-form-group-compact">
+                  <label className="fuk-label">Entity Masks</label>
+                  <div className="fuk-input-inline">
+                    <input
+                      type="text"
+                      className="fuk-input fuk-input--flex-2"
+                      value={formData.eligen_source || ''}
+                      onChange={(e) => setFormData({...formData, eligen_source: e.target.value})}
+                      placeholder="/path/to/masks/ or .psd / .ora file"
+                      disabled={generating}
+                    />
+                  </div>
+                  <div className="fuk-input-inline fuk-mt-2" style={{ gap: '0.5rem' }}>
+                    <button
+                      className="fuk-btn fuk-btn-secondary"
+                      style={{ flex: 1 }}
+                      disabled={generating}
+                      onClick={async () => {
+                        try {
+                          const res = await fetch('/api/browser/directory', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ title: 'Select EliGen Masks Folder' }),
+                          });
+                          const data = await res.json();
+                          if (data.success && data.directory) {
+                            setFormData(prev => ({ ...prev, eligen_source: data.directory }));
+                          }
+                        } catch (err) { console.error('Browse folder failed:', err); }
+                      }}
+                    >
+                      Browse Folder
+                    </button>
+                    <button
+                      className="fuk-btn fuk-btn-secondary"
+                      style={{ flex: 1 }}
+                      disabled={generating}
+                      onClick={async () => {
+                        try {
+                          const res = await fetch('/api/browser/open', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                              title: 'Select EliGen Mask File (.psd / .ora)',
+                              multiple: false,
+                              detect_sequences: false,
+                              filter: 'all',
+                            }),
+                          });
+                          const data = await res.json();
+                          if (data.success && data.files?.length > 0) {
+                            setFormData(prev => ({ ...prev, eligen_source: data.files[0].path }));
+                          }
+                        } catch (err) { console.error('Browse file failed:', err); }
+                      }}
+                    >
+                      Browse File
+                    </button>
+                  </div>
+                </div>
+                
+                {formData.eligen_source && (
+                  <div className="fuk-form-group-compact fuk-mt-2">
+                    <div style={{ 
+                      padding: '0.5rem 0.75rem',
+                      background: 'rgba(255,255,255,0.03)',
+                      borderRadius: '4px',
+                      fontSize: '0.8rem',
+                      color: 'var(--fuk-text-secondary)',
+                      wordBreak: 'break-all',
+                    }}>
+                      {formData.eligen_source}
+                    </div>
+                  </div>
+                )}
+                
+                <p className="fuk-help-text fuk-mt-2">
+                  Point to a folder of mask PNGs (filename = entity prompt) or a 
+                  layered file (.psd / .ora — layer name = entity prompt).
+                  Paint white where each entity goes, black elsewhere.
+                </p>
+              </>
+
             ) : (
               <div className="fuk-empty-state">
                 <Camera className="fuk-empty-state-icon" />
                 <p className="fuk-empty-state-text">
-                  Select an Edit or Control model<br />to enable image tools
+                  Select an Edit, Control, or EliGen model<br />to enable image tools
                 </p>
               </div>
             )}

@@ -139,11 +139,16 @@ class DiffSynthBackend:
         try:
             from wan_pipeline import WanPipelineRunner
             self.runners["video"] = WanPipelineRunner(self)
-        except ImportError as e:
-            _log("BACKEND", f"WanPipelineRunner not available: {e}", "warning")
+        except ImportError:
+            _log("BACKEND", "WanPipelineRunner not found — using inline generate_video()", "warning")
+
+        # Future runners:
+        # from chained_pipeline import ChainedPipelineRunner
+        # self.runners["chain"] = ChainedPipelineRunner(self)
 
         if self.runners:
             _log("BACKEND", f"Runners: {list(self.runners.keys())}")
+
     def run(self, family: str, **kwargs) -> Dict[str, Any]:
         """
         Dispatch generation to the appropriate runner.
