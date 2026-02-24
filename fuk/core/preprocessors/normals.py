@@ -41,7 +41,7 @@ class NormalsPreprocessor(BasePreprocessor):
     def __init__(
         self,
         method: NormalsMethod = NormalsMethod.FROM_DEPTH,
-        depth_model: DepthModel = DepthModel.DEPTH_ANYTHING_V2,
+        depth_model: DepthModel = DepthModel.DA3_MONO_LARGE,
         config_path: Optional[Path] = None
     ):
         super().__init__(config_path)

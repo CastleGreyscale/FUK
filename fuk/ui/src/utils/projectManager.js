@@ -217,6 +217,8 @@ export function createEmptyProjectState(defaults = {}) {
       lastLayersPreview: null,
       lastLayersMeta: null,
       lastExportPath: null,
+      lastUploadDir: null,    // Last directory used when browsing for source files
+      lastExportDir: null,    // Last directory used when choosing export destination
     },
     
     notes: '',

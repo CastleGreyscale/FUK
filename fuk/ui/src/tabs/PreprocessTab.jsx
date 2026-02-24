@@ -3,15 +3,19 @@
  * Image/Video preprocessing for control inputs: Canny, OpenPose, Depth
  * Supports both single images and frame-by-frame video processing
  * 
- * Updated: VideoSyncController for synchronized video comparison
+ * Updated: Task system integration with GenerationModal for console output
  */
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Pipeline, CheckCircle, Camera, Film, AlertCircle, Folder } from '../components/Icons';
 import MediaUploader, { isVideoFile } from '../components/MediaUploader';
 import ZoomableImage from '../components/ZoomableImage';
+import GenerationModal from '../components/GenerationModal';
 import { useLocalStorage } from '../hooks/useLocalStorage';
+import { useGeneration } from '../hooks/useGeneration';
+import { startTask } from '../utils/api';
 import { buildImageUrl } from '../utils/constants';
+import { formatTime } from '../utils/helpers';
 import Footer from '../components/Footer';
 
 const API_URL = '/api';
@@ -46,14 +50,26 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
   // UI state
   const [selectedMethod, setSelectedMethod] = useState('canny');
   const [sourceInput, setSourceInput] = useState(null);
-  const [processing, setProcessing] = useState(false);
   const [result, setResult] = useState(null);
-  const [error, setError] = useState(null);
+  const [localError, setLocalError] = useState(null);  // For validation errors only
   
-  // Timer state
-  const [startTime, setStartTime] = useState(null);
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const mountedRef = useRef(true);
+  // Generation state (replaces local processing/timer)
+  const {
+    generating,
+    progress,
+    result: genResult,
+    error: genError,
+    elapsedSeconds,
+    consoleLog,
+    showModal,
+    startGeneration,
+    cancel,
+    closeModal,
+    reset: resetGeneration,
+  } = useGeneration();
+
+  // Combine errors
+  const error = genError || localError;
   
   // Track if we've restored from project state
   const hasRestoredRef = useRef(false);
@@ -79,24 +95,6 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
   useEffect(() => {
     settingsRef.current = settings;
   }, [settings]);
-  
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => { mountedRef.current = false; };
-  }, []);
-  
-  // Timer effect
-  useEffect(() => {
-    if (!processing || !startTime) return;
-    
-    const interval = setInterval(() => {
-      if (mountedRef.current) {
-        setElapsedSeconds(Math.floor((Date.now() - startTime) / 1000));
-      }
-    }, 1000);
-    
-    return () => clearInterval(interval);
-  }, [processing, startTime]);
   
   // Reset restoration flag when leaving the tab
   useEffect(() => {
@@ -159,9 +157,59 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
   useEffect(() => {
     setResult(null);
     setSourceInput(null);
-    setError(null);
+    setLocalError(null);
+    resetGeneration();
     hasRestoredRef.current = false; // Allow restoration for new project
   }, [project?.currentFilename]);
+  
+  // --- Bridge: when task completes, extract tab-specific result ---
+  useEffect(() => {
+    if (!genResult || genResult.status !== 'complete' || !genResult.result) return;
+    
+    const data = genResult.result;
+    console.log('[PreprocessTab] Task complete, extracting result:', data);
+    
+    // Handle response - use preview_url for sequences, output_url for videos/images
+    const displayUrl = data.is_sequence 
+      ? (data.preview_url || data.output_url) 
+      : (data.output_url || data.url);
+    
+    const newResult = {
+      ...data,
+      isVideo,
+      url: displayUrl,
+      isSequence: data.is_sequence || false,
+      sequenceUrl: data.is_sequence ? data.output_url : null,
+      frames: data.frames || [],
+    };
+    
+    setResult(newResult);
+    
+    // Save to project lastState for cross-tab persistence
+    if (project?.updateLastState) {
+      project.updateLastState({
+        lastPreprocessPreview: displayUrl,
+        lastPreprocessMeta: {
+          isVideo,
+          isSequence: data.is_sequence || false,
+          method: selectedMethod,
+          sourceInput,
+          frameCount: data.frame_count || 0,
+          params: currentSettings,
+        },
+        activeTab: 'preprocess',
+      });
+    }
+    
+    // Notify history to refresh
+    window.dispatchEvent(new CustomEvent('fuk-generation-complete', {
+      detail: { 
+        type: 'preprocess',
+        method: selectedMethod,
+        result: data,
+      }
+    }));
+  }, [genResult]);
   
   const updateSettings = useCallback((methodUpdates) => {
     const currentSettings = settingsRef.current;
@@ -215,21 +263,18 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
     if (newPath !== sourceInput) {
       setSourceInput(newPath);
       setResult(null);
-      setError(null);
+      setLocalError(null);
     }
   };
   
-  // Run preprocessing
+  // Run preprocessing via task system
   const handleProcess = async () => {
     if (!sourceInput) {
       alert('Please select a source image or video');
       return;
     }
     
-    setProcessing(true);
-    setStartTime(Date.now());
-    setElapsedSeconds(0);
-    setError(null);
+    setLocalError(null);
     setResult(null);
     
     try {
@@ -245,83 +290,25 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
         console.log('[OpenPose] Payload being sent:', payload);
       }
       
-      let endpoint;
+      let taskType;
       
       if (isVideo) {
-        // Video processing
-        endpoint = `${API_URL}/preprocess/video`;
+        taskType = 'preprocess_video';
         payload.video_path = sourceInput;
         payload.output_mode = videoSettings.output_mode;
       } else {
-        // Image processing
-        endpoint = `${API_URL}/preprocess`;
+        taskType = 'preprocess';
         payload.image_path = sourceInput;
       }
       
-      console.log(`Preprocessing (${isVideo ? 'video' : 'image'}):`, payload);
+      console.log(`[PreprocessTab] Starting task (${taskType}):`, payload);
       
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({ detail: res.statusText }));
-        throw new Error(errorData.detail || `Preprocessing failed: ${res.statusText}`);
-      }
-      
-      const data = await res.json();
-      console.log('Preprocessing complete:', data);
-      
-      // Handle response - use preview_url for sequences, output_url for videos/images
-      const displayUrl = data.is_sequence 
-        ? (data.preview_url || data.output_url) 
-        : (data.output_url || data.url);
-      
-      const newResult = {
-        ...data,
-        isVideo,
-        url: displayUrl,
-        // Keep is_sequence flag for display logic
-        isSequence: data.is_sequence || false,
-        // For sequences, store the directory URL separately
-        sequenceUrl: data.is_sequence ? data.output_url : null,
-        frames: data.frames || [],
-      };
-      
-      setResult(newResult);
-      
-      // Save to project lastState for cross-tab persistence
-      if (project?.updateLastState) {
-        project.updateLastState({
-          lastPreprocessPreview: displayUrl,
-          lastPreprocessMeta: {
-            isVideo,
-            isSequence: data.is_sequence || false,
-            method: selectedMethod,
-            sourceInput,
-            frameCount: data.frame_count || 0,
-            params: currentSettings,
-          },
-          activeTab: 'preprocess',
-        });
-      }
-      
-      // Notify history to refresh
-      window.dispatchEvent(new CustomEvent('fuk-generation-complete', {
-        detail: { 
-          type: 'preprocess',
-          method: selectedMethod,
-          result: data,
-        }
-      }));
+      const data = await startTask(taskType, payload);
+      startGeneration(data.generation_id);
       
     } catch (err) {
       console.error('Preprocessing error:', err);
-      setError(err.message);
-    } finally {
-      setProcessing(false);
+      setLocalError(err.message);
     }
   };
   
@@ -582,14 +569,6 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
   
   const methodTitle = selectedMethod.charAt(0).toUpperCase() + selectedMethod.slice(1);
   
-  // Format elapsed time
-  const formatTime = (seconds) => {
-    if (seconds < 60) return `${seconds}s`;
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}m ${secs}s`;
-  };
-  
   // Render the result preview - handles video, sequence, and image
   const renderResultPreview = () => {
     if (!result) return null;
@@ -722,7 +701,7 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
                 <div className="fuk-placeholder">
                   <Pipeline className="fuk-placeholder-icon" />
                   <p className="fuk-placeholder-text">
-                    {processing ? `Processing... ${formatTime(elapsedSeconds)}` : 'Click Process to generate'}
+                    {generating ? `Processing... ${formatTime(elapsedSeconds)}` : 'Click Process to generate'}
                   </p>
                 </div>
               </div>
@@ -741,8 +720,10 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
             <MediaUploader
               media={sourceInput ? [{ path: sourceInput }] : []}
               onMediaChange={handleSourceInputChange}
-              disabled={processing}
+              disabled={generating}
               accept="all"
+              initialDir={project?.projectState?.lastState?.lastUploadDir}
+              onDirectorySelected={(dir) => project?.updateLastState?.({ lastUploadDir: dir })}
             />
             
             <p className="fuk-help-text">
@@ -758,7 +739,7 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
                     className="fuk-select"
                     value={videoSettings.output_mode}
                     onChange={(e) => setVideoSettings({ output_mode: e.target.value })}
-                    disabled={processing}
+                    disabled={generating}
                   >
                     <option value="mp4">MP4 Video</option>
                     <option value="sequence">Image Sequence</option>
@@ -784,9 +765,9 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
                 onChange={(e) => {
                   setSelectedMethod(e.target.value);
                   setResult(null);
-                  setError(null);
+                  setLocalError(null);
                 }}
-                disabled={processing}
+                disabled={generating}
               >
                 <option value="canny">Canny Edge Detection</option>
                 <option value="openpose">OpenPose (Pose)</option>
@@ -822,14 +803,27 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
       <Footer
         activeTab={activeTab}
         setActiveTab={setActiveTab}
-        generating={processing}
-        progress={processing ? { progress: 0.5, phase: 'processing' } : null}
+        generating={generating}
+        progress={progress}
         elapsedSeconds={elapsedSeconds}
         onGenerate={handleProcess}
-        onCancel={() => setProcessing(false)}
+        onCancel={cancel}
         canGenerate={!!sourceInput}
         generateLabel={isVideo ? "Process Video" : "Process"}
         generatingLabel={isVideo ? "Processing Video..." : "Processing..."}
+      />
+
+      {/* Generation Modal with console output */}
+      <GenerationModal
+        isOpen={showModal}
+        type="preprocess"
+        generating={generating}
+        progress={progress}
+        elapsedSeconds={elapsedSeconds}
+        consoleLog={consoleLog}
+        error={genError}
+        onCancel={cancel}
+        onClose={closeModal}
       />
     </>
   );

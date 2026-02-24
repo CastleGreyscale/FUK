@@ -100,7 +100,7 @@ class VideoLayersRequest(BaseModel):
     }
     
     # Depth settings
-    depth_model: str = "depth_anything_v2"
+    depth_model: str = "da3_mono_large"
     depth_invert: bool = False
     depth_normalize: bool = True
     depth_range_min: float = 0.0
@@ -108,7 +108,7 @@ class VideoLayersRequest(BaseModel):
     
     # Normals settings
     normals_method: str = "from_depth"
-    normals_depth_model: str = "depth_anything_v2"
+    normals_depth_model: str = "da3_mono_large"
     normals_space: str = "tangent"
     normals_flip_y: bool = False
     normals_intensity: float = 1.0
@@ -336,7 +336,7 @@ def setup_video_routes(
                     
             # ---- DEPTH (unified — handles batch vs frame-by-frame internally) ----
             elif request.method == "depth":
-                depth_model = DEPTH_MODEL_MAP.get(request.depth_model, DepthModel.DEPTH_ANYTHING_V2)
+                depth_model = DEPTH_MODEL_MAP.get(request.depth_model, DepthModel.DA3_MONO_LARGE)
                 
                 log.info("VideoPreprocess", f"Depth model: {depth_model.value}")
                 
@@ -375,7 +375,7 @@ def setup_video_routes(
             # ---- NORMALS (frame-by-frame) ----
             elif request.method == "normals":
                 normals_method = NORMALS_METHOD_MAP.get(request.normals_method, NormalsMethod.FROM_DEPTH)
-                depth_model = DEPTH_MODEL_MAP.get(request.normals_depth_model, DepthModel.DEPTH_ANYTHING_V2)
+                depth_model = DEPTH_MODEL_MAP.get(request.normals_depth_model, DepthModel.DA3_MONO_LARGE)
                 
                 def frame_processor(inp, out):
                     return preprocessor_manager.normals(
@@ -715,7 +715,7 @@ def setup_video_routes(
             # Depth layer - always MP4 + raw .npy (saved by preprocessor)
             # ----------------------------------------------------------
             if request.layers.get("depth"):
-                depth_model = DEPTH_MODEL_MAP.get(request.depth_model, DepthModel.DEPTH_ANYTHING_V2)
+                depth_model = DEPTH_MODEL_MAP.get(request.depth_model, DepthModel.DA3_MONO_LARGE)
                 log.info("VideoLayers", f"Processing depth layer ({depth_model.value})...")
                 
                 depth_output = gen_dir / "depth.mp4"
@@ -747,7 +747,7 @@ def setup_video_routes(
             # ----------------------------------------------------------
             if request.layers.get("normals"):
                 normals_method = NORMALS_METHOD_MAP.get(request.normals_method, NormalsMethod.FROM_DEPTH)
-                depth_model = DEPTH_MODEL_MAP.get(request.normals_depth_model, DepthModel.DEPTH_ANYTHING_V2)
+                depth_model = DEPTH_MODEL_MAP.get(request.normals_depth_model, DepthModel.DA3_MONO_LARGE)
                 log.info("VideoLayers", f"Processing normals layer (method={normals_method.value})...")
                 
                 normals_output = gen_dir / "normals.mp4"
@@ -898,4 +898,3 @@ def setup_video_routes(
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
     
-    log.success("Routes", "Video endpoints registered")

@@ -13,6 +13,9 @@ import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import {CheckCircle, Layers, AlertCircle, Film } from '../components/Icons';
 import MediaUploader, { isVideoFile } from '../components/MediaUploader';
 import ZoomableImage from '../components/ZoomableImage';
+import GenerationModal from '../components/GenerationModal';
+import { useGeneration } from '../hooks/useGeneration';
+import { startTask } from '../utils/api';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { buildImageUrl } from '../utils/constants';
 import Footer from '../components/Footer';
@@ -45,9 +48,6 @@ const DEFAULT_SETTINGS = {
   cryptoModel: 'sam2_hiera_large',
   cryptoMaxObjects: 50,
   cryptoMinArea: 500,
-  
-  // Video output mode
-  videoOutputMode: 'mp4',
 };
 
 export default function LayersTab({ config, activeTab, setActiveTab, project }) {
@@ -108,13 +108,24 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
   
   // UI state
   const [sourceInput, setSourceInput] = useState(null);
-  const [processing, setProcessing] = useState(false);
   const [generatedLayers, setGeneratedLayers] = useState({});
   const [errors, setErrors] = useState({});
-  const [elapsedTime, setElapsedTime] = useState(0);
+
+  const {
+    generating: processing,
+    progress,
+    result: genResult,
+    error: genError,
+    elapsedSeconds: elapsedTime,
+    consoleLog,
+    showModal,
+    startGeneration,
+    cancel,
+    closeModal,
+  } = useGeneration();
   
   // Timer ref
-  const timerRef = useRef(null);
+
   const mountedRef = useRef(true);
   
   // Track if we've restored from project state
@@ -127,7 +138,6 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
-      if (timerRef.current) clearInterval(timerRef.current);
     };
   }, []);
   
@@ -157,6 +167,7 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
   
   // Reset restoration flag when project file changes
   useEffect(() => {
+    console.log('[Layers] Reset effect fired - currentFilename changed to:', project?.currentFilename);
     hasRestoredRef.current = false;
     setGeneratedLayers({});
     setErrors({});
@@ -184,154 +195,129 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
       alert('Please select a source image or video');
       return;
     }
-    
-    setProcessing(true);
+
     setGeneratedLayers({});
     setErrors({});
-    setElapsedTime(0);
-    
-    const startTime = Date.now();
-    timerRef.current = setInterval(() => {
-      if (mountedRef.current) {
-        setElapsedTime(Math.floor((Date.now() - startTime) / 1000));
-      }
-    }, 1000);
-    
+
     try {
-      let endpoint, payload;
-      
+      let taskType, payload;
+
       if (isVideo) {
-        // Video layers - frame by frame
-        endpoint = `${API_URL}/layers/video/generate`;
+        taskType = 'layers_video';
         payload = {
           video_path: sourceInput,
-          output_mode: settings.videoOutputMode,
           layers: settings.layers,
-          
           depth_model: settings.depthModel,
           depth_invert: settings.depthInvert,
           depth_normalize: settings.depthNormalize,
           depth_range_min: settings.depthRangeMin ?? 0.0,
           depth_range_max: settings.depthRangeMax ?? 1.0,
-          
           normals_method: settings.normalsMethod,
           normals_depth_model: settings.normalsDepthModel,
           normals_space: settings.normalsSpace,
           normals_flip_y: settings.normalsFlipY,
           normals_intensity: settings.normalsIntensity,
-          
           crypto_model: settings.cryptoModel,
           crypto_max_objects: settings.cryptoMaxObjects,
           crypto_min_area: settings.cryptoMinArea,
         };
       } else {
-        // Image layers
-        endpoint = `${API_URL}/layers/generate`;
+        taskType = 'layers';
         payload = {
           image_path: sourceInput,
           layers: settings.layers,
-          
           depth_model: settings.depthModel,
           depth_invert: settings.depthInvert,
           depth_normalize: settings.depthNormalize,
           depth_range_min: settings.depthRangeMin ?? 0.0,
           depth_range_max: settings.depthRangeMax ?? 1.0,
-          
           normals_method: settings.normalsMethod,
           normals_depth_model: settings.normalsDepthModel,
           normals_space: settings.normalsSpace,
           normals_flip_y: settings.normalsFlipY,
           normals_intensity: settings.normalsIntensity,
-          
           crypto_model: settings.cryptoModel,
           crypto_max_objects: settings.cryptoMaxObjects,
           crypto_min_area: settings.cryptoMinArea,
         };
       }
-      
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || `Server error: ${response.status}`);
-      }
-      
-      const result = await response.json();
-      
-      const layers = {};
-      if (result.layers) {
-        Object.entries(result.layers).forEach(([name, data]) => {
-          layers[name] = {
-            url: data.url,
-            name: name.charAt(0).toUpperCase() + name.slice(1),
-            info: isVideo 
-              ? `${data.frame_count || result.frame_count || 0} frames`
-              : (data.model || data.method || (data.num_objects ? `${data.num_objects} objects` : '')),
-            isVideo,
-          };
-        });
-      }
-      
-      if (result.source) {
-        layers.beauty = {
-          url: result.source,
-          name: 'Beauty (Source)',
-          info: 'Original',
-          isVideo,
-        };
-      }
-      
-      setGeneratedLayers(layers);
-      setErrors(result.errors || {});
-      
-      // Save to project lastState for cross-tab persistence
-      if (project?.updateLastState) {
-        // Use first layer URL as the main preview
-        const firstLayerUrl = Object.values(layers)[0]?.url || null;
-        
-        project.updateLastState({
-          lastLayersPreview: firstLayerUrl,
-          lastLayersMeta: {
-            isVideo,
-            sourceInput,
-            generatedLayers: layers,
-            frameCount: result.frame_count || 0,
-          },
-          activeTab: 'layers',
-        });
-      }
-      // Notify history to refresh  
-      window.dispatchEvent(new CustomEvent('fuk-generation-complete', {
-        detail: { 
-          type: 'layers',
-          result: result,
-        }
-      }));
-      
+
+      const data = await startTask(taskType, payload);
+      startGeneration(data.generation_id);
     } catch (err) {
       console.error('Layer generation failed:', err);
-      setErrors({ _general: err.message });
-    } finally {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
-      setProcessing(false);
+      setErrors({ general: err.message });
     }
   };
   
   const handleCancel = () => {
-    setProcessing(false);
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
+    cancel();
   };
   
+  // Bridge: extract layers from task result
+  useEffect(() => {
+    if (!genResult || genResult.status !== 'complete' || !genResult.result) return;
+
+    const data = genResult.result;
+    console.log('[LayersTab] Task complete:', data);
+
+    if (data.layers) {
+      const newLayers = {};
+      for (const [name, info] of Object.entries(data.layers)) {
+        // Build proper layer object for preview renderer
+        // Backend returns { url, path, ... } for both image and video layers
+        const layerObj = typeof info === 'string' ? { url: info } : { ...info };
+        // Add display name (capitalize first letter)
+        layerObj.name = name.charAt(0).toUpperCase() + name.slice(1);
+        // Video layers have frame_count; image layers don't
+        layerObj.isVideo = isVideo || !!layerObj.frame_count;
+        // Build info string from backend metadata
+        if (layerObj.frame_count) {
+          layerObj.info = `${layerObj.frame_count} frames`;
+        } else if (layerObj.model) {
+          layerObj.info = layerObj.model;
+        } else if (layerObj.method) {
+          layerObj.info = layerObj.method;
+        } else if (layerObj.num_objects != null) {
+          layerObj.info = `${layerObj.num_objects} objects`;
+        }
+        newLayers[name] = layerObj;
+      }
+      setGeneratedLayers(newLayers);
+    }
+    if (data.errors) {
+      setErrors(data.errors);
+    }
+
+    // Save to project lastState
+    if (project?.updateLastState) {
+      // Build the same layer objects we stored in state
+      const layersForSave = {};
+      if (data.layers) {
+        for (const [name, info] of Object.entries(data.layers)) {
+          const layerObj = typeof info === 'string' ? { url: info } : { ...info };
+          layerObj.name = name.charAt(0).toUpperCase() + name.slice(1);
+          layerObj.isVideo = isVideo || !!layerObj.frame_count;
+          layersForSave[name] = layerObj;
+        }
+      }
+      project.updateLastState({
+        lastLayersPreview: data.layers,
+        lastLayersMeta: {
+          sourceInput,
+          isVideo,
+          layers: settings.layers,
+          generatedLayers: layersForSave,
+        },
+        activeTab: 'layers',
+      });
+    }
+
+    window.dispatchEvent(new CustomEvent('fuk-generation-complete', {
+      detail: { type: 'layers', result: data }
+    }));
+  }, [genResult]);
+
   const enabledLayersCount = Object.values(settings.layers).filter(v => v).length;
   const hasErrors = Object.keys(errors).length > 0;
   
@@ -367,7 +353,7 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
                   <div className="fuk-layer-card-body">
                     {layerData.isVideo ? (
                       <video
-                        src={buildImageUrl(layerData.url)}
+                        src={buildImageUrl(layerData.preview_url || layerData.url)}
                         controls
                         preload="metadata"
                         className="fuk-layer-card-media"
@@ -432,6 +418,8 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
               onMediaChange={handleSourceChange}
               disabled={processing}
               accept="all"
+              initialDir={project?.projectState?.lastState?.lastUploadDir}
+              onDirectorySelected={(dir) => project?.updateLastState?.({ lastUploadDir: dir })}
             />
             
             <p className="fuk-help-text">
@@ -442,27 +430,6 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
               <div className="fuk-alert fuk-alert--info fuk-mt-3">
                 <Film className="fuk-alert-icon" />
                 <span className="fuk-alert-text">Video: Processing frame-by-frame</span>
-              </div>
-            )}
-            
-            {/* Video output mode */}
-            {isVideo && (
-              <div className="fuk-form-group-compact fuk-mt-4 fuk-pt-4 fuk-border-top">
-                <label className="fuk-label">Output Format</label>
-                <select
-                  className="fuk-select"
-                  value={settings.videoOutputMode}
-                  onChange={(e) => updateSettings({ videoOutputMode: e.target.value })}
-                  disabled={processing}
-                >
-                  <option value="mp4">MP4 Video (per layer)</option>
-                  <option value="sequence">Image Sequences</option>
-                </select>
-                <p className="fuk-help-text">
-                  {settings.videoOutputMode === 'mp4' 
-                    ? 'Each layer as separate video' 
-                    : 'Frame sequences for EXR workflow'}
-                </p>
               </div>
             )}
           </div>
@@ -799,6 +766,17 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
         canGenerate={!!sourceInput && enabledLayersCount > 0}
         generateLabel={isVideo ? "Generate Video Layers" : "Generate Layers"}
         generatingLabel={isVideo ? "Generating Video Layers..." : "Generating..."}
+      />
+      <GenerationModal
+        isOpen={showModal}
+        type="layers"
+        generating={processing}
+        progress={progress}
+        elapsedSeconds={elapsedTime}
+        consoleLog={consoleLog}
+        error={genError}
+        onCancel={cancel}
+        onClose={closeModal}
       />
     </>
   );

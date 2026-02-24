@@ -84,6 +84,7 @@ class QwenPipelineRunner(PipelineRunner):
         # --- Logging ---
         log_params = {
             "prompt": prompt,
+            "negative_prompt": negative_prompt if negative_prompt else "(none)",
             "size": f"{width}x{height}",
             "steps": num_steps,
             "cfg_scale": effective_cfg,
@@ -148,6 +149,13 @@ class QwenPipelineRunner(PipelineRunner):
         latent_path, cleanup_hook = self.setup_latent_capture(pipe, output_path, save_latent)
 
         # --- Generate ---
+        # Log what's actually going to the pipe
+        if "negative_prompt" in pipe_kwargs:
+            neg = pipe_kwargs["negative_prompt"]
+            _log(self.log_prefix, f"  ✓ negative_prompt in pipe_kwargs ({len(neg)} chars): {neg[:60]}...", "success")
+        else:
+            _log(self.log_prefix, "  ✗ negative_prompt NOT in pipe_kwargs", "warning")
+
         try:
             with torch.inference_mode():
                 image = pipe(**pipe_kwargs)

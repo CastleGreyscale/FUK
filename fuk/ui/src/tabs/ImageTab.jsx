@@ -374,6 +374,8 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                     images={formData.control_image_paths}
                     onImagesChange={handleImagesChange}
                     disabled={generating}
+                    initialDir={project?.projectState?.lastState?.lastUploadDir}
+                    onDirectorySelected={(dir) => project?.updateLastState?.({ lastUploadDir: dir })}
                   />
                 </div>
                 

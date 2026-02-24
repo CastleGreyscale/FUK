@@ -10,7 +10,7 @@ import { X, FolderOpen } from './Icons';
 
 const API_URL = '/api';
 
-export default function ImageUploader({ images, onImagesChange, disabled, id: providedId }) {
+export default function ImageUploader({ images, onImagesChange, disabled, id: providedId, initialDir = null, onDirectorySelected = null }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   
@@ -35,6 +35,7 @@ export default function ImageUploader({ images, onImagesChange, disabled, id: pr
           multiple: true,
           detect_sequences: false,
           filter: 'images',
+          initial_dir: initialDir || null,
         }),
       });
       
@@ -49,6 +50,14 @@ export default function ImageUploader({ images, onImagesChange, disabled, id: pr
         const paths = data.files.map(f => f.path);
         onImagesChange([...images, ...paths]);
         console.log('[ImageUploader] Selected images (absolute paths):', paths);
+        
+        // Fire directory callback for last-location tracking
+        if (onDirectorySelected && paths[0]) {
+          const p = paths[0];
+          const sep = p.includes('\\') ? '\\' : '/';
+          const dir = p.substring(0, p.lastIndexOf(sep));
+          if (dir) onDirectorySelected(dir);
+        }
       } else if (data.error) {
         throw new Error(data.error);
       }

@@ -27,6 +27,7 @@ import shutil
 import tempfile
 import time
 import json
+from core.film_interpolator import FILMInterpolator
 
 # ============================================================================
 # Upscaler Models
@@ -43,9 +44,8 @@ class UpscaleModel(str, Enum):
 
 class InterpolationModel(str, Enum):
     """Available frame interpolation models"""
-    RIFE = "rife"
-    RIFE_V4 = "rife_v4"
-
+    FILM = "film"
+    FILM_FP32 = "film_fp32"
 
 # ============================================================================
 # Real-ESRGAN Upscaler
@@ -929,11 +929,11 @@ class PostProcessorManager:
         return self._upscaler
     
     @property
-    def interpolator(self) -> RIFEInterpolator:
+    def interpolator(self) -> FILMInterpolator:
         if self._interpolator is None:
-            self._interpolator = RIFEInterpolator()
+            self._interpolator = FILMInterpolator()
         return self._interpolator
-    
+
     def upscale_image(
         self,
         input_path: Path,
@@ -973,9 +973,9 @@ class PostProcessorManager:
             },
             "interpolation": {
                 "available": True,
-                "ncnn_available": self.interpolator.ncnn_binary is not None,
-                "models": ["rife"],
+                "models": ["film"],
                 "target_fps": [24, 30, 60],
+                "precision": "float32" if self.interpolator.precision == torch.float32 else "float16",
             }
         }
     

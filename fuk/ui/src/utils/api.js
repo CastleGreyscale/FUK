@@ -58,6 +58,29 @@ export async function startVideoGeneration(payload) {
 }
 
 /**
+ * Start a generic background task (preprocess, upscale, interpolate, layers, export)
+ * Returns { generation_id, status } — poll via SSE at /api/progress/{generation_id}
+ *
+ * @param {string} taskType - One of: preprocess, preprocess_video, upscale, upscale_video,
+ *                            interpolate, layers, layers_video, export_exr, export_exr_sequence
+ * @param {object} payload  - Task-specific parameters (same shape as the original endpoint body)
+ */
+export async function startTask(taskType, payload) {
+  const res = await fetch(`${API_URL}/task/start`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ task_type: taskType, payload })
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || `Task start failed: ${res.statusText}`);
+  }
+
+  return res.json();
+}
+
+/**
  * Cancel a generation
  */
 export async function cancelGeneration(generationId) {

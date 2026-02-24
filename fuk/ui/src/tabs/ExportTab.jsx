@@ -4,12 +4,16 @@
  * Supports both single image and video sequence export
  */
 
-import { useState, useMemo, useCallback } from 'react';
-import { CheckCircle, Download, AlertCircle, Film , Folder} from '../components/Icons';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { CheckCircle, Download, AlertCircle, Film, Folder, FolderPlus } from '../components/Icons';
 import InlineImageInput from '../components/InlineImageInput';
 import ZoomableImage from '../components/ZoomableImage';
+import GenerationModal from '../components/GenerationModal';
 import { useLocalStorage } from '../hooks/useLocalStorage';
+import { useGeneration } from '../hooks/useGeneration';
+import { startTask } from '../utils/api';
 import { buildImageUrl, API_URL } from '../utils/constants';
+import { formatTime } from '../utils/helpers';
 import Footer from '../components/Footer';
 
 
@@ -68,11 +72,30 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
   const [isVideoMode, setIsVideoMode] = useState(false);
   
   // UI state
-  const [exporting, setExporting] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [showNewFolder, setShowNewFolder] = useState(false);
+  const [newFolderError, setNewFolderError] = useState(null);
   const [exportResult, setExportResult] = useState(null);
-  const [error, setError] = useState(null);
-  const [elapsedTime, setElapsedTime] = useState(0);
+  const [localError, setLocalError] = useState(null);  // For validation errors only
+
   
+  // Generation state (replaces local processing/timer)
+const {
+    generating: exporting,
+    progress,
+    result: genResult,
+    error: genError,
+    elapsedSeconds: elapsedTime,
+    consoleLog,
+    showModal,
+    startGeneration,
+    cancel,
+    closeModal,
+  } = useGeneration();
+
+  // Combine errors from both sources
+  const error = genError || localError;
+
   // Detect if any layer is a video
   const hasVideoLayers = useMemo(() => {
     return Object.values(layers).some(path => isVideoPath(path));
@@ -84,7 +107,7 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
       [layerName]: path,
     }));
     setExportResult(null);
-    setError(null);
+    setLocalError(null);
     
     // Auto-detect video mode when a video is added
     if (isVideoPath(path)) {
@@ -127,7 +150,7 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
     setLayers(newLayers);
     setIsVideoMode(isVideo);
     setExportResult(null);
-    setError(null);
+    setLocalError(null);
     
     console.log('[ExportTab] Populated layers:', newLayers, 'video mode:', isVideo);
   }, [layers]);
@@ -141,120 +164,144 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
     });
   };
   
-  // Browse for save location
+  // Browse for export directory
   const handleBrowseSaveLocation = async () => {
     try {
+      const lastExportDir = project?.projectState?.lastState?.lastExportDir;
       const response = await fetch(`${API_URL}/project/browse-save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title: isVideoMode ? 'Select Output Directory' : 'Save EXR Export',
-          defaultName: isVideoMode ? '' : `${settings.exportFilename}.exr`,
-          fileTypes: isVideoMode 
-            ? [['All Files', '*.*']]
-            : [['EXR Files', '*.exr'], ['All Files', '*.*']],
-          directory: isVideoMode,
+          title: isVideoMode ? 'Select Output Directory' : 'Select Export Directory',
+          initialDir: settings.exportPath || lastExportDir || null,
         }),
       });
-      
+
       const data = await response.json();
-      
+
       if (data.path && !data.cancelled) {
-        if (isVideoMode) {
-          // For video, the path is a directory
-          updateSettings({ exportPath: data.path });
-        } else {
-          // For single image, extract directory and filename
-          const lastSlash = Math.max(data.path.lastIndexOf('/'), data.path.lastIndexOf('\\'));
-          const dir = data.path.substring(0, lastSlash);
-          let filename = data.path.substring(lastSlash + 1);
-          
-          // Remove .exr extension if present
-          if (filename.toLowerCase().endsWith('.exr')) {
-            filename = filename.slice(0, -4);
-          }
-          
-          updateSettings({
-            exportPath: dir,
-            exportFilename: filename,
-          });
+        updateSettings({ exportPath: data.path });
+        // Persist last used export directory to project file
+        if (project?.updateLastState) {
+          project.updateLastState({ lastExportDir: data.path });
         }
       }
     } catch (err) {
       console.error('Browse failed:', err);
     }
   };
-  
-  const handleExport = async () => {
-    if (!layers.beauty && !layers.depth && !layers.normals && !layers.crypto) {
-      setError('Please add at least one layer to export');
-      return;
-    }
-    
-    if (!settings.exports.multiLayerEXR && !settings.exports.singleLayerEXRs) {
-      setError('Please select at least one export type');
-      return;
-    }
-    
-    setExporting(true);
-    setExportResult(null);
-    setError(null);
-    setElapsedTime(0);
-    
-    const startTime = Date.now();
-    const timer = setInterval(() => {
-      setElapsedTime(Math.floor((Date.now() - startTime) / 1000));
-    }, 1000);
-    
+
+  // Create a new subfolder inside the current export path
+  const handleCreateFolder = async () => {
+    if (!newFolderName.trim()) return;
+    setNewFolderError(null);
     try {
-      // Choose endpoint based on video mode
-      const endpoint = isVideoMode ? `${API_URL}/export/exr-sequence` : `${API_URL}/export/exr`;
-      
-      const payload = {
-        layers: {
-          beauty: layers.beauty,
-          depth: layers.depth,
-          normals: layers.normals,
-          crypto: layers.crypto,
-        },
-        bit_depth: settings.exrBitDepth,
-        compression: settings.exrCompression,
-        color_space: settings.exrColorSpace,
-        multi_layer: settings.exports.multiLayerEXR,
-        single_files: settings.exports.singleLayerEXRs,
-        filename: settings.exportFilename,
-        export_path: settings.exportPath,
-      };
-      
-      // Add video-specific options
-      if (isVideoMode) {
-        payload.start_frame = settings.sequenceStartFrame;
-        payload.filename_pattern = `${settings.exportFilename}.{frame:04d}.exr`;
-      }
-      
-      const response = await fetch(endpoint, {
+      const response = await fetch(`${API_URL}/project/create-folder`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          parent: settings.exportPath || null,
+          name: newFolderName.trim(),
+        }),
       });
-      
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || `Server error: ${response.status}`);
+      const data = await response.json();
+      if (data.path) {
+        updateSettings({ exportPath: data.path });
+        if (project?.updateLastState) {
+          project.updateLastState({ lastExportDir: data.path });
+        }
+        setNewFolderName('');
+        setShowNewFolder(false);
+      } else {
+        setNewFolderError(data.detail || 'Failed to create folder');
       }
-      
-      const result = await response.json();
-      setExportResult(result);
-      
     } catch (err) {
-      console.error('Export failed:', err);
-      setError(err.message);
-    } finally {
-      clearInterval(timer);
-      setExporting(false);
+      setNewFolderError(err.message);
     }
   };
   
+  const handleExport = async () => {
+    if (!layers.beauty && !layers.depth && !layers.normals && !layers.crypto) {
+      setLocalError('Please add at least one layer to export');
+      return;
+    }
+
+    if (!settings.exports.multiLayerEXR && !settings.exports.singleLayerEXRs) {
+      setLocalError('Please select at least one export type');
+      return;
+    }
+
+    setExportResult(null);
+    setLocalError(null);
+
+    try {
+      const taskType = isVideoMode ? 'export_exr_sequence' : 'export_exr';
+
+      let payload;
+
+      if (isVideoMode) {
+        // EXRSequenceExportRequest needs generation_path or beauty_latent + aov_layers
+        // Derive the generation directory from any available layer path
+        // e.g. "api/project/cache/video_layers_007/depth.mp4" -> find the gen dir
+        const anyLayerPath = layers.beauty || layers.depth || layers.normals || layers.crypto;
+        
+        // Extract generation directory: strip the filename from the path
+        // Works for both "api/project/cache/video_layers_007/depth.mp4" 
+        // and absolute paths like "/home/.../cache/video_layers_007/depth.mp4"
+        let generationPath = null;
+        if (anyLayerPath) {
+          const lastSlash = anyLayerPath.lastIndexOf('/');
+          generationPath = lastSlash > 0 ? anyLayerPath.substring(0, lastSlash) : anyLayerPath;
+        }
+
+        // Build aov_layers (everything except beauty)
+        const aovLayers = {};
+        if (layers.depth) aovLayers.depth = layers.depth;
+        if (layers.normals) aovLayers.normals = layers.normals;
+        if (layers.crypto) aovLayers.crypto = layers.crypto;
+
+        payload = {
+          generation_path: generationPath,
+          aov_layers: aovLayers,
+          bit_depth: settings.exrBitDepth,
+          compression: settings.exrCompression,
+          filename: settings.exportFilename,
+          export_path: settings.exportPath || null,
+          start_frame: settings.sequenceStartFrame,
+          filename_pattern: `${settings.exportFilename}.{frame:04d}.exr`,
+        };
+      } else {
+        // ExportEXRRequest accepts layers directly
+        payload = {
+          layers: {
+            beauty: layers.beauty,
+            depth: layers.depth,
+            normals: layers.normals,
+            crypto: layers.crypto,
+          },
+          bit_depth: settings.exrBitDepth,
+          compression: settings.exrCompression,
+          color_space: settings.exrColorSpace,
+          multi_layer: settings.exports.multiLayerEXR,
+          single_files: settings.exports.singleLayerEXRs,
+          filename: settings.exportFilename,
+          export_path: settings.exportPath || null,
+        };
+      }
+
+      const data = await startTask(taskType, payload);
+      startGeneration(data.generation_id);
+    } catch (err) {
+      console.error('Export failed:', err);
+      setLocalError(err.message);
+    }
+  };
+
+  useEffect(() => {
+    if (!genResult || genResult.status !== 'complete' || !genResult.result) return;
+    setExportResult(genResult.result);
+  }, [genResult]);
+
   const availableLayersCount = Object.values(layers).filter(v => v !== null).length;
   const canExport = availableLayersCount > 0 && (settings.exports.multiLayerEXR || settings.exports.singleLayerEXRs);
   
@@ -456,11 +503,46 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
                   className="fuk-btn fuk-btn-secondary"
                   onClick={handleBrowseSaveLocation}
                   disabled={exporting}
-                  title="Browse for save location"
+                  title="Browse for export directory"
                 >
                   <Folder className="fuk-icon fuk-icon--md" />
                 </button>
+                <button
+                  className="fuk-btn fuk-btn-secondary"
+                  onClick={() => { setShowNewFolder(v => !v); setNewFolderError(null); setNewFolderName(''); }}
+                  disabled={exporting}
+                  title="Create new folder"
+                >
+                  <FolderPlus className="fuk-icon fuk-icon--md" />
+                </button>
               </div>
+
+              {/* Inline new folder creator */}
+              {showNewFolder && (
+                <div className="save-location-row fuk-mt-2">
+                  <input
+                    type="text"
+                    className="fuk-input"
+                    placeholder="New folder name..."
+                    value={newFolderName}
+                    onChange={(e) => setNewFolderName(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleCreateFolder(); if (e.key === 'Escape') setShowNewFolder(false); }}
+                    autoFocus
+                    disabled={exporting}
+                  />
+                  <button
+                    className="fuk-btn fuk-btn-primary"
+                    onClick={handleCreateFolder}
+                    disabled={exporting || !newFolderName.trim()}
+                  >
+                    Create
+                  </button>
+                </div>
+              )}
+              {newFolderError && (
+                <p className="fuk-help-text fuk-help-text--error">{newFolderError}</p>
+              )}
+
               <p className="fuk-help-text fuk-help-text--sm fuk-help-text--inline">
                 Leave empty to save in project cache
               </p>
@@ -597,13 +679,24 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
         progress={exporting ? { progress: 0.5, phase: 'exporting' } : null}
         elapsedSeconds={elapsedTime}
         onGenerate={handleExport}
-        onCancel={() => setExporting(false)}
+        onCancel={cancel}
         canGenerate={canExport}
         generateLabel={isVideoMode 
           ? `Export Sequence${settings.exportFilename ? ` (${settings.exportFilename})` : ''}`
           : `Export EXR${settings.exportFilename ? ` (${settings.exportFilename})` : ''}`
         }
         generatingLabel={isVideoMode ? "Exporting Sequence..." : "Exporting..."}
+      />
+      <GenerationModal
+        isOpen={showModal}
+        type="export"
+        generating={exporting}
+        progress={progress}
+        elapsedSeconds={elapsedTime}
+        consoleLog={consoleLog}
+        error={genError}
+        onCancel={cancel}
+        onClose={closeModal}
       />
     </>
   );

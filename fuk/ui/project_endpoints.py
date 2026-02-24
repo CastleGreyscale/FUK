@@ -6,8 +6,8 @@ IMPORTANT: All tkinter dialogs run via subprocess to avoid blocking
 the FastAPI event loop. See file_browser.py for the subprocess handler.
 """
 
-from fastapi import APIRouter, HTTPException, Body, Query
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, HTTPException, Body, Query, Request
+from fastapi.responses import FileResponse, StreamingResponse
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 import json
@@ -495,13 +495,57 @@ async def browse_save_location(data: dict = Body(...)):
         result = await loop.run_in_executor(pool, run_save_dialog)
     
     if result.get("path"):
-        print(f"[PROJECT] User selected save location: {result['path']}", flush=True)
+        print(f"[PROJECT] Export directory selected: {result['path']}", flush=True)
     elif result.get("error"):
-        print(f"[PROJECT] Save dialog error: {result['error']}", flush=True)
+        print(f"[PROJECT] Directory dialog error: {result['error']}", flush=True)
     else:
-        print("[PROJECT] User cancelled save dialog", flush=True)
+        print("[PROJECT] User cancelled directory dialog", flush=True)
     
     return result
+
+
+@router.post("/create-folder")
+async def create_folder(data: dict = Body(...)):
+    """
+    Create a new folder at the given path.
+    
+    Args (in body):
+        parent: Parent directory path
+        name: New folder name
+    
+    Returns:
+        path: Full path of the created folder
+        error: Error message if failed
+    """
+    parent = data.get('parent', '')
+    name = data.get('name', '').strip()
+    
+    if not name:
+        raise HTTPException(status_code=400, detail="Folder name cannot be empty")
+    
+    # Sanitize name — strip path separators to prevent traversal
+    safe_name = name.replace('/', '').replace('\\', '').replace('..', '')
+    if not safe_name:
+        raise HTTPException(status_code=400, detail="Invalid folder name")
+    
+    # Determine parent directory
+    if parent and Path(parent).exists():
+        parent_path = Path(parent)
+    elif _project_folder:
+        parent_path = Path(_project_folder)
+    else:
+        raise HTTPException(status_code=400, detail="No parent directory specified")
+    
+    new_folder = parent_path / safe_name
+    
+    try:
+        new_folder.mkdir(parents=False, exist_ok=True)
+        print(f"[PROJECT] Created folder: {new_folder}", flush=True)
+        return {"path": str(new_folder), "name": safe_name}
+    except PermissionError:
+        raise HTTPException(status_code=403, detail=f"Permission denied: {new_folder}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/set-folder")
 async def set_folder(data: dict = Body(...)):
@@ -1429,7 +1473,7 @@ def setup_project_routes(app):
 # ============================================================================
 
 @router.get("/cache/{file_path:path}")
-async def serve_cache_file(file_path: str):
+async def serve_cache_file(file_path: str, request: Request):
     """
     Dynamically serve files from the project cache directory.
     This allows the cache location to change when projects are opened.
@@ -1480,6 +1524,59 @@ async def serve_cache_file(file_path: str):
     content_type, _ = mimetypes.guess_type(str(full_path))
     if content_type is None:
         content_type = "application/octet-stream"
+    
+    # For video files, support HTTP range requests so browsers can seek/play
+    if content_type and content_type.startswith("video/"):
+        file_size = full_path.stat().st_size
+        range_header = request.headers.get("range")
+        
+        if range_header:
+            try:
+                range_val = range_header.replace("bytes=", "")
+                start_str, end_str = range_val.split("-")
+                start = int(start_str) if start_str else 0
+                end = int(end_str) if end_str else file_size - 1
+            except Exception:
+                start, end = 0, file_size - 1
+            
+            end = min(end, file_size - 1)
+            chunk_size = end - start + 1
+            
+            def iter_range():
+                with open(full_path, "rb") as f:
+                    f.seek(start)
+                    remaining = chunk_size
+                    while remaining > 0:
+                        data = f.read(min(65536, remaining))
+                        if not data:
+                            break
+                        remaining -= len(data)
+                        yield data
+            
+            return StreamingResponse(
+                iter_range(),
+                status_code=206,
+                media_type=content_type,
+                headers={
+                    "Content-Range": f"bytes {start}-{end}/{file_size}",
+                    "Accept-Ranges": "bytes",
+                    "Content-Length": str(chunk_size),
+                },
+            )
+        else:
+            def iter_file():
+                with open(full_path, "rb") as f:
+                    while chunk := f.read(65536):
+                        yield chunk
+            
+            return StreamingResponse(
+                iter_file(),
+                media_type=content_type,
+                headers={
+                    "Accept-Ranges": "bytes",
+                    "Content-Length": str(file_size),
+                },
+            )
     
     return FileResponse(
         path=full_path,

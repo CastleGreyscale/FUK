@@ -37,6 +37,13 @@ class OutputMode(str, Enum):
     SEQUENCE = "sequence"  # Keep as image sequence (EXR workflow)
 
 
+class VideoQuality(str, Enum):
+    """Video encoding quality presets"""
+    PREVIEW = "preview"      # Fast, smaller files (yuv420p, CRF 20)
+    HIGH = "high"            # Full chroma, low CRF (yuv444p, CRF 14)
+    PRORES = "prores"        # ProRes 4444 — near-lossless, 10-bit, no chroma subsampling
+
+
 class VideoProcessor:
     """
     Frame-by-frame video processor
@@ -284,6 +291,7 @@ class VideoProcessor:
         output_path: Path,
         fps: float,
         frame_pattern: str = "frame_%06d.png",
+        quality: str = "high",
         progress_callback: Optional[Callable[[float, str], None]] = None
     ) -> Dict[str, Any]:
         """
@@ -294,33 +302,68 @@ class VideoProcessor:
             output_path: Output video path
             fps: Target framerate
             frame_pattern: Frame filename pattern
+            quality: Encoding quality preset
+                - "preview": yuv420p, CRF 20, fast (smallest files)
+                - "high": yuv444p, CRF 14, slow (full chroma, default)
+                - "prores": ProRes 4444, near-lossless 10-bit
             progress_callback: Optional callback
             
         Returns:
             Dict with output info
         """
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        
         frame_count = len(list(frames_dir.glob("frame_*.png")))
+        
+        # ProRes outputs .mov, everything else .mp4
+        if quality == "prores":
+            output_path = output_path.with_suffix(".mov")
+        else:
+            output_path = output_path.with_suffix(".mp4")
+        
+        output_path.parent.mkdir(parents=True, exist_ok=True)
         
         print(f"[VideoProcessor] Assembling video from {frame_count} frames")
         print(f"[VideoProcessor]   Frames dir: {frames_dir}")
         print(f"[VideoProcessor]   Output: {output_path}")
         print(f"[VideoProcessor]   FPS: {fps}")
+        print(f"[VideoProcessor]   Quality: {quality}")
         
         if progress_callback:
-            progress_callback(0.9, f"Assembling {frame_count} frames to video...")
+            progress_callback(0.9, f"Assembling {frame_count} frames to video ({quality})...")
         
         if self.ffmpeg_path:
+            # Build encoding args based on quality preset
+            if quality == "prores":
+                # ProRes 4444 — 10-bit, no chroma subsampling, alpha support
+                # Profile 4 = ProRes 4444, profile 5 = ProRes 4444 XQ
+                encode_args = [
+                    "-c:v", "prores_ks",
+                    "-profile:v", "4",        # ProRes 4444
+                    "-pix_fmt", "yuva444p10le",  # 10-bit 4:4:4 with alpha
+                    "-vendor", "apl0",
+                ]
+            elif quality == "high":
+                # H.264 with full chroma preservation
+                encode_args = [
+                    "-c:v", "libx264",
+                    "-preset", "slow",         # Better compression efficiency
+                    "-crf", "14",              # Near-visually-lossless
+                    "-pix_fmt", "yuv444p",     # Full chroma — no subsampling
+                ]
+            else:
+                # Preview / fast
+                encode_args = [
+                    "-c:v", "libx264",
+                    "-preset", "medium",
+                    "-crf", "20",
+                    "-pix_fmt", "yuv420p",     # Standard web-compatible
+                ]
+            
             cmd = [
                 str(self.ffmpeg_path),
-                "-y",  # Overwrite
+                "-y",
                 "-framerate", str(fps),
                 "-i", str(frames_dir / frame_pattern),
-                "-c:v", "libx264",
-                "-preset", "medium",
-                "-crf", "18",  # High quality
-                "-pix_fmt", "yuv420p",
+                *encode_args,
                 str(output_path)
             ]
             
@@ -356,7 +399,8 @@ class VideoProcessor:
         
         # Verify output
         if output_path.exists():
-            print(f"[VideoProcessor] Output video created: {output_path} ({output_path.stat().st_size} bytes)")
+            size_mb = output_path.stat().st_size / (1024 * 1024)
+            print(f"[VideoProcessor] Output: {output_path} ({size_mb:.1f} MB)")
         else:
             print(f"[VideoProcessor] WARNING: Output video not found at {output_path}")
         
@@ -365,6 +409,7 @@ class VideoProcessor:
             "frame_count": frame_count,
             "fps": fps,
             "duration": frame_count / fps,
+            "quality": quality,
         }
     
     def process_video(
@@ -373,6 +418,7 @@ class VideoProcessor:
         output_path: Path,
         frame_processor: Callable[[Path, Path], Dict[str, Any]],
         output_mode: OutputMode = OutputMode.MP4,
+        quality: str = "high",
         parallel: bool = False,
         max_workers: int = 4,
         preserve_fps: bool = True,
@@ -556,6 +602,7 @@ class VideoProcessor:
                     output_frames_dir,
                     output_path,
                     fps=fps,
+                    quality=quality,
                     progress_callback=lambda p, m: progress_callback(0.9 + p * 0.1, m) if progress_callback else None
                 )
                 
@@ -575,6 +622,7 @@ class VideoProcessor:
         output_dir: Path,
         layer_processors: Dict[str, Callable[[Path, Path], Dict[str, Any]]],
         output_mode: OutputMode = OutputMode.MP4,
+        quality: str = "high",
         progress_callback: Optional[Callable[[float, str], None]] = None
     ) -> Dict[str, Any]:
         """
@@ -672,7 +720,7 @@ class VideoProcessor:
                 # Assemble or copy output
                 if output_mode == OutputMode.MP4:
                     layer_output = output_dir / f"{layer_name}.mp4"
-                    self.assemble_video(layer_output_dir, layer_output, fps)
+                    self.assemble_video(layer_output_dir, layer_output, fps, quality=quality)
                     
                     results["layers"][layer_name] = {
                         "output_path": str(layer_output),

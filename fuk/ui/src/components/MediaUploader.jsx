@@ -61,6 +61,8 @@ export default function MediaUploader({
   detectSequences = true,
   id: providedId,
   label = 'Drop media or click to browse',
+  initialDir = null,          // Starting directory for file dialog
+  onDirectorySelected = null, // Called with parent dir after successful selection
 }) {
   const [loading, setLoading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -118,6 +120,7 @@ export default function MediaUploader({
           multiple,
           detect_sequences: detectSequences,
           filter: accept,
+          initial_dir: initialDir || null,
         }),
       });
       
@@ -137,6 +140,14 @@ export default function MediaUploader({
           frameCount: f.frame_count,
           framePattern: f.frame_pattern,
         }));
+        
+        // Fire directory callback so parent can persist the last-used location
+        if (onDirectorySelected && data.files[0]?.path) {
+          const p = data.files[0].path;
+          const sep = p.includes('\\') ? '\\' : '/';
+          const dir = p.substring(0, p.lastIndexOf(sep));
+          if (dir) onDirectorySelected(dir);
+        }
         
         if (multiple) {
           callOnChange([...normalizedMedia, ...newMedia]);

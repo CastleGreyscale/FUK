@@ -163,9 +163,11 @@ class EXRExporter:
         """
         Find the corresponding .latent.pt file for a beauty pass video/image.
         
-        Latents are stored in a 'latents/' subdirectory next to the beauty file:
-            generated.mp4 -> latents/generated.latent.pt
-            render/frame_001.png -> latents/frame_001.latent.pt
+        Search order:
+            1. latents/{stem}.latent.pt  (exact match)
+            2. latents/{base_name}.latent.pt  (without extension suffix)
+            3. latents/generated.latent.pt  (standard generation name)
+            4. First .latent.pt found  (fallback - there's usually only one)
         
         Returns:
             Path to .latent.pt file if found, None otherwise
@@ -174,14 +176,26 @@ class EXRExporter:
         if not latent_dir.exists():
             return None
         
+        # 1. Exact stem match
         latent_file = latent_dir / f"{beauty_path.stem}.latent.pt"
         if latent_file.exists():
             return latent_file
         
+        # 2. Base name match
         base_name = beauty_path.stem.split('.')[0]
         latent_file = latent_dir / f"{base_name}.latent.pt"
         if latent_file.exists():
             return latent_file
+        
+        # 3. Standard generation name
+        latent_file = latent_dir / "generated.latent.pt"
+        if latent_file.exists():
+            return latent_file
+        
+        # 4. Fallback: any .latent.pt
+        latent_files = list(latent_dir.glob("*.latent.pt"))
+        if latent_files:
+            return latent_files[0]
         
         return None
     
@@ -194,9 +208,7 @@ class EXRExporter:
         full pipeline.
         
         Returns:
-            (vae, needs_device_arg, is_borrowed) — the VAE module, whether
-            decode() needs a device kwarg, and whether the VAE belongs to a
-            cached pipeline (borrowed=True means we must NOT mutate it in place)
+            (vae, needs_device_arg) — the VAE module and whether decode() needs a device kwarg
         """
         import inspect
         
@@ -206,7 +218,7 @@ class EXRExporter:
                 print(f"  📄 Reusing VAE from cached pipeline: {key}")
                 vae = pipe.vae
                 needs_device = 'device' in inspect.signature(vae.decode).parameters
-                return vae, needs_device, True  # borrowed from live pipeline
+                return vae, needs_device
         
         # 2. No cached pipeline — load VAE-only via DiffSynth
         entry = backend.get_model_entry(model_type)
@@ -247,7 +259,7 @@ class EXRExporter:
         
         needs_device = 'device' in inspect.signature(vae.decode).parameters
         print(f"  📄 VAE loaded to CPU ({type(vae).__name__})")
-        return vae, needs_device, False  # standalone, safe to mutate
+        return vae, needs_device
 
     def _decode_beauty_latents(
         self,
@@ -300,23 +312,13 @@ class EXRExporter:
         # ------------------------------------------------------------------
         # Load VAE only — no DiT, no text encoder, no VRAM usage
         # ------------------------------------------------------------------
-        vae, needs_device_arg, is_borrowed = self._load_vae_only(backend, model_type)
+        vae, needs_device_arg = self._load_vae_only(backend, model_type)
         
         # ------------------------------------------------------------------
         # Decode: GPU (float32) first, CPU fallback
         # float32 avoids the bf16 conv3d kernel issue (cuDNN handles f32).
         # VAE-only load (~1.3GB) leaves ~22GB free on a 24GB card.
-        #
-        # IMPORTANT: If VAE is borrowed from a cached pipeline, we must
-        # restore its original dtype and device after decode — otherwise
-        # all subsequent standard generations will run with a VAE stuck
-        # on CPU in float32 instead of CUDA bfloat16.
         # ------------------------------------------------------------------
-        if is_borrowed:
-            original_dtype = next(vae.parameters()).dtype
-            original_device = next(vae.parameters()).device
-            print(f"  📄 Borrowed VAE (will restore to {original_dtype} on {original_device} after decode)")
-        
         vae = vae.to(dtype=torch.float32).eval()
         latent = latent.to(dtype=torch.float32)
         
@@ -355,15 +357,8 @@ class EXRExporter:
             print(f"  📄 CPU decode complete")
         
         # Clean up VAE
-        if is_borrowed:
-            # Restore pipeline's VAE to its original state
-            vae.to(dtype=original_dtype, device=original_device)
-            print(f"  📄 Restored borrowed VAE to {original_dtype} on {original_device}")
-            del latent
-        else:
-            # Standalone VAE — discard entirely
-            vae.cpu()
-            del vae, latent
+        vae.cpu()
+        del vae, latent
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
         
@@ -654,7 +649,6 @@ class EXRExporter:
         """
         MurmurHash3_32 — the standard hash used by the Cryptomatte spec.
         Pure Python implementation, no external deps.
-        Verified against the mmh3 reference library.
         """
         import struct as _struct
         
@@ -665,6 +659,7 @@ class EXRExporter:
         c2 = 0x1b873593
         h1 = seed
         
+        # Body (process 4-byte chunks)
         n_blocks = length // 4
         for i in range(n_blocks):
             k1 = _struct.unpack_from('<I', key, i * 4)[0]
@@ -675,6 +670,7 @@ class EXRExporter:
             h1 = ((h1 << 13) | (h1 >> 19)) & 0xFFFFFFFF
             h1 = (h1 * 5 + 0xe6546b64) & 0xFFFFFFFF
         
+        # Tail
         tail_start = n_blocks * 4
         k1 = 0
         tail_len = length & 3
@@ -689,6 +685,7 @@ class EXRExporter:
             k1 = (k1 * c2) & 0xFFFFFFFF
             h1 ^= k1
         
+        # Finalization
         h1 ^= length
         h1 ^= (h1 >> 16)
         h1 = (h1 * 0x85ebca6b) & 0xFFFFFFFF
@@ -708,6 +705,7 @@ class EXRExporter:
         self,
         id_matte: np.ndarray,
         num_objects: int = 0,
+        quiet: bool = False,
     ) -> tuple:
         """
         Convert raw object-ID matte into spec-compliant Cryptomatte channels.
@@ -717,27 +715,25 @@ class EXRExporter:
           - IDs are MurmurHash3_32 of object name, bit-cast to float32
           - Channel names: CryptoObject00.R/G/B/A
           - MUST be 32-bit float (half precision corrupts hashes)
-          - Manifest: JSON mapping name -> hex hash in EXR metadata
+          - Manifest: JSON mapping name -> hex hash
         
         Args:
             id_matte: uint16 [H, W] with 0=background, 1..N=objects
             num_objects: max object count (0 = auto-detect from data)
         
         Returns:
-            (channel_data, channel_info, metadata)
-            channel_data: {name: bytes} for writePixels
-            channel_info: {name: Imath.Channel} for header
-            metadata: dict of EXR header metadata strings
+            (channels_dict, metadata_dict)
         """
         h, w = id_matte.shape[:2]
         if id_matte.ndim > 2:
             id_matte = id_matte[:, :, 0]
         
+        # Determine objects present
         unique_ids = np.unique(id_matte)
-        unique_ids = unique_ids[unique_ids > 0]
+        unique_ids = unique_ids[unique_ids > 0]  # exclude background
         max_id = int(unique_ids.max()) if len(unique_ids) > 0 else num_objects
         
-        # Build manifest: object name -> MurmurHash3 -> hex + float
+        # Build manifest: object names -> MurmurHash3 -> hex + float
         id_to_hash_float = {}
         manifest = {}
         
@@ -745,35 +741,28 @@ class EXRExporter:
             name = f"object_{obj_id:03d}"
             hash_uint = self._mm3_hash(name)
             hash_float = self._uint32_to_float32(hash_uint)
+            hex_hash = f"{hash_uint:08x}"
             
             id_to_hash_float[obj_id] = hash_float
-            manifest[name] = f"{hash_uint:08x}"
+            manifest[name] = hex_hash
         
-        # Build per-pixel lookup: object ID -> float32 hash
+        # Build per-pixel ID and coverage arrays
+        # Single-winner matte: each pixel has 1 object with coverage=1.0
         id_float_map = np.zeros(max_id + 1, dtype=np.float32)
         for obj_id, hf in id_to_hash_float.items():
             id_float_map[obj_id] = hf
         
         safe_ids = np.clip(id_matte.astype(np.int32), 0, max_id)
         
-        # CryptoObject00: R=ID hash, G=coverage, B=0, A=0 (single-winner matte)
-        crypto_float32 = self.Imath.PixelType(self.Imath.PixelType.FLOAT)
-        
-        channel_data = {
-            'CryptoObject00.R': id_float_map[safe_ids].astype(np.float32).tobytes(),
-            'CryptoObject00.G': np.where(safe_ids > 0, 1.0, 0.0).astype(np.float32).tobytes(),
-            'CryptoObject00.B': np.zeros((h, w), dtype=np.float32).tobytes(),
-            'CryptoObject00.A': np.zeros((h, w), dtype=np.float32).tobytes(),
+        # CryptoObject00: R=ID, G=coverage, B=0, A=0 (2nd pair empty)
+        channels = {
+            'CryptoObject00.R': id_float_map[safe_ids],
+            'CryptoObject00.G': np.where(safe_ids > 0, 1.0, 0.0).astype(np.float32),
+            'CryptoObject00.B': np.zeros((h, w), dtype=np.float32),
+            'CryptoObject00.A': np.zeros((h, w), dtype=np.float32),
         }
         
-        channel_info = {
-            'CryptoObject00.R': self.Imath.Channel(crypto_float32),
-            'CryptoObject00.G': self.Imath.Channel(crypto_float32),
-            'CryptoObject00.B': self.Imath.Channel(crypto_float32),
-            'CryptoObject00.A': self.Imath.Channel(crypto_float32),
-        }
-        
-        # Metadata for EXR header (spec-required)
+        # Metadata for EXR header
         layer_hash = f"{self._mm3_hash('CryptoObject'):08x}"
         metadata = {
             f'cryptomatte/{layer_hash}/name': 'CryptoObject',
@@ -782,11 +771,12 @@ class EXRExporter:
             f'cryptomatte/{layer_hash}/manifest': json.dumps(manifest),
         }
         
-        print(f"  [Crypto] Cryptomatte: {len(unique_ids)} unique objects, "
-              f"manifest: {len(manifest)} entries")
+        if not quiet:
+            print(f"  [Crypto] Cryptomatte: {len(unique_ids)} unique objects, "
+                  f"manifest: {len(manifest)} entries")
         
-        return channel_data, channel_info, metadata
-    
+        return channels, metadata
+
     def _export_frame_multilayer(
         self,
         layers: Dict[str, str],
@@ -832,6 +822,29 @@ class EXRExporter:
                 elif layer_name == 'crypto':
                     # uint16 [H,W] object IDs — store as float for EXR
                     loaded_layers['crypto_raw'] = arr.astype(np.float32)
+            
+            # Resize any layers that don't match the established dimensions
+            # (beauty from latent decode may differ slightly from preprocessor .npy)
+            if width is not None and height is not None:
+                for key, arr in loaded_layers.items():
+                    arr_h, arr_w = arr.shape[:2]
+                    if arr_h != height or arr_w != width:
+                        from PIL import Image as _PILImage
+                        # Crypto/ID mattes MUST use nearest-neighbor (no interpolation)
+                        is_id_data = 'crypto' in key
+                        resample = _PILImage.NEAREST if is_id_data else _PILImage.LANCZOS
+                        if arr.ndim == 2:
+                            img = _PILImage.fromarray(arr, mode='F')
+                            img = img.resize((width, height), resample)
+                            loaded_layers[key] = np.array(img).astype(np.float32)
+                        else:
+                            # Multi-channel: resize each channel
+                            channels = []
+                            for c in range(arr.shape[2]):
+                                img = _PILImage.fromarray(arr[:,:,c], mode='F')
+                                img = img.resize((width, height), resample)
+                                channels.append(np.array(img).astype(np.float32))
+                            loaded_layers[key] = np.stack(channels, axis=-1)
 
         for layer_name, layer_path in layers.items():
             if layer_name in loaded_layers:
@@ -876,40 +889,6 @@ class EXRExporter:
         if not loaded_layers:
             raise ValueError("No valid layers to export")
         
-        # Ensure all layers match the target dimensions (beauty sets the reference)
-        # Preprocessors may output at slightly different resolutions than VAE decode
-        if width is not None and height is not None:
-            for key in list(loaded_layers.keys()):
-                arr = loaded_layers[key]
-                arr_h, arr_w = arr.shape[:2]
-                if arr_h != height or arr_w != width:
-                    if not quiet:
-                        print(f"  ⚠ Resizing {key}: {arr_w}x{arr_h} → {width}x{height}")
-                    
-                    if key == 'crypto_raw':
-                        # Nearest-neighbor for integer IDs (no blending)
-                        if arr.ndim == 2:
-                            img_r = Image.fromarray(arr).resize(
-                                (width, height), Image.Resampling.NEAREST)
-                            loaded_layers[key] = np.array(img_r).astype(arr.dtype)
-                        else:
-                            img_r = Image.fromarray(arr[:,:,0]).resize(
-                                (width, height), Image.Resampling.NEAREST)
-                            loaded_layers[key] = np.array(img_r).astype(arr.dtype)
-                    elif arr.ndim == 2:
-                        # Single-channel (depth) — bilinear
-                        img_r = Image.fromarray(arr, mode='F').resize(
-                            (width, height), Image.Resampling.BILINEAR)
-                        loaded_layers[key] = np.array(img_r).astype(np.float32)
-                    else:
-                        # Multi-channel (beauty, normals) — resize per channel
-                        channels = []
-                        for c in range(arr.shape[2]):
-                            ch_img = Image.fromarray(arr[:,:,c], mode='F').resize(
-                                (width, height), Image.Resampling.BILINEAR)
-                            channels.append(np.array(ch_img))
-                        loaded_layers[key] = np.stack(channels, axis=-1).astype(np.float32)
-        
         # Build EXR channels
         channels_dict = {}
         channel_info = {}
@@ -953,23 +932,39 @@ class EXRExporter:
             channel_info['N.Y'] = self.Imath.Channel(pixel_type)
             channel_info['N.Z'] = self.Imath.Channel(pixel_type)
 
-        # Cryptomatte (proper spec encoding with ID/coverage pairs)
-        crypto_metadata = {}
-        crypto = loaded_layers.get('crypto_raw', loaded_layers.get('crypto'))
-        if crypto is not None:
-            crypto_id_matte = crypto.astype(np.uint16) if crypto.dtype != np.uint16 else crypto
-            if crypto_id_matte.ndim == 3:
-                crypto_id_matte = crypto_id_matte[:, :, 0]
-            crypto_chan_data, crypto_chan_info, crypto_metadata = \
-                self._build_cryptomatte_channels(crypto_id_matte)
-            channels_dict.update(crypto_chan_data)
-            channel_info.update(crypto_chan_info)
+        if 'crypto_raw' in loaded_layers:
+            # Use spec-compliant Cryptomatte via _build_cryptomatte_channels
+            # Raw data is uint16 object IDs — need MurmurHash3 + manifest
+            id_matte = loaded_layers['crypto_raw']
+            if id_matte.ndim > 2:
+                id_matte = id_matte[:, :, 0]
+            crypto_channels, crypto_metadata = self._build_cryptomatte_channels(
+                id_matte.astype(np.uint16),
+                quiet=quiet,
+            )
+            # Cryptomatte MUST be 32-bit float (half corrupts hash bit-patterns)
+            float_type = self.Imath.PixelType(self.Imath.PixelType.FLOAT)
+            for ch_name, ch_data in crypto_channels.items():
+                channels_dict[ch_name] = ch_data.astype(np.float32).tobytes()
+                channel_info[ch_name] = self.Imath.Channel(float_type)
+        elif 'crypto' in loaded_layers:
+            # PNG fallback — just store as generic RGB (not spec-compliant)
+            arr = loaded_layers['crypto']
+            channels_dict['crypto.R'] = self._to_bytes(arr[:, :, 0], bit_depth)
+            channels_dict['crypto.G'] = self._to_bytes(arr[:, :, 1], bit_depth)
+            channels_dict['crypto.B'] = self._to_bytes(arr[:, :, 2], bit_depth)
+            channel_info['crypto.R'] = self.Imath.Channel(pixel_type)
+            channel_info['crypto.G'] = self.Imath.Channel(pixel_type)
+            channel_info['crypto.B'] = self.Imath.Channel(pixel_type)
+            crypto_metadata = {}
+        else:
+            crypto_metadata = {}
         
         # Create and write EXR
         header = self.OpenEXR.Header(width, height)
         header['channels'] = channel_info
         
-        # Add Cryptomatte metadata to header
+        # Write Cryptomatte manifest metadata into header (required by spec)
         for meta_key, meta_val in crypto_metadata.items():
             header[meta_key] = meta_val.encode('utf-8') if isinstance(meta_val, str) else meta_val
         
@@ -1123,29 +1118,18 @@ class EXRExporter:
             channel_info['N.Y'] = self.Imath.Channel(pixel_type)
             channel_info['N.Z'] = self.Imath.Channel(pixel_type)
         
-        # Cryptomatte (proper spec encoding with ID/coverage pairs)
-        crypto_metadata = {}
         if 'crypto' in loaded_layers:
             arr = loaded_layers['crypto']
-            # From PNG fallback: arr is [0,1] float, need to convert to uint16 IDs
-            # Each unique color = unique object. Quantize to get discrete IDs.
-            if arr.ndim == 3:
-                # Use first channel as grayscale ID (lossy path)
-                id_matte = (arr[:, :, 0] * 255).astype(np.uint16)
-            else:
-                id_matte = (arr * 255).astype(np.uint16)
-            crypto_chan_data, crypto_chan_info, crypto_metadata = \
-                self._build_cryptomatte_channels(id_matte)
-            channels_dict.update(crypto_chan_data)
-            channel_info.update(crypto_chan_info)
+            channels_dict['crypto.R'] = self._to_bytes(arr[:, :, 0], bit_depth)
+            channels_dict['crypto.G'] = self._to_bytes(arr[:, :, 1], bit_depth)
+            channels_dict['crypto.B'] = self._to_bytes(arr[:, :, 2], bit_depth)
+            channel_info['crypto.R'] = self.Imath.Channel(pixel_type)
+            channel_info['crypto.G'] = self.Imath.Channel(pixel_type)
+            channel_info['crypto.B'] = self.Imath.Channel(pixel_type)
         
         # Create EXR header
         header = self.OpenEXR.Header(width, height)
         header['channels'] = channel_info
-        
-        # Add Cryptomatte metadata to header
-        for meta_key, meta_val in crypto_metadata.items():
-            header[meta_key] = meta_val.encode('utf-8') if isinstance(meta_val, str) else meta_val
         
         # Write EXR
         exr_file = self.OpenEXR.OutputFile(str(output_path), header)

@@ -246,15 +246,18 @@ class PreprocessorManager:
         depth_defaults = self._defaults.get("depth", {})
         
         if model is None:
-            model_name = depth_defaults.get("model", "depth_anything_v2")
+            model_name = depth_defaults.get("model", "da3_mono_large")
             # Map config names to enum
             model_map = {
                 "depth_anything_v2": DepthModel.DEPTH_ANYTHING_V2,
                 "da2_vit_large": DepthModel.DEPTH_ANYTHING_V2,
                 "da3_mono_large": DepthModel.DA3_MONO_LARGE,
+                "da3_metric_large": DepthModel.DA3_METRIC_LARGE,
+                "da3_large": DepthModel.DA3_LARGE,
+                "da3_giant": DepthModel.DA3_GIANT,
                 "midas": DepthModel.MIDAS,
             }
-            model = model_map.get(model_name, DepthModel.DEPTH_ANYTHING_V2)
+            model = model_map.get(model_name, DepthModel.DA3_MONO_LARGE)
         
         invert = invert if invert is not None else depth_defaults.get("invert", False)
         normalize = normalize if normalize is not None else depth_defaults.get("normalize", True)
@@ -282,7 +285,7 @@ class PreprocessorManager:
     def get_raw_depth(
         self,
         image_path: Path,
-        model: DepthModel = DepthModel.DEPTH_ANYTHING_V2
+        model: DepthModel = DepthModel.DA3_MONO_LARGE
     ):
         """Get raw depth values as float32 array [0, 1]"""
         if model not in self._depth_cache:

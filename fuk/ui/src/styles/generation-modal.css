@@ -237,6 +237,12 @@
   color: #8b949e;
 }
 
+.gen-modal-log-progress {
+  color: #8b949e;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.75rem;
+}
+
 /* Error message */
 .gen-modal-error-message {
   padding: 1rem 1.5rem;

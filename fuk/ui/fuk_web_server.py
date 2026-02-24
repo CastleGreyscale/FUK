@@ -107,7 +107,12 @@ def _append_to_generation_log(line: str, level: str = "info"):
 
 
 class FukLogger:
-    """Centralized logging with timestamps and categories"""
+    """Centralized logging with timestamps and categories.
+    
+    When _OutputCapture is active, print() goes through _TeeStream which
+    already calls _append_to_generation_log(). So we skip the direct call
+    to avoid duplicate lines in the console modal.
+    """
     
     COLORS = {
         'header': '\033[95m',
@@ -124,6 +129,12 @@ class FukLogger:
     def timestamp():
         return datetime.now().strftime("%H:%M:%S.%f")[:-3]
     
+    @staticmethod
+    def _log(line: str, level: str):
+        """Append to generation log only when stdout is NOT being captured."""
+        if not _capture_active:
+            _append_to_generation_log(line, level)
+    
     @classmethod
     def header(cls, title: str, char: str = "="):
         width = 70
@@ -133,45 +144,45 @@ class FukLogger:
         print(f"\n{cls.COLORS['cyan']}{line1}")
         print(line2)
         print(f"{line3}{cls.COLORS['end']}\n")
-        _append_to_generation_log(line1, "header")
-        _append_to_generation_log(line2, "header")
-        _append_to_generation_log(line3, "header")
+        cls._log(line1, "header")
+        cls._log(line2, "header")
+        cls._log(line3, "header")
     
     @classmethod
     def section(cls, title: str):
         line = f"--- {title} ---"
         print(f"\n{cls.COLORS['blue']}{line}{cls.COLORS['end']}")
-        _append_to_generation_log(line, "section")
+        cls._log(line, "section")
     
     @classmethod
     def info(cls, category: str, message: str):
         line = f"[{cls.timestamp()}] [{category}] {message}"
         print(f"{cls.COLORS['cyan']}[{cls.timestamp()}]{cls.COLORS['end']} [{category}] {message}")
-        _append_to_generation_log(line, "info")
+        cls._log(line, "info")
     
     @classmethod
     def success(cls, category: str, message: str):
         line = f"[{cls.timestamp()}] OK [{category}] {message}"
         print(f"{cls.COLORS['green']}{line}{cls.COLORS['end']}")
-        _append_to_generation_log(line, "success")
+        cls._log(line, "success")
     
     @classmethod
     def warning(cls, category: str, message: str):
         line = f"[{cls.timestamp()}] WARN [{category}] {message}"
         print(f"{cls.COLORS['yellow']}{line}{cls.COLORS['end']}")
-        _append_to_generation_log(line, "warning")
+        cls._log(line, "warning")
     
     @classmethod
     def error(cls, category: str, message: str):
         line = f"[{cls.timestamp()}] ERROR [{category}] {message}"
         print(f"{cls.COLORS['red']}{line}{cls.COLORS['end']}")
-        _append_to_generation_log(line, "error")
+        cls._log(line, "error")
     
     @classmethod
     def params(cls, title: str, params: Dict[str, Any]):
         """Log parameters in a formatted way"""
         print(f"\n{cls.COLORS['yellow']}  {title}:{cls.COLORS['end']}")
-        _append_to_generation_log(f"  {title}:", "params")
+        cls._log(f"  {title}:", "params")
         for key, value in params.items():
             # Truncate long values
             str_val = str(value)
@@ -179,28 +190,28 @@ class FukLogger:
                 str_val = str_val[:77] + "..."
             line = f"    {key}: {str_val}"
             print(line)
-            _append_to_generation_log(line, "params")
+            cls._log(line, "params")
     
     @classmethod
     def command(cls, cmd: List[str]):
         """Log a command being executed"""
         print(f"\n{cls.COLORS['bold']}  Command:{cls.COLORS['end']}")
-        _append_to_generation_log("  Command:", "command")
+        cls._log("  Command:", "command")
         # Format command nicely
         formatted = " \\\n    ".join(cmd)
         print(f"    {formatted}")
-        _append_to_generation_log(f"    {formatted}", "command")
+        cls._log(f"    {formatted}", "command")
         print()
     
     @classmethod
     def paths(cls, title: str, paths: Dict[str, Any]):
         """Log path information"""
         print(f"\n{cls.COLORS['blue']}  {title}:{cls.COLORS['end']}")
-        _append_to_generation_log(f"  {title}:", "paths")
+        cls._log(f"  {title}:", "paths")
         for key, value in paths.items():
             line = f"    {key}: {value}"
             print(line)
-            _append_to_generation_log(line, "paths")
+            cls._log(line, "paths")
     
     @classmethod
     def timing(cls, category: str, start_time: float, message: str = ""):
@@ -213,7 +224,7 @@ class FukLogger:
             time_str = f"{mins}m {secs:.1f}s"
         line = f"[{cls.timestamp()}] TIME [{category}] {message} ({time_str})"
         print(f"{cls.COLORS['green']}{line}{cls.COLORS['end']}")
-        _append_to_generation_log(line, "timing")
+        cls._log(line, "timing")
     
     @classmethod
     def exception(cls, category: str, e: Exception):
@@ -232,7 +243,7 @@ class FukLogger:
         print(f"\n{cls.COLORS['red']}")
         for line in lines:
             print(line)
-            _append_to_generation_log(line, "error")
+            cls._log(line, "error")
         print(f"{cls.COLORS['end']}\n")
 
 log = FukLogger()
@@ -736,6 +747,8 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
     
     # Start log capture for this generation
     set_current_generation(generation_id)
+    capture = _OutputCapture()
+    capture.start()
     
     try:
         log.header("IMAGE GENERATION")
@@ -888,6 +901,7 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
     
     finally:
         # Always clear the current generation for log capture
+        capture.stop()
         clear_current_generation()
 
 
@@ -926,6 +940,8 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
     
     # Start log capture for this generation
     set_current_generation(generation_id)
+    capture = _OutputCapture()
+    capture.start()
     
     try:
         log.header("VIDEO GENERATION")
@@ -1079,6 +1095,7 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
     
     finally:
         # Always clear the current generation for log capture
+        capture.stop()
         clear_current_generation()
 
 @app.post("/api/generate/video", response_model=GenerationResponse)
@@ -1190,25 +1207,26 @@ async def stream_progress(generation_id: str):
         raise HTTPException(status_code=404, detail="Generation not found")
     
     async def event_generator():
-        """Generate SSE events"""
+        """Generate SSE events with idle-based timeout instead of hard limit."""
         last_update = None
         last_status = None
-        retry_count = 0
-        max_retries = 60  # 30 seconds max
+        idle_count = 0
+        max_idle = 600       # 5 minutes of NO updates before giving up
+        poll_interval = 0.5  # seconds between checks
         
         # Send initial state immediately
         gen = active_generations.get(generation_id)
         if gen:
             yield f"data: {json.dumps(gen)}\n\n"
         
-        while retry_count < max_retries:
+        while idle_count < max_idle:
             gen = active_generations.get(generation_id)
             
             if not gen:
                 print(f"[SSE] Generation {generation_id} not found in active_generations")
                 break
             
-            # Send update if changed or periodically
+            # Check for changes
             current_update = gen.get("updated_at")
             current_status = gen.get("status")
             
@@ -1217,20 +1235,24 @@ async def stream_progress(generation_id: str):
                     yield f"data: {json.dumps(gen)}\n\n"
                     last_update = current_update
                     last_status = current_status
+                    idle_count = 0  # Reset idle counter on any change
                 except Exception as e:
                     print(f"[SSE] Error sending update: {e}")
                     break
+            else:
+                idle_count += 1  # Only count idle when nothing changed
             
-            # Stop if complete or failed
+            # Stop if terminal state
             if gen["status"] in ["complete", "failed", "cancelled"]:
                 print(f"[SSE] Generation {generation_id} finished with status: {gen['status']}")
                 # Send final update one more time
                 yield f"data: {json.dumps(gen)}\n\n"
                 break
             
-            await asyncio.sleep(0.5)
-            retry_count += 1
+            await asyncio.sleep(poll_interval)
         
+        if idle_count >= max_idle:
+            print(f"[SSE] Idle timeout for {generation_id} after {max_idle * poll_interval}s")
         print(f"[SSE] Closing stream for {generation_id}")
     
     return StreamingResponse(
@@ -2427,7 +2449,7 @@ class LayersRequest(BaseModel):
     }
     
     # Depth settings
-    depth_model: str = "depth_anything_v2"
+    depth_model: str = "da3_mono_large"
     depth_invert: bool = False
     depth_normalize: bool = True
     depth_range_min: float = 0.0
@@ -2435,7 +2457,7 @@ class LayersRequest(BaseModel):
     
     # Normals settings
     normals_method: str = "from_depth"
-    normals_depth_model: str = "depth_anything_v2"
+    normals_depth_model: str = "da3_mono_large"
     normals_space: str = "tangent"
     normals_flip_y: bool = False
     normals_intensity: float = 1.0
@@ -2492,13 +2514,17 @@ async def generate_layers(request: LayersRequest):
                     "midas_large": DepthModel.MIDAS_LARGE,
                     "depth_anything_v2": DepthModel.DEPTH_ANYTHING_V2,
                     "depth_anything_v3": DepthModel.DEPTH_ANYTHING_V3,
+                    "da3_mono_large": DepthModel.DA3_MONO_LARGE,
+                    "da3_metric_large": DepthModel.DA3_METRIC_LARGE,
+                    "da3_large": DepthModel.DA3_LARGE,
+                    "da3_giant": DepthModel.DA3_GIANT,
                     "zoedepth": DepthModel.ZOEDEPTH,
                 }
                 
                 depth_result = preprocessor_manager.depth(
                     image_path=input_path,
                     output_path=gen_dir / "depth.png",
-                    model=depth_model_map.get(request.depth_model, DepthModel.DEPTH_ANYTHING_V2),
+                    model=depth_model_map.get(request.depth_model, DepthModel.DA3_MONO_LARGE),
                     invert=request.depth_invert,
                     normalize=request.depth_normalize,
                     range_min=request.depth_range_min,
@@ -2530,6 +2556,10 @@ async def generate_layers(request: LayersRequest):
                     "midas_large": DepthModel.MIDAS_LARGE,
                     "depth_anything_v2": DepthModel.DEPTH_ANYTHING_V2,
                     "depth_anything_v3": DepthModel.DEPTH_ANYTHING_V3,
+                    "da3_mono_large": DepthModel.DA3_MONO_LARGE,
+                    "da3_metric_large": DepthModel.DA3_METRIC_LARGE,
+                    "da3_large": DepthModel.DA3_LARGE,
+                    "da3_giant": DepthModel.DA3_GIANT,
                     "zoedepth": DepthModel.ZOEDEPTH,
                 }
                 
@@ -2537,7 +2567,7 @@ async def generate_layers(request: LayersRequest):
                     image_path=input_path,
                     output_path=gen_dir / "normals.png",
                     method=normals_method_map.get(request.normals_method, NormalsMethod.FROM_DEPTH),
-                    depth_model=depth_model_map.get(request.normals_depth_model, DepthModel.DEPTH_ANYTHING_V2),
+                    depth_model=depth_model_map.get(request.normals_depth_model, DepthModel.DA3_MONO_LARGE),
                     space=request.normals_space,
                     flip_y=request.normals_flip_y,
                     intensity=request.normals_intensity,
@@ -2922,8 +2952,9 @@ async def export_exr_sequence(request: EXRSequenceExportRequest):
         beauty_latent = None
         
         if request.beauty_latent:
-            # Direct latent path provided
-            beauty_latent = Path(request.beauty_latent)
+            # Direct latent path provided - resolve URL paths
+            resolved = resolve_input_path(request.beauty_latent)
+            beauty_latent = resolved or Path(request.beauty_latent)
             if not beauty_latent.exists():
                 raise HTTPException(
                     status_code=400,
@@ -2931,7 +2962,15 @@ async def export_exr_sequence(request: EXRSequenceExportRequest):
                 )
         elif request.generation_path:
             # Find latent in generation directory
-            gen_path = Path(request.generation_path)
+            # Resolve URL-style paths (api/project/cache/...) to absolute paths
+            resolved_gen = resolve_input_path(request.generation_path)
+            if resolved_gen is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Could not resolve generation path: {request.generation_path}"
+                )
+            # If resolved to a file, use its parent directory
+            gen_path = resolved_gen if resolved_gen.is_dir() else resolved_gen.parent
             latent_dir = gen_path / "latents"
             
             if not latent_dir.exists():
@@ -2982,7 +3021,7 @@ async def export_exr_sequence(request: EXRSequenceExportRequest):
         base_filename = request.filename or "export"
         filename_pattern = request.filename_pattern or f"{base_filename}.{{frame:04d}}.exr"
         
-        # Export using LATENT-ONLY API
+        # Export using LATENT-ONLY API (working version)
         exporter = EXRExporter()
         
         result = exporter.export_video_sequence(
@@ -3076,6 +3115,298 @@ setup_video_routes(
     clear_vram=clear_vram,                              
     cleanup_failed_generation=cleanup_failed_generation 
 )
+
+# ============================================================================
+# Generic Task System
+# ============================================================================
+# Enables ANY processing operation (preprocess, upscale, interpolate, layers,
+# export) to run as a tracked background task with:
+#   - Real-time console output capture (stdout + stderr)
+#   - SSE progress streaming via /api/progress/{generation_id}
+#   - Frontend modal integration via useGeneration + GenerationModal
+# ============================================================================
+
+import sys as _sys
+import re as _re
+
+# Module-level originals — set once, never wrapped
+_real_stdout = _sys.stdout
+_real_stderr = _sys.stderr
+_capture_active = False
+
+f# Strips ALL ANSI escape sequences (colors, cursor moves, clear line, etc.)
+_ansi_re = _re.compile(r'\033\[[0-9;]*[A-Za-z]|\033\].*?\007')
+
+# Shared dedup state across both stdout and stderr TeeStreams
+# This prevents the same progress line appearing twice when DiffSynth
+# writes to both streams (tqdm→stderr, print→stdout)
+_last_captured_line = None
+
+
+class _TeeStream:
+    """Stream wrapper that writes to both the original stream and the generation log."""
+
+    def __init__(self, original, level="info"):
+        self.original = original
+        self.level = level
+        self._line_buffer = ""
+
+    @staticmethod
+    def _clean(text):
+        """Strip ANSI escapes and control chars."""
+        return _ansi_re.sub("", text).replace("\r", "").strip()
+
+    def write(self, text):
+        global _last_captured_line
+        # Always write to the real terminal
+        self.original.write(text)
+        if not text:
+            return
+
+        self._line_buffer += text
+
+        # Flush complete lines
+        while "\n" in self._line_buffer:
+            line, self._line_buffer = self._line_buffer.split("\n", 1)
+            cleaned = self._clean(line)
+            if cleaned and cleaned != _last_captured_line:
+                _append_to_generation_log(cleaned, self.level)
+                _last_captured_line = cleaned
+
+        # Handle \r (tqdm / progress bars) — emit only the latest segment
+        if "\r" in self._line_buffer:
+            parts = self._line_buffer.split("\r")
+            self._line_buffer = parts[-1]
+            latest = self._clean(parts[-1])
+            if latest and latest != _last_captured_line:
+                _append_to_generation_log(latest, "progress")
+                _last_captured_line = latest
+
+    def flush(self):
+        global _last_captured_line
+        if self._line_buffer.strip():
+            cleaned = self._clean(self._line_buffer)
+            if cleaned and cleaned != _last_captured_line:
+                _append_to_generation_log(cleaned, self.level)
+                _last_captured_line = cleaned
+            self._line_buffer = ""
+        self.original.flush()
+
+    # Delegate everything else so libraries don't crash
+    def fileno(self):
+        return self.original.fileno()
+
+    def isatty(self):
+        return getattr(self.original, "isatty", lambda: False)()
+
+    def readable(self):
+        return False
+
+    def writable(self):
+        return True
+
+    def seekable(self):
+        return False
+
+
+class _OutputCapture:
+    """Context manager that tees stdout/stderr into the generation console_log.
+    
+    Uses module-level originals to prevent nesting — calling start() twice
+    always wraps the REAL streams, never a previous _TeeStream.
+    """
+
+    def start(self):
+        global _capture_active, _last_captured_line
+        _capture_active = True
+        _last_captured_line = None
+        _sys.stdout = _TeeStream(_real_stdout, level="info")
+        _sys.stderr = _TeeStream(_real_stderr, level="warning")
+
+    def stop(self):
+        global _capture_active, _last_captured_line
+        if isinstance(_sys.stdout, _TeeStream):
+            _sys.stdout.flush()
+        if isinstance(_sys.stderr, _TeeStream):
+            _sys.stderr.flush()
+        _sys.stdout = _real_stdout
+        _sys.stderr = _real_stderr
+        _capture_active = False
+        _last_captured_line = None
+
+
+# ---------------------------------------------------------------------------
+# Task request model
+# ---------------------------------------------------------------------------
+
+class TaskRequest(BaseModel):
+    """Generic task request — task_type + arbitrary payload dict."""
+    task_type: str
+    payload: dict = {}
+
+
+# ---------------------------------------------------------------------------
+# Endpoint
+# ---------------------------------------------------------------------------
+
+@app.post("/api/task/start")
+async def start_task(request: TaskRequest, background_tasks: BackgroundTasks):
+    """
+    Start any processing operation as a tracked background task.
+    Returns a generation_id — poll via GET /api/progress/{generation_id}.
+
+    Supported task_types:
+      preprocess, preprocess_video,
+      upscale, upscale_video,
+      interpolate,
+      layers, layers_video,
+      export_exr, export_exr_sequence
+    """
+    generation_id = str(uuid.uuid4())
+
+    active_generations[generation_id] = {
+        "id": generation_id,
+        "type": request.task_type,
+        "status": "queued",
+        "phase": "queued",
+        "progress": 0.0,
+        "console_log": [],
+        "created_at": datetime.now().isoformat(),
+        "updated_at": datetime.now().isoformat(),
+    }
+
+    background_tasks.add_task(
+        _run_generic_task, generation_id, request.task_type, request.payload
+    )
+
+    return GenerationResponse(
+        generation_id=generation_id,
+        status="queued",
+        message=f"Task '{request.task_type}' started",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Background runner
+# ---------------------------------------------------------------------------
+
+async def _run_generic_task(generation_id: str, task_type: str, payload: dict):
+    """Execute any task with full stdout/stderr capture."""
+
+    set_current_generation(generation_id)
+    capture = _OutputCapture()
+    capture.start()
+
+    try:
+        active_generations[generation_id].update({
+            "status": "running",
+            "phase": "processing",
+            "updated_at": datetime.now().isoformat(),
+        })
+
+        result = await _dispatch_task(task_type, payload, generation_id)
+
+        active_generations[generation_id].update({
+            "status": "complete",
+            "phase": "complete",
+            "progress": 1.0,
+            "result": result,
+            "updated_at": datetime.now().isoformat(),
+            "completed_at": datetime.now().isoformat(),
+        })
+
+    except HTTPException as exc:
+        active_generations[generation_id].update({
+            "status": "failed",
+            "error": exc.detail,
+            "updated_at": datetime.now().isoformat(),
+        })
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        active_generations[generation_id].update({
+            "status": "failed",
+            "error": str(exc),
+            "updated_at": datetime.now().isoformat(),
+        })
+    finally:
+        capture.stop()
+        clear_current_generation()
+
+
+# ---------------------------------------------------------------------------
+# Dispatcher — routes task_type to the matching endpoint handler
+# ---------------------------------------------------------------------------
+
+async def _dispatch_task(task_type: str, payload: dict, generation_id: str) -> dict:
+    """Call the appropriate handler and return its result dict."""
+
+    # ---- Preprocess (image) ----
+    if task_type == "preprocess":
+        req = PreprocessRequest(**payload)
+        return await preprocess_image(req)
+
+    # ---- Preprocess (video) — lives on video_endpoints router ----
+    elif task_type == "preprocess_video":
+        return await _forward_to_endpoint("/api/preprocess/video", payload)
+
+    # ---- Upscale (image) ----
+    elif task_type == "upscale":
+        req = UpscaleRequest(**payload)
+        return await upscale_image(req)
+
+    # ---- Upscale (video) ----
+    elif task_type == "upscale_video":
+        return await _forward_to_endpoint("/api/postprocess/upscale/video", payload)
+
+    # ---- Frame interpolation ----
+    elif task_type == "interpolate":
+        req = InterpolateRequest(**payload)
+        return await interpolate_video(req)
+
+    # ---- Layers (image) ----
+    elif task_type == "layers":
+        req = LayersRequest(**payload)
+        return await generate_layers(req)
+
+    # ---- Layers (video) ----
+    elif task_type == "layers_video":
+        return await _forward_to_endpoint("/api/layers/video/generate", payload)
+
+    # ---- EXR export ----
+    elif task_type == "export_exr":
+        req = ExportEXRRequest(**payload)
+        return await export_to_exr(req)
+
+    # ---- EXR sequence export ----
+    elif task_type == "export_exr_sequence":
+        req = EXRSequenceExportRequest(**payload)
+        return await export_exr_sequence(req)
+
+    else:
+        raise ValueError(f"Unknown task_type: '{task_type}'")
+
+
+async def _forward_to_endpoint(path: str, payload: dict) -> dict:
+    """
+    Call an endpoint that lives on a sub-router (e.g. video_endpoints)
+    by using Starlette's TestClient internally.
+    """
+    from starlette.testclient import TestClient
+
+    def _call():
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.post(path, json=payload)
+        if resp.status_code >= 400:
+            detail = "Unknown error"
+            try:
+                detail = resp.json().get("detail", resp.text)
+            except Exception:
+                detail = resp.text
+            raise HTTPException(status_code=resp.status_code, detail=detail)
+        return resp.json()
+
+    return await asyncio.to_thread(_call)
 
 # ============================================================================
 # Main

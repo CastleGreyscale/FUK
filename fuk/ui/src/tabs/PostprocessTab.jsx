@@ -2,7 +2,7 @@
  * Post-Process Tab
  * Upscaling (images & videos) and frame interpolation
  * Before/After comparison layout
- * Supports both single images and frame-by-frame video processing
+ * Supports both single images and frame-by-frame video generating
  * 
  * Features:
  * - Persists last result in project state for cross-tab restoration
@@ -13,6 +13,9 @@ import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { Enhance, Loader2, CheckCircle, Camera, Film, AlertCircle } from '../components/Icons';
 import MediaUploader, { isVideoFile } from '../components/MediaUploader';
 import ZoomableImage from '../components/ZoomableImage';
+import GenerationModal from '../components/GenerationModal';
+import { useGeneration } from '../hooks/useGeneration';
+import { startTask } from '../utils/api';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { buildImageUrl } from '../utils/constants';
 import { useVideoPlayback } from '../hooks/useVideoPlayback';
@@ -66,20 +69,30 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
   // UI state
   const [activeProcess, setActiveProcess] = useState('upscale');
   const [sourceInput, setSourceInput] = useState(null);
-  const [processing, setProcessing] = useState(false);
-  const [progress, setProgress] = useState(null);
   const [result, setResult] = useState(null);
-  const [error, setError] = useState(null);
   const [capabilities, setCapabilities] = useState(null);
+  const [localError, setLocalError] = useState(null);
+
+  const {
+    generating,
+    progress,
+    result: genResult,
+    error: genError,
+    elapsedSeconds,
+    consoleLog,
+    showModal,
+    startGeneration,
+    cancel,
+    closeModal,
+    reset: resetGeneration,
+  } = useGeneration();
+
+  const error = genError || localError;
   
   // Track input dimensions for proper aspect ratio
   const [inputDimensions, setInputDimensions] = useState({ width: 16, height: 9 });
   const [outputDimensions, setOutputDimensions] = useState({ width: 16, height: 9 });
   
-  // Timer state
-  const [startTime, setStartTime] = useState(null);
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const mountedRef = useRef(true);
   
   // Track if we've restored from project state
   const hasRestoredRef = useRef(false);
@@ -89,23 +102,7 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
   // Detect if input is video
   const isVideo = useMemo(() => isVideoFile(sourceInput), [sourceInput]);
   
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => { mountedRef.current = false; };
-  }, []);
-  
-  useEffect(() => {
-    if (!processing || !startTime) return;
-    
-    const interval = setInterval(() => {
-      if (mountedRef.current) {
-        setElapsedSeconds(Math.floor((Date.now() - startTime) / 1000));
-      }
-    }, 1000);
-    
-    return () => clearInterval(interval);
-  }, [processing, startTime]);
-  
+
   // Reset restoration flag when leaving the tab
   useEffect(() => {
     if (activeTab !== 'postprocess') {
@@ -172,7 +169,6 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
   useEffect(() => {
     setResult(null);
     setSourceInput(null);
-    setError(null);
     hasRestoredRef.current = false; // Allow restoration for new project
   }, [project?.currentFilename]);
   
@@ -242,7 +238,6 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
     if (newPath !== sourceInput) {
       setSourceInput(newPath);
       setResult(null);
-      setError(null);
     }
   };
   
@@ -271,22 +266,18 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
   
   const handleUpscale = async () => {
     if (!sourceInput) {
-      setError('Please select a source image or video');
+      setLocalError('Please select a source image or video');
       return;
     }
-    
-    setProcessing(true);
-    setStartTime(Date.now());
-    setElapsedSeconds(0);
-    setProgress({ phase: 'Starting upscale...', progress: 0.1 });
-    setError(null);
-    
+
+    setLocalError(null);
+    setResult(null);
+
     try {
-      let endpoint, payload;
-      
+      let taskType, payload;
+
       if (isVideo) {
-        // Video upscaling - frame by frame
-        endpoint = `${API_URL}/postprocess/upscale/video`;
+        taskType = 'upscale_video';
         payload = {
           source_path: sourceInput,
           scale: settings.upscaleFactor,
@@ -295,8 +286,7 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
           output_mode: settings.videoOutputMode,
         };
       } else {
-        // Image upscaling
-        endpoint = `${API_URL}/postprocess/upscale`;
+        taskType = 'upscale';
         payload = {
           source_path: sourceInput,
           scale: settings.upscaleFactor,
@@ -304,101 +294,84 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
           denoise: settings.denoise,
         };
       }
-      
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      
-      if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.detail || 'Upscale failed');
-      }
-      
-      const data = await response.json();
-      console.log('[PostProcess] Upscale result:', data);
-      
-      let newResult;
-      if (isVideo) {
-        newResult = {
-          type: 'video',
-          url: data.output_url,
-          path: data.output_path,
-          inputSize: data.input_size,
-          outputSize: data.output_size,
-          scale: data.scale,
-          method: data.method,
-          frameCount: data.frame_count,
-        };
-      } else {
-        newResult = {
-          type: 'image',
-          url: data.output_url,
-          path: data.output_path,
-          inputSize: data.input_size,
-          outputSize: data.output_size,
-          scale: data.scale,
-          method: data.method,
-        };
-      }
-      
-      setResult(newResult);
-      setProgress({ phase: 'Complete', progress: 1 });
-      
-      // Save to project lastState
-      saveResultToLastState(newResult);
-      
-      // Notify history to refresh
-      window.dispatchEvent(new CustomEvent('fuk-generation-complete', {
-        detail: { 
-          type: 'upscale',
-          result: data,
-          elapsed: Math.floor((Date.now() - startTime) / 1000)
-        }
-      }));
-      
+
+      const data = await startTask(taskType, payload);
+      startGeneration(data.generation_id);
     } catch (err) {
       console.error('[PostProcess] Upscale error:', err);
-      setError(err.message);
-    } finally {
-      setProcessing(false);
+      setLocalError(err.message);
     }
   };
-  
+
   const handleInterpolate = async () => {
     if (!sourceInput) {
-      setError('Please select a source video');
+      setLocalError('Please select a source video');
       return;
     }
-    
-    setProcessing(true);
-    setStartTime(Date.now());
-    setElapsedSeconds(0);
-    setProgress({ phase: 'Starting interpolation...', progress: 0.1 });
-    setError(null);
-    
+
+    setLocalError(null);
+    setResult(null);
+
     try {
-      const response = await fetch(`${API_URL}/postprocess/interpolate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          source_path: sourceInput,
-          source_fps: settings.sourceFramerate,
-          target_fps: settings.targetFramerate,
-          model: settings.interpolationMethod,
-        }),
+      const data = await startTask('interpolate', {
+        source_path: sourceInput,
+        source_fps: settings.sourceFramerate,
+        target_fps: settings.targetFramerate,
+        model: settings.interpolationMethod,
       });
-      
-      if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.detail || 'Interpolation failed');
-      }
-      
-      const data = await response.json();
-      console.log('[PostProcess] Interpolate result:', data);
-      
-      const newResult = {
+      startGeneration(data.generation_id);
+    } catch (err) {
+      console.error('[PostProcess] Interpolate error:', err);
+      setLocalError(err.message);
+    }
+  };
+
+  const handleProcess = async () => {
+    if (activeProcess === 'upscale') {
+      await handleUpscale();
+    } else {
+      await handleInterpolate();
+    }
+  };
+
+  const handleCancel = () => {
+    cancel();
+  };
+
+  // Bridge: extract tab-specific result from task completion
+  useEffect(() => {
+    if (!genResult || genResult.status !== 'complete' || !genResult.result) return;
+
+    const data = genResult.result;
+    console.log('[PostProcess] Task complete:', data);
+
+    let newResult;
+    if (data.frame_count) {
+      // Video result
+      newResult = {
+        type: 'video',
+        url: data.output_url,
+        path: data.output_path,
+        inputSize: data.input_size,
+        outputSize: data.output_size,
+        scale: data.scale,
+        method: data.method,
+        frameCount: data.frame_count,
+      };
+    } else if (data.output_size) {
+      // Image upscale result
+      newResult = {
+        type: 'image',
+        url: data.output_url,
+        path: data.output_path,
+        inputSize: data.input_size,
+        outputSize: data.output_size,
+        scale: data.scale,
+        method: data.method,
+      };
+    } else {
+      // Interpolation result
+      newResult = {
         type: 'video',
         url: data.output_url,
         path: data.output_path,
@@ -407,44 +380,21 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
         multiplier: data.multiplier,
         method: data.method,
       };
-      
-      setResult(newResult);
-      setProgress({ phase: 'Complete', progress: 1 });
-      // Save to project lastState
-      saveResultToLastState(newResult);
-      // Notify history to refresh
-      window.dispatchEvent(new CustomEvent('fuk-generation-complete', {
-        detail: { 
-          type: 'interpolate',
-          result: data,
-          elapsed: Math.floor((Date.now() - startTime) / 1000)
-        }
-      }));
-      
-    } catch (err) {
-      console.error('[PostProcess] Interpolate error:', err);
-      setError(err.message);
-    } finally {
-      setProcessing(false);
     }
-  };
-  
-  const handleProcess = async () => {
-    if (activeProcess === 'upscale') {
-      await handleUpscale();
-    } else {
-      await handleInterpolate();
-    }
-  };
-  
-  const handleCancel = () => {
-    setProcessing(false);
-    setProgress(null);
-    setStartTime(null);
-    setElapsedSeconds(0);
-  };
-  
-  const canProcess = sourceInput && !processing;
+
+    setResult(newResult);
+    saveResultToLastState(newResult);
+
+    window.dispatchEvent(new CustomEvent('fuk-generation-complete', {
+      detail: {
+        type: activeProcess,
+        result: data,
+        elapsed: elapsedSeconds,
+      }
+    }));
+  }, [genResult]);
+
+  const canProcess = sourceInput && !generating;
   const inputAspectRatio = inputDimensions.width / inputDimensions.height;
   const inputAspectStyle = { '--preview-aspect': inputAspectRatio };
   
@@ -528,13 +478,13 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
           </div>
           
           {/* Arrow */}
-          <div className={`fuk-compare-arrow ${processing ? 'fuk-compare-arrow--active' : ''}`}>
-            {processing ? (
+          <div className={`fuk-compare-arrow ${generating ? 'fuk-compare-arrow--active' : ''}`}>
+            {generating ? (
               <Loader2 className="fuk-compare-arrow-icon fuk-compare-arrow-icon--spin" />
             ) : (
               <span>→</span>
             )}
-            {processing && progress && (
+            {generating && progress && (
               <span className="fuk-compare-arrow-label">{progress.phase}</span>
             )}
           </div>
@@ -584,10 +534,10 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                 <div className="fuk-placeholder">
                   <Enhance className="fuk-placeholder-icon" />
                   <p className="fuk-placeholder-text">
-                    {processing ? `Processing... ${formatTime(elapsedSeconds)}` : 'Result will appear here'}
+                    {generating ? `generating... ${formatTime(elapsedSeconds)}` : 'Result will appear here'}
                   </p>
-                  {processing && isVideo && (
-                    <p className="fuk-placeholder-subtext">Processing video frame-by-frame</p>
+                  {generating && isVideo && (
+                    <p className="fuk-placeholder-subtext">generating video frame-by-frame</p>
                   )}
                 </div>
               </div>
@@ -608,8 +558,10 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
             <MediaUploader
               media={sourceInput ? [{ path: sourceInput }] : []}
               onMediaChange={handleSourceChange}
-              disabled={processing}
+              disabled={generating}
               accept={activeProcess === 'interpolate' ? 'videos' : 'all'}
+              initialDir={project?.projectState?.lastState?.lastUploadDir}
+              onDirectorySelected={(dir) => project?.updateLastState?.({ lastUploadDir: dir })}
             />
             
             <p className="fuk-help-text">
@@ -622,7 +574,7 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
             {isVideo && activeProcess === 'upscale' && (
               <div className="fuk-alert fuk-alert--info fuk-mt-3">
                 <Film className="fuk-alert-icon" />
-                <span className="fuk-alert-text">Video: Processing frame-by-frame</span>
+                <span className="fuk-alert-text">Video: generating frame-by-frame</span>
               </div>
             )}
             
@@ -641,7 +593,7 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                   className="fuk-select"
                   value={settings.videoOutputMode}
                   onChange={(e) => updateSettings({ videoOutputMode: e.target.value })}
-                  disabled={processing}
+                  disabled={generating}
                 >
                   <option value="mp4">MP4 Video</option>
                   <option value="sequence">Image Sequence</option>
@@ -668,7 +620,7 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                   onChange={() => {
                     setActiveProcess('upscale');
                     setResult(null);
-                    setError(null);
+
                   }}
                 />
                 <div className="fuk-radio-card-content">
@@ -690,7 +642,7 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                   onChange={() => {
                     setActiveProcess('interpolate');
                     setResult(null);
-                    setError(null);
+
                   }}
                 />
                 <div className="fuk-radio-card-content">
@@ -732,7 +684,7 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                   className="fuk-select"
                   value={settings.upscaleMethod}
                   onChange={(e) => updateSettings({ upscaleMethod: e.target.value })}
-                  disabled={processing}
+                  disabled={generating}
                 >
                   <option value="realesrgan">Real-ESRGAN (Recommended)</option>
                   <option value="lanczos">Lanczos (Fast, No AI)</option>
@@ -749,7 +701,7 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                         className="fuk-radio"
                         checked={settings.upscaleFactor === factor}
                         onChange={() => updateSettings({ upscaleFactor: factor })}
-                        disabled={processing}
+                        disabled={generating}
                       />
                       <span className="fuk-radio-label">{factor}x</span>
                     </label>
@@ -772,7 +724,7 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                       min={0}
                       max={1}
                       step={0.05}
-                      disabled={processing}
+                      disabled={generating}
                     />
                     <input
                       type="number"
@@ -782,7 +734,7 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                       step={0.05}
                       min={0}
                       max={1}
-                      disabled={processing}
+                      disabled={generating}
                     />
                   </div>
                   <p className="fuk-help-text--inline">
@@ -804,7 +756,7 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                   className="fuk-select"
                   value={settings.interpolationMethod}
                   onChange={(e) => updateSettings({ interpolationMethod: e.target.value })}
-                  disabled={processing}
+                  disabled={generating}
                 >
                   <option value="rife">RIFE (Recommended)</option>
                 </select>
@@ -816,7 +768,7 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                   className="fuk-select"
                   value={settings.sourceFramerate}
                   onChange={(e) => updateSettings({ sourceFramerate: parseInt(e.target.value) })}
-                  disabled={processing}
+                  disabled={generating}
                 >
                   <option value="8">8 fps</option>
                   <option value="12">12 fps</option>
@@ -831,7 +783,7 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                   className="fuk-select"
                   value={settings.targetFramerate}
                   onChange={(e) => updateSettings({ targetFramerate: parseInt(e.target.value) })}
-                  disabled={processing}
+                  disabled={generating}
                 >
                   <option value="24">24 fps (Film)</option>
                   <option value="30">30 fps (Video)</option>
@@ -856,14 +808,25 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
       <Footer
         activeTab={activeTab}
         setActiveTab={setActiveTab}
-        generating={processing}
+        generating={generating}
         progress={progress}
         elapsedSeconds={elapsedSeconds}
         onGenerate={handleProcess}
-        onCancel={handleCancel}
+        onCancel={cancel}
         canGenerate={canProcess}
         generateLabel={activeProcess === 'upscale' ? (isVideo ? 'Upscale Video' : 'Upscale') : 'Interpolate'}
         generatingLabel={activeProcess === 'upscale' ? (isVideo ? 'Upscaling Video...' : 'Upscaling...') : 'Interpolating...'}
+      />
+      <GenerationModal
+        isOpen={showModal}
+        type={activeProcess}
+        generating={generating}
+        progress={progress}
+        elapsedSeconds={elapsedSeconds}
+        consoleLog={consoleLog}
+        error={genError}
+        onCancel={cancel}
+        onClose={closeModal}
       />
     </>
   );

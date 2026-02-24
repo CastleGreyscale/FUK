@@ -12,9 +12,25 @@ import { X, Square } from '../../src/components/Icons';
 import ProgressBar from './ProgressBar';
 import { formatTime } from '../utils/helpers';
 
+// Friendly display labels for each task type
+const TYPE_LABELS = {
+  image: 'Image',
+  video: 'Video',
+  preprocess: 'Preprocessing',
+  preprocess_video: 'Video Preprocessing',
+  upscale: 'Upscale',
+  upscale_video: 'Video Upscale',
+  interpolate: 'Interpolation',
+  layers: 'Layer Generation',
+  layers_video: 'Video Layer Generation',
+  export: 'EXR Export',
+  export_exr: 'EXR Export',
+  export_exr_sequence: 'EXR Sequence Export',
+};
+
 export default function GenerationModal({
   isOpen,
-  type = 'image', // 'image' or 'video'
+  type = 'image', // 'image', 'video', 'preprocess', 'upscale', 'interpolate', 'layers', 'export', etc.
   generating,
   progress,
   elapsedSeconds,
@@ -50,6 +66,9 @@ export default function GenerationModal({
   const isComplete = !generating && !error;
   const isFailed = !generating && error;
 
+  // Get display label for this type
+  const typeLabel = TYPE_LABELS[type] || type.charAt(0).toUpperCase() + type.slice(1);
+
   // Get level-based styling for log lines
   const getLevelClass = (level) => {
     switch (level) {
@@ -59,6 +78,7 @@ export default function GenerationModal({
       case 'timing': return 'gen-modal-log-timing';
       case 'header': return 'gen-modal-log-header';
       case 'section': return 'gen-modal-log-section';
+      case 'progress': return 'gen-modal-log-progress';
       case 'params':
       case 'paths': return 'gen-modal-log-dim';
       default: return '';
@@ -77,9 +97,9 @@ export default function GenerationModal({
               {isFailed && <span className="gen-modal-error-icon">✗</span>}
             </span>
             <span>
-              {generating && `Generating ${type}...`}
-              {isComplete && `${type.charAt(0).toUpperCase() + type.slice(1)} Complete`}
-              {isFailed && `${type.charAt(0).toUpperCase() + type.slice(1)} Failed`}
+              {generating && `${typeLabel}...`}
+              {isComplete && `${typeLabel} Complete`}
+              {isFailed && `${typeLabel} Failed`}
             </span>
           </div>
           

@@ -28,7 +28,7 @@ const DEFAULT_SETTINGS = {
     detect_face: false,
   },
   depth: {
-    depth_model: 'depth_anything_v2',
+    depth_model: 'depth_anything_v3',
     depth_invert: false,
     depth_normalize: true,
     depth_colormap: 'inferno',

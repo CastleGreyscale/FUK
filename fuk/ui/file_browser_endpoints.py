@@ -264,4 +264,3 @@ def setup_file_browser_routes(app, log):
             ]
         }
     
-    log.success("Routes", "File browser endpoints registered")
