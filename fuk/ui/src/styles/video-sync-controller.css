@@ -44,14 +44,14 @@
 .video-sync-btn--primary {
   width: 2.5rem;
   height: 2.5rem;
-  background: var(--color-accent, #a855f7);
-  border-color: var(--color-accent, #a855f7);
+  background: var(--color-accent);
+  border-color: var(--color-accent);
   color: #fff;
 }
 
 .video-sync-btn--primary:hover {
-  background: var(--color-accent-hover, #9333ea);
-  border-color: var(--color-accent-hover, #9333ea);
+  background: var(--color-accent-hover);
+  border-color: var(--color-accent-hover);
 }
 
 .video-sync-icon {
@@ -87,7 +87,7 @@
   top: 0;
   left: 0;
   height: 100%;
-  background: linear-gradient(to right, var(--color-accent, #a855f7), #ec4899);
+  background: linear-gradient(to right, var(--color-accent), #0284c7);
   border-radius: var(--radius-full, 9999px);
   transition: width 0.05s linear;
 }
@@ -99,7 +99,7 @@
   width: 0.875rem;
   height: 0.875rem;
   background: #fff;
-  border: 2px solid var(--color-accent, #a855f7);
+  border: 2px solid var(--color-accent);
   border-radius: 50%;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
   opacity: 0;

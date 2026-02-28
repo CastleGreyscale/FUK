@@ -1687,6 +1687,10 @@ async def preprocess_image(request: PreprocessRequest):
                 "midas_large": DepthModel.MIDAS_LARGE,
                 "depth_anything_v2": DepthModel.DEPTH_ANYTHING_V2,
                 "depth_anything_v3": DepthModel.DEPTH_ANYTHING_V3,
+                "da3_mono_large":     DepthModel.DA3_MONO_LARGE,
+                "da3_metric_large":   DepthModel.DA3_METRIC_LARGE,
+                "da3_large":          DepthModel.DA3_LARGE,
+                "da3_giant":          DepthModel.DA3_GIANT,
                 "zoedepth": DepthModel.ZOEDEPTH,
             }
             
@@ -1696,7 +1700,7 @@ async def preprocess_image(request: PreprocessRequest):
             )
             depth_model = depth_model_map.get(
                 request.normals_depth_model,
-                DepthModel.DEPTH_ANYTHING_V2
+                DepthModel.DA3_MONO_LARGE
             )
             
             result = preprocessor_manager.normals(
@@ -2150,6 +2154,8 @@ class PreprocessRequest(BaseModel):
     depth_normalize: bool = True
     depth_range_min: float = 0.0
     depth_range_max: float = 1.0
+    depth_process_res: Optional[int] = None    # None = use DA3 config default (1344)
+    depth_process_res_method: str = "lower_bound_resize"
     
     # Normals parameters
     normals_method: str = "from_depth"  # 'from_depth' or 'dsine'
@@ -2226,20 +2232,21 @@ async def preprocess_image(request: PreprocessRequest):
             )
         
         elif request.method == "depth":
-            # Map string to enum
             depth_model_map = {
-                "midas_small": DepthModel.MIDAS_SMALL,
-                "midas_large": DepthModel.MIDAS_LARGE,
-                "depth_anything_v2": DepthModel.DEPTH_ANYTHING_V2,
-                "depth_anything_v3": DepthModel.DEPTH_ANYTHING_V3,
-                "zoedepth": DepthModel.ZOEDEPTH,
+                "midas_small":        DepthModel.MIDAS_SMALL,
+                "midas_large":        DepthModel.MIDAS_LARGE,
+                "depth_anything_v2":  DepthModel.DEPTH_ANYTHING_V2,
+                "depth_anything_v3":  DepthModel.DEPTH_ANYTHING_V3,
+                "da3_mono_large":     DepthModel.DA3_MONO_LARGE,
+                "da3_metric_large":   DepthModel.DA3_METRIC_LARGE,
+                "da3_large":          DepthModel.DA3_LARGE,
+                "da3_giant":          DepthModel.DA3_GIANT,
+                "zoedepth":           DepthModel.ZOEDEPTH,
             }
-            
             depth_model = depth_model_map.get(
                 request.depth_model,
-                DepthModel.DEPTH_ANYTHING_V2
+                DepthModel.DA3_MONO_LARGE,
             )
-            
             result = preprocessor_manager.depth(
                 image_path=input_path,
                 output_path=output_path,
@@ -2248,6 +2255,8 @@ async def preprocess_image(request: PreprocessRequest):
                 normalize=request.depth_normalize,
                 range_min=request.depth_range_min,
                 range_max=request.depth_range_max,
+                process_res=request.depth_process_res or 1344,
+                process_res_method=request.depth_process_res_method,
             )
         
         elif request.method == "normals":
@@ -2261,6 +2270,10 @@ async def preprocess_image(request: PreprocessRequest):
                 "midas_large": DepthModel.MIDAS_LARGE,
                 "depth_anything_v2": DepthModel.DEPTH_ANYTHING_V2,
                 "depth_anything_v3": DepthModel.DEPTH_ANYTHING_V3,
+                "da3_mono_large":     DepthModel.DA3_MONO_LARGE,
+                "da3_metric_large":   DepthModel.DA3_METRIC_LARGE,
+                "da3_large":          DepthModel.DA3_LARGE,
+                "da3_giant":          DepthModel.DA3_GIANT,
                 "zoedepth": DepthModel.ZOEDEPTH,
             }
             
@@ -2270,7 +2283,7 @@ async def preprocess_image(request: PreprocessRequest):
             )
             depth_model = depth_model_map.get(
                 request.normals_depth_model,
-                DepthModel.DEPTH_ANYTHING_V2
+                DepthModel.DA3_MONO_LARGE
             )
             
             result = preprocessor_manager.normals(

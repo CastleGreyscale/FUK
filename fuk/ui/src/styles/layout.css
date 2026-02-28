@@ -395,8 +395,8 @@
 }
 
 .fuk-checkbox:checked {
-  background-color: #a855f7;
-  border-color: #a855f7;
+  background-color: var(--color-accent);
+  border-color: var(--color-accent);
 }
 
 
@@ -599,7 +599,7 @@
   width: 3rem;
   height: 3rem;
   margin: 0 auto 1rem;
-  color: #a855f7;
+  color: var(--color-accent);
 }
 
 .fuk-error {

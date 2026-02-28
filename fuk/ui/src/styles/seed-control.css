@@ -62,7 +62,7 @@
 
 .fuk-seed-btn-dice:hover:not(:disabled) {
   background-color: rgba(168, 85, 247, 0.2);
-  border-color: #a855f7;
+  border-color: var(--color-accent);
   color: #c084fc;
 }
 

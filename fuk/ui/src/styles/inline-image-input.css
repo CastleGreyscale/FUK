@@ -43,7 +43,7 @@
 }
 
 .inline-dropzone.drag-over {
-  border-color: #a855f7;
+  border-color: var(--color-accent);
   background: rgba(168, 85, 247, 0.1);
   border-style: solid;
 }
@@ -79,7 +79,7 @@
 }
 
 .inline-dropzone-label .uploading {
-  color: #a855f7;
+  color: var(--color-accent);
   font-size: 0.65rem;
 }
 

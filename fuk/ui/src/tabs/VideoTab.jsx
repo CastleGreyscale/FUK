@@ -88,6 +88,7 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
     source_width: videoDefaults.source_width ?? null,
     source_height: videoDefaults.source_height ?? null,
     vram_preset: config?.models?.vram_preset_default ?? 'low',
+    batchCount: 1,
   }), [videoDefaults]);
   
   // Fallback localStorage for when no project is loaded
@@ -150,6 +151,7 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
     cancel,
     closeModal,
     reset: resetGeneration,
+    setKeepModalOpen,
   } = useGeneration();
 
   // Saved seeds hook
@@ -262,19 +264,78 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
     }
   }, [formData.seedMode, formData.seed, formData.lastUsedSeed]);
 
+  // --- Batch generation ---
+  const batchQueueRef = useRef(null);
+  const [batchProgress, setBatchProgress] = useState(null); // { current, total }
+
+  const buildBatchSeeds = useCallback((seedMode, startSeed, count) => {
+    if (seedMode === SEED_MODES.RANDOM) {
+      return Array.from({ length: count }, () => generateRandomSeed());
+    }
+    if (seedMode === SEED_MODES.INCREMENT) {
+      const base = startSeed ?? 0;
+      return Array.from({ length: count }, (_, i) => base + i);
+    }
+    // FIXED — same seed every time
+    return Array.from({ length: count }, () => startSeed);
+  }, []);
+
+  // Chain next generation when previous completes
+  useEffect(() => {
+    if (!result || result.error) return;
+    if (!batchQueueRef.current) return;
+
+    const queue = batchQueueRef.current;
+    queue.index += 1;
+
+    if (queue.index >= queue.seeds.length) {
+      batchQueueRef.current = null;
+      setBatchProgress(null);
+      setKeepModalOpen(false);
+      return;
+    }
+
+    const nextSeed = queue.seeds[queue.index];
+    setBatchProgress({ current: queue.index + 1, total: queue.seeds.length });
+    setKeepModalOpen(true);
+
+    startVideoGeneration({ ...queue.basePayload, seed: nextSeed })
+      .then(data => startGeneration(data.generation_id))
+      .catch(err => {
+        console.error('Batch video generation failed:', err);
+        batchQueueRef.current = null;
+        setBatchProgress(null);
+        setKeepModalOpen(false);
+      });
+  }, [result]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleGenerate = async () => {
     const effectiveSeed = getEffectiveSeed();
+    const count = formData.batchCount || 1;
     
-    const payload = {
+    const basePayload = {
       ...formData,
-      seed: effectiveSeed,
       image_path: formData.image_path ? formData.image_path.replace(/^\/outputs\//, '').replace(/^\//, '') : null,
       end_image_path: formData.end_image_path ? formData.end_image_path.replace(/^\/outputs\//, '').replace(/^\//, '') : null,
       control_path: formData.control_path ? formData.control_path.replace(/^\/outputs\//, '').replace(/^\//, '') : null,
     };
+
+    // Build seed queue for batch
+    if (count > 1) {
+      const seeds = buildBatchSeeds(formData.seedMode, effectiveSeed, count);
+      batchQueueRef.current = { seeds, index: 0, basePayload };
+      setBatchProgress({ current: 1, total: count });
+      setKeepModalOpen(true);
+      basePayload.seed = seeds[0];
+    } else {
+      batchQueueRef.current = null;
+      setBatchProgress(null);
+      setKeepModalOpen(false);
+      basePayload.seed = effectiveSeed;
+    }
     
-    console.log('Video generation payload:', payload);
-    console.log(`Seed mode: ${formData.seedMode}, using seed: ${effectiveSeed}`);
+    console.log('Video generation payload:', basePayload);
+    console.log(`Seed mode: ${formData.seedMode}, batch: ${count}, using seed: ${basePayload.seed}`);
     
     setFormData(prev => ({
       ...prev,
@@ -283,10 +344,12 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
     }));
     
     try {
-      const data = await startVideoGeneration(payload);
+      const data = await startVideoGeneration(basePayload);
       startGeneration(data.generation_id);
     } catch (err) {
       console.error('Video generation failed:', err);
+      batchQueueRef.current = null;
+      setBatchProgress(null);
       alert('Failed to start video generation');
     }
   };
@@ -799,7 +862,9 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
         onCancel={cancel}
         canGenerate={!!formData.prompt && (!requiresStartImage || !!formData.image_path) && (!requiresEndImage || !!formData.end_image_path)}
         generateLabel="Generate Video"
-        generatingLabel="Generating..."
+        generatingLabel={batchProgress ? `Generating ${batchProgress.current}/${batchProgress.total}...` : 'Generating...'}
+        batchCount={formData.batchCount}
+        onBatchCountChange={(val) => setFormData(prev => ({ ...prev, batchCount: val }))}
       />
 
       {/* Generation Modal */}

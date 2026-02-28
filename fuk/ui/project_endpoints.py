@@ -430,29 +430,22 @@ async def browse_folder():
 @router.post("/browse-save")
 async def browse_save_location(data: dict = Body(...)):
     """
-    Open native save file dialog.
-    
-    Note: This still uses tkinter directly since file_browser.py
-    doesn't have a save dialog. Consider adding one if this causes issues.
+    Open native directory selection dialog for choosing an export location.
     
     Args (in body):
         title: Dialog title
-        defaultName: Default filename
-        fileTypes: List of [description, pattern] tuples
-        initialDir: Starting directory (optional)
+        initialDir: Starting directory (optional, falls back to project folder)
     
     Returns:
-        path: Selected file path or None if cancelled
+        path: Selected directory path or None if cancelled
         cancelled: True if user cancelled
     """
-    print("[PROJECT] Opening save dialog...", flush=True)
+    print("[PROJECT] Opening export directory dialog...", flush=True)
     
-    # For save dialogs, we need to use tkinter directly for now
-    # Run in a thread to avoid blocking
     import asyncio
     from concurrent.futures import ThreadPoolExecutor
     
-    def run_save_dialog():
+    def run_dir_dialog():
         import tkinter as tk
         from tkinter import filedialog
         
@@ -461,38 +454,29 @@ async def browse_save_location(data: dict = Body(...)):
             root.withdraw()
             root.attributes('-topmost', True)
             
-            # Parse file types
-            file_types = data.get('fileTypes', [['All Files', '*.*']])
-            tk_filetypes = [(desc, pattern) for desc, pattern in file_types]
-            
-            # Get initial directory
+            # Get initial directory — prefer caller's hint, then project folder
             initial_dir = data.get('initialDir')
             if not initial_dir and _project_folder:
                 initial_dir = str(_project_folder)
             
-            # Open save dialog
-            file_path = filedialog.asksaveasfilename(
-                title=data.get('title', 'Save File'),
-                initialfile=data.get('defaultName', ''),
+            selected = filedialog.askdirectory(
+                title=data.get('title', 'Select Export Directory'),
                 initialdir=initial_dir,
-                filetypes=tk_filetypes,
-                defaultextension='.exr',
             )
             
             root.destroy()
             
-            if file_path:
-                return {"path": file_path, "cancelled": False}
+            if selected:
+                return {"path": selected, "cancelled": False}
             else:
                 return {"path": None, "cancelled": True}
                 
         except Exception as e:
             return {"error": str(e), "cancelled": True}
     
-    # Run in thread pool to avoid blocking event loop
     loop = asyncio.get_event_loop()
     with ThreadPoolExecutor() as pool:
-        result = await loop.run_in_executor(pool, run_save_dialog)
+        result = await loop.run_in_executor(pool, run_dir_dialog)
     
     if result.get("path"):
         print(f"[PROJECT] Export directory selected: {result['path']}", flush=True)
@@ -969,6 +953,7 @@ async def list_generations(
                 metadata["available_layers"] = available_layers
                 metadata["layer_count"] = len(available_layers)
                 metadata["is_video"] = True
+                metadata["subtype"] = "video"
                 preview_found = True
             elif (gen_dir / "source.png").exists():
                 preview = f"api/project/cache/{rel_path}/source.png"
@@ -1000,6 +985,8 @@ async def list_generations(
                 metadata["available_layers"] = available_layers
                 metadata["layer_count"] = len(available_layers)
                 metadata["is_video"] = is_video_layers
+                if is_video_layers:
+                    metadata["subtype"] = "video"
                 preview_found = True
             
             if not preview_found:
@@ -1082,7 +1069,8 @@ async def list_generations(
         thumbnail_url = None
         if preview and (gen_type == "video" or 
                        (gen_type == "preprocess" and metadata.get("subtype") == "video") or
-                       (gen_type == "upscale" and metadata.get("subtype") == "video")):
+                       (gen_type == "upscale" and metadata.get("subtype") == "video") or
+                       (gen_type == "layers" and metadata.get("subtype") == "video")):
             # Extract filename from preview URL (e.g., "api/project/cache/xxx/upscaled_4x.mp4" -> "upscaled_4x.mp4")
             preview_filename = preview.split("/")[-1] if "/" in preview else preview
             thumb_candidates = [

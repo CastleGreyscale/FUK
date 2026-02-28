@@ -156,7 +156,7 @@
 }
 
 .fuk-media-frame--highlighted {
-  border-color: #a855f7;
+  border-color: var(--color-accent);
   border-width: 2px;
 }
 
@@ -303,7 +303,7 @@
 }
 
 .fuk-compare-arrow--active {
-  color: #a855f7;
+  color: var(--color-accent);
   animation: pulse 2s infinite;
 }
 
@@ -318,7 +318,7 @@
 
 .fuk-compare-arrow-label {
   font-size: 0.7rem;
-  color: #a855f7;
+  color: var(--color-accent);
 }
 
 /* ============================================================================
@@ -433,7 +433,7 @@
 }
 
 .fuk-stats-primary strong {
-  color: #a855f7;
+  color: var(--color-accent);
 }
 
 .fuk-stats-secondary {
@@ -529,7 +529,7 @@
 
 .fuk-radio-card--active {
   background: rgba(168, 85, 247, 0.1);
-  border-color: #a855f7;
+  border-color: var(--color-accent);
 }
 
 .fuk-radio-card-content {
@@ -615,7 +615,7 @@
 }
 
 .fuk-thumb-frame--primary {
-  border: 2px solid #a855f7;
+  border: 2px solid var(--color-accent);
 }
 
 .fuk-thumb-frame img {

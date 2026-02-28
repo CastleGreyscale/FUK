@@ -5,7 +5,7 @@
  * Defaults flow: config.defaults.image -> project state overwrites
  */
 
-import { useEffect, useCallback, useMemo, useRef } from 'react';
+import { useEffect, useCallback, useMemo, useRef, useState } from 'react';
 import { Camera, CheckCircle, X, Pipeline, FolderOpen } from '../../src/components/Icons';
 import MediaUploader from '../components/MediaUploader';
 import ZoomableImage from '../components/ZoomableImage';
@@ -70,6 +70,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
     control_image_paths: imageDefaults.control_image_paths ?? [],
     eligen_source: imageDefaults.eligen_source ?? '',
     vram_preset: config?.models?.vram_preset_default ?? 'low',
+    batchCount: 1,
   }), [imageDefaults]);
   
   // Fallback localStorage for when no project is loaded
@@ -134,6 +135,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
     cancel,
     closeModal,
     reset: resetGeneration,
+    setKeepModalOpen,
   } = useGeneration();
 
   // Saved seeds hook
@@ -218,31 +220,88 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
     }
   }, [formData.seedMode, formData.seed, formData.lastUsedSeed]);
 
+  // --- Batch generation ---
+  const batchQueueRef = useRef(null);
+  const [batchProgress, setBatchProgress] = useState(null); // { current, total }
+
+  const buildBatchSeeds = useCallback((seedMode, startSeed, count) => {
+    if (seedMode === SEED_MODES.RANDOM) {
+      return Array.from({ length: count }, () => generateRandomSeed());
+    }
+    if (seedMode === SEED_MODES.INCREMENT) {
+      const base = startSeed ?? 0;
+      return Array.from({ length: count }, (_, i) => base + i);
+    }
+    // FIXED — same seed every time
+    return Array.from({ length: count }, () => startSeed);
+  }, []);
+
+  // Chain next generation when previous completes
+  useEffect(() => {
+    if (!result || result.error) return;
+    if (!batchQueueRef.current) return;
+
+    const queue = batchQueueRef.current;
+    queue.index += 1;
+
+    if (queue.index >= queue.seeds.length) {
+      batchQueueRef.current = null;
+      setBatchProgress(null);
+      setKeepModalOpen(false); // allow normal auto-close on final item
+      return;
+    }
+
+    const nextSeed = queue.seeds[queue.index];
+    setBatchProgress({ current: queue.index + 1, total: queue.seeds.length });
+    setKeepModalOpen(true); // keep modal open between items
+
+    startImageGeneration({ ...queue.basePayload, seed: nextSeed })
+      .then(data => startGeneration(data.generation_id))
+      .catch(err => {
+        console.error('Batch generation failed:', err);
+        batchQueueRef.current = null;
+        setBatchProgress(null);
+        setKeepModalOpen(false);
+      });
+  }, [result]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleGenerate = async () => {
     const dims = calculateDimensions(formData.aspectRatio, formData.width, aspectRatios);
     const effectiveSeed = getEffectiveSeed();
+    const count = formData.batchCount || 1;
     
-    const payload = {
+    const basePayload = {
       ...formData,
       width: dims.width,
       height: dims.height,
       steps: formData.stepsMode === 'custom' ? formData.steps : parseInt(formData.steps),
-      seed: effectiveSeed,
       control_image_paths: formData.control_image_paths,
       control_image_path: formData.control_image_paths.length > 0 
         ? formData.control_image_paths[0] 
         : null,
-      // Pass denoising_strength only when control images exist
       denoising_strength: formData.control_image_paths.length > 0 
         ? formData.edit_strength 
         : null,
-      // Pass exponential_shift_mu (null = auto-calculate)
       exponential_shift_mu: formData.exponential_shift_mu,
       eligen_source: formData.eligen_source || null,
     };
+
+    // Build seed queue for batch
+    if (count > 1) {
+      const seeds = buildBatchSeeds(formData.seedMode, effectiveSeed, count);
+      batchQueueRef.current = { seeds, index: 0, basePayload };
+      setBatchProgress({ current: 1, total: count });
+      setKeepModalOpen(true);
+      basePayload.seed = seeds[0];
+    } else {
+      batchQueueRef.current = null;
+      setBatchProgress(null);
+      setKeepModalOpen(false);
+      basePayload.seed = effectiveSeed;
+    }
     
-    console.log('Generation payload:', payload);
-    console.log(`Seed mode: ${formData.seedMode}, using seed: ${effectiveSeed}`);
+    console.log('Generation payload:', basePayload);
+    console.log(`Seed mode: ${formData.seedMode}, batch: ${count}, using seed: ${basePayload.seed}`);
     
     setFormData(prev => ({
       ...prev,
@@ -251,10 +310,12 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
     }));
     
     try {
-      const data = await startImageGeneration(payload);
+      const data = await startImageGeneration(basePayload);
       startGeneration(data.generation_id);
     } catch (err) {
       console.error('Generation failed:', err);
+      batchQueueRef.current = null;
+      setBatchProgress(null);
       alert('Failed to start generation');
     }
   };
@@ -788,7 +849,9 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
         onCancel={cancel}
         canGenerate={!!formData.prompt}
         generateLabel="Generate Image"
-        generatingLabel="Generating..."
+        generatingLabel={batchProgress ? `Generating ${batchProgress.current}/${batchProgress.total}...` : 'Generating...'}
+        batchCount={formData.batchCount}
+        onBatchCountChange={(val) => setFormData(prev => ({ ...prev, batchCount: val }))}
       />
 
       {/* Generation Modal */}

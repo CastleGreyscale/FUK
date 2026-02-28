@@ -13,7 +13,9 @@ import { useVideoPlayback } from '../hooks/useVideoPlayback';
 // Hover preview popup component
 function HoverPreview({ generation, position, videoRef }) {
   const isVideo = generation.type === 'video' || generation.type === 'interpolate' || 
-                  (generation.type === 'preprocess' && generation.subtype === 'video');
+                  (generation.type === 'preprocess' && generation.subtype === 'video') ||
+                  (generation.type === 'upscale' && generation.subtype === 'video') ||
+                  (generation.type === 'layers' && generation.subtype === 'video');
   const isSequence = generation.isSequence;
   const previewUrl = buildImageUrl(generation.preview);
   const displayName = generation.name || generation.id || 'Unknown';
@@ -73,7 +75,8 @@ function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned, onHov
   const isVideo = generation.type === 'video' || 
                   generation.type === 'interpolate' || 
                   (generation.type === 'preprocess' && generation.subtype === 'video') ||
-                  (generation.type === 'upscale' && generation.subtype === 'video');
+                  (generation.type === 'upscale' && generation.subtype === 'video') ||
+                  (generation.type === 'layers' && generation.subtype === 'video');
   const isSequence = generation.isSequence;
   const previewUrl = buildImageUrl(generation.preview);
   const thumbnailUrl = generation.thumbnailUrl ? buildImageUrl(generation.thumbnailUrl) : null;
@@ -238,10 +241,6 @@ function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned, onHov
       onDragStart={handleDragStart}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
-      title={generation.sourcePath 
-        ? `Drag to use as input\n${displayName}\nSource: ${generation.sourcePath}\n${generation.timestamp}`
-        : `Drag to use as input\n${displayName}\n${generation.timestamp}`
-      }
     >
       <div className="gen-history-thumb">
         {!imageError ? (
@@ -258,25 +257,20 @@ function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned, onHov
               </div>
             </div>
           ) : isVideo ? (
-            <video 
-              ref={videoRefPlayback}
-              src={previewUrl}
-              muted
-              loop
-              preload="none"
-              onMouseEnter={(e) => {
-                // Load and play only on hover
-                if (e.target.readyState === 0) {
-                  e.target.load();
-                }
-                e.target.play().catch(() => {});
-              }}
-              onMouseLeave={(e) => { 
-                e.target.pause(); 
-                e.target.currentTime = 0;
-              }}
-              onError={() => setImageError(true)}
-            />
+            thumbnailUrl ? (
+              <img
+                src={thumbnailUrl}
+                alt={displayName}
+                onError={() => setImageError(true)}
+              />
+            ) : (
+              <video
+                src={previewUrl}
+                muted
+                preload="metadata"
+                onError={() => setImageError(true)}
+              />
+            )
           ) : (
             <img 
               src={previewUrl} 

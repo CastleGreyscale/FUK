@@ -25,6 +25,8 @@ export function useGeneration() {
   const timerRef = useRef(null);
   // Ref to track last console log length (to avoid duplicate processing)
   const lastLogLengthRef = useRef(0);
+  // Ref to suppress auto-close (e.g. during batch runs)
+  const keepModalOpenRef = useRef(false);
   
   useEffect(() => {
     mountedRef.current = true;
@@ -100,9 +102,9 @@ export function useGeneration() {
             setConsoleLog(data.console_log);
           }
           
-          // Auto-close modal on success after a brief delay
+          // Auto-close modal on success after a brief delay (suppressed during batch)
           setTimeout(() => {
-            if (mountedRef.current && !data.error) {
+            if (mountedRef.current && !data.error && !keepModalOpenRef.current) {
               setShowModal(false);
             }
           }, 1500);
@@ -195,5 +197,6 @@ export function useGeneration() {
     cancel,
     closeModal,
     reset,
+    setKeepModalOpen: (val) => { keepModalOpenRef.current = val; },
   };
 }

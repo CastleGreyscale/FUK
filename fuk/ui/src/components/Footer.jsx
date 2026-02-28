@@ -18,6 +18,8 @@ export default function Footer({
   canGenerate,
   generateLabel = 'Generate',
   generatingLabel = 'Generating...',
+  batchCount,
+  onBatchCountChange,
 }) {
   return (
     <div className="fuk-footer" style={{ position: 'relative' }}>
@@ -73,7 +75,24 @@ export default function Footer({
       </div>
 
       {/* Buttons - Right */}
-      <div className="fuk-footer-right" style={{ display: 'flex', gap: '0.75rem' }}>
+      <div className="fuk-footer-right" style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+        {/* Batch Count */}
+        {onBatchCountChange && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', userSelect: 'none' }}>×</span>
+            <input
+              type="number"
+              min="1"
+              max="50"
+              value={batchCount ?? 1}
+              onChange={e => onBatchCountChange(Math.max(1, Math.min(50, parseInt(e.target.value) || 1)))}
+              disabled={generating}
+              className="fuk-input"
+              style={{ width: '3.5rem', textAlign: 'center', padding: '0.35rem 0.4rem' }}
+              title="Batch count"
+            />
+          </div>
+        )}
         <button
           onClick={onGenerate}
           disabled={generating || !canGenerate}

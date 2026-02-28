@@ -334,6 +334,7 @@ class DepthPreprocessor(BasePreprocessor):
                 normalize: Normalize depth to [0, 1]
                 range_min: Low end of depth range remap (0.0-1.0)
                 range_max: High end of depth range remap (0.0-1.0)
+                guided_filter: Apply guided edge refinement (default False)
                 exact_output: If True, write to exact output_path (for video frames)
                 process_res: DA3 processing resolution (default from config)
                 process_res_method: DA3 resize method (default from config)
@@ -344,6 +345,7 @@ class DepthPreprocessor(BasePreprocessor):
         normalize = kwargs.get('normalize', True)
         range_min = kwargs.get('range_min', 0.0)
         range_max = kwargs.get('range_max', 1.0)
+        guided_filter = kwargs.get('guided_filter', False)
         exact_output = kwargs.get('exact_output', False)
         process_res = kwargs.get('process_res', self.da3_process_res)
         process_res_method = kwargs.get('process_res_method', self.da3_process_res_method)
@@ -361,6 +363,10 @@ class DepthPreprocessor(BasePreprocessor):
         
         if invert:
             depth = 1.0 - depth
+        
+        # Optional guided edge refinement (off by default - degrades DA3 quality)
+        if guided_filter:
+            depth = self._guided_upsample(depth, image)
         
         output_image = apply_depth_greyscale(depth, range_min=range_min, range_max=range_max)
         
@@ -415,7 +421,8 @@ class DepthPreprocessor(BasePreprocessor):
                 range_max: High end of depth range remap (0.0-1.0)
                 process_res: DA3 processing resolution
                 process_res_method: DA3 resize method
-                temporal_smooth: Temporal median filter window (0=off, default 3)
+                guided_filter: Apply guided edge refinement per-frame (default False)
+                temporal_smooth: Temporal median filter window (0=off, default 0)
         """
         self._ensure_initialized()
         
@@ -439,13 +446,15 @@ class DepthPreprocessor(BasePreprocessor):
         range_max = kwargs.get('range_max', 1.0)
         process_res = kwargs.get('process_res', self.da3_process_res)
         process_res_method = kwargs.get('process_res_method', self.da3_process_res_method)
-        temporal_smooth = kwargs.get('temporal_smooth', 3)
+        temporal_smooth = kwargs.get('temporal_smooth', 0)
+        guided_filter = kwargs.get('guided_filter', False)
         
         print(f"\n[Depth] ===== BATCH VIDEO DEPTH PROCESSING =====")
         print(f"[Depth] Model: {self.model_type.value}")
         print(f"[Depth] Input: {video_path}")
         print(f"[Depth] Output: {output_path}")
         print(f"[Depth] Temporal smoothing: {temporal_smooth if temporal_smooth > 0 else 'off'}")
+        print(f"[Depth] Guided filter: {'on' if guided_filter else 'off'}")
         
         video_info = get_video_info(video_path)
         fps = video_info["fps"]
@@ -511,14 +520,20 @@ class DepthPreprocessor(BasePreprocessor):
             if progress_callback:
                 progress_callback(0.6, "Post-processing depth maps...")
             
-            # Step 6: Convert to greyscale with range remap
+            # Step 6: Convert to greyscale (+ optional guided refinement)
             print(f"[Depth] Post-processing depth maps...")
             for i, (frame_path, depth_map) in enumerate(zip(frame_paths, all_depths)):
                 output_frame_path = output_frames_dir / frame_path.name
                 
                 # Resize to original dimensions if needed
                 if depth_map.shape[:2] != (original_size[1], original_size[0]):
-                    depth_map = cv2.resize(depth_map, original_size, interpolation=cv2.INTER_LINEAR)
+                    depth_map = cv2.resize(depth_map, original_size, interpolation=cv2.INTER_LANCZOS4)
+                
+                # Optional guided edge refinement (off by default)
+                if guided_filter:
+                    guide_bgr = cv2.imread(str(frame_path))
+                    if guide_bgr is not None:
+                        depth_map = self._guided_upsample(depth_map, guide_bgr)
                 
                 output_image = apply_depth_greyscale(depth_map, range_min=range_min, range_max=range_max)
                 cv2.imwrite(str(output_frame_path), output_image)
@@ -631,7 +646,7 @@ class DepthPreprocessor(BasePreprocessor):
             
             depth = prediction.depth[0]
             if depth.shape[:2] != image_rgb.shape[:2]:
-                depth = cv2.resize(depth, (image_rgb.shape[1], image_rgb.shape[0]))
+                depth = cv2.resize(depth, (image_rgb.shape[1], image_rgb.shape[0]), interpolation=cv2.INTER_LANCZOS4)
             return depth
         
         elif self.model_type == DepthModel.DEPTH_ANYTHING_V2:
@@ -666,6 +681,56 @@ class DepthPreprocessor(BasePreprocessor):
     # Utilities
     # ========================================================================
     
+
+    @staticmethod
+    def _guided_upsample(
+        depth: np.ndarray,
+        guide_bgr: np.ndarray,
+        r: int = 10,
+        eps: float = 1e-3,
+    ) -> np.ndarray:
+        """
+        Guided filter: snap coarse depth edges to RGB boundaries.
+        
+        WARNING: This smooths depth detail. DA3 already produces sharp edges,
+        so this is typically NOT needed and will degrade quality.
+        Only enable via guided_filter=True kwarg when using older/coarser models
+        (MiDaS, V2) that produce blocky ViT patch artifacts.
+
+        Args:
+            depth:     float32 [0,1] depth map at target resolution
+            guide_bgr: uint8 BGR source image at same resolution
+            r:         filter radius (10-16 works well for 1280-wide)
+            eps:       regularisation - lower = sharper (1e-3 to 1e-4)
+
+        Returns:
+            float32 [0,1] depth with edge-aligned boundaries
+        """
+        h, w = depth.shape[:2]
+
+        # Use luminance as guide (single channel, fast)
+        guide = cv2.cvtColor(guide_bgr, cv2.COLOR_BGR2GRAY).astype(np.float32) / 255.0
+
+        # O(N) box-filter based guided filter (He et al. 2013)
+        ksize = (2 * r + 1, 2 * r + 1)
+        N = cv2.boxFilter(np.ones((h, w), np.float32), -1, ksize)
+
+        mean_I  = cv2.boxFilter(guide,         -1, ksize) / N
+        mean_p  = cv2.boxFilter(depth,         -1, ksize) / N
+        mean_Ip = cv2.boxFilter(guide * depth, -1, ksize) / N
+        mean_II = cv2.boxFilter(guide * guide, -1, ksize) / N
+
+        cov_Ip = mean_Ip - mean_I * mean_p
+        var_I  = mean_II - mean_I * mean_I
+
+        a = cov_Ip / (var_I + eps)
+        b = mean_p - a * mean_I
+
+        mean_a = cv2.boxFilter(a, -1, ksize) / N
+        mean_b = cv2.boxFilter(b, -1, ksize) / N
+
+        return np.clip(mean_a * guide + mean_b, 0.0, 1.0)
+
     @staticmethod
     def _temporal_smooth(depths: np.ndarray, window: int = 3) -> np.ndarray:
         """

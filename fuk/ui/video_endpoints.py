@@ -65,6 +65,8 @@ class VideoPreprocessRequest(BaseModel):
     depth_normalize: bool = True
     depth_range_min: float = 0.0
     depth_range_max: float = 1.0
+    depth_process_res: Optional[int] = None
+    depth_process_res_method: str = "lower_bound_resize"
     
     # Normals parameters
     normals_method: str = "from_depth"
@@ -353,7 +355,6 @@ def setup_video_routes(
                     output_mode="mp4" if output_mode == OutputMode.MP4 else "sequence",
                     invert=request.depth_invert,
                     normalize=request.depth_normalize,
-                    colormap=request.depth_colormap,
                     temporal_smooth=5,
                 )
                 
@@ -688,6 +689,10 @@ def setup_video_routes(
                 shutil.copy2(input_path, source_copy)
                 log.info("VideoLayers", f"Copied source: {source_copy.name}")
             
+            # Generate thumbnail for history pane
+            if source_copy.suffix == '.mp4':
+                _generate_thumbnail(source_copy)
+            
             # Copy latents from source generation dir so layers folder is self-contained
             # e.g. video_002/latents/generated.latent.pt -> video_layers_005/latents/
             source_latent_dir = input_path.parent / "latents"
@@ -897,4 +902,3 @@ def setup_video_routes(
             
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
-    

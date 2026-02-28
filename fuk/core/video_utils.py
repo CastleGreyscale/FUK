@@ -492,12 +492,7 @@ def apply_depth_greyscale(
     return cv2.cvtColor(depth_uint8, cv2.COLOR_GRAY2BGR)
 
 
-# Keep old name as alias for backward compatibility during transition
-def apply_depth_colormap(
-    depth: np.ndarray,
-    colormap: Optional[str] = None,
-    range_min: float = 0.0,
-    range_max: float = 1.0,
-) -> np.ndarray:
-    """Backward-compatible wrapper — ignores colormap, always greyscale."""
-    return apply_depth_greyscale(depth, range_min=range_min, range_max=range_max)
+# Permanent greyscale alias — depth outputs are always greyscale.
+# Colormaps distort the luminance channel and break any downstream model
+# or composite that reads depth as data (ControlNet, EXR Z-channel, etc.).
+apply_depth_colormap = apply_depth_greyscale
