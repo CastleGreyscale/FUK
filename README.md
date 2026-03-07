@@ -12,16 +12,16 @@ FUK is built as a modular, extensible pipeline that orchestrates specialized AI 
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    React UI (Vite + FastAPI)                 │
-│          Project Management • Generation History             │
-│              Drag-and-drop • Real-time Preview               │
+│                    React UI (Vite + FastAPI)                │
+│          Project Management • Generation History            │
+│              Drag-and-drop • Real-time Preview              │
 └────────────────────────┬────────────────────────────────────┘
                          │
 ┌────────────────────────▼────────────────────────────────────┐
-│                   FUK Core Pipeline Layer                    │
-│        Python Managers • Config System • VRAM Control        │
-│       Latent Management • EXR Export • File Organization     │
-└─┬──────┬──────┬──────┬──────┬──────┬──────┬────────────────┘
+│                   FUK Core Pipeline Layer                   │
+│        Python Managers • Config System • VRAM Control       │
+│       Latent Management • EXR Export • File Organization    │
+└─┬──────┬──────┬──────┬──────┬──────┬──────┬─────────────────┘
   │      │      │      │      │      │      │
   ▼      ▼      ▼      ▼      ▼      ▼      ▼
 ┌────┐ ┌────┐ ┌────┐ ┌────┐ ┌────┐ ┌────┐ ┌────┐
@@ -65,8 +65,8 @@ FUK treats AI generation as source material that enters a professional pipeline,
 ### Current Implementation
 
 **Generation (via DiffSynth-Studio):**
-- Image generation via Qwen models (2509, 2512, Edit, Control-Union)
-- Video generation via Wan models (I2V-A14B, VACE-Fun)
+- Image generation via Qwen models (2509, 2512, Edit, Control-Union, EliGen)
+- Video generation via Wan models (I2V-A14B, VACE-Fun, FFLFV)
 - Direct model integration with flexible configuration
 - Seed tracking and management with save/recall functionality
 - Latent-space operations and caching
@@ -81,7 +81,7 @@ FUK treats AI generation as source material that enters a professional pipeline,
 
 **Post-Processing:**
 - Upscaling: Real-ESRGAN (X4 models)
-- Frame interpolation: RIFE (2x, 4x, 8x)
+- Frame interpolation: FILM (Google's Frame Interpolation for Large Motion)
 - Video stabilization and temporal coherence
 - Sequence-aware processing
 
@@ -90,7 +90,7 @@ FUK treats AI generation as source material that enters a professional pipeline,
 - Proper AOV organization (beauty, depth, normals, crypto)
 - Scene-linear color space workflows
 - Lossless latent-to-EXR conversion
-- Native Nuke/Resolve/Blender integration
+- Native compositor/grading compatibility
 
 **Project Management:**
 - Industry-standard project/shot/version hierarchy
@@ -105,12 +105,11 @@ FUK treats AI generation as source material that enters a professional pipeline,
 - **Scene builder workflows** - Multi-camera coverage from single generations
 - **Advanced temporal processing** - Enhanced frame-to-frame coherence
 - **LoRA training pipeline** - Automated character consistency workflows
-- **Extended model support** - SUPIR upscaling, FILM interpolation
+- **Extended model support** - Additional models for image/video generation, upscaling, and interpolation
 
 ### Roadmap
 
 - Multi-shot project packaging and delivery
-- Prompt expansion via Ollama integration
 - Per-project configuration inheritance and overrides
 - Native sequence handling with automatic metadata extraction
 - Render farm integration for batch processing
@@ -125,7 +124,7 @@ FUK treats AI generation as source material that enters a professional pipeline,
 - **Python:** 3.10 or 3.11 (3.12+ not yet tested)
 - **GPU:** NVIDIA GPU with 12GB+ VRAM (24GB recommended for video)
 - **CUDA:** 11.8 or 12.1+
-- **Storage:** ~50GB for base models, more for LoRAs and custom checkpoints
+- **Storage:** 500GB max depending on model selection
 - **Software:** Git, Node.js 18+ (for frontend)
 
 ### Quick Install
@@ -141,20 +140,20 @@ cd FUK
 chmod +x setup.sh
 ./setup.sh
 
-# Edit configuration files
-nano config/models.json     # Set your model root directory
-nano config/defaults.json   # Adjust generation defaults
+# Edit configuration files using a code editor
+config/models.json     # Set your model root directory
+config/defaults.json   # Adjust generation defaults
 
 # Download models (separate step, allows config review first)
 python scripts/download_models.py
 
 # Start the server
-python start_web_ui.py
+./start.sh
 ```
 
 The setup script handles:
 - Python dependencies from pyproject.toml
-- Vendor repository cloning (Depth-Anything-3, SAM2, DSINE)
+- Vendor repository cloning (DiffSynth-Studio, Depth-Anything-3, SAM2, DSINE)
 - Vendor package installation
 - SAM2 checkpoint downloads
 - Frontend dependencies (npm/bun)
@@ -173,11 +172,13 @@ pip install -e .
 
 # Clone vendor dependencies
 mkdir fuk\vendor
+git clone https://github.com/modelscope/DiffSynth-Studio.git fuk/vendor/DiffSynth-Studio
 git clone https://github.com/ByteDance-Seed/Depth-Anything-3.git fuk/vendor/Depth-Anything-3
 git clone https://github.com/facebookresearch/segment-anything-2 fuk/vendor/segment-anything-2
 git clone https://github.com/baegwangbin/DSINE.git fuk/vendor/DSINE
 
 # Install vendor packages
+pip install -e ./fuk/vendor/DiffSynth-Studio
 pip install -e ./fuk/vendor/Depth-Anything-3
 pip install -e ./fuk/vendor/segment-anything-2
 
@@ -202,19 +203,14 @@ notepad config\defaults.json
 python scripts\download_models.py
 
 # Start server
-python start_web_ui.py
+python fuk\fuk_web_server.py
 ```
 
-### Optional: Binary Tools (Recommended)
+### Optional: Real-ESRGAN Upscaling Binary
 
-For frame interpolation and upscaling, download pre-built binaries:
+For upscaling, download the pre-built binary:
 
-**RIFE (Frame Interpolation):**
-1. Download: https://github.com/nihui/rife-ncnn-vulkan/releases
-2. Extract to: `fuk/vendor/rife-ncnn/`
-3. Ensure executable is in that directory
-
-**Real-ESRGAN (Upscaling):**
+**Real-ESRGAN:**
 
 Linux:
 ```bash
@@ -225,6 +221,8 @@ unzip realesrgan-ncnn-vulkan-20220424-ubuntu.zip -d fuk/vendor/realesrgan-ncnn/
 Windows:
 1. Download: https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-ncnn-vulkan-20220424-windows.zip
 2. Extract to: `fuk\vendor\realesrgan-ncnn\`
+
+Frame interpolation (FILM) downloads automatically on first use — no binary required.
 
 ---
 
@@ -237,7 +235,7 @@ FUK uses DiffSynth-Studio for direct model access. Models are downloaded via Hug
 After editing `config/models.json` to set your model root directory:
 
 ```bash
-python scripts/download_models.py
+python utils/download_models.py
 ```
 
 This downloads all configured models from Hugging Face to your specified directory.
@@ -268,7 +266,7 @@ These download automatically on first use:
 - SAM2 segmentation checkpoints (via setup.sh)
 - Depth-Anything-V3 weights (on first depth generation)
 - Real-ESRGAN models (on first upscale operation)
-- RIFE models (on first interpolation)
+- FILM weights (on first interpolation, via `dajes/frame-interpolation-pytorch`)
 
 ---
 
@@ -330,7 +328,7 @@ Edit `config/defaults.json` → `vram.preset` to change.
 ## First Run
 
 ```bash
-python start_web_ui.py
+./start.sh
 ```
 
 - **Frontend:** http://localhost:5173
@@ -420,8 +418,8 @@ huggingface-cli login
 ```bash
 cd fuk/ui
 rm -rf node_modules
-npm install  # or: bun install
-npm run dev
+bun install  # or: npm install
+bun run dev
 ```
 
 ### Generation Hangs or Crashes
@@ -447,7 +445,7 @@ uvicorn fuk.fuk_web_server:app --reload --host 0.0.0.0 --port 8000
 
 # Frontend (Vite dev server with HMR)
 cd fuk/ui
-npm run dev
+bun run dev  # or: npm run dev
 ```
 
 ### Adding New Models
@@ -514,7 +512,6 @@ FUK respects your project structure. Set your project root and FUK creates neces
 ## Known Issues
 
 - Video upscaling UI may freeze when loading large results (processing continues, UI issue only)
-- Progress bar implementation inconsistent across some operations
 - Image dropzone requires precise targeting in some browsers
 
 See GitHub Issues for current bugs and feature requests.

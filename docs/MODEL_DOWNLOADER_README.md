@@ -2,12 +2,17 @@
 
 Automated model download script using DiffSynth's built-in download mechanism.
 
+## Notes
+ - Depending on model selection you may require 500GB if storage
+ - Use the fastest storage you have available
+ - Does not need to be the same drive as the app itself
+
 ## Setup
 
 1. **Add `models_root` to your `defaults.json`:**
    ```json
    {
-     "models_root": "/home/brad/ai/models",
+     "models_root": "/path/to/your/models",
      "aspect_ratios": [
        ...
    ```
@@ -15,7 +20,7 @@ Automated model download script using DiffSynth's built-in download mechanism.
 2. **Set the download path:**
    The script reads `models_root` from `defaults.json` and sets it as:
    ```bash
-   export DIFFSYNTH_MODEL_BASE_PATH="/home/brad/ai/models"
+   export DIFFSYNTH_MODEL_BASE_PATH="/path/to/your/models"
    ```
 
 ## Usage
@@ -94,21 +99,4 @@ The script shows detailed progress:
 Downloading: Component 1: Qwen/Qwen-Image → transformer/diffusion_pytorch_model*.safetensors
 ================================================================================
 ✓ Downloaded to: /home/brad/ai/models/Qwen/Qwen-Image/transformer/...
-```
-
-## Integration
-
-After downloading, you can use `defaults.models_root` consistently throughout FUK:
-- Backend model loading
-- Pipeline construction
-- LoRA discovery
-- Any future model operations
-
-Replace hardcoded paths like:
-```python
-# Old
-models_root = "/home/brad/ai/models"
-
-# New
-models_root = defaults['models_root']
 ```

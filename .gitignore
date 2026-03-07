@@ -12,9 +12,11 @@
 !fuk/fuk/ui/**
 !fuk/fuk/utils/**
 !fuk/fuk/config/**
-!docs
+!docs/MODEL_DOWNLOADER_README.md
+!docs/MODEL_DOWNLOADER_README.md
 !docs/**
-!setup.shg
+!setup.sh
+
 
 
 

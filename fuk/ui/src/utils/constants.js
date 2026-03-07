@@ -14,9 +14,11 @@ export const SEED_MODES = {
   INCREMENT: 'increment', // Increment seed by 1 after each generation
 };
 
-// Generate a random seed (0 to 2^32-1)
+// Generate a random seed (0 to 2^32-1) using crypto RNG for proper distribution
 export function generateRandomSeed() {
-  return Math.floor(Math.random() * 4294967295);
+  const arr = new Uint32Array(1);
+  crypto.getRandomValues(arr);
+  return arr[0];
 }
 
 /**

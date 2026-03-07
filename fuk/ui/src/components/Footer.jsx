@@ -23,14 +23,6 @@ export default function Footer({
 }) {
   return (
     <div className="fuk-footer" style={{ position: 'relative' }}>
-      {/* Progress Bar - Left */}
-      <div style={{ flex: 1, maxWidth: '400px' }}>
-        <ProgressBar
-          progress={progress}
-          elapsedSeconds={elapsedSeconds}
-          generating={generating}
-        />
-      </div>
 
       {/* Tabs - Center */}
       <div className="fuk-footer-center">
