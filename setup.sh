@@ -7,10 +7,6 @@ echo "Installation Script"
 echo "============================================"
 echo ""
 
-# Check Python version
-PYTHON_VERSION=$(python3 --version 2>&1 | awk '{print $2}')
-echo "✓ Found Python $PYTHON_VERSION"
-
 # Check CUDA
 if command -v nvidia-smi &> /dev/null; then
     echo "✓ NVIDIA GPU detected"
@@ -18,23 +14,54 @@ else
     echo "⚠  Warning: nvidia-smi not found. GPU acceleration may not work."
 fi
 
-# ── Virtual Environment ──────────────────────────────────────────────────────
+# ── Virtual Environment (Python 3.10 required) ───────────────────────────────
 echo ""
-echo "[0/6] Setting up virtual environment..."
+echo "[0/7] Setting up virtual environment..."
 
 VENV_DIR="venv"
+PYTHON_BIN=""
+
+# Prefer explicit python3.10; fall back with a hard error
+for candidate in python3.10 python3; do
+    if command -v "$candidate" &> /dev/null; then
+        VER=$("$candidate" -c "import sys; print('%d.%d' % sys.version_info[:2])")
+        if [ "$VER" = "3.10" ]; then
+            PYTHON_BIN="$candidate"
+            break
+        fi
+    fi
+done
+
+if [ -z "$PYTHON_BIN" ]; then
+    echo ""
+    echo "  ✗ Error: Python 3.10 is required but was not found."
+    echo "    Install it with:  sudo apt install python3.10 python3.10-venv"
+    echo "    Or via pyenv:     pyenv install 3.10 && pyenv local 3.10"
+    exit 1
+fi
+
+echo "  ✓ Found Python 3.10: $(which $PYTHON_BIN)"
 
 if [ ! -d "$VENV_DIR" ]; then
     echo "  → Creating virtual environment at ./$VENV_DIR ..."
-    python3 -m venv "$VENV_DIR"
+    "$PYTHON_BIN" -m venv "$VENV_DIR"
     echo "  ✓ Virtual environment created"
 else
-    echo "  ✓ Virtual environment already exists"
+    # Verify the existing venv is actually 3.10
+    VENV_VER=$("$VENV_DIR/bin/python" -c "import sys; print('%d.%d' % sys.version_info[:2])" 2>/dev/null || echo "unknown")
+    if [ "$VENV_VER" != "3.10" ]; then
+        echo "  ⚠  Existing venv is Python $VENV_VER, not 3.10 — recreating..."
+        rm -rf "$VENV_DIR"
+        "$PYTHON_BIN" -m venv "$VENV_DIR"
+        echo "  ✓ Virtual environment recreated with Python 3.10"
+    else
+        echo "  ✓ Virtual environment already exists (Python 3.10)"
+    fi
 fi
 
 echo "  → Activating virtual environment..."
 source "$VENV_DIR/bin/activate"
-echo "  ✓ Using Python: $(which python)"
+echo "  ✓ Using Python: $(python --version) at $(which python)"
 
 # Upgrade pip and install wheel up front — prevents legacy setup.py install
 # warnings for packages like antlr4-python3-runtime, basicsr, moviepy
@@ -42,20 +69,52 @@ echo "  → Upgrading pip + installing build tools..."
 pip install --quiet --upgrade pip wheel setuptools
 echo "  ✓ pip, wheel, setuptools up to date"
 
+# ── PyTorch (CUDA) ────────────────────────────────────────────────────────────
+# PyPI only hosts CPU-only torch wheels. CUDA builds must come from PyTorch's
+# own index. This must run before `pip install -e .` so the CUDA wheels are
+# already present and pip won't replace them with CPU-only versions.
+echo ""
+echo "[1/7] Installing PyTorch (CUDA)..."
+
+# Detect CUDA version from nvcc to pick the right wheel index.
+# Supports: cu118, cu124, cu126, cu128 (PyTorch 2.7 matrix)
+CUDA_INDEX="cu128"  # safe default — most recent stable
+if command -v nvcc &> /dev/null; then
+    CUDA_VER=$(nvcc --version | grep -oP "release \K[0-9]+\.[0-9]+" | tr -d '.')
+    case "$CUDA_VER" in
+        118|11*) CUDA_INDEX="cu118" ;;
+        124)     CUDA_INDEX="cu124" ;;
+        126)     CUDA_INDEX="cu126" ;;
+        128|12*) CUDA_INDEX="cu128" ;;
+        *)       CUDA_INDEX="cu128" ;;
+    esac
+    echo "  ✓ Detected CUDA $CUDA_VER → $CUDA_INDEX"
+else
+    echo "  ⚠  nvcc not found, defaulting to $CUDA_INDEX"
+fi
+
+echo "  → https://download.pytorch.org/whl/$CUDA_INDEX"
+pip install torch torchvision torchaudio \
+    --index-url "https://download.pytorch.org/whl/$CUDA_INDEX"
+echo "  ✓ PyTorch: $(python -c 'import torch; print(torch.__version__)')"
+echo "  ✓ CUDA available: $(python -c 'import torch; print(torch.cuda.is_available())')"
+
 # ── Core FUK ─────────────────────────────────────────────────────────────────
 echo ""
-echo "[1/6] Installing core FUK dependencies..."
+echo "[2/7] Installing core FUK dependencies..."
+# --no-deps first so pip resolves our already-installed CUDA torch
+# rather than re-pulling CPU-only wheels from PyPI
 pip install -e . --no-deps
 pip install -e .
 
 # ── Vendor directory ─────────────────────────────────────────────────────────
 echo ""
-echo "[2/6] Setting up vendor directory..."
+echo "[3/7] Setting up vendor directory..."
 mkdir -p fuk/vendor
 
 # ── Vendor repos ─────────────────────────────────────────────────────────────
 echo ""
-echo "[3/6] Cloning vendor dependencies..."
+echo "[4/7] Cloning vendor dependencies..."
 
 # DiffSynth-Studio
 if [ ! -d "fuk/vendor/DiffSynth-Studio" ]; then
@@ -95,17 +154,23 @@ fi
 
 # ── Vendor packages ───────────────────────────────────────────────────────────
 echo ""
-echo "[4/6] Installing vendor packages..."
-# wheel is already installed above, so antlr4-python3-runtime, basicsr, and
-# moviepy will build properly instead of falling back to legacy setup.py install
+echo "[5/7] Installing vendor packages..."
+
+# basicsr uses setup.py version introspection that breaks in isolated build
+# environments (KeyError: '__version__'). --no-build-isolation lets it see
+# the already-installed setuptools in our venv and avoids the error.
+# Install it explicitly before DiffSynth-Studio pulls it in as a dep.
+echo "  → Pre-installing basicsr (no-build-isolation workaround)..."
+pip install basicsr --no-build-isolation
+
 pip install -e ./fuk/vendor/DiffSynth-Studio
 pip install -e ./fuk/vendor/Depth-Anything-3
 pip install -e ./fuk/vendor/segment-anything-2
 
 # ── Configuration files ───────────────────────────────────────────────────────
 echo ""
-echo "[5/6] Setting up configuration files..."
-mkdir -p config
+echo "[6/7] Setting up configuration files..."
+mkdir -p fuk/config
 
 # Initialize .gitignore if it doesn't exist
 if [ ! -f ".gitignore" ]; then
@@ -155,36 +220,36 @@ renders/
 outputs/
 
 # Configuration files (personal settings - gitignored, edit freely)
-config/*.json
-config/tools/*.json
-!config/*.json.template
-!config/tools/*.json.template
+fuk/config/*.json
+fuk/config/tools/*.json
+!fuk/config/*.json.template
+!fuk/config/tools/*.json.template
 EOL
 else
     echo "  ✓ .gitignore already exists"
 fi
 
 # Add config patterns to .gitignore if not already present
-if ! grep -q "config/\*.json" .gitignore 2>/dev/null; then
+if ! grep -q "fuk/config/\*.json" .gitignore 2>/dev/null; then
     echo "  → Adding config patterns to .gitignore..."
     cat >> .gitignore << 'EOL'
 
 # Configuration files (personal settings - gitignored, edit freely)
-config/*.json
-config/tools/*.json
-!config/*.json.template
-!config/tools/*.json.template
+fuk/config/*.json
+fuk/config/tools/*.json
+!fuk/config/*.json.template
+!fuk/config/tools/*.json.template
 EOL
 fi
 
 # ── Templates ─────────────────────────────────────────────────────────────────
 # Templates are ALWAYS written — they are the canonical reference and must
-# stay in sync with the codebase. Personal config/*.json files are never
+# stay in sync with the codebase. Personal fuk/config/*.json files are never
 # touched after first creation.
 echo ""
 echo "  → Writing template configuration files..."
 
-cat > config/models.json.template << 'EOL'
+cat > fuk/config/models.json.template << 'EOL'
 {
   "_comment": "FUK Model Registry — each entry defines everything needed to construct a DiffSynth pipeline. Add new models by adding entries here. Visit https://github.com/modelscope/DiffSynth-Studio/blob/main/docs/en/Model_Details/Qwen-Image.md and https://github.com/modelscope/DiffSynth-Studio/blob/main/docs/en/Model_Details/Wan.md for full model list. Note: not all options are setup. Below is the current list of working models. Before running download_models.py remove unwanted models. Roughly 15-30GB per model",
 
@@ -371,9 +436,9 @@ cat > config/models.json.template << 'EOL'
   }
 }
 EOL
-echo "    ✓ config/models.json.template"
+echo "    ✓ fuk/config/models.json.template"
 
-cat > config/defaults.json.template << 'EOL'
+cat > fuk/config/defaults.json.template << 'EOL'
 {
   "models_root": "/path/to/your/models",
 
@@ -557,24 +622,24 @@ cat > config/defaults.json.template << 'EOL'
   }
 }
 EOL
-echo "    ✓ config/defaults.json.template"
+echo "    ✓ fuk/config/defaults.json.template"
 
 # Copy templates to live configs only if they don't exist yet
 echo ""
 echo "  → Initializing live configuration files..."
 
-if [ ! -f "config/models.json" ]; then
-    cp config/models.json.template config/models.json
-    echo "    ✓ Created config/models.json — set your models_root path"
+if [ ! -f "fuk/config/models.json" ]; then
+    cp fuk/config/models.json.template fuk/config/models.json
+    echo "    ✓ Created fuk/config/models.json — set your models_root path"
 else
-    echo "    ✓ config/models.json already exists (not overwriting)"
+    echo "    ✓ fuk/config/models.json already exists (not overwriting)"
 fi
 
-if [ ! -f "config/defaults.json" ]; then
-    cp config/defaults.json.template config/defaults.json
-    echo "    ✓ Created config/defaults.json — set your models_root and lora_dirs"
+if [ ! -f "fuk/config/defaults.json" ]; then
+    cp fuk/config/defaults.json.template fuk/config/defaults.json
+    echo "    ✓ Created fuk/config/defaults.json — set your models_root and lora_dirs"
 else
-    echo "    ✓ config/defaults.json already exists (not overwriting)"
+    echo "    ✓ fuk/config/defaults.json already exists (not overwriting)"
 fi
 
 # ── Frontend ──────────────────────────────────────────────────────────────────
@@ -588,7 +653,7 @@ echo "Extract to: fuk/vendor/realesrgan-ncnn/"
 echo ""
 
 echo ""
-echo "[6/6] Installing frontend dependencies..."
+echo "[7/7] Installing frontend dependencies..."
 cd fuk/ui
 
 if command -v bun &> /dev/null; then
@@ -616,12 +681,12 @@ echo ""
 echo "Next steps:"
 echo ""
 echo "1. IMPORTANT: Edit your configuration files:"
-echo "   config/models.json      — set your models_root path"
-echo "   config/defaults.json    — set your models_root and lora_dirs"
+echo "   fuk/config/models.json      — set your models_root path"
+echo "   fuk/config/defaults.json    — set your models_root and lora_dirs"
 echo ""
 echo "   Templates (tracked in git):"
-echo "   config/models.json.template"
-echo "   config/defaults.json.template"
+echo "   fuk/config/models.json.template"
+echo "   fuk/config/defaults.json.template"
 echo ""
 echo "2. Download models:"
 echo "   python scripts/download_models.py"
@@ -630,7 +695,7 @@ echo "3. Start FUK:"
 echo "   ./start.sh"
 echo ""
 echo "Configuration notes:"
-echo "  • Your config files (config/*.json) are gitignored"
-echo "  • Templates (config/*.json.template) are tracked in git"
+echo "  • Your config files (fuk/config/*.json) are gitignored"
+echo "  • Templates (fuk/config/*.json.template) are tracked in git"
 echo "  • Templates are always refreshed by setup.sh — edit freely"
 echo ""

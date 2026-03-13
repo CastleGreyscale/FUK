@@ -9,6 +9,7 @@ dependencies = [
     "torchvision>=0.22.0",
     "xformers>=0.0.31",
     "triton>=3.1.0",
+    "torchaudio>=2.7.0",
     
     # Hugging Face Ecosystem
     "transformers>=4.56.0",
