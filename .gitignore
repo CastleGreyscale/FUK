@@ -16,6 +16,7 @@
 !docs/MODEL_DOWNLOADER_README.md
 !docs/**
 !setup.sh
+!start.sh
 
 
 

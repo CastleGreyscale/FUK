@@ -18,15 +18,42 @@ else
     echo "⚠  Warning: nvidia-smi not found. GPU acceleration may not work."
 fi
 
+# ── Virtual Environment ──────────────────────────────────────────────────────
+echo ""
+echo "[0/6] Setting up virtual environment..."
+
+VENV_DIR="venv"
+
+if [ ! -d "$VENV_DIR" ]; then
+    echo "  → Creating virtual environment at ./$VENV_DIR ..."
+    python3 -m venv "$VENV_DIR"
+    echo "  ✓ Virtual environment created"
+else
+    echo "  ✓ Virtual environment already exists"
+fi
+
+echo "  → Activating virtual environment..."
+source "$VENV_DIR/bin/activate"
+echo "  ✓ Using Python: $(which python)"
+
+# Upgrade pip and install wheel up front — prevents legacy setup.py install
+# warnings for packages like antlr4-python3-runtime, basicsr, moviepy
+echo "  → Upgrading pip + installing build tools..."
+pip install --quiet --upgrade pip wheel setuptools
+echo "  ✓ pip, wheel, setuptools up to date"
+
+# ── Core FUK ─────────────────────────────────────────────────────────────────
 echo ""
 echo "[1/6] Installing core FUK dependencies..."
 pip install -e . --no-deps
 pip install -e .
 
+# ── Vendor directory ─────────────────────────────────────────────────────────
 echo ""
 echo "[2/6] Setting up vendor directory..."
 mkdir -p fuk/vendor
 
+# ── Vendor repos ─────────────────────────────────────────────────────────────
 echo ""
 echo "[3/6] Cloning vendor dependencies..."
 
@@ -66,12 +93,16 @@ else
     echo "  ✓ DSINE already exists"
 fi
 
+# ── Vendor packages ───────────────────────────────────────────────────────────
 echo ""
 echo "[4/6] Installing vendor packages..."
+# wheel is already installed above, so antlr4-python3-runtime, basicsr, and
+# moviepy will build properly instead of falling back to legacy setup.py install
 pip install -e ./fuk/vendor/DiffSynth-Studio
 pip install -e ./fuk/vendor/Depth-Anything-3
 pip install -e ./fuk/vendor/segment-anything-2
 
+# ── Configuration files ───────────────────────────────────────────────────────
 echo ""
 echo "[5/6] Setting up configuration files..."
 mkdir -p config
@@ -146,15 +177,16 @@ config/tools/*.json
 EOL
 fi
 
-# Create example config files if they don't exist
+# ── Templates ─────────────────────────────────────────────────────────────────
+# Templates are ALWAYS written — they are the canonical reference and must
+# stay in sync with the codebase. Personal config/*.json files are never
+# touched after first creation.
 echo ""
-echo "  → Setting up example configuration files..."
+echo "  → Writing template configuration files..."
 
-# models.json.template
-if [ ! -f "config/models.json.template" ]; then
-    cat > config/models.json.template << 'EOL'
+cat > config/models.json.template << 'EOL'
 {
-  "_comment": "FUK Model Registry — each entry defines everything needed to construct a DiffSynth pipeline. Add new models by adding entries here.",
+  "_comment": "FUK Model Registry — each entry defines everything needed to construct a DiffSynth pipeline. Add new models by adding entries here. Visit https://github.com/modelscope/DiffSynth-Studio/blob/main/docs/en/Model_Details/Qwen-Image.md and https://github.com/modelscope/DiffSynth-Studio/blob/main/docs/en/Model_Details/Wan.md for full model list. Note: not all options are setup. Below is the current list of working models. Before running download_models.py remove unwanted models. Roughly 15-30GB per model",
 
   "qwen_image": {
     "model_id": "Qwen/Qwen-Image",
@@ -195,7 +227,9 @@ if [ ! -f "config/models.json.template" ]; then
     "description": "Multi-image editing (supports multiple input images)",
     "aliases": ["qwen-edit", "edit-2511"],
     "supports": ["edit_image", "negative_prompt"],
-    "parameter_map": {"edit_targets": "edit_image"},
+    "parameter_map": {
+      "edit_targets": "edit_image"
+    },
     "components": [
       {"pattern": "transformer/diffusion_pytorch_model*.safetensors"},
       {"pattern": "text_encoder/model*.safetensors", "model_id": "Qwen/Qwen-Image"},
@@ -212,7 +246,9 @@ if [ ! -f "config/models.json.template" ]; then
     "description": "In-context control with preprocessed control images",
     "aliases": ["control-union", "qwen-control"],
     "supports": ["context_image", "negative_prompt"],
-    "parameter_map": {"control_input": "context_image"},
+    "parameter_map": {
+      "control_input": "context_image"
+    },
     "components": [
       {"pattern": "transformer/diffusion_pytorch_model*.safetensors"},
       {"pattern": "text_encoder/model*.safetensors"},
@@ -254,7 +290,9 @@ if [ ! -f "config/models.json.template" ]; then
     "description": "Image-to-video (Wan 2.2 A14B - latest)",
     "aliases": ["i2v-A14B", "i2v-2.2"],
     "supports": ["input_image", "negative_prompt", "tiled"],
-    "parameter_map": {"reference_image": "input_image"},
+    "parameter_map": {
+      "reference_image": "input_image"
+    },
     "components": [
       {"pattern": "high_noise_model/diffusion_pytorch_model*.safetensors"},
       {"pattern": "low_noise_model/diffusion_pytorch_model*.safetensors"},
@@ -265,7 +303,9 @@ if [ ! -f "config/models.json.template" ]; then
       "model_id": "Wan-AI/Wan2.1-T2V-1.3B",
       "pattern": "google/umt5-xxl/"
     },
-    "pipeline_kwargs": {"tiled": true}
+    "pipeline_kwargs": {
+      "tiled": true
+    }
   },
 
   "wan_vace_a14b": {
@@ -289,7 +329,9 @@ if [ ! -f "config/models.json.template" ]; then
       "model_id": "Wan-AI/Wan2.1-T2V-1.3B",
       "pattern": "google/umt5-xxl/"
     },
-    "pipeline_kwargs": {"tiled": true}
+    "pipeline_kwargs": {
+      "tiled": true
+    }
   },
 
   "wan_inp_a14b": {
@@ -313,26 +355,35 @@ if [ ! -f "config/models.json.template" ]; then
       "model_id": "Wan-AI/Wan2.1-T2V-1.3B",
       "pattern": "google/umt5-xxl/"
     },
-    "pipeline_kwargs": {"tiled": true}
+    "pipeline_kwargs": {
+      "tiled": true
+    }
+  },
+
+  "_deferred": {
+    "_comment": "Complex models deferred for post-launch",
+    "wan_t2v_1.3b": "Excluding T2V - not professional use case",
+    "wan_t2v_14b": "Excluding T2V - not professional use case",
+    "wan_s2v_14b": "Requires: s2v_pose_video + motion_video + audio pipeline",
+    "wan_animate_14b": "Requires: animate_pose_video + animate_face_video + animate_inpaint_video + animate_mask_video",
+    "wan_control_camera": "Requires: camera_control_direction parsing + special UI",
+    "qwen_blockwise_controlnet": "Requires: preprocessor integration for canny/depth/inpaint"
   }
 }
 EOL
-    echo "    ✓ Created config/models.json.template"
-fi
+echo "    ✓ config/models.json.template"
 
-# defaults.json.template
-if [ ! -f "config/defaults.json.template" ]; then
-    cat > config/defaults.json.template << 'EOL'
+cat > config/defaults.json.template << 'EOL'
 {
   "models_root": "/path/to/your/models",
 
   "aspect_ratios": [
-    { "label": "1:1 (Square)",      "value": "1:1",    "ratio": 1.0    },
-    { "label": "1.33:1 (Fullscreen)","value": "1.33:1", "ratio": 1.3333 },
-    { "label": "1.78:1 (Widescreen)","value": "1.78:1", "ratio": 1.7778 },
-    { "label": "1.85:1 (Academy)",  "value": "1.85:1", "ratio": 1.85   },
-    { "label": "2.39:1 (Anamorphic)","value": "2.39:1", "ratio": 2.39   },
-    { "label": "2.75:1 (Panavision)","value": "2.75:1", "ratio": 2.76   }
+    { "label": "1:1 (Square)",        "value": "1:1",    "ratio": 1.0    },
+    { "label": "1.33:1 (Fullscreen)", "value": "1.33:1", "ratio": 1.3333 },
+    { "label": "1.78:1 (Widescreen)", "value": "1.78:1", "ratio": 1.7778 },
+    { "label": "1.85:1 (Academy)",    "value": "1.85:1", "ratio": 1.85   },
+    { "label": "2.39:1 (Anamorphic)", "value": "2.39:1", "ratio": 2.39   },
+    { "label": "2.75:1 (Panavision)", "value": "2.75:1", "ratio": 2.76   }
   ],
 
   "image": {
@@ -506,27 +557,27 @@ if [ ! -f "config/defaults.json.template" ]; then
   }
 }
 EOL
-    echo "    ✓ Created config/defaults.json.template"
-fi
+echo "    ✓ config/defaults.json.template"
 
-# Copy example configs to actual configs if they don't exist
+# Copy templates to live configs only if they don't exist yet
 echo ""
-echo "  → Initializing configuration files from examples..."
+echo "  → Initializing live configuration files..."
 
 if [ ! -f "config/models.json" ]; then
     cp config/models.json.template config/models.json
-    echo "    ✓ Created config/models.json (set your models_root path)"
+    echo "    ✓ Created config/models.json — set your models_root path"
 else
     echo "    ✓ config/models.json already exists (not overwriting)"
 fi
 
 if [ ! -f "config/defaults.json" ]; then
     cp config/defaults.json.template config/defaults.json
-    echo "    ✓ Created config/defaults.json (set your models_root and lora_dirs)"
+    echo "    ✓ Created config/defaults.json — set your models_root and lora_dirs"
 else
     echo "    ✓ config/defaults.json already exists (not overwriting)"
 fi
 
+# ── Frontend ──────────────────────────────────────────────────────────────────
 echo ""
 echo "Note: Real-ESRGAN is optional but recommended for upscaling."
 echo "Download pre-built binaries:"
@@ -553,19 +604,24 @@ fi
 
 cd ../..
 
+# ── Done ──────────────────────────────────────────────────────────────────────
 echo ""
 echo "============================================"
 echo "✓ Installation Complete!"
 echo "============================================"
 echo ""
+echo "Virtual environment: ./venv"
+echo "  Activate manually: source venv/bin/activate"
+echo ""
 echo "Next steps:"
 echo ""
 echo "1. IMPORTANT: Edit your configuration files:"
-echo "   config/models.json      - Set your models_root path"
-echo "   config/defaults.json    - Set your models_root and lora_dirs"
+echo "   config/models.json      — set your models_root path"
+echo "   config/defaults.json    — set your models_root and lora_dirs"
 echo ""
-echo "   Templates are in:"
-echo "   config/*.json.template"
+echo "   Templates (tracked in git):"
+echo "   config/models.json.template"
+echo "   config/defaults.json.template"
 echo ""
 echo "2. Download models:"
 echo "   python scripts/download_models.py"
@@ -575,6 +631,6 @@ echo "   ./start.sh"
 echo ""
 echo "Configuration notes:"
 echo "  • Your config files (config/*.json) are gitignored"
-echo "  • Example configs (config/*.json.example) are tracked in git"
-echo "  • Update examples when adding new config options"
+echo "  • Templates (config/*.json.template) are tracked in git"
+echo "  • Templates are always refreshed by setup.sh — edit freely"
 echo ""
