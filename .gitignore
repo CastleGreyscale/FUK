@@ -13,10 +13,11 @@
 !fuk/fuk/utils/**
 !fuk/fuk/config/**
 !docs/MODEL_DOWNLOADER_README.md
-!docs/MODEL_DOWNLOADER_README.md
+!docs/WINDOWS.md
 !docs/**
 !setup.sh
 !start.sh
+!download_models.sh
 
 
 

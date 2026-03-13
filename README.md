@@ -141,11 +141,11 @@ chmod +x setup.sh
 ./setup.sh
 
 # Edit configuration files using a code editor
-config/models.json     # Set your model root directory
-config/defaults.json   # Adjust generation defaults
+config/models.json     # Remove unwanted models
+config/defaults.json   # Set model and lora root directories
 
 # Download models (separate step, allows config review first)
-python scripts/download_models.py
+./download_models.sh
 
 # Start the server
 ./start.sh
