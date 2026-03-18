@@ -1,6 +1,10 @@
 #!/bin/bash
 set -e
 
+# Always run relative to repo root regardless of where the script is called from
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+cd "$SCRIPT_DIR"
+
 echo "============================================"
 echo "FUK — Model Downloader"
 echo "============================================"

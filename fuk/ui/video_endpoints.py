@@ -490,6 +490,31 @@ def setup_video_routes(
                 },
             )
 
+            # Extract first frame from the PROCESSED output as a companion still for
+            # image gen — so you get the controlnet result (e.g. openpose skeleton),
+            # not the raw source frame.
+            # MP4: extract via ffmpeg. Sequence: first frame file already exists.
+            first_frame_path = gen_dir / "first_frame.png"
+            try:
+                if output_mode == OutputMode.SEQUENCE and output_path.is_dir():
+                    # Sequence: grab the first frame file directly
+                    seq_frames = sorted(output_path.glob("frame_*.png"))
+                    if seq_frames:
+                        import shutil as _shutil
+                        _shutil.copy2(seq_frames[0], first_frame_path)
+                        log.info("VideoPreprocess", f"First frame copied from sequence: {seq_frames[0].name}")
+                    else:
+                        log.warning("VideoPreprocess", "No sequence frames found for first_frame (non-fatal)")
+                else:
+                    # MP4: extract frame 0 from processed video
+                    extracted = extract_thumbnail(output_path, first_frame_path)
+                    if extracted:
+                        log.info("VideoPreprocess", f"First frame saved: {first_frame_path.name}")
+                    else:
+                        log.warning("VideoPreprocess", "First frame extraction returned None (non-fatal)")
+            except Exception as e:
+                log.warning("VideoPreprocess", f"First frame extraction failed (non-fatal): {e}")
+
             # Clear preprocessor caches to free VRAM after video processing
             # Video preprocessing is memory-intensive, so unload models when done
             preprocessor_manager.clear_caches([request.method])

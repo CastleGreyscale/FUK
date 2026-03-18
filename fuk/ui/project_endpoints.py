@@ -1130,6 +1130,31 @@ async def list_generations(
         
         if should_include:
             generations.append(gen_obj)
+            
+            # If this is a video preprocess entry, also emit a sibling image entry
+            # for the first frame so it can be dragged into image generation directly.
+            if gen_type == "preprocess" and metadata.get("subtype") == "video":
+                first_frame_file = gen_dir / "first_frame.png"
+                if first_frame_file.exists():
+                    first_frame_preview = f"api/project/cache/{rel_path}/first_frame.png"
+                    generations.append({
+                        "id": f"{str(rel_path)}/first_frame",
+                        "name": None,
+                        "type": "preprocess",
+                        "subtype": "first_frame",
+                        "preview": first_frame_preview,
+                        "path": first_frame_preview,
+                        "sourcePath": None,
+                        "date": mtime.strftime("%Y-%m-%d"),
+                        "timestamp": mtime.strftime("%H:%M:%S"),
+                        "prompt": metadata.get("prompt", ""),
+                        "seed": None,
+                        "model": metadata.get("model", ""),
+                        "pinned": False,
+                        "thumbnailUrl": None,
+                        "isSequence": False,
+                        "frameCount": None,
+                    })
     
     print(f"[HISTORY] Loaded {len(generations)} generations (img: {type_counts['image']}/{img_limit}, video: {type_counts['video']}/{video_limit})", flush=True)
     return {"generations": generations, "hasMore": has_more}
