@@ -284,3 +284,29 @@
 .fuk-ml-2 {
   margin-left: 0.5rem;
 }
+
+
+.fuk-media-thumb--replace {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+ 
+.fuk-media-thumb-replace-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(168, 85, 247, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+  border-radius: var(--radius-sm);
+  pointer-events: none;
+}
+ 
+.fuk-media-thumb-replace-overlay span {
+  color: white;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}

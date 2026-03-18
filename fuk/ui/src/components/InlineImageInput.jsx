@@ -19,6 +19,7 @@ export default function InlineImageInput({
 }) {
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [dragOverPreview, setDragOverPreview] = useState(false);
   const inputId = useId();
 
   const handleUpload = async (files) => {
@@ -82,6 +83,29 @@ export default function InlineImageInput({
     setDragOver(false);
   };
 
+  // Drop directly onto the loaded preview — replaces current value
+  const handlePreviewDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverPreview(false);
+
+    const fukGenData = e.dataTransfer.getData('application/x-fuk-generation');
+    if (onLayersPackDrop && fukGenData) {
+      try {
+        const genData = JSON.parse(fukGenData);
+        if (genData.type === 'layers' && genData.metadata?.available_layers) {
+          onLayersPackDrop(genData);
+          return;
+        }
+      } catch (err) {}
+    }
+
+    const internalPath = e.dataTransfer.getData('text/plain');
+    if (internalPath && internalPath.startsWith('api/')) {
+      onChange(internalPath);
+    }
+  };
+
   const previewUrl = value ? buildImageUrl(value) : null;
   const isVideo = value && (value.endsWith('.mp4') || value.endsWith('.webm'));
 
@@ -132,7 +156,17 @@ export default function InlineImageInput({
 
         {/* Inline Preview */}
         {value && (
-          <div className="inline-preview">
+          <div 
+            className={`inline-preview ${dragOverPreview ? 'drag-over-replace' : ''}`}
+            onDrop={handlePreviewDrop}
+            onDragOver={(e) => { e.preventDefault(); setDragOverPreview(true); }}
+            onDragLeave={() => setDragOverPreview(false)}
+          >
+            {dragOverPreview && (
+              <div className="inline-preview-replace-overlay">
+                <span>Replace</span>
+              </div>
+            )}
             {isVideo ? (
               <video 
                 src={previewUrl}

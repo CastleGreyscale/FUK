@@ -66,6 +66,7 @@ export default function MediaUploader({
 }) {
   const [loading, setLoading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [dragOverIndex, setDragOverIndex] = useState(null);
   const [error, setError] = useState(null);
   
   const reactId = useId();
@@ -248,6 +249,31 @@ export default function MediaUploader({
     setDragOver(false);
   };
 
+  // Drop onto a specific loaded thumbnail — replaces that item in the list
+  const handleThumbDrop = useCallback((e, index) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverIndex(null);
+
+    const pathData = e.dataTransfer.getData('text/plain');
+    if (pathData && (pathData.startsWith('/') || pathData.startsWith('api/'))) {
+      const replacement = {
+        path: pathData,
+        displayName: pathData.split('/').pop(),
+        mediaType: getMediaType(pathData),
+      };
+      const fukGenData = e.dataTransfer.getData('application/x-fuk-generation');
+      if (fukGenData) {
+        try {
+          const genData = JSON.parse(fukGenData);
+          replacement.displayName = genData.name || replacement.displayName;
+        } catch (e) {}
+      }
+      const updated = normalizedMedia.map((item, i) => i === index ? replacement : item);
+      callOnChange(updated);
+    }
+  }, [normalizedMedia, callOnChange]);
+
   const handleRemove = (index) => {
     callOnChange(normalizedMedia.filter((_, i) => i !== index));
   };
@@ -300,7 +326,18 @@ export default function MediaUploader({
             const isSequence = item.mediaType === 'sequence';
             
             return (
-              <div key={index} className="fuk-media-thumb">
+              <div 
+                key={index} 
+                className={`fuk-media-thumb ${dragOverIndex === index ? 'fuk-media-thumb--replace' : ''}`}
+                onDrop={(e) => handleThumbDrop(e, index)}
+                onDragOver={(e) => { e.preventDefault(); setDragOverIndex(index); }}
+                onDragLeave={() => setDragOverIndex(null)}
+              >
+                {dragOverIndex === index && (
+                  <div className="fuk-media-thumb-replace-overlay">
+                    <span>Replace</span>
+                  </div>
+                )}
                 <div className="fuk-media-thumb-preview">
                   {isVideo ? (
                     <video
