@@ -4,7 +4,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Film, Camera, Clock, Trash2, RefreshCw, ChevronDown, ChevronRight, Enhance, Zap, ArrowUp, Layers, Download, PinIcon, ImportIcon, SequenceIcon } from './Icons';
+import { Film, Camera, Clock, Trash2, RefreshCw, ChevronDown, ChevronRight, Enhance, Zap, ArrowUp, Layers, Download, PinIcon, ImportIcon, SequenceIcon, ThumbsUp, ThumbsDown } from './Icons';
 import { buildImageUrl, API_URL } from '../utils/constants';
 import { useVideoPlayback } from '../hooks/useVideoPlayback';
 
@@ -19,6 +19,9 @@ function HoverPreview({ generation, position, videoRef }) {
   const isSequence = generation.isSequence;
   const previewUrl = buildImageUrl(generation.preview);
   const displayName = generation.name || generation.id || 'Unknown';
+  
+  // Full date + time combined
+  const dateTime = [generation.date, generation.timestamp].filter(Boolean).join(' · ');
   
   // Calculate position - keep popup in viewport
   const style = {
@@ -69,7 +72,7 @@ function HoverPreview({ generation, position, videoRef }) {
 }
 
 // Draggable thumbnail component
-function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned, onHover, onHoverEnd, videoRefPlayback }) {
+function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned, onHover, onHoverEnd, videoRefPlayback, vote, onVote }) {
   const [imageError, setImageError] = useState(false);
   const videoRef = useRef(null);
   const isVideo = generation.type === 'video' || 
@@ -241,6 +244,10 @@ function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned, onHov
       onDragStart={handleDragStart}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
+      title={generation.sourcePath 
+        ? `Drag to use as input\n${displayName}\nSource: ${generation.sourcePath}\n${generation.timestamp}`
+        : `Drag to use as input\n${displayName}\n${generation.timestamp}`
+      }
     >
       <div className="gen-history-thumb">
         {!imageError ? (
@@ -303,40 +310,40 @@ function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned, onHov
         )}
       </div>
       
-      <div className="gen-history-info">
-        <span className="gen-history-name">
-          {displayName.split('/').pop()}
-          {getSubtypeBadge()}
-          {getFrameCountBadge()}
-        </span>
-        <span className="gen-history-time">{generation.timestamp}</span>
-      </div>
-      
-      {/* Action buttons - show on hover */}
-      <div className="gen-history-actions-overlay">
+      {/* Action bar — always visible, replaces hover overlay + info strip */}
+      <div className="gen-history-actions-bar">
         <button 
           className={`gen-history-pin ${isPinned ? 'active' : ''}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            onTogglePin(generation);
-          }}
-          title={isPinned ? "Unpin" : "Pin to top"}
+          onClick={(e) => { e.stopPropagation(); onTogglePin(generation); }}
+          title={isPinned ? 'Unpin' : 'Pin to top'}
         >
           <PinIcon />
         </button>
-        
-        {onDelete && (
-          <button 
-            className="gen-history-delete"
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete(generation);
-            }}
-            title="Delete generation"
+        <div className="gen-history-actions-bar-right">
+          <button
+            className={`gen-history-vote up ${vote === 1 ? 'active' : ''}`}
+            onClick={(e) => { e.stopPropagation(); onVote(generation, vote === 1 ? 0 : 1); }}
+            title="Good generation"
           >
-            <Trash2 />
+            <ThumbsUp />
           </button>
-        )}
+          <button
+            className={`gen-history-vote down ${vote === -1 ? 'active' : ''}`}
+            onClick={(e) => { e.stopPropagation(); onVote(generation, vote === -1 ? 0 : -1); }}
+            title="Bad generation"
+          >
+            <ThumbsDown />
+          </button>
+          {onDelete && (
+            <button 
+              className="gen-history-delete"
+              onClick={(e) => { e.stopPropagation(); onDelete(generation); }}
+              title="Delete generation"
+            >
+              <Trash2 />
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -349,6 +356,8 @@ export default function GenerationHistory({ project, collapsed, onToggle, playba
   const [imgLimit, setImgLimit] = useState(5);
   const [videoLimit, setVideoLimit] = useState(5);
   const [hasMore, setHasMore] = useState({ image: false, video: false });
+  // votes: { [generation.id]: 1 | -1 | 0 }
+  const [votes, setVotes] = useState({});
   
   // Video playback speed refs
   const hoverVideoRef = useVideoPlayback(playbackSpeed);
@@ -536,6 +545,29 @@ export default function GenerationHistory({ project, collapsed, onToggle, playba
   const pinnedGenerations = generations.filter(g => pinnedIds.includes(g.id));
   const unpinnedGenerations = generations.filter(g => !pinnedIds.includes(g.id));
 
+  // Load votes on mount
+  useEffect(() => {
+    fetch(`${API_URL}/project/votes`)
+      .then(r => r.ok ? r.json() : {})
+      .then(data => setVotes(data || {}))
+      .catch(() => {}); // Non-fatal — votes file may not exist yet
+  }, []);
+
+  const handleVote = useCallback(async (generation, value) => {
+    const id = generation.id;
+    // Optimistic update
+    setVotes(prev => ({ ...prev, [id]: value }));
+    try {
+      await fetch(`${API_URL}/project/votes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, vote: value }),
+      });
+    } catch (err) {
+      console.error('[History] Vote save failed:', err);
+    }
+  }, []);
+
   const handleDelete = async (generation) => {
     if (!confirm(`Delete ${generation.name || generation.id}?`)) return;
     
@@ -637,6 +669,8 @@ export default function GenerationHistory({ project, collapsed, onToggle, playba
                       onHover={handleItemHover}
                       onHoverEnd={handleItemHoverEnd}
                       videoRefPlayback={thumbVideoRef}
+                      vote={votes[gen.id] || 0}
+                      onVote={handleVote}
                     />
                   ))}
                 </div>
@@ -659,6 +693,8 @@ export default function GenerationHistory({ project, collapsed, onToggle, playba
                     onHover={handleItemHover}
                     onHoverEnd={handleItemHoverEnd}
                     videoRefPlayback={thumbVideoRef}
+                    vote={votes[gen.id] || 0}
+                    onVote={handleVote}
                   />
                 ))}
               </div>

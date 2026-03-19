@@ -24,6 +24,9 @@
 
 # Exclude sensitive/cache data
 fuk/core/old/
+fuk/ui/data/**
+fuk/ui/data/votes/up/*
+fuk/ui/data/votes/down/*
 fuk/testing/
 **/*.log
 **/*.bak

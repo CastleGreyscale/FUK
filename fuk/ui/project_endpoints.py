@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Body, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from pathlib import Path
 from typing import Optional, Dict, Any, List
+from pydantic import BaseModel
 import json
 import mimetypes
 from datetime import datetime, timedelta
@@ -1476,6 +1477,158 @@ async def delete_generation(gen_id: str):
         return {"success": True, "deleted": dir_id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to delete: {str(e)}")
+
+
+# ============================================================================
+# Vote Storage
+#
+# Votes are stored in data/votes/up/ and data/votes/down/ at the FUK root,
+# one JSON file per voted generation, named {project}__{sanitized_id}.json.
+#
+# Each file captures the full metadata.json payload plus a vote envelope so
+# the data is self-contained for later analysis (seeds, prompts, LoRA weights,
+# guidance scales, etc.) without needing to re-open the originating project.
+#
+# votes/up/   — positive votes
+# votes/down/ — negative votes
+#
+# A clear (vote=0) deletes the file from whichever folder it's in.
+# Re-voting moves the file between folders atomically via rename.
+# ============================================================================
+
+_VOTES_ROOT = Path(__file__).parent / "data" / "votes"
+
+
+def _vote_dirs() -> tuple:
+    """Return (up_dir, down_dir), creating them on first use."""
+    up = _VOTES_ROOT / "up"
+    down = _VOTES_ROOT / "down"
+    up.mkdir(parents=True, exist_ok=True)
+    down.mkdir(parents=True, exist_ok=True)
+    return up, down
+
+
+def _vote_filename(generation_id: str) -> str:
+    """
+    Stable filename for a generation vote file.
+    generation_id is a relative cache path like:
+        fuktest_shot01_251229/img_gen_003
+    We sanitise path separators to __ so it's a flat filename.
+    """
+    sanitized = generation_id.replace("/", "__").replace("\\", "__")
+    return f"{sanitized}.json"
+
+
+def _find_existing_vote(filename: str):
+    """
+    Return (path, vote_value) if a vote file already exists in up/ or down/,
+    else (None, 0).
+    """
+    up_dir, down_dir = _vote_dirs()
+    up_path = up_dir / filename
+    down_path = down_dir / filename
+    if up_path.exists():
+        return up_path, 1
+    if down_path.exists():
+        return down_path, -1
+    return None, 0
+
+
+def _load_metadata_for_generation(generation_id: str) -> Dict[str, Any]:
+    """
+    Resolve the metadata.json for a generation ID.
+    generation_id is a cache-relative path, e.g. shot01_251229/img_gen_003.
+    Falls back to empty dict if not found (non-fatal).
+    """
+    if not _cache_root:
+        return {}
+    metadata_path = _cache_root / generation_id / "metadata.json"
+    if not metadata_path.exists():
+        return {}
+    try:
+        with open(metadata_path) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _get_all_votes() -> Dict[str, int]:
+    """Scan up/ and down/ folders and return {generation_id: 1|-1}."""
+    up_dir, down_dir = _vote_dirs()
+    result = {}
+
+    for vote_file in up_dir.glob("*.json"):
+        # Reverse the filename sanitisation to recover the generation ID
+        gen_id = vote_file.stem.replace("__", "/")
+        result[gen_id] = 1
+
+    for vote_file in down_dir.glob("*.json"):
+        gen_id = vote_file.stem.replace("__", "/")
+        result[gen_id] = -1
+
+    return result
+
+
+class SaveVoteRequest(BaseModel):
+    id: str        # generation ID (cache-relative path)
+    vote: int      # 1 = up, -1 = down, 0 = clear
+
+
+@router.get("/votes")
+async def get_votes():
+    """Return all current votes as {generation_id: 1|-1}."""
+    return _get_all_votes()
+
+
+@router.post("/votes")
+async def save_vote(request: SaveVoteRequest):
+    """
+    Save, move, or clear a vote for a generation.
+
+    On vote=1 or vote=-1: writes a JSON file containing the full metadata
+    payload for that generation into the appropriate up/ or down/ folder.
+    If a file already exists in the opposite folder it is removed first.
+
+    On vote=0: deletes whichever file exists (clear/undo).
+    """
+    up_dir, down_dir = _vote_dirs()
+    filename = _vote_filename(request.id)
+
+    existing_path, existing_value = _find_existing_vote(filename)
+
+    if request.vote == 0:
+        # Clear — just delete if present
+        if existing_path and existing_path.exists():
+            existing_path.unlink()
+        return {"success": True, "id": request.id, "vote": 0}
+
+    # Determine target directory
+    target_dir = up_dir if request.vote == 1 else down_dir
+    target_path = target_dir / filename
+
+    # Remove from opposite folder if it was there
+    if existing_path and existing_path != target_path:
+        existing_path.unlink(missing_ok=True)
+
+    # Skip writing if already in the right place
+    if not target_path.exists():
+        # Harvest full metadata for this generation
+        gen_metadata = _load_metadata_for_generation(request.id)
+
+        vote_record = {
+            "vote": request.vote,
+            "voted_at": datetime.now().isoformat(),
+            "generation_id": request.id,
+            "project_cache": str(_cache_root) if _cache_root else None,
+            # Full generation context for later analysis
+            "metadata": gen_metadata,
+        }
+
+        with open(target_path, "w") as f:
+            json.dump(vote_record, f, indent=2)
+
+    return {"success": True, "id": request.id, "vote": request.vote}
+
 
 def setup_project_routes(app):
     """Setup project routes on FastAPI app"""
