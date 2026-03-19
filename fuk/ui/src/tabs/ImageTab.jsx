@@ -19,7 +19,8 @@ import { calculateDimensions, formatTime } from '../utils/helpers.js';
 import { 
   buildImageUrl, 
   SEED_MODES, 
-  generateRandomSeed 
+  generateRandomSeed,
+  API_URL,
 } from '../../src/utils/constants';
 import Footer from '../components/Footer';
 
@@ -224,6 +225,11 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
   const batchQueueRef = useRef(null);
   const [batchProgress, setBatchProgress] = useState(null); // { current, total }
 
+  // Metadata reload from history drag
+  const [metaDragOver, setMetaDragOver] = useState(false);
+  const [droppedPreview, setDroppedPreview] = useState(null);
+  const [metaLoadedFrom, setMetaLoadedFrom] = useState(null);
+
   const buildBatchSeeds = useCallback((seedMode, startSeed, count) => {
     if (seedMode === SEED_MODES.RANDOM) {
       return Array.from({ length: count }, () => generateRandomSeed());
@@ -324,16 +330,86 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
     setFormData(prev => ({ ...prev, control_image_paths: paths }));
   };
 
+  // Reload generation settings from a history item dropped onto the preview panel
+  const handleMetaDrop = useCallback(async (e) => {
+    e.preventDefault();
+    setMetaDragOver(false);
+
+    const fukGenData = e.dataTransfer.getData('application/x-fuk-generation');
+    if (!fukGenData) return;
+
+    let gen;
+    try { gen = JSON.parse(fukGenData); } catch { return; }
+
+    // Skip video-only types — their metadata doesn't map to image settings
+    if (gen.type === 'video' || gen.type === 'interpolate') return;
+
+    try {
+      const res = await fetch(`${API_URL}/project/generations/${encodeURIComponent(gen.id)}/metadata`);
+      if (!res.ok) return;
+      const meta = await res.json();
+
+      const updates = {};
+      if (meta.prompt)                 updates.prompt           = meta.prompt;
+      if (meta.negative_prompt)        updates.negative_prompt  = meta.negative_prompt;
+      if (meta.model)                  updates.model            = resolveModelKey(meta.model);
+      if (meta.guidance_scale != null) updates.guidance_scale   = meta.guidance_scale;
+      if (meta.infer_steps != null)    updates.steps            = meta.infer_steps;
+      if (meta.lora != null)           updates.lora             = meta.lora;
+      if (meta.lora_multiplier != null) updates.lora_multiplier = meta.lora_multiplier;
+      if (meta.seed != null) {
+        updates.seed     = meta.seed;
+        updates.seedMode = SEED_MODES.FIXED;
+      }
+      if (meta.image_size?.[0])        updates.width            = meta.image_size[0];
+
+      setFormData(prev => ({ ...prev, ...updates }));
+
+      // Show the dropped gen's preview — droppedPreview takes priority over existing result
+      const previewPath = gen.preview || gen.path;
+      setDroppedPreview(previewPath ? buildImageUrl(previewPath) : null);
+      setMetaLoadedFrom(gen.name || gen.id?.split('/').pop() || 'history');
+
+    } catch (err) {
+      console.error('[ImageTab] Metadata reload failed:', err);
+    }
+  }, [resolveModelKey, setFormData]);
+
   // Calculate CSS variable for dynamic aspect ratio
   const dims = getCurrentDimensions();
   const aspectRatioStyle = { '--preview-aspect': `${dims.width} / ${dims.height}` };
 
   return (
     <>
-      {/* Preview Area */}
-      <div className="fuk-preview-area">
+      {/* Preview Area — also acts as metadata drop target */}
+      <div
+        className={`fuk-preview-area ${metaDragOver ? 'meta-drag-over' : ''}`}
+        onDragOver={(e) => { e.preventDefault(); setMetaDragOver(true); }}
+        onDragLeave={() => setMetaDragOver(false)}
+        onDrop={handleMetaDrop}
+        style={{ position: 'relative' }}
+      >
         <div className="fuk-preview-single">
-          {previewImage ? (
+          {/* droppedPreview takes priority — shows reference gen while settings are loaded */}
+          {droppedPreview ? (
+            <div className="fuk-preview-container fuk-preview-container--meta">
+              <ZoomableImage
+                src={droppedPreview}
+                alt="Loaded from history"
+                className="fuk-preview-media fuk-preview-media--meta"
+              />
+              <div className="fuk-preview-info">
+                <div className="fuk-preview-info-row">
+                  <span className="fuk-meta-loaded-badge">↩ Settings from: {metaLoadedFrom}</span>
+                  <button
+                    className="fuk-meta-dismiss"
+                    onClick={() => { setDroppedPreview(null); setMetaLoadedFrom(null); }}
+                    title="Dismiss"
+                  >×</button>
+                </div>
+              </div>
+            </div>
+          ) : previewImage ? (
             <div className="fuk-preview-container">
               <ZoomableImage
                 src={buildImageUrl(previewImage)}
@@ -365,10 +441,18 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                 <p className="fuk-placeholder-text">
                   {dims.width} × {dims.height}
                 </p>
+                <p className="fuk-placeholder-subtext fuk-meta-hint">
+                  Drop a history item here to reload its settings
+                </p>
               </div>
             </div>
           )}
         </div>
+        {metaDragOver && (
+          <div className="fuk-meta-drop-overlay">
+            <span>Load Settings</span>
+          </div>
+        )}
       </div>
 
       {/* Settings Area */}

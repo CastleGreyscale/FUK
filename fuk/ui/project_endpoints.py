@@ -1435,6 +1435,39 @@ async def register_import(data: dict = Body(...)):
         "last_frame": last_frame,
         "frame_count": frame_count,
     }
+@router.get("/generations/{gen_id:path}/metadata")
+async def get_generation_metadata(gen_id: str):
+    """
+    Return the raw metadata.json for a generation.
+    Used by the frontend to reload settings from a history item.
+    gen_id is a cache-relative path, e.g. fuktest_shot01_251229/img_gen_003
+    """
+    if not _cache_root:
+        raise HTTPException(status_code=400, detail="No project loaded")
+
+    # Strip /first_frame suffix added by history scanner for companion stills
+    if gen_id.endswith("/first_frame"):
+        gen_id = gen_id[: -len("/first_frame")]
+
+    gen_dir = _cache_root / gen_id
+
+    # Security check
+    try:
+        gen_dir.resolve().relative_to(_cache_root.resolve())
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Invalid generation ID")
+
+    metadata_path = gen_dir / "metadata.json"
+    if not metadata_path.exists():
+        raise HTTPException(status_code=404, detail="No metadata for this generation")
+
+    try:
+        with open(metadata_path) as f:
+            return json.load(f)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read metadata: {e}")
+
+
 @router.delete("/generations/{gen_id:path}")
 async def delete_generation(gen_id: str):
     """Delete a generation directory or specific layer file"""
