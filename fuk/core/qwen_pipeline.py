@@ -81,6 +81,26 @@ class QwenPipelineRunner(PipelineRunner):
         denoise = (denoising_strength if denoising_strength is not None
                    else defaults.get("denoising_strength", 0.85))
 
+        # --- Inherit dimensions from source image (all non-t2i modes) ---
+        # For edit with multiple inputs, first image is the master.
+        # Keeps latent dimensions consistent with the source — avoids
+        # VAE rounding mismatches in layer stacks and downstream compositing.
+        source_path = self._resolve_source_image(control_image, context_image, eligen_source)
+        if source_path:
+            from PIL import Image as _PILImage
+            try:
+                with _PILImage.open(str(source_path)) as src:
+                    src_w, src_h = src.size
+                # Round to nearest VAE multiple (8) to avoid encoder/decoder
+                # shape disagreements — same rounding the pipeline would apply
+                src_w = (src_w // 8) * 8
+                src_h = (src_h // 8) * 8
+                if src_w > 0 and src_h > 0:
+                    width, height = src_w, src_h
+                    _log(self.log_prefix, f"Inherited dimensions from source: {width}x{height}")
+            except Exception as e:
+                _log(self.log_prefix, f"Could not read source image dimensions: {e}", "warning")
+
         # --- Logging ---
         log_params = {
             "prompt": prompt,
@@ -182,6 +202,40 @@ class QwenPipelineRunner(PipelineRunner):
         finally:
             if cleanup_hook:
                 cleanup_hook()
+
+    # ------------------------------------------------------------------
+    # Source image resolution
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _resolve_source_image(
+        control_image: Optional[Union[Path, List[Path]]],
+        context_image: Optional[Any],
+        eligen_source: Optional[Union[str, Path]],
+    ) -> Optional[Path]:
+        """
+        Return the master source image path for dimension inheritance.
+
+        Priority: control_image (first if list) → context_image → None.
+        eligen_source is a mask directory, not an image — skip it.
+        Returns None for pure t2i (no source images at all).
+        """
+        if control_image:
+            if isinstance(control_image, list):
+                candidate = control_image[0] if control_image else None
+            else:
+                candidate = control_image
+            if candidate:
+                p = Path(str(candidate))
+                if p.exists() and p.is_file():
+                    return p
+
+        if context_image:
+            p = Path(str(context_image))
+            if p.exists() and p.is_file():
+                return p
+
+        return None
 
     # ------------------------------------------------------------------
     # EliGen support

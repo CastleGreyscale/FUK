@@ -9,7 +9,7 @@ export { default as GenerationHistory } from './GenerationHistory';
 export { default as GenerationModal } from './GenerationModal';
 export { isVideoFile, isSequenceFile, isImageFile } from './MediaUploader';
 export { default as InlineImageInput } from './InlineImageInput';
-
+export { default as LayerStackPanel } from './LayerStackPanel';
 
 
 // Icons

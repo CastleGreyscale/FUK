@@ -49,6 +49,7 @@ from file_browser_endpoints import setup_file_browser_routes
 from video_endpoints import setup_video_routes
 from core.diffsynth_backend import DiffSynthBackend
 from core.video_processor import VideoProcessor
+from layer_stack_endpoints import setup_layer_routes, initialize_layer_endpoints
 import json
 import asyncio
 import uuid
@@ -3128,6 +3129,14 @@ setup_video_routes(
     clear_vram=clear_vram,                              
     cleanup_failed_generation=cleanup_failed_generation 
 )
+
+# ============================================================================
+# Layer Stack Endpoints
+# ============================================================================
+
+
+initialize_layer_endpoints(generation_backend, CACHE_ROOT)
+setup_layer_routes(app)
 
 # ============================================================================
 # Generic Task System

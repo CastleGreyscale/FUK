@@ -12,6 +12,8 @@ import ZoomableImage from '../components/ZoomableImage';
 import SeedControl from '../components/SeedControl';
 import GenerationModal from '../components/GenerationModal';
 import { useGeneration } from '../hooks/useGeneration';
+import LayerStackPanel from '../components/LayerStackPanel';
+import { createStack } from '../utils/layerStackApi';
 import { useLocalStorage } from '../../src/hooks/useLocalStorage';
 import { useSavedSeeds } from '../hooks/useSavedSeeds';
 import { startImageGeneration } from '../../src/utils/api';
@@ -126,6 +128,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
   // Generation state
   const {
     generating,
+    generationId,
     progress,
     result,
     error,
@@ -199,6 +202,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
           lastUsedSeed: result.seed_used,
         }));
       }
+      setCurrentImagePath(result.outputs.png); 
     }
   }, [result, project?.updateLastState, setFormData]);
 
@@ -229,6 +233,10 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
   const [metaDragOver, setMetaDragOver] = useState(false);
   const [droppedPreview, setDroppedPreview] = useState(null);
   const [metaLoadedFrom, setMetaLoadedFrom] = useState(null);
+
+  // Layer edit system
+  const [stackId, setStackId] = useState(null);
+  const [currentImagePath, setCurrentImagePath] = useState(null);
 
   const buildBatchSeeds = useCallback((seedMode, startSeed, count) => {
     if (seedMode === SEED_MODES.RANDOM) {
@@ -330,6 +338,16 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
     setFormData(prev => ({ ...prev, control_image_paths: paths }));
   };
 
+  const handleCreateStack = async () => {
+    if (!previewImage) return;
+    try {
+      const data = await createStack(previewImage);  // previewImage is already the cache URL
+      setStackId(data.stack_id);
+    } catch (err) {
+      console.error('Failed to create stack:', err);
+    }
+  };
+
   // Reload generation settings from a history item dropped onto the preview panel
   const handleMetaDrop = useCallback(async (e) => {
     e.preventDefault();
@@ -389,6 +407,27 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
         onDrop={handleMetaDrop}
         style={{ position: 'relative' }}
       >
+      {/* Layer stack side panel — qwen_edit only */}
+      {modelSupports(formData.model, 'edit_image') && (
+        <div className="fuk-layer-sidebar">
+          {previewImage && !stackId && (
+            <button
+              className="ls-btn ls-btn--primary ls-btn--full"
+              onClick={handleCreateStack}
+              disabled={!generationId}
+              style={{ marginBottom: '0.5rem' }}
+            >
+              + New Layer Stack
+            </button>
+          )}
+          <LayerStackPanel
+            stackId={stackId}
+            currentImagePath={currentImagePath}
+            onFlattenComplete={(url) => setCurrentImagePath(url)}
+          />
+        </div>
+      )}
+
         <div className="fuk-preview-single">
           {/* droppedPreview takes priority — shows reference gen while settings are loaded */}
           {droppedPreview ? (

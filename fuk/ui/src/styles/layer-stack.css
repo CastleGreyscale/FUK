@@ -1,0 +1,454 @@
+/**
+ * layer-stack.css
+ * Styles for the non-destructive latent layer editing panel.
+ * Uses existing FUK CSS variable tokens throughout.
+ */
+
+/* ---------------------------------------------------------------------------
+   Panel shell
+--------------------------------------------------------------------------- */
+
+.ls-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  background: var(--card-bg);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-md);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+}
+
+.ls-panel--empty {
+  align-items: center;
+  justify-content: center;
+  min-height: 6rem;
+}
+
+.ls-empty-msg {
+  color: var(--color-text-secondary);
+  text-align: center;
+  line-height: var(--line-height-relaxed);
+}
+
+/* ---------------------------------------------------------------------------
+   Header
+--------------------------------------------------------------------------- */
+
+.ls-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+}
+
+.ls-title {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--color-layers);
+  text-transform: uppercase;
+}
+
+.ls-title-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--color-layers);
+  flex-shrink: 0;
+}
+
+.ls-header-actions {
+  display: flex;
+  gap: var(--spacing-xs);
+}
+
+/* ---------------------------------------------------------------------------
+   Buttons
+--------------------------------------------------------------------------- */
+
+.ls-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  font-family: inherit;
+  transition: opacity var(--transition-fast), background var(--transition-fast);
+  white-space: nowrap;
+}
+
+.ls-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.ls-btn--primary {
+  background: var(--color-layers);
+  color: #000;
+  padding: var(--btn-padding-sm);
+  font-weight: 600;
+}
+
+.ls-btn--primary:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.ls-btn--ghost {
+  background: transparent;
+  color: var(--color-text-secondary);
+  padding: var(--btn-padding-sm);
+  border: var(--border-width) solid var(--color-border);
+}
+
+.ls-btn--ghost:hover:not(:disabled) {
+  background: var(--color-surface-hover);
+  color: var(--color-text-primary);
+}
+
+.ls-btn--sm {
+  font-size: var(--font-size-xs);
+  padding: 0.25rem 0.6rem;
+}
+
+.ls-btn--xs {
+  font-size: var(--font-size-xs);
+  padding: 0.15rem 0.4rem;
+}
+
+.ls-btn--icon {
+  width: 1.6rem;
+  height: 1.6rem;
+  padding: 0;
+  font-size: 0.8rem;
+}
+
+.ls-btn--danger:hover:not(:disabled) {
+  color: var(--color-error-400);
+  border-color: var(--color-error-600);
+}
+
+.ls-btn--full {
+  width: 100%;
+}
+
+/* ---------------------------------------------------------------------------
+   Loading bar
+--------------------------------------------------------------------------- */
+
+.ls-loading-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.ls-loading-label {
+  font-size: var(--font-size-xs);
+  color: var(--color-layers);
+}
+
+.ls-loading-track {
+  height: 2px;
+  background: var(--color-border);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+}
+
+.ls-loading-fill {
+  height: 100%;
+  background: var(--color-layers);
+  border-radius: var(--radius-full);
+  animation: ls-sweep 1.4s ease-in-out infinite;
+  width: 40%;
+}
+
+@keyframes ls-sweep {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
+}
+
+/* ---------------------------------------------------------------------------
+   Error
+--------------------------------------------------------------------------- */
+
+.ls-error {
+  font-size: var(--font-size-xs);
+  color: var(--color-error-400);
+  background: rgba(239, 68, 68, 0.08);
+  border: var(--border-width) solid var(--color-error-600);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  cursor: pointer;
+}
+
+/* ---------------------------------------------------------------------------
+   Add layer form
+--------------------------------------------------------------------------- */
+
+.ls-add-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  background: var(--color-surface);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-md);
+}
+
+.ls-form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.ls-form-row--inline {
+  flex-direction: row;
+  gap: var(--spacing-sm);
+}
+
+.ls-form-row--inline > div {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.ls-label {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.ls-input {
+  background: var(--input-bg);
+  border: var(--border-width) solid var(--input-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  font-family: inherit;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  outline: none;
+  transition: border-color var(--transition-fast);
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.ls-input:focus {
+  border-color: var(--color-layers);
+}
+
+.ls-textarea {
+  resize: vertical;
+  min-height: 4rem;
+}
+
+.ls-select {
+  cursor: pointer;
+}
+
+/* ---------------------------------------------------------------------------
+   Layer list
+--------------------------------------------------------------------------- */
+
+.ls-layers {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.ls-empty-layers {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  text-align: center;
+  padding: var(--spacing-md) 0;
+}
+
+/* ---------------------------------------------------------------------------
+   Individual layer
+--------------------------------------------------------------------------- */
+
+.ls-layer {
+  background: var(--color-surface);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  transition: border-color var(--transition-fast), opacity var(--transition-fast);
+}
+
+.ls-layer--on {
+  border-left: 2px solid var(--color-layers);
+}
+
+.ls-layer--off {
+  opacity: 0.45;
+  border-left: 2px solid var(--color-border);
+}
+
+.ls-layer-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+}
+
+/* Eye / toggle */
+.ls-eye {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.7rem;
+  padding: 0 2px;
+  flex-shrink: 0;
+  transition: color var(--transition-fast);
+}
+
+.ls-eye--on  { color: var(--color-layers); }
+.ls-eye--off { color: var(--color-text-muted); }
+
+.ls-eye:disabled { cursor: not-allowed; }
+
+/* Layer name */
+.ls-layer-name {
+  flex: 1;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Version badge */
+.ls-version-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: transparent;
+  border: var(--border-width) solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  padding: 1px 5px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: border-color var(--transition-fast), color var(--transition-fast);
+}
+
+.ls-version-badge:hover {
+  border-color: var(--color-layers);
+  color: var(--color-layers);
+}
+
+.ls-chevron {
+  font-size: 0.5rem;
+}
+
+/* Prompt preview below header row */
+.ls-layer-prompt-preview {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  padding-left: 1.4rem;   /* align under name */
+  padding-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------------------------------------------------------------------------
+   Version history
+--------------------------------------------------------------------------- */
+
+.ls-versions {
+  margin-top: var(--spacing-xs);
+  padding-left: 1.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border-left: 1px solid var(--color-border);
+}
+
+.ls-version {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: 2px var(--spacing-xs);
+  border-radius: var(--radius-sm);
+  transition: background var(--transition-fast);
+}
+
+.ls-version--active {
+  background: rgba(37, 219, 235, 0.08);
+}
+
+.ls-version-label {
+  font-size: var(--font-size-xs);
+  color: var(--color-layers);
+  font-weight: 600;
+  min-width: 1.4rem;
+}
+
+.ls-version-prompt {
+  flex: 1;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ls-version-seed {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  font-family: monospace;
+  flex-shrink: 0;
+}
+
+/* ---------------------------------------------------------------------------
+   Flatten preview
+--------------------------------------------------------------------------- */
+
+.ls-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  margin-top: var(--spacing-xs);
+}
+
+.ls-preview-label {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.ls-preview-img {
+  width: 100%;
+  border-radius: var(--radius-md);
+  border: var(--border-width) solid var(--color-border);
+  display: block;
+}
+
+.fuk-preview-area--with-layers {
+  display: flex;
+  flex-direction: row;
+  gap: var(--spacing-md);
+  align-items: flex-start;
+}
+
+.fuk-layer-sidebar {
+  width: 280px;
+  flex-shrink: 0;
+  position: sticky;
+  top: var(--spacing-md);
+}
+
+/* Make the preview fill remaining space when sidebar is present */
+.fuk-preview-area--with-layers .fuk-preview-single {
+  flex: 1;
+  min-width: 0;
+}
