@@ -608,6 +608,7 @@ class ImageGenerationRequest(BaseModel):
     denoising_strength: Optional[float] = None  # Edit strength when control images present
     exponential_shift_mu: Optional[float] = None  # Sampling timestep control (null = auto)
     eligen_source: Optional[str] = None  # Path to EliGen masks (directory, .psd, or .ora)
+    eligen_alpha: Optional[float] = None  # EliGen model LoRA strength (null = use models.json default)
     
 class VideoGenerationRequest(BaseModel):
     prompt: str
@@ -855,7 +856,8 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
             vram_preset=request.vram_preset,
             denoising_strength=request.denoising_strength,
             exponential_shift_mu=request.exponential_shift_mu,
-            eligen_source=eligen_source_abs, 
+            eligen_source=eligen_source_abs,
+            eligen_alpha=request.eligen_alpha,
         )
         
         log.success("ImageGen", "Generation complete!")
@@ -891,7 +893,9 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
 
             lora=request.lora,
             lora_multiplier=request.lora_multiplier,
-            control_image=[str(p) for p in control_images] if control_images else None
+            control_image=[str(p) for p in control_images] if control_images else None,
+            eligen_source=str(eligen_source_abs) if eligen_source_abs else None,
+            eligen_alpha=request.eligen_alpha,
         )
         
         # Mark complete
