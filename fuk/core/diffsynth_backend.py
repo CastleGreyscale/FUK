@@ -589,36 +589,36 @@ class DiffSynthBackend:
             _log("BACKEND", f"Using cached pipeline: {cache_key}")
             return self.pipelines[cache_key]
 
-        # If same model with different preset is cached, evict it
-        stale = [k for k in self.pipelines if k.startswith(f"{model_type}:")]
-        for k in stale:
-            _log("BACKEND", f"Evicting pipeline (preset changed): {k}")
-            del self.pipelines[k]
-            self._active_user_loras.pop(k, None)
-        if stale and torch.cuda.is_available():
-            torch.cuda.empty_cache()
-
         entry = self.get_model_entry(model_type)
         pipeline_name = entry["pipeline"]
 
-        # Evict pipelines from OTHER families to free VRAM
-        # (e.g. clear Qwen before loading Wan 14B and vice versa)
-        other_family = [
-            k for k in list(self.pipelines.keys())
-            if not k.startswith(f"{model_type}:")
-            and self.get_model_entry(k.split(":")[0]).get("pipeline") != pipeline_name
-        ]
-        if other_family:
-            for k in other_family:
-                _log("BACKEND", f"Evicting pipeline (different family): {k}")
+        # --- Eviction: only keep ONE pipeline cached at a time ---
+        # Evict ALL other cached pipelines — same family or different.
+        # With VRAM offloading, idle pipelines park their weights in
+        # system RAM. Stacking multiple 20-30 GB pipelines causes RAM
+        # to balloon (131 GB+) and eventually forces swap, which tanks
+        # render times from 1.4 min to 8+ min.
+        import gc
+        stale = [k for k in list(self.pipelines.keys()) if k != cache_key]
+        if stale:
+            for k in stale:
+                stale_model = k.split(":")[0]
+                stale_family = self.get_model_entry(stale_model).get("pipeline", "?")
+                if stale_family == pipeline_name:
+                    reason = "same family, different model"
+                elif k.startswith(f"{model_type}:"):
+                    reason = "same model, different preset"
+                else:
+                    reason = "different family"
+                _log("BACKEND", f"Evicting pipeline ({reason}): {k}")
                 del self.pipelines[k]
                 self._active_user_loras.pop(k, None)
                 self._model_lora_config.pop(k, None)
+            # GC first so Python releases refs, THEN clear CUDA cache
+            gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
-            import gc
-            gc.collect()
-            _log("BACKEND", f"Freed VRAM from {len(other_family)} cross-family pipeline(s)", "success")
+            _log("BACKEND", f"Evicted {len(stale)} pipeline(s), RAM freed", "success")
 
         PipelineCls = PIPELINE_CLASSES.get(pipeline_name)
         if PipelineCls is None:
