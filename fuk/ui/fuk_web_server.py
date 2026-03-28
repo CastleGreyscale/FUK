@@ -735,10 +735,33 @@ def clear_vram():
             print(f"VRAM cleared")
         else:
             print(f"CUDA not available, skipping VRAM clear")
-            
+        
+        _prune_stale_generations()
+
     except Exception as e:
         print(f"VRAM clear failed: {e}")
-
+        
+def _prune_stale_generations(max_age_minutes: int = 30):
+    """Remove completed/failed generation entries older than max_age."""
+    from datetime import datetime, timedelta
+    cutoff = datetime.now() - timedelta(minutes=max_age_minutes)
+    stale = []
+    for gid, gen in active_generations.items():
+        if gen.get("status") not in ("complete", "failed"):
+            continue
+        completed = gen.get("completed_at") or gen.get("failed_at")
+        if not completed:
+            continue
+        try:
+            ts = datetime.fromisoformat(completed)
+            if ts < cutoff:
+                stale.append(gid)
+        except (ValueError, TypeError):
+            pass
+    for gid in stale:
+        del active_generations[gid]
+    if stale:
+        print(f"Pruned {len(stale)} stale generation(s) from tracking")
 # ============================================================================
 # Image Generation
 # ============================================================================

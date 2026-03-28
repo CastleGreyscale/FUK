@@ -96,6 +96,8 @@ class DiffSynthBackend:
         self.pipelines: Dict[str, Any] = {}
         self._active_user_loras: Dict[str, List[tuple]] = {}  # cache_key → [(path, alpha), ...]
         self._model_lora_config: Dict[str, dict] = {}  # cache_key → model lora config from models.json
+        self._model_lora_config: Dict[str, dict] = {}  # cache_key → model lora config from models.json
+        self._model_lora_alpha: Dict[str, float] = {}   # cache_key → current model LoRA alpha
         #self.latent_manager = LatentManager()
 
         # Scan for available LoRA files
@@ -394,7 +396,8 @@ class DiffSynthBackend:
             # Reload model LoRA since clear_lora() nukes everything
             model_lora_cfg = self._model_lora_config.get(cache_key)
             if model_lora_cfg:
-                self._load_model_lora(pipeline, model_lora_cfg)
+                active_alpha = self._model_lora_alpha.get(cache_key, model_lora_cfg.get("alpha", 1.0))
+                self._load_model_lora(pipeline, model_lora_cfg, alpha_override=active_alpha)
         # else: no model LoRA, no user LoRAs — just load directly
 
         # Load user LoRA(s) on top
@@ -432,9 +435,38 @@ class DiffSynthBackend:
         # Reload model LoRA if this pipeline has one
         model_lora_cfg = self._model_lora_config.get(cache_key)
         if model_lora_cfg:
-            self._load_model_lora(pipeline, model_lora_cfg)
+            active_alpha = self._model_lora_alpha.get(cache_key, model_lora_cfg.get("alpha", 1.0))
+            self._load_model_lora(pipeline, model_lora_cfg, alpha_override=active_alpha)
         
         del self._active_user_loras[cache_key]
+
+    def override_model_lora_alpha(self, pipeline, cache_key: str, alpha: float):
+        """
+        Change the model-bundled LoRA alpha at runtime (e.g. EliGen strength slider).
+
+        Clears and reloads the model LoRA at the new alpha if it changed.
+        Pops user LoRAs so apply_loras() reloads them on the next call.
+        No-op if this pipeline has no model LoRA or alpha hasn't changed.
+        """
+        model_lora_cfg = self._model_lora_config.get(cache_key)
+        if not model_lora_cfg:
+            return
+
+        current_alpha = self._model_lora_alpha.get(cache_key, model_lora_cfg.get("alpha", 1.0))
+        if abs(current_alpha - alpha) < 1e-4:
+            _log("BACKEND", f"Model LoRA alpha unchanged ({alpha:.2f})")
+            return
+
+        _log("BACKEND", f"Model LoRA alpha: {current_alpha:.2f} → {alpha:.2f}")
+
+        try:
+            pipeline.clear_lora()
+        except Exception as e:
+            _log("BACKEND", f"clear_lora() during alpha override: {e}", "warning")
+
+        self._load_model_lora(pipeline, model_lora_cfg, alpha_override=alpha)
+        self._model_lora_alpha[cache_key] = alpha
+        self._active_user_loras.pop(cache_key, None)
 
     def _resolve_vram_preset(self, preset_name: str = None) -> tuple:
         """
@@ -588,37 +620,32 @@ class DiffSynthBackend:
         if cache_key in self.pipelines:
             _log("BACKEND", f"Using cached pipeline: {cache_key}")
             return self.pipelines[cache_key]
-
-        # If same model with different preset is cached, evict it
-        stale = [k for k in self.pipelines if k.startswith(f"{model_type}:")]
-        for k in stale:
-            _log("BACKEND", f"Evicting pipeline (preset changed): {k}")
-            del self.pipelines[k]
-            self._active_user_loras.pop(k, None)
-        if stale and torch.cuda.is_available():
-            torch.cuda.empty_cache()
-
         entry = self.get_model_entry(model_type)
         pipeline_name = entry["pipeline"]
 
-        # Evict pipelines from OTHER families to free VRAM
-        # (e.g. clear Qwen before loading Wan 14B and vice versa)
-        other_family = [
-            k for k in list(self.pipelines.keys())
-            if not k.startswith(f"{model_type}:")
-            and self.get_model_entry(k.split(":")[0]).get("pipeline") != pipeline_name
-        ]
-        if other_family:
-            for k in other_family:
-                _log("BACKEND", f"Evicting pipeline (different family): {k}")
+        # --- Eviction: only keep ONE pipeline cached at a time ---
+        import gc
+        stale = [k for k in list(self.pipelines.keys()) if k != cache_key]
+        if stale:
+            for k in stale:
+                stale_model = k.split(":")[0]
+                stale_family = self.get_model_entry(stale_model).get("pipeline", "?")
+                if stale_family == pipeline_name:
+                    reason = "same family, different model"
+                elif k.startswith(f"{model_type}:"):
+                    reason = "same model, different preset"
+                else:
+                    reason = "different family"
+                _log("BACKEND", f"Evicting pipeline ({reason}): {k}")
                 del self.pipelines[k]
                 self._active_user_loras.pop(k, None)
                 self._model_lora_config.pop(k, None)
+                self._model_lora_alpha.pop(k, None)
+            gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
-            import gc
-            gc.collect()
-            _log("BACKEND", f"Freed VRAM from {len(other_family)} cross-family pipeline(s)", "success")
+            _log("BACKEND", f"Evicted {len(stale)} pipeline(s), RAM freed", "success")
+
 
         PipelineCls = PIPELINE_CLASSES.get(pipeline_name)
         if PipelineCls is None:
@@ -657,11 +684,12 @@ class DiffSynthBackend:
         pipeline = PipelineCls.from_pretrained(**kwargs)
         _log("BACKEND", f"Pipeline loaded: {cache_key}", "success")
 
-        # Model-bundled LoRA (e.g. Control-Union) — load and track config
+        # Model-bundled LoRA (e.g. Control-Union, EliGen) — load and track config
         lora_cfg = entry.get("lora")
         if lora_cfg:
             self._load_model_lora(pipeline, lora_cfg)
-            self._model_lora_config[cache_key] = lora_cfg  # Track for reloading
+            self._model_lora_config[cache_key] = lora_cfg
+            self._model_lora_alpha[cache_key] = lora_cfg.get("alpha", 1.0)
 
         self.pipelines[cache_key] = pipeline
         return pipeline
@@ -674,6 +702,7 @@ class DiffSynthBackend:
             del self.pipelines[k]
             self._active_user_loras.pop(k, None)
             self._model_lora_config.pop(k, None)
+            self._model_lora_alpha.pop(k, None)
         if stale and torch.cuda.is_available():
             torch.cuda.empty_cache()
             _log("BACKEND", f"Unloaded pipeline(s): {stale}")

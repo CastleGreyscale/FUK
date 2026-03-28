@@ -72,6 +72,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
     exponential_shift_mu: imageDefaults.exponential_shift_mu ?? null,
     control_image_paths: imageDefaults.control_image_paths ?? [],
     eligen_source: imageDefaults.eligen_source ?? '',
+     eligen_alpha: imageDefaults.eligen_alpha ?? 1.0,  // ← ADD
     vram_preset: config?.models?.vram_preset_default ?? 'low',
     batchCount: 1,
   }), [imageDefaults]);
@@ -298,6 +299,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
         : null,
       exponential_shift_mu: formData.exponential_shift_mu,
       eligen_source: formData.eligen_source || null,
+       eligen_alpha: formData.eligen_source ? (formData.eligen_alpha ?? 1.0) : null,  // ← ADD
     };
 
     // Build seed queue for batch
@@ -674,6 +676,24 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                     }}>
                       {formData.eligen_source}
                     </div>
+                    <label className="fuk-label">EliGen Strength</label>
+                  <div className="fuk-slider-row">
+                    <input
+                      type="range" min="0" max="2" step="0.05"
+                      className="fuk-slider"
+                      value={formData.eligen_alpha ?? 1.0}
+                      onChange={(e) => setFormData({...formData, eligen_alpha: parseFloat(e.target.value)})}
+                    />
+                    <input
+                      type="number" min="0" max="2" step="0.05"
+                      className="fuk-number-input"
+                      value={formData.eligen_alpha ?? 1.0}
+                      onChange={(e) => setFormData({...formData, eligen_alpha: parseFloat(e.target.value)})}
+                    />
+                  </div>
+                  <div className="fuk-hint">
+                    EliGen model LoRA weight. Lower values reduce style influence
+                  </div>
                   </div>
                 )}
                 
