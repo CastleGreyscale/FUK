@@ -376,7 +376,7 @@ class PreprocessorManager:
         self,
         image_path: Path,
         method: NormalsMethod = NormalsMethod.FROM_DEPTH,
-        depth_model: DepthModel = DepthModel.DEPTH_ANYTHING_V2,
+        depth_model: DepthModel = DepthModel.DA3_MONO_LARGE,
         intensity: float = 1.0
     ):
         """Get raw normal vectors as float32 array [-1, 1]"""

@@ -1764,7 +1764,7 @@ async def preprocess_image(request: PreprocessRequest):
             
             depth_model = depth_model_map.get(
                 request.depth_model,
-                DepthModel.DEPTH_ANYTHING_V2
+                DepthModel.DA3_MONO_LARGE
             )
             
             result = preprocessor_manager.depth(
@@ -2311,17 +2311,17 @@ class PreprocessRequest(BaseModel):
     detect_face: bool = False
     
     # Depth parameters
-    depth_model: str = "depth_anything_v2"
+    depth_model: str = "da3_mono_large"
     depth_invert: bool = False
     depth_normalize: bool = True
     depth_range_min: float = 0.0
     depth_range_max: float = 1.0
     depth_process_res: Optional[int] = None    # None = use DA3 config default (1344)
     depth_process_res_method: str = "lower_bound_resize"
-    
+
     # Normals parameters
     normals_method: str = "from_depth"  # 'from_depth' or 'dsine'
-    normals_depth_model: str = "depth_anything_v2"
+    normals_depth_model: str = "da3_mono_large"
     normals_space: str = "tangent"  # 'tangent', 'world', 'object'
     normals_flip_y: bool = False
     normals_flip_x: bool = False
