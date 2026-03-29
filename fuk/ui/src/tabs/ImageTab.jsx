@@ -191,6 +191,10 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
   // Update last state and seed when generation completes
   useEffect(() => {
     if (result?.outputs?.png) {
+      // Clear any metadata-dropped preview so the new result is shown
+      setDroppedPreview(null);
+      setMetaLoadedFrom(null);
+
       if (project?.updateLastState) {
         project.updateLastState({
           lastImagePreview: result.outputs.png,
@@ -381,7 +385,21 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
         updates.seed     = meta.seed;
         updates.seedMode = SEED_MODES.FIXED;
       }
-      if (meta.image_size?.[0])        updates.width            = meta.image_size[0];
+      if (meta.image_size?.[0] && meta.image_size?.[1]) {
+        const w = meta.image_size[0];
+        const h = meta.image_size[1];
+        updates.width = w;
+        // Find the closest preset aspect ratio so the height-sync effect computes the right height
+        if (aspectRatios.length) {
+          const targetRatio = w / h;
+          const closest = aspectRatios.reduce((best, ar) =>
+            Math.abs(ar.ratio - targetRatio) < Math.abs(best.ratio - targetRatio) ? ar : best
+          , aspectRatios[0]);
+          updates.aspectRatio = closest.value;
+        }
+      } else if (meta.image_size?.[0]) {
+        updates.width = meta.image_size[0];
+      }
 
       setFormData(prev => ({ ...prev, ...updates }));
 
@@ -393,7 +411,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
     } catch (err) {
       console.error('[ImageTab] Metadata reload failed:', err);
     }
-  }, [resolveModelKey, setFormData]);
+  }, [resolveModelKey, setFormData, aspectRatios]);
 
   // --- Source image dimension check (for non-text-to-image modes) ---
   const isTextToImage = !modelSupports(formData.model, 'edit_image') &&
