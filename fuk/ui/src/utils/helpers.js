@@ -14,10 +14,11 @@ export function formatTime(seconds) {
 }
 
 /**
- * Calculate dimensions based on aspect ratio and width
- * Width rounds to nearest 64 (safe for all diffusion models)
- * Height rounds to nearest 16 (finer granularity, prevents ratio collisions)
- * 
+ * Calculate dimensions based on aspect ratio and width.
+ * Both width and height are rounded to the nearest 16-multiple —
+ * Qwen's ShapeChecker requires this, and all other supported models
+ * accept any multiple of 16 (it's always a multiple of 8 too).
+ *
  * @param {string} aspectRatioValue - The aspect ratio value (e.g., "1.78:1")
  * @param {number} width - Target width
  * @param {Array} aspectRatios - Array of aspect ratio objects from config

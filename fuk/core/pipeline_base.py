@@ -145,9 +145,15 @@ class PipelineRunner:
         return img
 
     def resolve_image_list(
-        self, control_image: Optional[Union[Path, List[Path]]]
+        self, control_image: Optional[Union[Path, List[Path]]],
+        width: int = None, height: int = None,
     ) -> Optional[List[Image.Image]]:
-        """Convert control_image path(s) to a list of PIL Images."""
+        """Convert control_image path(s) to a list of PIL Images.
+        
+        When width/height are provided, all images are resized to match
+        the generation target — prevents shape mismatches between the
+        latent-encoded input and the noise tensor.
+        """
         if not control_image:
             return None
         paths = control_image if isinstance(control_image, list) else [control_image]
@@ -155,7 +161,12 @@ class PipelineRunner:
         for p in paths:
             p = Path(str(p))
             if p.exists():
-                images.append(Image.open(str(p)))
+                img = Image.open(str(p))
+                if width and height and (img.width != width or img.height != height):
+                    _log(self.log_prefix,
+                         f"  Resizing edit image {p.name}: {img.width}x{img.height} → {width}x{height}")
+                    img = img.resize((width, height), Image.LANCZOS)
+                images.append(img)
         return images if images else None
 
     # ------------------------------------------------------------------
@@ -207,7 +218,7 @@ class PipelineRunner:
         Returns dict of pipe kwargs, or None to skip.
         """
         if model_param == "edit_image":
-            images = self.resolve_image_list(value)
+            images = self.resolve_image_list(value, width, height)
             if images:
                 _log(self.log_prefix, f"  Mapped {semantic_name} → edit_image: {len(images)} images")
                 return {"edit_image": images}

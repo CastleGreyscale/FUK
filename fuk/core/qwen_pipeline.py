@@ -54,6 +54,7 @@ class QwenPipelineRunner(PipelineRunner):
         context_image: Optional[Any] = None,
         # EliGen — entity masks (directory of PNGs or .psd file)
         eligen_source: Optional[Union[str, Path]] = None,
+        eligen_alpha: Optional[float] = None,  # ← ADD
         eligen_alpha: Optional[float] = None,  # Override model LoRA strength
         # VRAM
         vram_preset: Optional[str] = None,
@@ -82,6 +83,29 @@ class QwenPipelineRunner(PipelineRunner):
         denoise = (denoising_strength if denoising_strength is not None
                    else defaults.get("denoising_strength", 0.85))
 
+        # --- Inherit dimensions from source image (all non-t2i modes) ---
+        # For edit with multiple inputs, first image is the master.
+        # Keeps latent dimensions consistent with the source — avoids
+        # VAE rounding mismatches in layer stacks and downstream compositing.
+        source_path = self._resolve_source_image(control_image, context_image, eligen_source)
+        if source_path:
+            from PIL import Image as _PILImage
+            try:
+                with _PILImage.open(str(source_path)) as src:
+                    src_w, src_h = src.size
+                # Round to nearest 16-multiple — Qwen's ShapeChecker uses ceiling-16
+                # rounding internally. Pre-rounding here ensures the edit image
+                # (resized by resolve_image_list) matches the noise tensor dimensions
+                # exactly. Using 8-rounding here + 16-rounding inside the pipeline
+                # causes a 1-token mismatch that produces ghosting / crop artifacts.
+                src_w = ((src_w + 15) // 16) * 16
+                src_h = ((src_h + 15) // 16) * 16
+                if src_w > 0 and src_h > 0:
+                    width, height = src_w, src_h
+                    _log(self.log_prefix, f"Inherited dimensions from source: {width}x{height}")
+            except Exception as e:
+                _log(self.log_prefix, f"Could not read source image dimensions: {e}", "warning")
+
         # --- Logging ---
         log_params = {
             "prompt": prompt,
@@ -100,10 +124,14 @@ class QwenPipelineRunner(PipelineRunner):
         if eligen_alpha is not None:
             log_params["eligen_alpha"] = eligen_alpha
         self.log_generation_header("IMAGE GENERATION", model_type, entry, log_params)
+        if eligen_alpha is not None:
+            log_params["eligen_alpha"] = eligen_alpha
 
         # --- Pipeline + LoRA ---
         pipe = self.get_pipeline(model_type, vram_preset=vram_preset)
         cache_key = self._cache_key(model_type, vram_preset)
+        if eligen_alpha is not None:
+            self.backend.override_model_lora_alpha(pipe, cache_key, eligen_alpha)
 
         # Override model LoRA alpha if requested (e.g. EliGen strength slider)
         if eligen_alpha is not None:
@@ -190,6 +218,40 @@ class QwenPipelineRunner(PipelineRunner):
         finally:
             if cleanup_hook:
                 cleanup_hook()
+
+    # ------------------------------------------------------------------
+    # Source image resolution
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _resolve_source_image(
+        control_image: Optional[Union[Path, List[Path]]],
+        context_image: Optional[Any],
+        eligen_source: Optional[Union[str, Path]],
+    ) -> Optional[Path]:
+        """
+        Return the master source image path for dimension inheritance.
+
+        Priority: control_image (first if list) → context_image → None.
+        eligen_source is a mask directory, not an image — skip it.
+        Returns None for pure t2i (no source images at all).
+        """
+        if control_image:
+            if isinstance(control_image, list):
+                candidate = control_image[0] if control_image else None
+            else:
+                candidate = control_image
+            if candidate:
+                p = Path(str(candidate))
+                if p.exists() and p.is_file():
+                    return p
+
+        if context_image:
+            p = Path(str(context_image))
+            if p.exists() and p.is_file():
+                return p
+
+        return None
 
     # ------------------------------------------------------------------
     # EliGen support

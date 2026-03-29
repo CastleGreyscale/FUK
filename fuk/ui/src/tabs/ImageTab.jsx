@@ -12,6 +12,9 @@ import ZoomableImage from '../components/ZoomableImage';
 import SeedControl from '../components/SeedControl';
 import GenerationModal from '../components/GenerationModal';
 import { useGeneration } from '../hooks/useGeneration';
+// [LAYER STACK DISABLED]
+// import LayerStackPanel from '../components/LayerStackPanel';
+// import { initStack } from '../utils/layerStackApi';
 import { useLocalStorage } from '../../src/hooks/useLocalStorage';
 import { useSavedSeeds } from '../hooks/useSavedSeeds';
 import { startImageGeneration } from '../../src/utils/api';
@@ -70,6 +73,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
     exponential_shift_mu: imageDefaults.exponential_shift_mu ?? null,
     control_image_paths: imageDefaults.control_image_paths ?? [],
     eligen_source: imageDefaults.eligen_source ?? '',
+     eligen_alpha: imageDefaults.eligen_alpha ?? 1.0,  // ← ADD
     eligen_alpha: imageDefaults.eligen_alpha ?? 1.0,
     vram_preset: config?.models?.vram_preset_default ?? 'low',
     batchCount: 1,
@@ -127,6 +131,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
   // Generation state
   const {
     generating,
+    generationId,
     progress,
     result,
     error,
@@ -200,6 +205,10 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
           lastUsedSeed: result.seed_used,
         }));
       }
+      setCurrentImagePath(result.outputs.png);
+      if (result.stack) {
+        setStackData(result.stack);
+      } 
     }
   }, [result, project?.updateLastState, setFormData]);
 
@@ -230,6 +239,11 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
   const [metaDragOver, setMetaDragOver] = useState(false);
   const [droppedPreview, setDroppedPreview] = useState(null);
   const [metaLoadedFrom, setMetaLoadedFrom] = useState(null);
+
+  // [LAYER STACK DISABLED]
+  // const [stackId, setStackId] = useState(null);
+  // const [stackData, setStackData] = useState(null);
+  // const [currentImagePath, setCurrentImagePath] = useState(null);
 
   const buildBatchSeeds = useCallback((seedMode, startSeed, count) => {
     if (seedMode === SEED_MODES.RANDOM) {
@@ -291,7 +305,10 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
         : null,
       exponential_shift_mu: formData.exponential_shift_mu,
       eligen_source: formData.eligen_source || null,
-      eligen_alpha: formData.eligen_source ? (formData.eligen_alpha ?? 1.0) : null,
+      eligen_alpha: formData.eligen_source ? (formData.eligen_alpha ?? 1.0) : null,  // ← ADD
+      // [LAYER STACK DISABLED]
+      // stack_id: stackId || null,
+      // layer_name: stackId ? (formData.prompt?.slice(0, 40) || 'edit') : null,
     };
 
     // Build seed queue for batch
@@ -331,6 +348,9 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
   const handleImagesChange = (paths) => {
     setFormData(prev => ({ ...prev, control_image_paths: paths }));
   };
+
+  // [LAYER STACK DISABLED]
+  // const handleInitLayers = async () => { ... };
 
   // Reload generation settings from a history item dropped onto the preview panel
   const handleMetaDrop = useCallback(async (e) => {
@@ -391,6 +411,13 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
         onDrop={handleMetaDrop}
         style={{ position: 'relative' }}
       >
+      {/* [LAYER STACK DISABLED]
+      {modelSupports(formData.model, 'edit_image') && (
+        <div className="fuk-layer-sidebar">
+          <LayerStackPanel stackId={stackId} stackData={stackData} ... />
+        </div>
+      )} */}
+
         <div className="fuk-preview-single">
           {/* droppedPreview takes priority — shows reference gen while settings are loaded */}
           {droppedPreview ? (
@@ -637,6 +664,24 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                     }}>
                       {formData.eligen_source}
                     </div>
+                    <label className="fuk-label">EliGen Strength</label>
+                  <div className="fuk-slider-row">
+                    <input
+                      type="range" min="0" max="2" step="0.05"
+                      className="fuk-slider"
+                      value={formData.eligen_alpha ?? 1.0}
+                      onChange={(e) => setFormData({...formData, eligen_alpha: parseFloat(e.target.value)})}
+                    />
+                    <input
+                      type="number" min="0" max="2" step="0.05"
+                      className="fuk-number-input"
+                      value={formData.eligen_alpha ?? 1.0}
+                      onChange={(e) => setFormData({...formData, eligen_alpha: parseFloat(e.target.value)})}
+                    />
+                  </div>
+                  <div className="fuk-hint">
+                    EliGen model LoRA weight. Lower values reduce style influence
+                  </div>
                   </div>
                 )}
 
@@ -939,7 +984,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                     const newDims = calculateDimensions(formData.aspectRatio, clamped, aspectRatios);
                     setFormData({...formData, width: clamped, height: newDims.height});
                   }}
-                  step={64}
+                  step={16}
                   min={512}
                   max={2048}
                   placeholder="1024"
