@@ -395,6 +395,57 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
     }
   }, [resolveModelKey, setFormData]);
 
+  // --- Source image dimension check (for non-text-to-image modes) ---
+  const isTextToImage = !modelSupports(formData.model, 'edit_image') &&
+    !modelSupports(formData.model, 'context_image') &&
+    !modelSupports(formData.model, 'eligen');
+
+  const [sourceImageDims, setSourceImageDims] = useState(null);
+  const [dimsDismissed, setDimsDismissed] = useState(false);
+  const [alignLoading, setAlignLoading] = useState(false);
+
+  useEffect(() => {
+    if (isTextToImage || formData.control_image_paths.length === 0) {
+      setSourceImageDims(null);
+      return;
+    }
+    const path = formData.control_image_paths[0];
+    const img = new window.Image();
+    img.onload = () => setSourceImageDims({ w: img.naturalWidth, h: img.naturalHeight });
+    img.onerror = () => setSourceImageDims(null);
+    img.src = buildImageUrl(path);
+  }, [formData.control_image_paths, isTextToImage]);
+
+  // Reset dismissed when images change
+  useEffect(() => {
+    setDimsDismissed(false);
+  }, [formData.control_image_paths]);
+
+  const roundUp16 = (n) => Math.ceil(n / 16) * 16;
+  const isAligned16 = (n) => n % 16 === 0;
+
+  const handleApplyAlign16 = async () => {
+    if (!formData.control_image_paths.length) return;
+    setAlignLoading(true);
+    try {
+      const res = await fetch('/api/image/align16', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source_path: formData.control_image_paths[0] }),
+      });
+      const data = await res.json();
+      if (data.success && !data.already_aligned) {
+        const newPaths = [data.output_url, ...formData.control_image_paths.slice(1)];
+        setFormData(prev => ({ ...prev, control_image_paths: newPaths }));
+        setDimsDismissed(true);
+      }
+    } catch (err) {
+      console.error('[Align16] failed:', err);
+    } finally {
+      setAlignLoading(false);
+    }
+  };
+
   // Calculate CSS variable for dynamic aspect ratio
   const dims = getCurrentDimensions();
   const aspectRatioStyle = { '--preview-aspect': `${dims.width} / ${dims.height}` };
@@ -551,7 +602,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                   />
                 </div>
                 
-                {formData.control_image_paths.length > 0 && (
+                {formData.control_image_paths.length > 0 && modelSupports(formData.model, 'edit_image') && (
                   <div className="fuk-form-group-compact fuk-mt-4">
                     <label className="fuk-label">Edit Strength</label>
                     <div className="fuk-input-inline">
@@ -949,48 +1000,112 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
           {/* Dimensions Card */}
           <div className="fuk-card">
             <h3 className="fuk-card-title fuk-mb-3">Dimensions</h3>
-            
-            <div className="fuk-form-group-compact">
-              <label className="fuk-label">Aspect Ratio</label>
-              <select
-                className="fuk-select"
-                value={formData.aspectRatio}
-                onChange={(e) => setFormData({...formData, aspectRatio: e.target.value})}
-              >
-                {aspectRatios.map(ar => (
-                  <option key={ar.value} value={ar.value}>{ar.label}</option>
-                ))}
-              </select>
-            </div>
-            
-            <div className="fuk-form-group-compact">
-              <label className="fuk-label">Width (Height auto-calculated)</label>
-              <div className="fuk-input-inline">
-                <input
-                  type="number"
-                  className="fuk-input"
-                  value={formData.width || ''}
-                  onChange={(e) => {
-                    const val = e.target.value === '' ? '' : parseInt(e.target.value);
-                    const newDims = calculateDimensions(formData.aspectRatio, val || 1024, aspectRatios);
-                    setFormData({...formData, width: val, height: newDims.height});
-                  }}
-                  onBlur={(e) => {
-                    const val = parseInt(e.target.value) || 1024;
-                    const clamped = Math.max(512, Math.min(2048, val));
-                    const newDims = calculateDimensions(formData.aspectRatio, clamped, aspectRatios);
-                    setFormData({...formData, width: clamped, height: newDims.height});
-                  }}
-                  step={16}
-                  min={512}
-                  max={2048}
-                  placeholder="1024"
-                />
-                <span className="fuk-input-suffix">
-                  = {dims.width}x{dims.height}
-                </span>
-              </div>
-            </div>
+
+            {isTextToImage ? (
+              <>
+                <div className="fuk-form-group-compact">
+                  <label className="fuk-label">Aspect Ratio</label>
+                  <select
+                    className="fuk-select"
+                    value={formData.aspectRatio}
+                    onChange={(e) => setFormData({...formData, aspectRatio: e.target.value})}
+                  >
+                    {aspectRatios.map(ar => (
+                      <option key={ar.value} value={ar.value}>{ar.label}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="fuk-form-group-compact">
+                  <label className="fuk-label">Width (Height auto-calculated)</label>
+                  <div className="fuk-input-inline">
+                    <input
+                      type="number"
+                      className="fuk-input"
+                      value={formData.width || ''}
+                      onChange={(e) => {
+                        const val = e.target.value === '' ? '' : parseInt(e.target.value);
+                        const newDims = calculateDimensions(formData.aspectRatio, val || 1024, aspectRatios);
+                        setFormData({...formData, width: val, height: newDims.height});
+                      }}
+                      onBlur={(e) => {
+                        const val = parseInt(e.target.value) || 1024;
+                        const clamped = Math.max(512, Math.min(2048, val));
+                        const newDims = calculateDimensions(formData.aspectRatio, clamped, aspectRatios);
+                        setFormData({...formData, width: clamped, height: newDims.height});
+                      }}
+                      step={16}
+                      min={512}
+                      max={2048}
+                      placeholder="1024"
+                    />
+                    <span className="fuk-input-suffix">
+                      = {dims.width}x{dims.height}
+                    </span>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                {sourceImageDims ? (
+                  <>
+                    <div className="fuk-form-group-compact">
+                      <label className="fuk-label">Source Image</label>
+                      <div style={{ fontSize: '0.95rem', fontVariantNumeric: 'tabular-nums' }}>
+                        {sourceImageDims.w} × {sourceImageDims.h}px
+                      </div>
+                    </div>
+
+                    {(!isAligned16(sourceImageDims.w) || !isAligned16(sourceImageDims.h)) && !dimsDismissed ? (
+                      <div className="fuk-warning-block" style={{
+                        marginTop: '0.75rem',
+                        padding: '0.6rem 0.75rem',
+                        background: 'rgba(255, 160, 50, 0.08)',
+                        border: '1px solid rgba(255, 160, 50, 0.35)',
+                        borderRadius: '4px',
+                        fontSize: '0.8rem',
+                      }}>
+                        <div style={{ color: 'var(--fuk-warning, #ffa032)', fontWeight: 600, marginBottom: '0.3rem' }}>
+                          Dimensions not multiples of 16
+                        </div>
+                        <div style={{ color: 'var(--fuk-text-secondary)', marginBottom: '0.5rem' }}>
+                          May cause generation errors. Nearest aligned size:&nbsp;
+                          <strong style={{ color: 'var(--fuk-text)' }}>
+                            {roundUp16(sourceImageDims.w)} × {roundUp16(sourceImageDims.h)}px
+                          </strong>
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.4rem' }}>
+                          <button
+                            className="fuk-btn fuk-btn-secondary"
+                            style={{ flex: 1, fontSize: '0.8rem', padding: '0.3rem 0.5rem' }}
+                            onClick={handleApplyAlign16}
+                            disabled={alignLoading || generating}
+                          >
+                            {alignLoading ? 'Padding...' : `Pad to ${roundUp16(sourceImageDims.w)}×${roundUp16(sourceImageDims.h)}`}
+                          </button>
+                          <button
+                            className="fuk-btn fuk-btn-secondary"
+                            style={{ fontSize: '0.8rem', padding: '0.3rem 0.6rem' }}
+                            onClick={() => setDimsDismissed(true)}
+                          >
+                            Ignore
+                          </button>
+                        </div>
+                      </div>
+                    ) : !dimsDismissed ? (
+                      <p className="fuk-help-text fuk-mt-1" style={{ color: 'var(--fuk-success, #4caf50)' }}>
+                        Dimensions are 16px-aligned
+                      </p>
+                    ) : null}
+                  </>
+                ) : (
+                  <p className="fuk-help-text">
+                    Dimensions inherited from source image.{' '}
+                    {formData.control_image_paths.length === 0 && 'Add a control image above to check alignment.'}
+                  </p>
+                )}
+              </>
+            )}
           </div>
 
         </div>

@@ -2112,6 +2112,67 @@ async def upscale_image(request: UpscaleRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class Align16Request(BaseModel):
+    source_path: str
+
+@app.post("/api/image/align16")
+async def align_image_to_16(request: Align16Request):
+    """
+    Pad an image to the nearest 16-pixel-aligned dimensions (centered, black fill).
+    Used to fix images whose dimensions are not multiples of 16 before AI generation.
+    """
+    try:
+        from PIL import Image, ImageOps
+
+        source_path = resolve_input_path(request.source_path)
+        if not source_path or not source_path.exists():
+            raise HTTPException(status_code=400, detail=f"Source file not found: {request.source_path}")
+
+        with Image.open(source_path) as img:
+            orig_w, orig_h = img.size
+            mode = img.mode
+            new_w = ((orig_w + 15) // 16) * 16
+            new_h = ((orig_h + 15) // 16) * 16
+
+            if new_w == orig_w and new_h == orig_h:
+                return {
+                    "success": True,
+                    "already_aligned": True,
+                    "output_url": request.source_path,
+                    "input_size": {"width": orig_w, "height": orig_h},
+                    "output_size": {"width": orig_w, "height": orig_h},
+                }
+
+            pad_left = (new_w - orig_w) // 2
+            pad_top = (new_h - orig_h) // 2
+            fill = (0, 0, 0, 0) if mode in ("RGBA", "LA") else (0, 0, 0)
+            padded = Image.new(mode, (new_w, new_h), fill)
+            padded.paste(img, (pad_left, pad_top))
+
+        gen_dir = get_generation_output_dir("align16")
+        suffix = source_path.suffix or ".png"
+        output_path = gen_dir / f"aligned{suffix}"
+        padded.save(output_path)
+
+        output_url = get_project_relative_url(output_path)
+        print(f"[Align16] {orig_w}x{orig_h} -> {new_w}x{new_h}, saved: {output_url}")
+
+        return {
+            "success": True,
+            "already_aligned": False,
+            "output_url": output_url,
+            "input_size": {"width": orig_w, "height": orig_h},
+            "output_size": {"width": new_w, "height": new_h},
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/postprocess/interpolate")
 async def interpolate_video(request: InterpolateRequest):
     """
