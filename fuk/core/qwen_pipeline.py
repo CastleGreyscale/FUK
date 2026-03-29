@@ -54,7 +54,6 @@ class QwenPipelineRunner(PipelineRunner):
         context_image: Optional[Any] = None,
         # EliGen — entity masks (directory of PNGs or .psd file)
         eligen_source: Optional[Union[str, Path]] = None,
-        eligen_alpha: Optional[float] = None,  # ← ADD
         eligen_alpha: Optional[float] = None,  # Override model LoRA strength
         # VRAM
         vram_preset: Optional[str] = None,
@@ -124,16 +123,12 @@ class QwenPipelineRunner(PipelineRunner):
         if eligen_alpha is not None:
             log_params["eligen_alpha"] = eligen_alpha
         self.log_generation_header("IMAGE GENERATION", model_type, entry, log_params)
-        if eligen_alpha is not None:
-            log_params["eligen_alpha"] = eligen_alpha
 
         # --- Pipeline + LoRA ---
         pipe = self.get_pipeline(model_type, vram_preset=vram_preset)
         cache_key = self._cache_key(model_type, vram_preset)
-        if eligen_alpha is not None:
-            self.backend.override_model_lora_alpha(pipe, cache_key, eligen_alpha)
 
-        # Override model LoRA alpha if requested (e.g. EliGen strength slider)
+        # Override model LoRA alpha if requested (e.g. EliGen / control strength slider)
         if eligen_alpha is not None:
             self.backend.override_model_lora_alpha(pipe, cache_key, eligen_alpha)
 

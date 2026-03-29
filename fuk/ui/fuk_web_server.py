@@ -609,6 +609,7 @@ class ImageGenerationRequest(BaseModel):
     denoising_strength: Optional[float] = None  # Edit strength when control images present
     exponential_shift_mu: Optional[float] = None  # Sampling timestep control (null = auto)
     eligen_source: Optional[str] = None  # Path to EliGen masks (directory, .psd, or .ora)
+    eligen_alpha: Optional[float] = None  # Model LoRA strength (EliGen or control union)
     # [LAYER STACK DISABLED]
     # stack_id: Optional[str] = None       # e.g. "img_edit_001"
     # layer_name: Optional[str] = None     # Human label for the new layer

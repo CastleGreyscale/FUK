@@ -73,7 +73,6 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
     exponential_shift_mu: imageDefaults.exponential_shift_mu ?? null,
     control_image_paths: imageDefaults.control_image_paths ?? [],
     eligen_source: imageDefaults.eligen_source ?? '',
-     eligen_alpha: imageDefaults.eligen_alpha ?? 1.0,  // ← ADD
     eligen_alpha: imageDefaults.eligen_alpha ?? 1.0,
     vram_preset: config?.models?.vram_preset_default ?? 'low',
     batchCount: 1,
@@ -205,10 +204,9 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
           lastUsedSeed: result.seed_used,
         }));
       }
-      setCurrentImagePath(result.outputs.png);
       if (result.stack) {
         setStackData(result.stack);
-      } 
+      }
     }
   }, [result, project?.updateLastState, setFormData]);
 
@@ -583,6 +581,32 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                   </div>
                 )}
                 
+                {modelSupports(formData.model, 'context_image') && (
+                  <div className="fuk-form-group-compact fuk-mt-4">
+                    <label className="fuk-label">LoRA Strength</label>
+                    <div className="fuk-input-inline">
+                      <input
+                        type="range"
+                        className="fuk-input fuk-input--flex-2"
+                        value={formData.eligen_alpha ?? 1.0}
+                        onChange={(e) => setFormData({...formData, eligen_alpha: parseFloat(e.target.value)})}
+                        min={0}
+                        max={2}
+                        step={0.05}
+                      />
+                      <input
+                        type="number"
+                        className="fuk-input fuk-input--w-80"
+                        value={formData.eligen_alpha ?? 1.0}
+                        onChange={(e) => setFormData({...formData, eligen_alpha: parseFloat(e.target.value)})}
+                        step={0.05}
+                        min={0}
+                        max={2}
+                      />
+                    </div>
+                  </div>
+                )}
+
                 <p className="fuk-help-text">
                   Upload one or more images to guide the generation.
                 </p>
@@ -665,56 +689,29 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                       {formData.eligen_source}
                     </div>
                     <label className="fuk-label">EliGen Strength</label>
-                  <div className="fuk-slider-row">
-                    <input
-                      type="range" min="0" max="2" step="0.05"
-                      className="fuk-slider"
-                      value={formData.eligen_alpha ?? 1.0}
-                      onChange={(e) => setFormData({...formData, eligen_alpha: parseFloat(e.target.value)})}
-                    />
-                    <input
-                      type="number" min="0" max="2" step="0.05"
-                      className="fuk-number-input"
-                      value={formData.eligen_alpha ?? 1.0}
-                      onChange={(e) => setFormData({...formData, eligen_alpha: parseFloat(e.target.value)})}
-                    />
-                  </div>
-                  <div className="fuk-hint">
-                    EliGen model LoRA weight. Lower values reduce style influence
-                  </div>
+                    <div className="fuk-input-inline">
+                      <input
+                        type="range"
+                        className="fuk-input fuk-input--flex-2"
+                        value={formData.eligen_alpha ?? 1.0}
+                        onChange={(e) => setFormData({...formData, eligen_alpha: parseFloat(e.target.value)})}
+                        min={0}
+                        max={2}
+                        step={0.05}
+                      />
+                      <input
+                        type="number"
+                        className="fuk-input fuk-input--w-80"
+                        value={formData.eligen_alpha ?? 1.0}
+                        onChange={(e) => setFormData({...formData, eligen_alpha: parseFloat(e.target.value)})}
+                        step={0.05}
+                        min={0}
+                        max={2}
+                      />
+                    </div>
                   </div>
                 )}
 
-                <div className="fuk-form-group-compact fuk-mt-4">
-                  <label className="fuk-label">EliGen Strength</label>
-                  <div className="fuk-input-inline">
-                    <input
-                      type="range"
-                      className="fuk-input fuk-input--flex-2"
-                      value={formData.eligen_alpha ?? 1.0}
-                      onChange={(e) => setFormData({...formData, eligen_alpha: parseFloat(e.target.value)})}
-                      min={0.1}
-                      max={1.0}
-                      step={0.05}
-                      disabled={generating}
-                    />
-                    <input
-                      type="number"
-                      className="fuk-input fuk-input--w-80"
-                      value={formData.eligen_alpha ?? 1.0}
-                      onChange={(e) => setFormData({...formData, eligen_alpha: parseFloat(e.target.value)})}
-                      step={0.05}
-                      min={0.1}
-                      max={1.0}
-                      disabled={generating}
-                    />
-                  </div>
-                  <p className="fuk-help-text fuk-mt-1">
-                    EliGen model LoRA weight. Lower values reduce style influence
-                    and give user LoRAs more room to express.
-                  </p>
-                </div>
-                
                 <p className="fuk-help-text fuk-mt-2">
                   Point to a folder of mask PNGs (filename = entity prompt) or a 
                   layered file (.psd / .ora — layer name = entity prompt).

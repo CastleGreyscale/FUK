@@ -96,8 +96,6 @@ class DiffSynthBackend:
         self.pipelines: Dict[str, Any] = {}
         self._active_user_loras: Dict[str, List[tuple]] = {}  # cache_key → [(path, alpha), ...]
         self._model_lora_config: Dict[str, dict] = {}  # cache_key → model lora config from models.json
-        self._model_lora_config: Dict[str, dict] = {}  # cache_key → model lora config from models.json
-        self._model_lora_alpha: Dict[str, float] = {}   # cache_key → current model LoRA alpha
         self._model_lora_alpha: Dict[str, float] = {}   # cache_key → current model LoRA alpha
         #self.latent_manager = LatentManager()
 
@@ -448,34 +446,6 @@ class DiffSynthBackend:
     def override_model_lora_alpha(self, pipeline, cache_key: str, alpha: float):
         """
         Change the model-bundled LoRA alpha at runtime (e.g. EliGen strength slider).
-
-        Clears and reloads the model LoRA at the new alpha if it changed.
-        Pops user LoRAs so apply_loras() reloads them on the next call.
-        No-op if this pipeline has no model LoRA or alpha hasn't changed.
-        """
-        model_lora_cfg = self._model_lora_config.get(cache_key)
-        if not model_lora_cfg:
-            return
-
-        current_alpha = self._model_lora_alpha.get(cache_key, model_lora_cfg.get("alpha", 1.0))
-        if abs(current_alpha - alpha) < 1e-4:
-            _log("BACKEND", f"Model LoRA alpha unchanged ({alpha:.2f})")
-            return
-
-        _log("BACKEND", f"Model LoRA alpha: {current_alpha:.2f} → {alpha:.2f}")
-
-        try:
-            pipeline.clear_lora()
-        except Exception as e:
-            _log("BACKEND", f"clear_lora() during alpha override: {e}", "warning")
-
-        self._load_model_lora(pipeline, model_lora_cfg, alpha_override=alpha)
-        self._model_lora_alpha[cache_key] = alpha
-        self._active_user_loras.pop(cache_key, None)
-
-    def override_model_lora_alpha(self, pipeline, cache_key: str, alpha: float):
-        """
-        Change the model-bundled LoRA alpha at runtime (e.g. EliGen strength slider).
         
         If the alpha differs from what's currently loaded, clears ALL LoRAs
         and reloads the model LoRA at the new alpha. User LoRAs are marked
@@ -680,7 +650,7 @@ class DiffSynthBackend:
                 self._model_lora_config.pop(k, None)
                 self._model_lora_alpha.pop(k, None)
             gc.collect()
-                self._model_lora_alpha.pop(k, None)
+
             # GC first so Python releases refs, THEN clear CUDA cache
             gc.collect()
             if torch.cuda.is_available():
