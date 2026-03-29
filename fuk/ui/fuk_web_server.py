@@ -49,7 +49,7 @@ from file_browser_endpoints import setup_file_browser_routes
 from video_endpoints import setup_video_routes
 from core.diffsynth_backend import DiffSynthBackend
 from core.video_processor import VideoProcessor
-from layer_stack_endpoints import setup_layer_routes, initialize_layer_endpoints
+# [LAYER STACK DISABLED] from layer_stack_endpoints import setup_layer_routes, initialize_layer_endpoints
 import json
 import asyncio
 import uuid
@@ -609,6 +609,9 @@ class ImageGenerationRequest(BaseModel):
     denoising_strength: Optional[float] = None  # Edit strength when control images present
     exponential_shift_mu: Optional[float] = None  # Sampling timestep control (null = auto)
     eligen_source: Optional[str] = None  # Path to EliGen masks (directory, .psd, or .ora)
+    # [LAYER STACK DISABLED]
+    # stack_id: Optional[str] = None       # e.g. "img_edit_001"
+    # layer_name: Optional[str] = None     # Human label for the new layer
     
 class VideoGenerationRequest(BaseModel):
     prompt: str
@@ -795,6 +798,11 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
         active_generations[generation_id]["current_step"] = 0
         
         # Create generation directory
+        # [LAYER STACK DISABLED] stack_id routing removed — always use img_gen
+        # if request.stack_id:
+        #     stack_dir = get_project_cache_dir() / request.stack_id
+        #     gen_dir = stack_dir / f"layer_{str(uuid.uuid4())[:8]}"
+        #     gen_dir.mkdir(parents=True, exist_ok=True)
         gen_dir = get_generation_output_dir("img_gen")
         paths = build_output_paths(gen_dir)
         log.info("ImageGen", f"Output directory: {gen_dir}")
@@ -818,6 +826,13 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
                 control_images.append(resolved)
                 log.info("ImageGen", f"Control image: {resolved}")
 
+        # [LAYER STACK DISABLED] auto base_preview control injection removed
+        # if request.stack_id and not control_images:
+        #     base_preview = get_project_cache_dir() / request.stack_id / "base_preview.png"
+        #     if base_preview.exists():
+        #         control_images.append(base_preview)
+
+
         # Handle EliGen mask source (directory or .psd/.ora file)
         eligen_source_abs = None
         if request.eligen_source:
@@ -831,6 +846,36 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
             if eligen_source_abs:
                 log.info("ImageGen", f"EliGen source: {eligen_source_abs}")
         
+        # --- Resolution inheritance from input images ---
+        # When any input image is present, force generation to match its
+        # dimensions. Eliminates mismatches between UI settings and source
+        # image size that cause ghosting, cropping, and tensor shape errors.
+        # Priority: base_preview (layer edits) → first control image
+        _resolution_source = None
+        # [LAYER STACK DISABLED] stack base_preview priority removed
+        # if request.stack_id:
+        #     _bp = get_project_cache_dir() / request.stack_id / "base_preview.png"
+        #     if _bp.exists(): _resolution_source = _bp
+        if _resolution_source is None and control_images:
+            _resolution_source = control_images[0]
+
+        if _resolution_source:
+            from PIL import Image as _PILImage
+            try:
+                with _PILImage.open(str(_resolution_source)) as _src:
+                    _src_w, _src_h = _src.size
+                _src_w = ((_src_w + 15) // 16) * 16
+                _src_h = ((_src_h + 15) // 16) * 16
+                if _src_w > 0 and _src_h > 0:
+                    if _src_w != request.width or _src_h != request.height:
+                        log.info("ImageGen",
+                                 f"Resolution override: {request.width}x{request.height} → "
+                                 f"{_src_w}x{_src_h} (from {_resolution_source.name})")
+                    request.width = _src_w
+                    request.height = _src_h
+            except Exception as _e:
+                log.info("ImageGen", f"Could not read source image dimensions: {_e}")
+
         log.info("ImageGen", "Starting generation...")
         
         # Generate using DiffSynth backend
@@ -902,6 +947,11 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
         })
         
         log.success("ImageGen", f"Complete! Output: {outputs['png']}")
+
+        # [LAYER STACK DISABLED] layer registration removed
+        # if request.stack_id:
+        #     from layer_stack_endpoints import register_layer_from_generation
+        #     stack_manifest = register_layer_from_generation(stack_id=request.stack_id, ...)
         
         # Clear VRAM
         clear_vram()
@@ -3158,8 +3208,9 @@ setup_video_routes(
 # ============================================================================
 
 
-initialize_layer_endpoints(generation_backend, CACHE_ROOT)
-setup_layer_routes(app)
+# [LAYER STACK DISABLED]
+# initialize_layer_endpoints(generation_backend, CACHE_ROOT)
+# setup_layer_routes(app)
 
 # ============================================================================
 # Generic Task System

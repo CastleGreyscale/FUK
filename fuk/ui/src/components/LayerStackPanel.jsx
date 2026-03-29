@@ -3,15 +3,19 @@
  *
  * Non-destructive latent layer editing UI.
  *
+ * Layer edits now run through the normal Generate button (with stack_id
+ * in the payload). This panel only manages layer state: toggle, flatten,
+ * remove, version switch. No inline generation.
+ *
  * Anatomy:
  *   ┌─────────────────────────────────────┐
- *   │  LAYER STACK          [Flatten] [+] │
+ *   │  LAYER STACK               [Flatten] │
  *   ├─────────────────────────────────────┤
  *   │  ● orange cat    v1 ▾  [↺] [✕]     │
  *   │    └─ v0  "orange cat orig"  [load] │
  *   │    └─ v1  "orange cat warm"  [load] │
- *   │  ○ lamp edit     v0 ▾  [↺] [✕]     │
- *   │  ● hand          v0 ▾  [↺] [✕]     │
+ *   │  ○ lamp edit     v0 ▾  [✕]          │
+ *   │  ● hand          v0 ▾  [✕]          │
  *   ├─────────────────────────────────────┤
  *   │  [preview image]                    │
  *   └─────────────────────────────────────┘
@@ -20,8 +24,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   getStack,
-  addLayer,
-  rerunLayer,
   toggleLayer,
   switchVersion,
   removeLayer,
@@ -33,7 +35,13 @@ import '../styles/layer-stack.css';
 // LayerStackPanel
 // ---------------------------------------------------------------------------
 
-export default function LayerStackPanel({ stackId, currentImagePath, onFlattenComplete }) {
+export default function LayerStackPanel({
+  stackId,
+  stackData,              // Stack manifest pushed from parent (after generation)
+  currentImagePath,
+  onFlattenComplete,
+  onStackCleared,         // Callback when stack is dismissed
+}) {
   const [stack, setStack]               = useState(null);
   const [previewUrl, setPreviewUrl]     = useState(null);
   const [expandedLayers, setExpanded]   = useState({});   // layer_id → bool
@@ -41,23 +49,24 @@ export default function LayerStackPanel({ stackId, currentImagePath, onFlattenCo
   const [activeOp, setActiveOp]         = useState(null); // human-readable op label
   const [error, setError]               = useState(null);
 
-  // Add-layer form state
-  const [showAddForm, setShowAddForm]   = useState(false);
-  const [addForm, setAddForm]           = useState({
-    name: '',
-    prompt: '',
-    model: 'qwen_edit',
-    seed: '',
-  });
-
   // ---------------------------------------------------------------------------
   // Load stack on mount / stackId change
   // ---------------------------------------------------------------------------
 
   useEffect(() => {
-    if (!stackId) return;
+    if (!stackId) {
+      setStack(null);
+      return;
+    }
     loadStack();
   }, [stackId]);
+
+  // Accept stack data pushed from parent (e.g. after generation completes)
+  useEffect(() => {
+    if (stackData) {
+      setStack(stackData);
+    }
+  }, [stackData]);
 
   async function loadStack() {
     try {
@@ -100,19 +109,6 @@ export default function LayerStackPanel({ stackId, currentImagePath, onFlattenCo
     );
   }
 
-  async function handleRerun(layer) {
-    const activeV = layer.versions[layer.active_version];
-    await withLoading(`Re-running "${layer.name}"...`, () =>
-      rerunLayer(stackId, {
-        layer_id: layer.layer_id,
-        version_id: layer.active_version,
-        // Pre-fill with stored params; user can override via a future modal
-        prompt: activeV.prompt,
-        seed: activeV.seed,
-      })
-    );
-  }
-
   async function handleRemove(layerId, name) {
     if (!confirm(`Remove layer "${name}"? The latent files stay on disk.`)) return;
     await withLoading('Removing...', () =>
@@ -127,28 +123,6 @@ export default function LayerStackPanel({ stackId, currentImagePath, onFlattenCo
     if (result?.preview_url) {
       setPreviewUrl(result.preview_url + '?t=' + Date.now()); // cache-bust
       onFlattenComplete?.(result.preview_url);
-    }
-  }
-
-  async function handleAddLayer(e) {
-    e.preventDefault();
-    if (!addForm.name || !addForm.prompt) return;
-
-    const params = {
-      name:          addForm.name,
-      prompt:        addForm.prompt,
-      model:         addForm.model,
-      control_image: currentImagePath || null,
-      seed:          addForm.seed ? parseInt(addForm.seed, 10) : null,
-    };
-
-    const result = await withLoading(`Adding layer "${addForm.name}"...`, () =>
-      addLayer(stackId, params)
-    );
-
-    if (result?.stack) {
-      setAddForm({ name: '', prompt: '', model: 'qwen_edit', seed: '' });
-      setShowAddForm(false);
     }
   }
 
@@ -221,16 +195,6 @@ export default function LayerStackPanel({ stackId, currentImagePath, onFlattenCo
             <span className="ls-chevron">{isExpanded ? '▴' : '▾'}</span>
           </button>
 
-          {/* Re-run */}
-          <button
-            className="ls-btn ls-btn--ghost ls-btn--icon"
-            onClick={() => handleRerun(layer)}
-            disabled={loading}
-            title="Re-run this layer (adds new version)"
-          >
-            ↺
-          </button>
-
           {/* Remove */}
           <button
             className="ls-btn ls-btn--ghost ls-btn--icon ls-btn--danger"
@@ -269,7 +233,7 @@ export default function LayerStackPanel({ stackId, currentImagePath, onFlattenCo
     return (
       <div className="ls-panel ls-panel--empty">
         <p className="ls-empty-msg">
-          Generate an image, then click <strong>New Layer Stack</strong> to start
+          Generate an image, then click <strong>Initialize Layers</strong> to start
           non-destructive editing.
         </p>
       </div>
@@ -280,32 +244,47 @@ export default function LayerStackPanel({ stackId, currentImagePath, onFlattenCo
   // Render
   // ---------------------------------------------------------------------------
 
+  const layerCount = stack?.layers?.length || 0;
+
   return (
     <div className="ls-panel">
       {/* Header */}
       <div className="ls-header">
         <span className="ls-title">
           <span className="ls-title-dot" />
-          LAYER STACK
+          LAYERS
+          {layerCount > 0 && (
+            <span className="ls-layer-count">({layerCount})</span>
+          )}
         </span>
         <div className="ls-header-actions">
           <button
             className="ls-btn ls-btn--primary ls-btn--sm"
             onClick={handleFlatten}
-            disabled={loading || !stack?.layers?.length}
+            disabled={loading || !layerCount}
             title="Decode all enabled layers to preview"
           >
             {loading && activeOp === 'Flattening layers...' ? 'Flattening…' : 'Flatten'}
           </button>
-          <button
-            className="ls-btn ls-btn--ghost ls-btn--sm"
-            onClick={() => setShowAddForm(v => !v)}
-            disabled={loading}
-            title="Add a new edit layer"
-          >
-            {showAddForm ? '✕ Cancel' : '+ Layer'}
-          </button>
+          {onStackCleared && (
+            <button
+              className="ls-btn ls-btn--ghost ls-btn--sm"
+              onClick={onStackCleared}
+              disabled={loading}
+              title="Close this layer stack"
+            >
+              ✕
+            </button>
+          )}
         </div>
+      </div>
+
+      {/* Stack info */}
+      <div className="ls-stack-info">
+        <span className="ls-stack-id">{stackId}</span>
+        <span className="ls-hint">
+          Use Generate to add edit layers
+        </span>
       </div>
 
       {/* Loading indicator */}
@@ -323,65 +302,12 @@ export default function LayerStackPanel({ stackId, currentImagePath, onFlattenCo
         </div>
       )}
 
-      {/* Add layer form */}
-      {showAddForm && (
-        <div className="ls-add-form">
-          <div className="ls-form-row">
-            <label className="ls-label">Name</label>
-            <input
-              className="ls-input"
-              placeholder="e.g. orange cat"
-              value={addForm.name}
-              onChange={e => setAddForm(f => ({ ...f, name: e.target.value }))}
-            />
-          </div>
-          <div className="ls-form-row">
-            <label className="ls-label">Prompt</label>
-            <textarea
-              className="ls-input ls-textarea"
-              placeholder="Describe the edit…"
-              value={addForm.prompt}
-              onChange={e => setAddForm(f => ({ ...f, prompt: e.target.value }))}
-              rows={3}
-            />
-          </div>
-          <div className="ls-form-row ls-form-row--inline">
-            <div>
-              <label className="ls-label">Model</label>
-              <select
-                className="ls-input ls-select"
-                value={addForm.model}
-                onChange={e => setAddForm(f => ({ ...f, model: e.target.value }))}
-              >
-                <option value="qwen_edit">qwen_edit</option>
-                <option value="qwen_image_2512">qwen_image_2512</option>
-              </select>
-            </div>
-            <div>
-              <label className="ls-label">Seed</label>
-              <input
-                className="ls-input"
-                type="number"
-                placeholder="random"
-                value={addForm.seed}
-                onChange={e => setAddForm(f => ({ ...f, seed: e.target.value }))}
-              />
-            </div>
-          </div>
-          <button
-            className="ls-btn ls-btn--primary ls-btn--full"
-            onClick={handleAddLayer}
-            disabled={loading || !addForm.name || !addForm.prompt}
-          >
-            {loading ? activeOp : 'Run Edit + Add Layer'}
-          </button>
-        </div>
-      )}
-
       {/* Layer list */}
       <div className="ls-layers">
-        {!stack?.layers?.length ? (
-          <div className="ls-empty-layers">No layers yet. Add an edit to get started.</div>
+        {!layerCount ? (
+          <div className="ls-empty-layers">
+            No layers yet. Type an edit prompt and hit Generate.
+          </div>
         ) : (
           stack.layers.map(renderLayer)
         )}

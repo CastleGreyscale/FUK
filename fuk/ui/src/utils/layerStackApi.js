@@ -1,6 +1,10 @@
 /**
  * Layer Stack API Client
  * Non-destructive latent editing endpoints
+ *
+ * Layer edits now run through the normal /api/generate/image endpoint
+ * (with stack_id + layer_name in the request). This file handles
+ * stack lifecycle (init, toggle, flatten, etc.) only.
  */
 
 import { API_URL } from './constants';
@@ -49,9 +53,15 @@ export async function listStacks() {
   return res.json();
 }
 
-/** Create a new stack from an existing generation */
-export async function createStack(imageUrl, name) {
-  return _post(`${BASE}/create`, { image_url: imageUrl, name });
+/**
+ * Initialize a new layer stack from a source image.
+ * Creates img_edit_XXX dir, copies/encodes base latent.
+ * @param {string} sourceImageUrl  e.g. "/api/project/cache/fuk_shot/img_gen_054/generated.png"
+ * @param {string} [name]          Optional human-readable name
+ * @returns {{ success, stack_id, stack, base_preview_url }}
+ */
+export async function initStack(sourceImageUrl, name) {
+  return _post(`${BASE}/init`, { source_image_url: sourceImageUrl, name });
 }
 
 /** Get a stack manifest by ID */
@@ -59,24 +69,6 @@ export async function getStack(stackId) {
   const res = await fetch(`${BASE}/${stackId}`);
   if (!res.ok) throw new Error(res.statusText);
   return res.json();
-}
-
-/**
- * Run a Qwen edit and add result as a new layer.
- * @param {string} stackId
- * @param {object} params  { name, prompt, model, control_image, seed, ... }
- */
-export async function addLayer(stackId, params) {
-  return _post(`${BASE}/${stackId}/add`, params);
-}
-
-/**
- * Re-run a layer (optionally with param overrides) → new version.
- * @param {string} stackId
- * @param {object} params  { layer_id, version_id?, prompt?, seed?, ... }
- */
-export async function rerunLayer(stackId, params) {
-  return _post(`${BASE}/${stackId}/rerun`, params);
 }
 
 /** Toggle a layer on or off */

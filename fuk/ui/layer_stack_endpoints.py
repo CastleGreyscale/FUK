@@ -3,45 +3,45 @@ Layer Stack Endpoints
 
 REST API for the non-destructive latent layer editing system.
 
-All stack state is persisted to disk (stack.json) so sessions survive
-server restarts. Flatten operations borrow the VAE from the already-cached
-Qwen pipeline — no extra model loading.
+Stacks live as img_edit_XXX directories inside the project cache, created
+via get_generation_output_dir("img_edit"). This means they appear in
+generation history alongside img_gen_XXX entries.
+
+Layer edits run through the normal /api/generate/image endpoint (with
+stack_id in the request). After generation, the web server calls
+register_layer_from_generation() to add the result to the stack.
 
 Routes:
-    POST   /api/layers/create              Create a new stack from a generation
-    GET    /api/layers/{stack_id}          Get stack manifest
-    POST   /api/layers/{stack_id}/add      Run a Qwen edit and add as new layer
-    POST   /api/layers/{stack_id}/rerun    Re-run a layer with same (or new) params
-    PATCH  /api/layers/{stack_id}/layer/{layer_id}/toggle     Enable/disable layer
-    PATCH  /api/layers/{stack_id}/layer/{layer_id}/version    Switch active version
-    POST   /api/layers/{stack_id}/layer/{layer_id}/reorder    Reorder all layers
-    DELETE /api/layers/{stack_id}/layer/{layer_id}            Remove layer
-    POST   /api/layers/{stack_id}/flatten                     Flatten to preview PNG
-    GET    /api/layers/list                                   List all stacks
+    POST   /api/layers/init                                     Initialize a new stack from a source image
+    GET    /api/layers/{stack_id}                                Get stack manifest
+    PATCH  /api/layers/{stack_id}/layer/{layer_id}/toggle        Enable/disable layer
+    PATCH  /api/layers/{stack_id}/layer/{layer_id}/version       Switch active version
+    POST   /api/layers/{stack_id}/reorder                        Reorder all layers
+    DELETE /api/layers/{stack_id}/layer/{layer_id}               Remove layer
+    POST   /api/layers/{stack_id}/flatten                        Flatten to preview PNG
+    GET    /api/layers/list                                      List all stacks
 """
 
+import shutil
 import torch
-import uuid
+import numpy as np
 from pathlib import Path
 from typing import Optional, Any
-from fastapi import APIRouter, HTTPException, Body
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from latent_layer_stack import LatentLayerStack
-from project_endpoints import get_cache_root, get_default_cache_root, get_project_cache_dir
 
 router = APIRouter(prefix="/api/layers", tags=["layers"])
 
 # Injected at startup by fuk_web_server.py
 _backend: Any = None
-_startup_cache_root: Optional[Path] = None
 
 
 def initialize_layer_endpoints(backend, cache_root: Path):
     """Called by fuk_web_server.py after backend and project system are ready."""
-    global _backend, _startup_cache_root
+    global _backend
     _backend = backend
-    _startup_cache_root = Path(cache_root)
     print("[LAYERS] Endpoint system initialized", flush=True)
 
 
@@ -49,60 +49,10 @@ def initialize_layer_endpoints(backend, cache_root: Path):
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _current_cache_root() -> Path:
-    """
-    Get the current cache root, respecting project switches.
-
-    Priority: project_endpoints current root → startup fallback.
-    This mirrors the dual-resolution strategy in the /api/project/cache/
-    file-serving endpoint.
-    """
-    root = get_cache_root()
-    if root:
-        return root
-    if _startup_cache_root:
-        return _startup_cache_root
-    raise RuntimeError("Layer endpoint system not initialized")
-
-
-def _resolve_cache_relative(rel_path: str) -> Path:
-    """
-    Resolve a cache-relative path, trying current project cache then default.
-
-    Matches the fallback logic in project_endpoints' file-serving endpoint:
-    current _cache_root first, then _default_cache_root.
-    """
-    current = get_cache_root()
-    default = get_default_cache_root()
-
-    if current:
-        candidate = current / rel_path
-        if candidate.exists():
-            return candidate
-
-    if default and default != current:
-        candidate = default / rel_path
-        if candidate.exists():
-            return candidate
-
-    # Return the best-guess path even if it doesn't exist yet
-    # (caller will check .exists() and raise appropriate errors)
-    base = current or default or _startup_cache_root
-    return base / rel_path
-
-
-def _stacks_root() -> Path:
-    """Layer stacks live in a 'layer_stacks' subdirectory of the project cache."""
-    try:
-        root = get_project_cache_dir() / "layer_stacks"
-    except (RuntimeError, Exception):
-        root = _current_cache_root() / "layer_stacks"
-    root.mkdir(parents=True, exist_ok=True)
-    return root
-
-
 def _stack_dir(stack_id: str) -> Path:
-    return _stacks_root() / stack_id
+    """Resolve stack_id (e.g. 'img_edit_001') to its directory in the project cache."""
+    from project_endpoints import get_project_cache_dir
+    return get_project_cache_dir() / stack_id
 
 
 def _load_stack(stack_id: str) -> LatentLayerStack:
@@ -130,54 +80,124 @@ def _borrow_vae(device: str = "cuda"):
     )
 
 
-def _run_qwen_edit(params: dict, output_path: Path) -> dict:
-    """Run a Qwen edit generation and return the result dict."""
-    from qwen_pipeline import QwenPipelineRunner
-    runner = QwenPipelineRunner(_backend)
-    return runner.generate(output_path=output_path, **params)
+def _resolve_image_url_to_path(image_url: str) -> Path:
+    """Resolve a /api/project/cache/... URL to a filesystem path."""
+    from project_endpoints import get_project_cache_dir
+    cache_dir = get_project_cache_dir()
 
-def _resolve_control_image(path_or_url: str) -> Path:
-    """Resolve a /api/project/cache/... URL back to a filesystem path."""
-    if path_or_url.startswith('/api/project/cache/'):
-        rel = path_or_url.removeprefix('/api/project/cache/')
-        return _resolve_cache_relative(rel)
-    return Path(path_or_url)
+    url = image_url.lstrip('/')
+    if url.startswith('api/project/cache/'):
+        rel = url.removeprefix('api/project/cache/')
+        return cache_dir.parent / rel  # cache_dir is project-specific, rel includes project dir
+    return Path(image_url)
+
+
+def _find_latent_in_dir(gen_dir: Path) -> Optional[Path]:
+    """Find a .pt latent file in a generation directory.
+    
+    Checks both top-level and the latents/ subdirectory, since
+    the pipeline saves latents to gen_dir/latents/generated.latent.pt
+    """
+    # Search locations: top-level first, then latents/ subdir
+    search_dirs = [gen_dir]
+    latents_subdir = gen_dir / "latents"
+    if latents_subdir.is_dir():
+        search_dirs.append(latents_subdir)
+    
+    # Prefer .latent.pt, fall back to any .pt
+    for search_dir in search_dirs:
+        for pattern in ["*.latent.pt", "*.pt"]:
+            matches = list(search_dir.glob(pattern))
+            if matches:
+                return matches[0]
+    return None
+
+
+def _vae_encode_image(image_path: Path, vae, device: str = "cuda") -> torch.Tensor:
+    """
+    Encode an arbitrary image through the VAE to get a latent tensor.
+    Used when the source image has no pre-saved latent (e.g. imported image).
+    """
+    from PIL import Image
+
+    img = Image.open(str(image_path)).convert("RGB")
+    w, h = img.size
+    # Round to 16-multiples — Qwen requires this, and the VAE is happy with
+    # any multiple of 8 (16 is always a multiple of 8). Using 8-rounding here
+    # and letting the pipeline ShapeChecker ceil-to-16 produces a base latent
+    # at a different resolution than subsequent edits, breaking delta math.
+    w = ((w + 15) // 16) * 16
+    h = ((h + 15) // 16) * 16
+    if w == 0 or h == 0:
+        raise ValueError(f"Image too small after rounding: {img.size}")
+    img = img.resize((w, h), Image.LANCZOS)
+
+    # Convert to tensor: [1, C, H, W] in range [-1, 1]
+    img_array = np.array(img).astype(np.float32) / 255.0
+    tensor = torch.from_numpy(img_array).permute(2, 0, 1).unsqueeze(0)
+    tensor = tensor * 2.0 - 1.0
+
+    with torch.inference_mode():
+        latent = vae.encode(tensor.to(device))
+
+    return latent.cpu()
+
+
+# ---------------------------------------------------------------------------
+# Public API for web server integration
+# ---------------------------------------------------------------------------
+
+def register_layer_from_generation(
+    stack_id: str,
+    layer_name: str,
+    gen_dir: Path,
+    latent_path: Optional[str],
+    preview_path: Optional[Path],
+    params: dict,
+) -> dict:
+    """
+    Called by run_image_generation after a layer edit completes.
+
+    Loads the stack, adds the generation's latent as a new layer,
+    and returns the updated stack manifest.
+
+    Args:
+        stack_id:      e.g. "img_edit_001"
+        layer_name:    Human-readable name for the layer
+        gen_dir:       The generation's output directory (already inside the stack dir)
+        latent_path:   Path to the .pt latent produced by generation
+        preview_path:  Path to generated.png for UI thumbnail
+        params:        Generation params for version history
+
+    Returns:
+        Updated stack manifest dict
+    """
+    stack = LatentLayerStack.load(_stack_dir(stack_id))
+
+    if not latent_path or not Path(latent_path).exists():
+        raise RuntimeError(f"Layer registration failed: no latent at {latent_path}")
+
+    from latent_layer_stack import unwrap_latent
+    edit_latent = unwrap_latent(torch.load(latent_path, map_location="cpu"))
+
+    layer_id = stack.add_layer(
+        name=layer_name,
+        edit_latent=edit_latent,
+        params=params,
+        preview_path=str(preview_path) if preview_path else None,
+    )
+
+    print(f"[LAYERS] Registered layer '{layer_name}' (id={layer_id}) in stack {stack_id}", flush=True)
+    return stack.to_dict()
 
 
 # ---------------------------------------------------------------------------
 # Request models
 # ---------------------------------------------------------------------------
 
-class CreateStackRequest(BaseModel):
-    image_url: str   # e.g. /api/project/cache/fuk_shot11_260213/img_gen_054/generated.png
+class InitStackRequest(BaseModel):
+    source_image_url: str   # e.g. /api/project/cache/fuk_shot11_260213/img_gen_054/generated.png
     name: Optional[str] = None
-
-
-class AddLayerRequest(BaseModel):
-    name: str
-    prompt: str
-    model: str = "qwen_edit"
-    control_image: Optional[str] = None   # Path to the image to edit (usually base preview)
-    seed: Optional[int] = None
-    steps: Optional[int] = None
-    cfg_scale: Optional[float] = None
-    denoising_strength: Optional[float] = None
-    negative_prompt: Optional[str] = None
-    lora: Optional[str] = None
-    lora_multiplier: float = 1.0
-
-
-class RerunLayerRequest(BaseModel):
-    layer_id: str
-    version_id: Optional[int] = None     # Which version to pull params from (default: active)
-    # Override any params for the new version
-    prompt: Optional[str] = None
-    seed: Optional[int] = None
-    steps: Optional[int] = None
-    cfg_scale: Optional[float] = None
-    denoising_strength: Optional[float] = None
-    lora: Optional[str] = None
-    lora_multiplier: float = 1.0
 
 
 class ToggleLayerRequest(BaseModel):
@@ -198,233 +218,118 @@ class ReorderRequest(BaseModel):
 
 @router.get("/list")
 async def list_stacks():
-    """List all existing layer stacks."""
-    root = _stacks_root()
+    """List all existing layer stacks (img_edit_* dirs with a stack.json)."""
+    from project_endpoints import get_project_cache_dir
+    import json
+
+    project_cache = get_project_cache_dir()
     stacks = []
-    for stack_dir in sorted(root.iterdir()):
-        manifest_path = stack_dir / "stack.json"
+
+    for entry in sorted(project_cache.iterdir()):
+        if not entry.is_dir() or not entry.name.startswith("img_edit_"):
+            continue
+        manifest_path = entry / "stack.json"
         if manifest_path.exists():
-            import json
             with open(manifest_path) as f:
                 m = json.load(f)
             stacks.append({
-                "stack_id":   m.get("stack_id"),
-                "created_at": m.get("created_at"),
-                "updated_at": m.get("updated_at"),
-                "layer_count": len(m.get("layers", [])),
+                "stack_id":        entry.name,  # e.g. "img_edit_001"
+                "created_at":      m.get("created_at"),
+                "updated_at":      m.get("updated_at"),
+                "layer_count":     len(m.get("layers", [])),
                 "base_image_path": m.get("base_image_path"),
             })
+
     return {"stacks": stacks}
 
 
-@router.post("/create")
-async def create_stack(req: CreateStackRequest):
-    # Parse the gen_dir directly from the cache URL
-    # /api/project/cache/{relative_path} → resolve via project cache roots
-    image_url = req.image_url.lstrip('/')
-    if not image_url.startswith('api/project/cache/'):
-        raise HTTPException(status_code=400, detail="image_url must be a /api/project/cache/... URL")
+@router.post("/init")
+async def init_stack(req: InitStackRequest):
+    """
+    Initialize a new layer stack from a source image.
 
-    rel = image_url.removeprefix('api/project/cache/')
-    image_path = _resolve_cache_relative(rel)
-    gen_dir = image_path.parent   # strip /generated.png → img_gen_054 dir
+    Creates an img_edit_XXX directory in the project cache, copies or
+    VAE-encodes the base latent, and saves the source image as a preview.
 
-    print(f"[LAYERS] create_stack: rel={rel}", flush=True)
-    print(f"[LAYERS] create_stack: resolved image_path={image_path}", flush=True)
-    print(f"[LAYERS] create_stack: gen_dir={gen_dir} exists={gen_dir.exists()}", flush=True)
+    Steps:
+        1. Resolve source image URL → filesystem path
+        2. Find .pt latent in the source gen dir (or VAE-encode the image)
+        3. Create img_edit_XXX dir via get_generation_output_dir
+        4. Copy base latent + preview image
+        5. Initialize stack.json manifest
 
-    if not gen_dir.exists():
-        raise HTTPException(status_code=404, detail=f"Generation directory not found: {gen_dir}")
+    Returns:
+        { success, stack_id, stack }
+    """
+    from project_endpoints import get_generation_output_dir
 
-    # Latents are saved in a latents/ subdirectory by pipeline_base.setup_latent_capture()
-    # e.g. img_gen_060/latents/generated.latent.pt
-    latent_dir = gen_dir / "latents"
-    latent_files = []
-    if latent_dir.exists():
-        latent_files = list(latent_dir.glob("*.latent.pt")) + list(latent_dir.glob("*.pt"))
-    # Fallback: check gen_dir root (legacy or alternate save locations)
-    if not latent_files:
-        latent_files = list(gen_dir.glob("*.latent.pt")) + list(gen_dir.glob("*.pt"))
-    if not latent_files:
-        raise HTTPException(status_code=400, detail=f"No latent file found in {gen_dir} or {gen_dir}/latents/. Was save_latent enabled?")
-    latent_path = latent_files[0]
+    # --- Resolve source image ---
+    source_path = _resolve_image_url_to_path(req.source_image_url)
+    if not source_path.exists():
+        raise HTTPException(status_code=404, detail=f"Source image not found: {source_path}")
 
-    preview_path = image_path if image_path.exists() else None
+    source_gen_dir = source_path.parent
 
-    base_latent = torch.load(latent_path, map_location="cpu")
-    # _capture_latent_hook saves as {'latent': tensor, 'shape': ..., 'dtype': ...}
-    if isinstance(base_latent, dict) and 'latent' in base_latent:
-        base_latent = base_latent['latent']
+    # --- Get or create base latent ---
+    latent_file = _find_latent_in_dir(source_gen_dir)
 
-    stack_id = str(uuid.uuid4())[:12]
-    stack_dir = _stack_dir(stack_id)
-    stack = LatentLayerStack.create(stack_dir, base_latent, preview_path)
+    if latent_file:
+        print(f"[LAYERS] Found existing latent: {latent_file.name}", flush=True)
+        from latent_layer_stack import unwrap_latent
+        base_latent = unwrap_latent(torch.load(latent_file, map_location="cpu"))
+    else:
+        # No latent on disk — VAE encode the image
+        print(f"[LAYERS] No latent found in {source_gen_dir.name}, VAE-encoding...", flush=True)
+        try:
+            vae = _borrow_vae()
+            base_latent = _vae_encode_image(source_path, vae)
+            print(f"[LAYERS] VAE encode complete: {base_latent.shape}", flush=True)
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to VAE-encode source image: {e}"
+            )
 
-    return {"success": True, "stack_id": stack_id, "stack": stack.to_dict()}
+    # --- Create stack directory ---
+    stack_dir = get_generation_output_dir("img_edit")
+    stack_id = stack_dir.name   # e.g. "img_edit_001"
+
+    # --- Copy source image as base preview ---
+    base_preview = stack_dir / "base_preview.png"
+    shutil.copy2(source_path, base_preview)
+
+    # --- Create the stack ---
+    stack = LatentLayerStack.create(
+        stack_dir=stack_dir,
+        base_latent=base_latent,
+        base_image_path=base_preview,
+    )
+
+    # Store source reference in manifest for traceability
+    manifest = stack.to_dict()
+    manifest["source_image_url"] = req.source_image_url
+    manifest["source_gen_dir"] = str(source_gen_dir)
+    stack._manifest.update({
+        "source_image_url": req.source_image_url,
+        "source_gen_dir": str(source_gen_dir),
+    })
+    stack._save_manifest()
+
+    print(f"[LAYERS] Stack initialized: {stack_id} (source: {source_gen_dir.name})", flush=True)
+
+    return {
+        "success": True,
+        "stack_id": stack_id,
+        "stack": stack.to_dict(),
+        "base_preview_url": f"/api/project/cache/{stack_dir.parent.name}/{stack_id}/base_preview.png",
+    }
+
 
 @router.get("/{stack_id}")
 async def get_stack(stack_id: str):
     """Get the full stack manifest."""
     stack = _load_stack(stack_id)
     return {"stack": stack.to_dict()}
-
-
-@router.post("/{stack_id}/add")
-async def add_layer(stack_id: str, req: AddLayerRequest):
-    """
-    Run a Qwen edit and add the result as a new layer.
-
-    The edit generation runs against the provided control_image (usually the
-    current flattened preview). The resulting latent is diffed against the
-    base to produce the stored delta.
-    """
-    stack = _load_stack(stack_id)
-    stack_dir = _stack_dir(stack_id)
-
-    # Read base latent dimensions so the edit generation matches exactly.
-    # Latent shape is [B, C, H, W]; pixel dims = latent dims × VAE scale (8).
-    base_pt = Path(stack.to_dict()["base_latent_path"])
-    base_latent_tensor = torch.load(base_pt, map_location="cpu")
-    base_h, base_w = base_latent_tensor.shape[-2], base_latent_tensor.shape[-1]
-    pixel_h, pixel_w = base_h * 8, base_w * 8
-
-    # Determine output path for this generation
-    layer_id_tmp = str(uuid.uuid4())[:8]
-    output_path = stack_dir / f"tmp_{layer_id_tmp}_edit.png"
-
-    # Build generation params
-    gen_params = {
-        "prompt":             req.prompt,
-        "model":              req.model,
-        "width":              pixel_w,
-        "height":             pixel_h,
-        "seed":               req.seed,
-        "steps":              req.steps,
-        "cfg_scale":          req.cfg_scale,
-        "denoising_strength": req.denoising_strength,
-        "negative_prompt":    req.negative_prompt,
-        "lora":               req.lora,
-        "lora_multiplier":    req.lora_multiplier,
-        "save_latent":        True,
-    }
-    if req.control_image:
-        gen_params["control_image"] = _resolve_control_image(req.control_image)
-
-    # Remove None values so pipeline defaults apply
-    gen_params = {k: v for k, v in gen_params.items() if v is not None}
-
-    # Run generation
-    result = _run_qwen_edit(gen_params, output_path)
-    if not result.get("success"):
-        raise HTTPException(status_code=500, detail=f"Generation failed: {result}")
-
-    # Load the generated latent
-    latent_path = result.get("latent") or result.get("latent_path")
-    if not latent_path or not Path(latent_path).exists():
-        raise HTTPException(status_code=500, detail="Generation did not produce a latent file")
-
-    edit_latent = torch.load(latent_path, map_location="cpu")
-    if isinstance(edit_latent, dict) and 'latent' in edit_latent:
-        edit_latent = edit_latent['latent']
-
-    # Store params for version history
-    layer_params = {
-        "prompt":             req.prompt,
-        "seed":               result.get("seed_used") or req.seed,
-        "model":              req.model,
-        "steps":              req.steps,
-        "cfg_scale":          req.cfg_scale,
-        "denoising_strength": req.denoising_strength,
-        "lora":               req.lora,
-    }
-
-    layer_id = stack.add_layer(req.name, edit_latent, layer_params)
-
-    return {
-        "success":  True,
-        "layer_id": layer_id,
-        "stack":    stack.to_dict(),
-    }
-
-
-@router.post("/{stack_id}/rerun")
-async def rerun_layer(stack_id: str, req: RerunLayerRequest):
-    """
-    Re-run a layer's generation (with optional param overrides) and add as a new version.
-
-    Pulls stored params from the specified version (default: active), applies
-    any overrides from the request, runs a new generation, and appends the
-    result as a new version. The new version becomes active automatically.
-    """
-    stack = _load_stack(stack_id)
-    stack_dir = _stack_dir(stack_id)
-
-    # Read base latent dimensions for resolution matching
-    base_pt = Path(stack.to_dict()["base_latent_path"])
-    base_latent_tensor = torch.load(base_pt, map_location="cpu")
-    base_h, base_w = base_latent_tensor.shape[-2], base_latent_tensor.shape[-1]
-    pixel_h, pixel_w = base_h * 8, base_w * 8
-
-    manifest = stack.to_dict()
-    layer = next((l for l in manifest["layers"] if l["layer_id"] == req.layer_id), None)
-    if not layer:
-        raise HTTPException(status_code=404, detail=f"Layer not found: {req.layer_id}")
-
-    # Pull params from specified version (or active)
-    v_index = req.version_id if req.version_id is not None else layer["active_version"]
-    if v_index >= len(layer["versions"]):
-        raise HTTPException(status_code=400, detail=f"Version {v_index} does not exist")
-    stored = layer["versions"][v_index]
-
-    # Build params: stored values as base, request overrides on top
-    gen_params = {
-        "prompt":             req.prompt             or stored.get("prompt", ""),
-        "model":              stored.get("model", "qwen_edit"),
-        "width":              pixel_w,
-        "height":             pixel_h,
-        "seed":               req.seed               or stored.get("seed"),
-        "steps":              req.steps              or stored.get("steps"),
-        "cfg_scale":          req.cfg_scale          or stored.get("cfg_scale"),
-        "denoising_strength": req.denoising_strength or stored.get("denoising_strength"),
-        "lora":               req.lora               or stored.get("lora"),
-        "lora_multiplier":    req.lora_multiplier,
-        "save_latent":        True,
-    }
-    gen_params = {k: v for k, v in gen_params.items() if v is not None}
-
-    # Output path
-    v_new = len(layer["versions"])
-    output_path = stack_dir / f"layer_{req.layer_id}" / f"v{v_new}_edit.png"
-
-    result = _run_qwen_edit(gen_params, output_path)
-    if not result.get("success"):
-        raise HTTPException(status_code=500, detail=f"Re-run failed: {result}")
-
-    latent_path = result.get("latent") or result.get("latent_path")
-    if not latent_path or not Path(latent_path).exists():
-        raise HTTPException(status_code=500, detail="Re-run did not produce a latent file")
-
-    edit_latent = torch.load(latent_path, map_location="cpu")
-    if isinstance(edit_latent, dict) and 'latent' in edit_latent:
-        edit_latent = edit_latent['latent']
-
-    new_params = {
-        "prompt":             gen_params.get("prompt"),
-        "seed":               result.get("seed_used") or gen_params.get("seed"),
-        "model":              gen_params.get("model"),
-        "steps":              gen_params.get("steps"),
-        "cfg_scale":          gen_params.get("cfg_scale"),
-        "denoising_strength": gen_params.get("denoising_strength"),
-        "lora":               gen_params.get("lora"),
-    }
-
-    new_v = stack.add_version(req.layer_id, edit_latent, new_params)
-
-    return {
-        "success":     True,
-        "new_version": new_v,
-        "stack":       stack.to_dict(),
-    }
 
 
 @router.patch("/{stack_id}/layer/{layer_id}/toggle")
@@ -476,10 +381,13 @@ async def flatten_stack(stack_id: str):
     stack.save_flatten_preview(vae, preview_path)
 
     # Return a cache-relative URL the frontend can load
-    cache_root = _current_cache_root()
+    from project_endpoints import get_project_cache_dir
+    cache_dir = get_project_cache_dir()
     try:
-        rel_path = preview_path.relative_to(cache_root)
-        preview_url = f"/api/project/cache/{rel_path}"
+        rel_path = preview_path.relative_to(cache_dir)
+        # Need project dir name in the URL
+        project_dir_name = cache_dir.name
+        preview_url = f"/api/project/cache/{project_dir_name}/{rel_path}"
     except ValueError:
         preview_url = str(preview_path)
 

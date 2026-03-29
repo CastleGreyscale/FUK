@@ -30,6 +30,18 @@ def _now() -> str:
     return datetime.now().isoformat()
 
 
+def unwrap_latent(data) -> torch.Tensor:
+    """
+    Extract a raw tensor from a loaded .pt file.
+
+    The pipeline saves latents as {'latent': tensor, 'shape': [...], 'dtype': '...'}
+    but LatentLayerStack works with raw tensors. This handles both formats.
+    """
+    if isinstance(data, dict) and 'latent' in data:
+        return data['latent']
+    return data
+
+
 def _log(msg: str, level: str = "info"):
     from datetime import datetime as _dt
     ts = _dt.now().strftime("%H:%M:%S.%f")[:-3]
@@ -154,6 +166,7 @@ class LatentLayerStack:
         name: str,
         edit_latent: torch.Tensor,
         params: dict,
+        preview_path: Optional[str] = None,
     ) -> str:
         """
         Add a new layer (with its first version) to the stack.
@@ -162,6 +175,7 @@ class LatentLayerStack:
             name:         Human-readable label (e.g. "orange cat").
             edit_latent:  Full edit latent from the generation.
             params:       Generation params to store (prompt, seed, model, …).
+            preview_path: Path to the edit's generated.png for UI thumbnail.
 
         Returns:
             layer_id of the new layer.
@@ -190,6 +204,7 @@ class LatentLayerStack:
             "cfg_scale":    params.get("cfg_scale"),
             "denoising_strength": params.get("denoising_strength"),
             "lora":         params.get("lora"),
+            "preview_path": preview_path,
             "timestamp":    _now(),
         }
 
@@ -198,6 +213,7 @@ class LatentLayerStack:
             "name":           name,
             "enabled":        True,
             "active_version": v_index,
+            "preview_path":   preview_path,
             "versions":       [version],
         }
 
@@ -317,7 +333,7 @@ class LatentLayerStack:
 
             if not delta_path.exists():
                 _log(f"Delta missing for layer '{layer['name']}' v{v} — recomputing", "warning")
-                latent = torch.load(version["latent_path"], map_location=device)
+                latent = unwrap_latent(torch.load(version["latent_path"], map_location=device))
                 delta = self._compute_delta(latent, device=device)
                 torch.save(delta.cpu(), delta_path)
             else:
@@ -381,7 +397,7 @@ class LatentLayerStack:
         base_path = Path(self._manifest["base_latent_path"])
         if not base_path.exists():
             raise FileNotFoundError(f"Base latent missing: {base_path}")
-        return torch.load(base_path, map_location=device)
+        return unwrap_latent(torch.load(base_path, map_location=device))
 
     def _compute_delta(
         self,
@@ -391,51 +407,8 @@ class LatentLayerStack:
         """
         delta = edit_latent - base_latent
 
-        If the edit latent has different spatial dimensions (e.g. the edit
-        pipeline quantised to a different VAE multiple), we centre-crop or
-        zero-pad the edit to match the base before subtracting.
-
         Both tensors kept in float32 for accurate delta math.
         """
         base = self._load_base_latent(device)
         edit = edit_latent.to(device)
-
-        # Shape: typically [B, C, H, W] for images
-        if edit.shape != base.shape:
-            _log(f"Shape mismatch: base={list(base.shape)} edit={list(edit.shape)} — aligning edit to base", "warning")
-            edit = self._match_spatial(edit, base)
-
         return (edit.float() - base.float())
-
-    @staticmethod
-    def _match_spatial(src: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        """
-        Centre-crop or zero-pad *src* so its spatial dims match *target*.
-
-        Works for both [B, C, H, W] (image) and [B, C, F, H, W] (video)
-        latents — spatial dims are always the last two.
-        """
-        # Spatial dims are the last two
-        src_h, src_w = src.shape[-2], src.shape[-1]
-        tgt_h, tgt_w = target.shape[-2], target.shape[-1]
-
-        if src_h == tgt_h and src_w == tgt_w:
-            return src
-
-        result = torch.zeros_like(target)
-
-        # Copy region is the overlap
-        copy_h = min(src_h, tgt_h)
-        copy_w = min(src_w, tgt_w)
-
-        # Centre offsets
-        src_y = (src_h - copy_h) // 2
-        src_x = (src_w - copy_w) // 2
-        tgt_y = (tgt_h - copy_h) // 2
-        tgt_x = (tgt_w - copy_w) // 2
-
-        result[..., tgt_y:tgt_y + copy_h, tgt_x:tgt_x + copy_w] = \
-            src[..., src_y:src_y + copy_h, src_x:src_x + copy_w]
-
-        _log(f"Aligned: ({src_h}×{src_w}) → ({tgt_h}×{tgt_w}) via centre crop/pad")
-        return result

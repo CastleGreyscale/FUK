@@ -12,8 +12,9 @@ import ZoomableImage from '../components/ZoomableImage';
 import SeedControl from '../components/SeedControl';
 import GenerationModal from '../components/GenerationModal';
 import { useGeneration } from '../hooks/useGeneration';
-import LayerStackPanel from '../components/LayerStackPanel';
-import { createStack } from '../utils/layerStackApi';
+// [LAYER STACK DISABLED]
+// import LayerStackPanel from '../components/LayerStackPanel';
+// import { initStack } from '../utils/layerStackApi';
 import { useLocalStorage } from '../../src/hooks/useLocalStorage';
 import { useSavedSeeds } from '../hooks/useSavedSeeds';
 import { startImageGeneration } from '../../src/utils/api';
@@ -203,7 +204,10 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
           lastUsedSeed: result.seed_used,
         }));
       }
-      setCurrentImagePath(result.outputs.png); 
+      setCurrentImagePath(result.outputs.png);
+      if (result.stack) {
+        setStackData(result.stack);
+      } 
     }
   }, [result, project?.updateLastState, setFormData]);
 
@@ -235,9 +239,10 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
   const [droppedPreview, setDroppedPreview] = useState(null);
   const [metaLoadedFrom, setMetaLoadedFrom] = useState(null);
 
-  // Layer edit system
-  const [stackId, setStackId] = useState(null);
-  const [currentImagePath, setCurrentImagePath] = useState(null);
+  // [LAYER STACK DISABLED]
+  // const [stackId, setStackId] = useState(null);
+  // const [stackData, setStackData] = useState(null);
+  // const [currentImagePath, setCurrentImagePath] = useState(null);
 
   const buildBatchSeeds = useCallback((seedMode, startSeed, count) => {
     if (seedMode === SEED_MODES.RANDOM) {
@@ -299,7 +304,10 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
         : null,
       exponential_shift_mu: formData.exponential_shift_mu,
       eligen_source: formData.eligen_source || null,
-       eligen_alpha: formData.eligen_source ? (formData.eligen_alpha ?? 1.0) : null,  // ← ADD
+      eligen_alpha: formData.eligen_source ? (formData.eligen_alpha ?? 1.0) : null,  // ← ADD
+      // [LAYER STACK DISABLED]
+      // stack_id: stackId || null,
+      // layer_name: stackId ? (formData.prompt?.slice(0, 40) || 'edit') : null,
     };
 
     // Build seed queue for batch
@@ -340,15 +348,8 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
     setFormData(prev => ({ ...prev, control_image_paths: paths }));
   };
 
-  const handleCreateStack = async () => {
-    if (!previewImage) return;
-    try {
-      const data = await createStack(previewImage);  // previewImage is already the cache URL
-      setStackId(data.stack_id);
-    } catch (err) {
-      console.error('Failed to create stack:', err);
-    }
-  };
+  // [LAYER STACK DISABLED]
+  // const handleInitLayers = async () => { ... };
 
   // Reload generation settings from a history item dropped onto the preview panel
   const handleMetaDrop = useCallback(async (e) => {
@@ -409,26 +410,12 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
         onDrop={handleMetaDrop}
         style={{ position: 'relative' }}
       >
-      {/* Layer stack side panel — qwen_edit only */}
+      {/* [LAYER STACK DISABLED]
       {modelSupports(formData.model, 'edit_image') && (
         <div className="fuk-layer-sidebar">
-          {previewImage && !stackId && (
-            <button
-              className="ls-btn ls-btn--primary ls-btn--full"
-              onClick={handleCreateStack}
-              disabled={!generationId}
-              style={{ marginBottom: '0.5rem' }}
-            >
-              + New Layer Stack
-            </button>
-          )}
-          <LayerStackPanel
-            stackId={stackId}
-            currentImagePath={currentImagePath}
-            onFlattenComplete={(url) => setCurrentImagePath(url)}
-          />
+          <LayerStackPanel stackId={stackId} stackData={stackData} ... />
         </div>
-      )}
+      )} */}
 
         <div className="fuk-preview-single">
           {/* droppedPreview takes priority — shows reference gen while settings are loaded */}
@@ -966,7 +953,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                     const newDims = calculateDimensions(formData.aspectRatio, clamped, aspectRatios);
                     setFormData({...formData, width: clamped, height: newDims.height});
                   }}
-                  step={64}
+                  step={16}
                   min={512}
                   max={2048}
                   placeholder="1024"

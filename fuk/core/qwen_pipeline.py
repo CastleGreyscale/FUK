@@ -92,10 +92,13 @@ class QwenPipelineRunner(PipelineRunner):
             try:
                 with _PILImage.open(str(source_path)) as src:
                     src_w, src_h = src.size
-                # Round to nearest VAE multiple (8) to avoid encoder/decoder
-                # shape disagreements — same rounding the pipeline would apply
-                src_w = (src_w // 8) * 8
-                src_h = (src_h // 8) * 8
+                # Round to nearest 16-multiple — Qwen's ShapeChecker uses ceiling-16
+                # rounding internally. Pre-rounding here ensures the edit image
+                # (resized by resolve_image_list) matches the noise tensor dimensions
+                # exactly. Using 8-rounding here + 16-rounding inside the pipeline
+                # causes a 1-token mismatch that produces ghosting / crop artifacts.
+                src_w = ((src_w + 15) // 16) * 16
+                src_h = ((src_h + 15) // 16) * 16
                 if src_w > 0 and src_h > 0:
                     width, height = src_w, src_h
                     _log(self.log_prefix, f"Inherited dimensions from source: {width}x{height}")
