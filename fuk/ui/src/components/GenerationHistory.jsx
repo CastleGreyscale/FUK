@@ -3,8 +3,8 @@
  * Shows past generations with drag-and-drop, pagination, and pinning
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { Film, Camera, Clock, Trash2, RefreshCw, ChevronDown, ChevronRight, Enhance, Zap, ArrowUp, Layers, Download, PinIcon, ImportIcon, SequenceIcon, ThumbsUp, ThumbsDown } from './Icons';
+import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
+import { Film, Camera, Clock, Trash2, RefreshCw, ChevronDown, ChevronRight, Enhance, Zap, ArrowUp, Layers, Download, PinIcon, ImportIcon, SequenceIcon, ThumbsUp, ThumbsDown, Maximize2, X, Info } from './Icons';
 import { buildImageUrl, API_URL } from '../utils/constants';
 import { useVideoPlayback } from '../hooks/useVideoPlayback';
 
@@ -12,38 +12,44 @@ import { useVideoPlayback } from '../hooks/useVideoPlayback';
 
 // Hover preview popup component
 function HoverPreview({ generation, position, videoRef }) {
-  const isVideo = generation.type === 'video' || generation.type === 'interpolate' || 
+  const popupRef = useRef(null);
+  const [style, setStyle] = useState({ position: 'fixed', left: -9999, top: -9999, zIndex: 9999, visibility: 'hidden' });
+
+  const isVideo = generation.type === 'video' || generation.type === 'interpolate' ||
                   (generation.type === 'preprocess' && generation.subtype === 'video') ||
                   (generation.type === 'upscale' && generation.subtype === 'video') ||
                   (generation.type === 'layers' && generation.subtype === 'video');
   const isSequence = generation.isSequence;
   const previewUrl = buildImageUrl(generation.preview);
   const displayName = generation.name || generation.id || 'Unknown';
-  
+
   // Full date + time combined
   const dateTime = [generation.date, generation.timestamp].filter(Boolean).join(' · ');
-  
-  // Calculate position - keep popup in viewport
-  const style = {
-    position: 'fixed',
-    left: position.x + 16,
-    top: position.y - 100,
-    zIndex: 9999,
-  };
-  
-  // Clamp to viewport
-  if (style.left + 320 > window.innerWidth) {
-    style.left = position.x - 336; // Show on left side instead
-  }
-  if (style.top < 8) {
-    style.top = 8;
-  }
-  if (style.top + 200 > window.innerHeight) {
-    style.top = window.innerHeight - 208;
-  }
-  
+
+  useLayoutEffect(() => {
+    if (!popupRef.current) return;
+    const { offsetWidth: w, offsetHeight: h } = popupRef.current;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const margin = 8;
+
+    let left = position.x + 16;
+    let top = position.y - Math.round(h / 2);
+
+    // Flip to left if it overflows right edge
+    if (left + w > vw - margin) {
+      left = position.x - w - 16;
+    }
+    // Clamp left
+    left = Math.max(margin, left);
+    // Clamp top so it doesn't go above or below viewport
+    top = Math.max(margin, Math.min(top, vh - h - margin));
+
+    setStyle({ position: 'fixed', left, top, zIndex: 9999, visibility: 'visible' });
+  }, [position.x, position.y, generation]);
+
   return (
-    <div className="gen-history-hover-preview" style={style}>
+    <div ref={popupRef} className="gen-history-hover-preview" style={style}>
       <div className="gen-history-hover-media">
         {isSequence ? (
           <img src={previewUrl} alt={displayName} />
@@ -238,16 +244,12 @@ function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned, onHov
   };
 
   return (
-    <div 
+    <div
       className={`gen-history-item ${isPinned ? 'pinned' : ''}`}
       draggable
       onDragStart={handleDragStart}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
-      title={generation.sourcePath 
-        ? `Drag to use as input\n${displayName}\nSource: ${generation.sourcePath}\n${generation.timestamp}`
-        : `Drag to use as input\n${displayName}\n${generation.timestamp}`
-      }
     >
       <div className="gen-history-thumb">
         {!imageError ? (
@@ -349,6 +351,316 @@ function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned, onHov
   );
 }
 
+// ─── helpers shared by gallery ───────────────────────────────────────────────
+
+function isGenVideo(g) {
+  return g.type === 'video' || g.type === 'interpolate' ||
+    (g.type === 'preprocess' && g.subtype === 'video') ||
+    (g.type === 'upscale'    && g.subtype === 'video') ||
+    (g.type === 'layers'     && g.subtype === 'video');
+}
+
+function processingIcon(g) {
+  const p = g.path || g.preview || '';
+  const n = g.name || g.id || '';
+  if (p.includes('upscale_')    || n.includes('upscale'))    return ArrowUp;
+  if (p.includes('interpolate_')|| n.includes('interpolate')) return Zap;
+  switch (g.type) {
+    case 'layers':    return Layers;
+    case 'preprocess': return Enhance;
+    case 'upscale':   return ArrowUp;
+    case 'interpolate': return Zap;
+    case 'export':    return Download;
+    case 'import':    return ImportIcon;
+    default:          return null;
+  }
+}
+
+function processingType(g) {
+  const p = g.path || g.preview || '';
+  const n = g.name || g.id || '';
+  if (p.includes('upscale_')    || n.includes('upscale'))    return 'upscale';
+  if (p.includes('interpolate_')|| n.includes('interpolate')) return 'interpolate';
+  return g.type;
+}
+
+// ─── single gallery thumbnail ─────────────────────────────────────────────────
+
+function GalleryThumb({ generation, isPinned, isSelected, vote, onSelect, onTogglePin, onVote, onDelete }) {
+  const [imgErr, setImgErr] = useState(false);
+  const video   = isGenVideo(generation);
+  const seq     = generation.isSequence;
+  const preview = buildImageUrl(generation.preview);
+  const thumb   = generation.thumbnailUrl ? buildImageUrl(generation.thumbnailUrl) : null;
+  const ProcIcon = processingIcon(generation);
+  const procType = processingType(generation);
+  const ContentIcon = seq ? SequenceIcon : video ? Film : Camera;
+
+  return (
+    <div
+      className={`gallery-thumb${isSelected ? ' selected' : ''}${isPinned ? ' pinned' : ''}`}
+      onClick={() => onSelect(generation)}
+    >
+      <div className="gallery-thumb-media">
+        {!imgErr ? (
+          seq ? (
+            <img src={preview} alt="" onError={() => setImgErr(true)} />
+          ) : video ? (
+            thumb
+              ? <img src={thumb} alt="" onError={() => setImgErr(true)} />
+              : <video src={preview} muted preload="metadata" onError={() => setImgErr(true)} />
+          ) : (
+            <img src={preview} alt="" onError={() => setImgErr(true)} />
+          )
+        ) : (
+          <div className="gallery-thumb-error"><ContentIcon /></div>
+        )}
+
+        {/* content badge */}
+        <div className={`gen-history-type-badge content ${video ? 'video' : 'image'}`}>
+          <ContentIcon />
+        </div>
+        {/* processing badge */}
+        {ProcIcon && (
+          <div className={`gen-history-type-badge processing ${procType} ${generation.subtype || ''}`}>
+            <ProcIcon />
+          </div>
+        )}
+        {isPinned && (
+          <div className="gen-history-pinned-badge"><PinIcon /></div>
+        )}
+      </div>
+
+      {/* action bar */}
+      <div className="gen-history-actions-bar">
+        <button
+          className={`gen-history-pin ${isPinned ? 'active' : ''}`}
+          onClick={e => { e.stopPropagation(); onTogglePin(generation); }}
+          title={isPinned ? 'Unpin' : 'Pin'}
+        ><PinIcon /></button>
+        <div className="gen-history-actions-bar-right">
+          <button
+            className={`gen-history-vote up ${vote === 1 ? 'active' : ''}`}
+            onClick={e => { e.stopPropagation(); onVote(generation, vote === 1 ? 0 : 1); }}
+          ><ThumbsUp /></button>
+          <button
+            className={`gen-history-vote down ${vote === -1 ? 'active' : ''}`}
+            onClick={e => { e.stopPropagation(); onVote(generation, vote === -1 ? 0 : -1); }}
+          ><ThumbsDown /></button>
+          <button
+            className="gen-history-delete"
+            onClick={e => { e.stopPropagation(); onDelete(generation); }}
+            title="Delete"
+          ><Trash2 /></button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── metadata detail panel ────────────────────────────────────────────────────
+
+function GalleryDetail({ generation, isPinned, vote, onTogglePin, onVote, onDelete }) {
+  const preview = buildImageUrl(generation.preview);
+  const video   = isGenVideo(generation);
+  const ProcIcon = processingIcon(generation);
+  const procType = processingType(generation);
+
+  const typeColors = {
+    depth: '#3b82f6', normals: '#a855f7', crypto: '#f59e0b',
+    canny: '#22c55e', openpose: '#ef4444', video: '#6366f1',
+  };
+
+  return (
+    <div className="gallery-detail">
+      {/* large preview */}
+      <div className="gallery-detail-preview">
+        {video
+          ? <video src={preview} controls muted loop playsInline />
+          : <img src={preview} alt={generation.name || generation.id} />
+        }
+      </div>
+
+      {/* metadata */}
+      <div className="gallery-detail-meta">
+        <div className="gallery-detail-name">{generation.name || generation.id}</div>
+
+        <div className="gallery-detail-badges">
+          <span className={`gallery-badge type-${procType}`}>
+            {ProcIcon && <ProcIcon />}
+            {generation.type}
+          </span>
+          {generation.subtype && (
+            <span className="gallery-badge" style={{ background: typeColors[generation.subtype] || '#6b7280' }}>
+              {generation.subtype}
+            </span>
+          )}
+          {generation.isSequence && generation.frameCount && (
+            <span className="gallery-badge" style={{ background: '#6366f1' }}>
+              {generation.frameCount}f
+            </span>
+          )}
+          {vote === 1  && <span className="gallery-badge vote-up"><ThumbsUp /> good</span>}
+          {vote === -1 && <span className="gallery-badge vote-down"><ThumbsDown /> bad</span>}
+        </div>
+
+        <div className="gallery-detail-rows">
+          {generation.date      && <div className="gallery-detail-row"><span>Date</span><span>{generation.date}</span></div>}
+          {generation.timestamp && <div className="gallery-detail-row"><span>Time</span><span>{generation.timestamp}</span></div>}
+          {generation.path      && <div className="gallery-detail-row path"><span>Path</span><span title={generation.path}>{generation.path}</span></div>}
+          {generation.sourcePath && <div className="gallery-detail-row path"><span>Source</span><span title={generation.sourcePath}>{generation.sourcePath}</span></div>}
+        </div>
+
+        <div className="gallery-detail-actions">
+          <button
+            className={`gen-history-pin ${isPinned ? 'active' : ''}`}
+            onClick={() => onTogglePin(generation)}
+            title={isPinned ? 'Unpin' : 'Pin'}
+          ><PinIcon />{isPinned ? 'Unpin' : 'Pin'}</button>
+          <button
+            className={`gen-history-vote up ${vote === 1 ? 'active' : ''}`}
+            onClick={() => onVote(generation, vote === 1 ? 0 : 1)}
+          ><ThumbsUp />Good</button>
+          <button
+            className={`gen-history-vote down ${vote === -1 ? 'active' : ''}`}
+            onClick={() => onVote(generation, vote === -1 ? 0 : -1)}
+          ><ThumbsDown />Bad</button>
+          <button
+            className="gen-history-delete"
+            onClick={() => onDelete(generation)}
+          ><Trash2 />Delete</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── fullscreen gallery overlay ───────────────────────────────────────────────
+
+function FullscreenGallery({ generations, pinnedIds, votes, onTogglePin, onVote, onDelete, onClose }) {
+  const [zoom, setZoom]       = useState(160);
+  const [selected, setSelected] = useState(null);
+
+  // Close on Escape, arrow-key navigation, +/- zoom
+  useEffect(() => {
+    const handle = e => {
+      if (e.key === 'Escape') { onClose(); return; }
+      if (e.key === '+' || e.key === '=') { setZoom(z => Math.min(z + 20, 320)); return; }
+      if (e.key === '-')                  { setZoom(z => Math.max(z - 20, 80));  return; }
+      if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+        setSelected(prev => {
+          if (!prev) return generations[0] || null;
+          const idx = generations.findIndex(g => g.id === prev.id);
+          const next = e.key === 'ArrowRight' ? idx + 1 : idx - 1;
+          return generations[Math.max(0, Math.min(next, generations.length - 1))] || prev;
+        });
+      }
+    };
+    window.addEventListener('keydown', handle);
+    return () => window.removeEventListener('keydown', handle);
+  }, [onClose, generations]);
+
+  // Wrap delete so gallery deselects a deleted item
+  const handleDelete = useCallback(async generation => {
+    if (!confirm(`Delete ${generation.name || generation.id}?`)) return;
+    await onDelete(generation);
+    setSelected(s => s?.id === generation.id ? null : s);
+  }, [onDelete]);
+
+  const pinnedGens   = generations.filter(g => pinnedIds.includes(g.id));
+  const unpinnedGens = generations.filter(g => !pinnedIds.includes(g.id));
+
+  return (
+    <div className="gallery-overlay" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      {/* header */}
+      <div className="gallery-header">
+        <div className="gallery-header-left">
+          <Clock />
+          <span className="gallery-header-title">Gallery</span>
+          <span className="gallery-header-count">{generations.length} items</span>
+        </div>
+        <div className="gallery-header-center">
+          <label className="gallery-zoom-label">
+            <span>Size</span>
+            <input
+              type="range" min={80} max={320} step={20}
+              value={zoom}
+              onChange={e => setZoom(Number(e.target.value))}
+              className="gallery-zoom-slider"
+            />
+            <span>{zoom}px</span>
+          </label>
+        </div>
+        <div className="gallery-header-right">
+          {selected && (
+            <button className="gallery-deselect-btn" onClick={() => setSelected(null)} title="Close detail">
+              <Info />
+            </button>
+          )}
+          <button className="gallery-close-btn" onClick={onClose} title="Close gallery (Esc)">
+            <X />
+          </button>
+        </div>
+      </div>
+
+      {/* body */}
+      <div className={`gallery-body${selected ? ' has-detail' : ''}`}>
+        <div className="gallery-grid-wrap">
+          {pinnedGens.length > 0 && (
+            <div className="gallery-section-label"><PinIcon /> Pinned</div>
+          )}
+          {pinnedGens.length > 0 && (
+            <div className="gallery-grid" style={{ '--thumb-w': `${zoom}px` }}>
+              {pinnedGens.map(g => (
+                <GalleryThumb
+                  key={g.id} generation={g}
+                  isPinned={true}
+                  isSelected={selected?.id === g.id}
+                  vote={votes[g.id] || 0}
+                  onSelect={setSelected}
+                  onTogglePin={onTogglePin}
+                  onVote={onVote}
+                  onDelete={handleDelete}
+                />
+              ))}
+            </div>
+          )}
+          {unpinnedGens.length > 0 && pinnedGens.length > 0 && (
+            <div className="gallery-section-label" style={{ marginTop: '1rem' }}>Recent</div>
+          )}
+          <div className="gallery-grid" style={{ '--thumb-w': `${zoom}px` }}>
+            {unpinnedGens.map(g => (
+              <GalleryThumb
+                key={g.id} generation={g}
+                isPinned={false}
+                isSelected={selected?.id === g.id}
+                vote={votes[g.id] || 0}
+                onSelect={setSelected}
+                onTogglePin={onTogglePin}
+                onVote={onVote}
+                onDelete={handleDelete}
+              />
+            ))}
+          </div>
+        </div>
+
+        {selected && (
+          <GalleryDetail
+            generation={selected}
+            isPinned={pinnedIds.includes(selected.id)}
+            vote={votes[selected.id] || 0}
+            onTogglePin={onTogglePin}
+            onVote={onVote}
+            onDelete={handleDelete}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── main component ───────────────────────────────────────────────────────────
+
 export default function GenerationHistory({ project, collapsed, onToggle, playbackSpeed }) {
   const [generations, setGenerations] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -358,6 +670,7 @@ export default function GenerationHistory({ project, collapsed, onToggle, playba
   const [hasMore, setHasMore] = useState({ image: false, video: false });
   // votes: { [generation.id]: 1 | -1 | 0 }
   const [votes, setVotes] = useState({});
+  const [galleryOpen, setGalleryOpen] = useState(false);
   
   // Video playback speed refs
   const hoverVideoRef = useVideoPlayback(playbackSpeed);
@@ -568,22 +881,24 @@ export default function GenerationHistory({ project, collapsed, onToggle, playba
     }
   }, []);
 
-  const handleDelete = async (generation) => {
-    if (!confirm(`Delete ${generation.name || generation.id}?`)) return;
-    
+  // Raw delete (no confirm) — callers handle confirmation
+  const deleteGeneration = useCallback(async (generation) => {
     try {
       const res = await fetch(`${API_URL}/project/generations/${encodeURIComponent(generation.id)}`, {
         method: 'DELETE'
       });
-      
       if (res.ok) {
         setGenerations(prev => prev.filter(g => g.id !== generation.id));
-        // Also remove from pinned if it was pinned
         setPinnedIds(prev => prev.filter(p => p !== generation.id));
       }
     } catch (err) {
       console.error('Failed to delete:', err);
     }
+  }, [setPinnedIds]);
+
+  const handleDelete = async (generation) => {
+    if (!confirm(`Delete ${generation.name || generation.id}?`)) return;
+    await deleteGeneration(generation);
   };
 
   // Count by type for header
@@ -625,7 +940,15 @@ export default function GenerationHistory({ project, collapsed, onToggle, playba
           <span className="gen-history-days-label">
             {imgLimit >= 1000 ? 'All' : `${imgLimit}/${videoLimit}`}
           </span>
-          <button 
+          <button
+            className="gen-history-refresh"
+            onClick={() => setGalleryOpen(true)}
+            disabled={generations.length === 0}
+            title="Open gallery"
+          >
+            <Maximize2 />
+          </button>
+          <button
             className="gen-history-refresh"
             onClick={handleRefresh}
             disabled={loading}
@@ -721,10 +1044,23 @@ export default function GenerationHistory({ project, collapsed, onToggle, playba
       
       {/* Hover preview popup */}
       {hoveredItem && (
-        <HoverPreview 
-          generation={hoveredItem} 
+        <HoverPreview
+          generation={hoveredItem}
           position={hoverPosition}
           videoRef={hoverVideoRef}
+        />
+      )}
+
+      {/* Fullscreen gallery overlay */}
+      {galleryOpen && (
+        <FullscreenGallery
+          generations={generations}
+          pinnedIds={pinnedIds}
+          votes={votes}
+          onTogglePin={handleTogglePin}
+          onVote={handleVote}
+          onDelete={deleteGeneration}
+          onClose={() => setGalleryOpen(false)}
         />
       )}
     </div>
