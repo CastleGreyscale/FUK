@@ -372,11 +372,20 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
     setFormData(prev => ({ ...prev, control_path: paths[0] || null }));
   };
 
-  // Check if task requires images or control video
-  const isFunControl = formData.task.includes('-FC');
-  const requiresStartImage = formData.task.includes('i2v') || formData.task.includes('flf2v');
-  const requiresEndImage = formData.task.includes('flf2v');
-  const requiresControlVideo = isFunControl;
+  // Check if task requires images or control video — derive from model supports if available,
+  // fall back to string-matching legacy task values (e.g. when videoModels haven't loaded yet)
+  const selectedModel = videoModels.find(m => m.key === formData.task);
+  const modelSupports = selectedModel?.supports || [];
+  const requiresControlVideo = modelSupports.length > 0
+    ? modelSupports.includes('vace_video')
+    : formData.task.includes('-FC');
+  const isFunControl = requiresControlVideo;
+  const requiresStartImage = modelSupports.length > 0
+    ? modelSupports.includes('input_image') || modelSupports.includes('vace_reference_image')
+    : formData.task.includes('i2v') || formData.task.includes('flf2v');
+  const requiresEndImage = modelSupports.length > 0
+    ? modelSupports.includes('end_image')
+    : formData.task.includes('flf2v');
   
   // Calculate whether current frame input is valid
   const currentFrameValid = (parseInt(frameInput) - 1) % 4 === 0;
