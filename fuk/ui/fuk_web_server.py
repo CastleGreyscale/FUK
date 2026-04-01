@@ -883,6 +883,33 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
         if _resolution_source is None and control_images:
             _resolution_source = control_images[0]
 
+        # Eligen .ora/.psd as resolution source when no control image is present
+        if _resolution_source is None and eligen_source_abs and eligen_source_abs.is_file():
+            _ext = eligen_source_abs.suffix.lower()
+            if _ext == ".ora":
+                # ORA is a ZIP — PIL can't open it; read canvas dims from XML manifest
+                import zipfile as _zipfile
+                import xml.etree.ElementTree as _ET
+                try:
+                    with _zipfile.ZipFile(eligen_source_abs, "r") as _zf:
+                        _root = _ET.fromstring(_zf.read("stack.xml"))
+                    _ora_w = int(_root.get("w", 0))
+                    _ora_h = int(_root.get("h", 0))
+                    if _ora_w > 0 and _ora_h > 0:
+                        _ora_w = ((_ora_w + 15) // 16) * 16
+                        _ora_h = ((_ora_h + 15) // 16) * 16
+                        if _ora_w != request.width or _ora_h != request.height:
+                            log.info("ImageGen",
+                                     f"Resolution override: {request.width}x{request.height} → "
+                                     f"{_ora_w}x{_ora_h} (from {eligen_source_abs.name})")
+                        request.width = _ora_w
+                        request.height = _ora_h
+                except Exception as _e:
+                    log.info("ImageGen", f"Could not read ORA canvas dimensions: {_e}")
+            else:
+                # PSD and other image files — let PIL handle them below
+                _resolution_source = eligen_source_abs
+
         if _resolution_source:
             from PIL import Image as _PILImage
             try:

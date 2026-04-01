@@ -228,7 +228,8 @@ class QwenPipelineRunner(PipelineRunner):
         Return the master source image path for dimension inheritance.
 
         Priority: control_image (first if list) → context_image → None.
-        eligen_source is a mask directory, not an image — skip it.
+        eligen_source may be a directory or .ora/.psd file; resolution
+        inheritance for eligen is handled upstream in the web server.
         Returns None for pure t2i (no source images at all).
         """
         if control_image:

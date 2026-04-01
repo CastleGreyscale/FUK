@@ -157,50 +157,9 @@ def ensure_project_loaded():
             print(f"[PROJECT] Failed to auto-load {latest_file.name}: {e}", flush=True)
             return False
     else:
-        # No project files exist, create a default one
-        print("[PROJECT] No project files found, creating default project", flush=True)
-        
-        try:
-            # Get folder name for project name
-            folder_name = _project_folder.name
-            now = datetime.now()
-            version = now.strftime("%y%m%d")
-            filename = f"{folder_name}_shot01_{version}.json"
-            file_path = _project_folder / filename
-            
-            # Create default project state
-            state = {
-                "meta": {
-                    "version": "1.0",
-                    "createdAt": now.isoformat(),
-                    "updatedAt": now.isoformat(),
-                    "fukVersion": "1.0.0",
-                },
-                "project": {
-                    "name": folder_name,
-                    "shot": "01",
-                    "version": version,
-                },
-                "tabs": {
-                    "image": {},
-                    "video": {},
-                    "preprocess": {},
-                },
-                "assets": {},
-                "lastState": {},
-                "notes": "",
-            }
-            
-            with open(file_path, 'w') as f:
-                json.dump(state, f, indent=2)
-            
-            _project_state = state
-            print(f"[PROJECT] Created default project: {filename}", flush=True)
-            return True
-            
-        except Exception as e:
-            print(f"[PROJECT] Failed to create default project: {e}", flush=True)
-            return False
+        # No project files exist - let frontend prompt for a name
+        print("[PROJECT] No project files found, waiting for user to create one", flush=True)
+        return False
 
 
 def get_project_cache_dir() -> Path:
@@ -683,8 +642,9 @@ async def create_new(data: dict = Body(...)):
     
     # Import DEFAULTS from main module
     from fuk_web_server import DEFAULTS
-    
+
     # Create project state populated with defaults from defaults.json
+    # Use sections directly so field names match defaults.json exactly
     state = {
         "meta": {
             "version": "1.0",
@@ -698,31 +658,8 @@ async def create_new(data: dict = Body(...)):
             "version": version,
         },
         "tabs": {
-            "image": {
-                "positive_prompt": DEFAULTS.get("image", {}).get("positive_prompt", ""),
-                "negative_prompt": DEFAULTS.get("image", {}).get("negative_prompt", ""),
-                "width": DEFAULTS.get("image", {}).get("width", 1344),
-                "aspect_ratio": DEFAULTS.get("image", {}).get("aspect_ratio", "Widescreen"),
-                "infer_steps": DEFAULTS.get("image", {}).get("infer_steps", 20),
-                "guidance_scale": DEFAULTS.get("image", {}).get("guidance_scale", 2.1),
-                "flow_shift": DEFAULTS.get("image", {}).get("flow_shift", 2.1),
-                "blocks_to_swap": DEFAULTS.get("image", {}).get("blocks_to_swap", 0),
-                "lora_multiplier": DEFAULTS.get("image", {}).get("lora_multiplier", 1.0),
-                "seed": DEFAULTS.get("image", {}).get("seed"),
-            },
-            "video": {
-                "task": DEFAULTS.get("video", {}).get("task", "i2v-A14B"),
-                "positive_prompt": DEFAULTS.get("video", {}).get("positive_prompt", ""),
-                "negative_prompt": DEFAULTS.get("video", {}).get("negative_prompt", ""),
-                "length": DEFAULTS.get("video", {}).get("length", 41),
-                "scale_factor": DEFAULTS.get("video", {}).get("scale_factor", 1.0),
-                "infer_steps": DEFAULTS.get("video", {}).get("infer_steps", 20),
-                "guidance_scale": DEFAULTS.get("video", {}).get("guidance_scale", 5.0),
-                "flow_shift": DEFAULTS.get("video", {}).get("flow_shift", 2.1),
-                "blocks_to_swap": DEFAULTS.get("video", {}).get("blocks_to_swap", 5),
-                "lora_multiplier": DEFAULTS.get("video", {}).get("lora_multiplier", 1.0),
-                "seed": DEFAULTS.get("video", {}).get("seed"),
-            },
+            "image": dict(DEFAULTS.get("image", {})),
+            "video": dict(DEFAULTS.get("video", {})),
             "preprocess": DEFAULTS.get("preprocess", {}),
             "postprocess": DEFAULTS.get("postprocess", {}),
             "export": DEFAULTS.get("export", {}),

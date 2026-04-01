@@ -26,7 +26,7 @@ export default function ProjectBar({
 }) {
   const [showNewShotInput, setShowNewShotInput] = useState(false);
   const [newShotNumber, setNewShotNumber] = useState('');
-  const [showNewProjectDialog, setShowNewProjectDialog] = useState(false);
+  const [showNewProjectDialog, setShowNewProjectDialog] = useState(!hasFiles);
   const [newProjectName, setNewProjectName] = useState('');
 
   const handleNewShotSubmit = (e) => {
