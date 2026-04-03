@@ -1154,19 +1154,30 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
         # Export to EXR if requested
         if request.export_exr:
             active_generations[generation_id]["phase"] = "exporting_exr"
-            
-            # NOTE: Latent-to-EXR disabled - VAE mismatch causes render artifacts.
-            # Always use the MP4 path until VAE matching is resolved.
-            # latent_path = gen_dir / "latent.safetensors"
-            # if latent_path.exists():
-            #     exr_dir = video_manager.export_latent_to_exr(...)
-            
-            exr_dir = video_manager.export_to_exr_sequence(
-                gen_dir=gen_dir,
-                video_path=paths["generated_mp4"],
-                linear=True
-            )
-            
+
+            from core.exr_exporter import EXRExporter
+            latent_path = gen_dir / "latents" / "generated.latent.pt"
+            exr_out_dir = gen_dir / "exr_frames"
+
+            if latent_path.exists():
+                log.info("VideoGen", f"Decoding latent → EXR (lossless): {latent_path.name}")
+                exr_exporter = EXRExporter()
+                exr_exporter.export_video_sequence(
+                    beauty_latent=latent_path,
+                    aov_layers={},
+                    backend=generation_backend,
+                    output_dir=exr_out_dir,
+                    model_type=request.task,
+                )
+                exr_dir = exr_out_dir
+            else:
+                log.warning("VideoGen", "Latent not found — falling back to MP4 decode (lossy)")
+                exr_dir = video_manager.export_to_exr_sequence(
+                    gen_dir=gen_dir,
+                    video_path=paths["generated_mp4"],
+                    linear=True
+                )
+
             outputs["exr_sequence"] = get_project_relative_url(exr_dir)
         
         # Save metadata
