@@ -1252,6 +1252,24 @@ async def generate_video(request: VideoGenerationRequest, background_tasks: Back
         message="Video generation started"
     )
 
+@app.get("/api/video/info")
+async def get_video_info(path: str):
+    """Get video metadata (frame count, fps, dimensions) for frame count inheritance."""
+    resolved = resolve_input_path(path)
+    if not resolved or not resolved.exists():
+        raise HTTPException(status_code=404, detail="Video file not found")
+    try:
+        vp = VideoProcessor()
+        info = vp.get_video_info(resolved)
+        return {
+            "frame_count": info["frame_count"],
+            "fps": round(info["fps"], 3),
+            "width": info["width"],
+            "height": info["height"],
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read video info: {e}")
+
 # ============================================================================
 # Cancel Generation
 # ============================================================================

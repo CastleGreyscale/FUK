@@ -46,6 +46,12 @@ function roundToValid4n1(frames) {
   return Math.max(5, 4 * n + 1); // Minimum 5 frames
 }
 
+// Round UP to next valid 4n+1 (ensures output is >= input frames)
+function roundUpToValid4n1(frames) {
+  const n = Math.ceil((frames - 1) / 4);
+  return Math.max(5, 4 * n + 1);
+}
+
 // Get duration string from frame count (assuming 24fps output)
 function getFrameDuration(frames, fps = 24) {
   const seconds = frames / fps;
@@ -90,6 +96,8 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
     source_height: videoDefaults.source_height ?? null,
     vram_preset: config?.models?.vram_preset_default ?? 'low',
     batchCount: 1,
+    frame_inherit: videoDefaults.frame_inherit ?? true,
+    trim_frames: videoDefaults.trim_frames ?? null,
   }), [videoDefaults]);
   
   // Fallback localStorage for when no project is loaded
@@ -133,6 +141,9 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
 
   // Frame input state (for controlled input before validation)
   const [frameInput, setFrameInput] = useState(String(formData.video_length || 81));
+
+  // Source video metadata (populated when control_path is a video)
+  const [sourceVideoInfo, setSourceVideoInfo] = useState(null);
 
   // Metadata reload from history drag
   const [metaDragOver, setMetaDragOver] = useState(false);
@@ -224,6 +235,62 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
       img.src = buildImageUrl(formData.image_path);
     }
   }, [formData.image_path, setFormData]);
+
+  // Fetch video info when control_path changes — drives frame count inheritance
+  useEffect(() => {
+    if (!formData.control_path) {
+      setSourceVideoInfo(null);
+      return;
+    }
+    const cleanPath = formData.control_path.replace(/^\/outputs\//, '').replace(/^\//, '');
+    fetch(`/api/video/info?path=${encodeURIComponent(cleanPath)}`)
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(info => {
+        setSourceVideoInfo(info);
+        if (formData.frame_inherit !== false) {
+          const base = roundUpToValid4n1(info.frame_count);
+          const frames = formData.trim_frames
+            ? roundToValid4n1(Math.min(base, formData.trim_frames))
+            : base;
+          setFrameInput(String(frames));
+          setFormData(prev => ({ ...prev, video_length: frames }));
+        }
+      })
+      .catch(() => setSourceVideoInfo(null));
+  }, [formData.control_path]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Re-apply inheritance when frame_inherit is toggled on
+  const handleFrameInheritToggle = (enabled) => {
+    setFormData(prev => {
+      const newData = { ...prev, frame_inherit: enabled };
+      if (enabled && sourceVideoInfo) {
+        const base = roundUpToValid4n1(sourceVideoInfo.frame_count);
+        const frames = prev.trim_frames
+          ? roundToValid4n1(Math.min(base, prev.trim_frames))
+          : base;
+        setFrameInput(String(frames));
+        return { ...newData, video_length: frames };
+      }
+      return newData;
+    });
+  };
+
+  // Re-apply inherited frame count when trim value changes
+  const handleTrimChange = (value) => {
+    const trimVal = value ? parseInt(value) : null;
+    setFormData(prev => {
+      const newData = { ...prev, trim_frames: trimVal };
+      if (prev.frame_inherit !== false && sourceVideoInfo) {
+        const base = roundUpToValid4n1(sourceVideoInfo.frame_count);
+        const frames = trimVal
+          ? roundToValid4n1(Math.min(base, trimVal))
+          : base;
+        setFrameInput(String(frames));
+        return { ...newData, video_length: frames };
+      }
+      return newData;
+    });
+  };
 
   // Update output dimensions when scale factor changes
   const handleScaleChange = (newScale) => {
@@ -760,6 +827,25 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
                 Frames
                 <span className="fuk-label-description">(must be 4n+1)</span>
               </label>
+
+              {/* Source video info + inherit toggle */}
+              {sourceVideoInfo && (
+                <div className="fuk-input-inline fuk-mb-2">
+                  <span className="fuk-label-description">
+                    Source: {sourceVideoInfo.frame_count} frames @ {sourceVideoInfo.fps.toFixed(1)}fps
+                  </span>
+                  <label className="fuk-checkbox-option" style={{ marginLeft: 'auto' }}>
+                    <input
+                      type="checkbox"
+                      className="fuk-checkbox"
+                      checked={formData.frame_inherit !== false}
+                      onChange={(e) => handleFrameInheritToggle(e.target.checked)}
+                    />
+                    <span>Inherit</span>
+                  </label>
+                </div>
+              )}
+
               <div className="fuk-input-inline">
                 <input
                   type="number"
@@ -779,6 +865,23 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
                 <p className="fuk-help-text fuk-help-text--info">
                   Will round to {validFrameCount} frames ({getFrameDuration(validFrameCount)})
                 </p>
+              )}
+
+              {/* Trim — visible when source video detected, caps inherited frame count */}
+              {sourceVideoInfo && (
+                <div className="fuk-input-inline fuk-mt-2">
+                  <label className="fuk-label" style={{ whiteSpace: 'nowrap', marginBottom: 0 }}>Trim to</label>
+                  <input
+                    type="number"
+                    className="fuk-input fuk-input--w-80"
+                    value={formData.trim_frames ?? ''}
+                    onChange={(e) => handleTrimChange(e.target.value)}
+                    placeholder="no limit"
+                    min={5}
+                    step={4}
+                  />
+                  <span className="fuk-input-result">frames max</span>
+                </div>
               )}
             </div>
           </div>
