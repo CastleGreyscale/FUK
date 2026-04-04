@@ -11,6 +11,7 @@ import PreprocessTab from './tabs/PreprocessTab';
 import PostprocessTab from './tabs/PostprocessTab';
 import LayersTab from './tabs/LayersTab';
 import ExportTab from './tabs/ExportTab';
+import UtilitiesTab from './tabs/UtilitiesTab';
 import { fetchConfig } from './utils/api';
 import { useProject } from './hooks/useProject';
 import { GenerationHistory } from './components';
@@ -162,6 +163,8 @@ export default function App() {
         return <LayersTab {...tabProps} />;
       case 'export':
         return <ExportTab {...tabProps} />;
+      case 'utilities':
+        return <UtilitiesTab {...tabProps} />;
       default:
         return null;
     }

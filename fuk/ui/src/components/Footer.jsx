@@ -5,7 +5,7 @@
 
 import TabButton from './TabButton';
 import ProgressBar from './ProgressBar';
-import { Camera, Film, Pipeline, Enhance, Save, FukMonogram, Loader2, X, Layers } from './Icons';
+import { Camera, Film, Pipeline, Enhance, Save, FukMonogram, Loader2, X, Layers, Wrench } from './Icons';
 
 export default function Footer({
   activeTab,
@@ -27,6 +27,12 @@ export default function Footer({
       {/* Tabs - Center */}
       <div className="fuk-footer-center">
         <div className="fuk-tabs">
+          <TabButton
+            active={activeTab === 'utilities'}
+            onClick={() => setActiveTab('utilities')}
+            icon={<Wrench style={{ width: '1rem', height: '1rem' }} />}
+            label="Utilities"
+          />
           <TabButton
             active={activeTab === 'preprocess'}
             onClick={() => setActiveTab('preprocess')}

@@ -53,6 +53,7 @@ from core.video_processor import VideoProcessor
 import json
 import asyncio
 import uuid
+import subprocess
 from datetime import datetime
 from enum import Enum
 import time
@@ -1691,14 +1692,92 @@ class RemoveSeedRequest(BaseModel):
 async def remove_seed(request: RemoveSeedRequest):
     """Remove a saved seed"""
     seeds = _load_seeds()
-    
+
     if request.model in seeds:
         seeds[request.model] = [s for s in seeds[request.model] if s["seed"] != request.seed]
         if not seeds[request.model]:
             del seeds[request.model]
         _save_seeds(seeds)
-    
+
     return {"success": True}
+
+# ============================================================================
+# Utilities — Blend Template
+# ============================================================================
+
+BLEND_GEN_SCRIPT = UI_DIR / "blend_gen_script.py"
+
+class BlendTemplateRequest(BaseModel):
+    width:       int   = 1920
+    height:      int   = 1080
+    frame_count: int   = 25
+    fps:         float = 24.0
+    save_dir:    str
+    filename:    str   = "template"
+
+@app.post("/api/utilities/blend-template")
+async def generate_blend_template(request: BlendTemplateRequest):
+    """
+    Generate a configured .blend template file via Blender headless mode.
+    Blender must be installed; path is read from defaults.json tools.blender
+    (defaults to the 'blender' command on PATH).
+    """
+    tools       = DEFAULTS.get("tools", {})
+    blender_cmd = tools.get("blender", "blender")
+    template    = tools.get("blender_template", "").strip()
+
+    if not BLEND_GEN_SCRIPT.exists():
+        raise HTTPException(status_code=500, detail="blend_gen_script.py not found alongside server")
+
+    save_dir = Path(request.save_dir)
+    if not save_dir.exists():
+        raise HTTPException(status_code=400, detail=f"Save directory does not exist: {save_dir}")
+
+    safe_name = "".join(c for c in request.filename if c.isalnum() or c in "-_ ").strip() or "template"
+    if not safe_name.endswith(".blend"):
+        safe_name += ".blend"
+    output_path = str(save_dir / safe_name)
+
+    args_json = json.dumps({
+        "output_path":  output_path,
+        "width":        request.width,
+        "height":       request.height,
+        "frame_count":  request.frame_count,
+        "fps":          request.fps,
+    })
+
+    # If a user template is configured and exists, open it; otherwise start blank
+    template_args = []
+    if template:
+        if Path(template).exists():
+            template_args = [template]
+            log.info("BlendTemplate", f"Using template: {template}")
+        else:
+            log.warning("BlendTemplate", f"blender_template not found at '{template}', starting from blank scene")
+
+    cmd = [blender_cmd, "--background"] + template_args + ["--python", str(BLEND_GEN_SCRIPT), "--", args_json]
+    log.info("BlendTemplate", f"Running blender → {output_path}")
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"Blender not found at '{blender_cmd}'. "
+                "Install Blender and ensure it is on PATH, or set tools.blender in config/defaults.json."
+            ),
+        )
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=500, detail="Blender timed out after 60 seconds")
+
+    if result.returncode != 0:
+        log.error("BlendTemplate", result.stderr or result.stdout)
+        raise HTTPException(status_code=500, detail=f"Blender error: {result.stderr or result.stdout}")
+
+    log.success("BlendTemplate", f"Saved → {output_path}")
+    return {"success": True, "path": output_path}
+
 
 # ============================================================================
 # PreProcessors

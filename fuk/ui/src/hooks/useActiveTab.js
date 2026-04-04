@@ -12,7 +12,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useLocalStorage } from './useLocalStorage';
 
 // Default tab order for validation
-const VALID_TABS = ['image', 'video', 'preprocess', 'postprocess', 'layers', 'export'];
+const VALID_TABS = ['utilities', 'image', 'video', 'preprocess', 'postprocess', 'layers', 'export'];
 
 export function useActiveTab(project, defaultTab = 'image') {
   // Fallback to localStorage when no project
