@@ -6,6 +6,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import Footer from '../components/Footer';
+import LoraDatasetBuilder from './LoraDatasetBuilder';
 
 // ============================================================================
 // Helpers
@@ -592,7 +593,7 @@ function SpecTool({ config }) {
 
 const SUB_TABS = [
   { key: 'spec', label: 'Spec Tool' },
-  { key: 'lora', label: 'LoRA Trainer', disabled: true },
+  { key: 'lora', label: 'LoRA Dataset Builder' },
 ];
 
 export default function UtilitiesTab({ activeTab, setActiveTab, config }) {
@@ -627,6 +628,7 @@ export default function UtilitiesTab({ activeTab, setActiveTab, config }) {
       {/* Sub-tab content */}
       <div style={{ flex: 1, overflow: 'hidden' }}>
         {subTab === 'spec' && <SpecTool config={config} />}
+        {subTab === 'lora' && <LoraDatasetBuilder config={config} />}
       </div>
 
       {/* Footer */}

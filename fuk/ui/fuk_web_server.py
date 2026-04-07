@@ -50,6 +50,7 @@ from video_endpoints import setup_video_routes
 from core.diffsynth_backend import DiffSynthBackend
 from core.video_processor import VideoProcessor
 # [LAYER STACK DISABLED] from layer_stack_endpoints import setup_layer_routes, initialize_layer_endpoints
+from lora_dataset_endpoints import setup_dataset_routes
 import json
 import asyncio
 import uuid
@@ -3434,6 +3435,18 @@ setup_video_routes(
 # [LAYER STACK DISABLED]
 # initialize_layer_endpoints(generation_backend, CACHE_ROOT)
 # setup_layer_routes(app)
+
+# ============================================================================
+# LoRA Dataset Builder
+# ============================================================================
+
+setup_dataset_routes(
+    app=app,
+    generation_backend=generation_backend,
+    datasets_root=OUTPUT_ROOT / "lora_datasets",
+    defaults=DEFAULTS,
+    resolve_input_path=resolve_input_path,
+)
 
 # ============================================================================
 # Generic Task System
