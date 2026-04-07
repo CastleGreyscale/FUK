@@ -139,7 +139,7 @@ class PipelineRunner:
         if not p.exists():
             _log(self.log_prefix, f"Image not found: {p}", "warning")
             return None
-        img = Image.open(str(p))
+        img = Image.open(str(p)).convert("RGB")
         if width and height:
             img = img.resize((width, height))
         return img
@@ -161,7 +161,7 @@ class PipelineRunner:
         for p in paths:
             p = Path(str(p))
             if p.exists():
-                img = Image.open(str(p))
+                img = Image.open(str(p)).convert("RGB")
                 if width and height and (img.width != width or img.height != height):
                     _log(self.log_prefix,
                          f"  Resizing edit image {p.name}: {img.width}x{img.height} → {width}x{height}")
