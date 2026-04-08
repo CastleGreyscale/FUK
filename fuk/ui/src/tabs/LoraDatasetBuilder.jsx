@@ -9,27 +9,11 @@ import ImageUploader from '../components/ImageUploader';
 import { ThumbsUp, ThumbsDown, CheckCircle } from '../components/Icons';
 import { buildImageUrl } from '../utils/constants';
 
-// ============================================================================
-// Variation pack definitions (mirrors lora_dataset_manager.py VARIATION_PRESETS)
-// ============================================================================
-
-const PRESETS = {
-  character: {
-    angles:      { label: 'Angles',      count: 7 },
-    expressions: { label: 'Expressions', count: 7 },
-    environments:{ label: 'Environments',count: 5 },
-    lighting:    { label: 'Lighting',    count: 5 },
-  },
-  product: {
-    angles:   { label: 'Angles',   count: 5 },
-    surfaces: { label: 'Surfaces', count: 4 },
-    lighting: { label: 'Lighting', count: 4 },
-  },
-  environment: {
-    time_of_day: { label: 'Time of Day', count: 4 },
-    weather:     { label: 'Weather',     count: 5 },
-    season:      { label: 'Season',      count: 4 },
-  },
+// Pack labels — used when presets haven't loaded yet (avoids blank UI on first render)
+const PACK_LABELS = {
+  character:   { angles: 'Angles', expressions: 'Expressions', environments: 'Environments', lighting: 'Lighting' },
+  product:     { angles: 'Angles', surfaces: 'Surfaces', lighting: 'Lighting' },
+  environment: { time_of_day: 'Time of Day', weather: 'Weather', season: 'Season' },
 };
 
 // Fallback defaults if not in config
@@ -68,6 +52,15 @@ function SetupPhase({ config, onStart }) {
   const [starting, setStarting]         = useState(false);
   const [error, setError]               = useState(null);
   const [sourceDragOver, setSourceDragOver] = useState(false);
+  const [serverPresets, setServerPresets]   = useState(null);
+
+  // Load live presets so pack counts are always accurate (no manual JSX update needed)
+  useEffect(() => {
+    fetch('/api/dataset/presets')
+      .then(r => r.json())
+      .then(setServerPresets)
+      .catch(() => {});
+  }, []);
 
   // Reset packs when subject type changes (keep params as-is)
   useEffect(() => {
@@ -115,7 +108,7 @@ function SetupPhase({ config, onStart }) {
     .map(([k]) => k);
 
   const totalVariations = selectedPacks.reduce((acc, pk) => {
-    return acc + (PRESETS[subjectType]?.[pk]?.count ?? 0);
+    return acc + (serverPresets?.[subjectType]?.[pk]?.variations?.length ?? 0);
   }, 0);
 
   const canStart = sources.length > 0 && subjectName.trim() && selectedPacks.length > 0;
@@ -153,7 +146,16 @@ function SetupPhase({ config, onStart }) {
     }
   };
 
-  const currentPacks = PRESETS[subjectType] || {};
+  // Derive pack list from server presets (live count) with PACK_LABELS as fallback labels
+  const currentPacks = Object.entries(
+    serverPresets?.[subjectType] ?? PACK_LABELS[subjectType] ?? {}
+  ).reduce((acc, [key, val]) => {
+    acc[key] = {
+      label: val.label ?? PACK_LABELS[subjectType]?.[key] ?? key,
+      count: val.variations?.length ?? 0,
+    };
+    return acc;
+  }, {});
   const loras = config?.models?.loras || [];
 
   return (
@@ -516,8 +518,9 @@ function VariationThumbnail({ variation, jobId }) {
 // ============================================================================
 
 function CurationPhase({ jobId }) {
-  const [job, setJob]         = useState(null);
-  const [exporting, setExporting] = useState(false);
+  const [job, setJob]               = useState(null);
+  const [exportDir, setExportDir]   = useState('');
+  const [exporting, setExporting]   = useState(false);
   const [exportResult, setExportResult] = useState(null);
 
   const fetchJob = useCallback(() => {
@@ -538,11 +541,27 @@ function CurationPhase({ jobId }) {
     fetchJob();
   };
 
+  const handleBrowseExportDir = async () => {
+    try {
+      const res = await fetch('/api/browser/directory', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: 'Choose export folder for approved images' }),
+      });
+      const data = await res.json();
+      if (data.success && data.directory) setExportDir(data.directory);
+    } catch (_) {}
+  };
+
   const handleExport = async () => {
     setExporting(true);
     setExportResult(null);
     try {
-      const res = await fetch(`/api/dataset/${jobId}/export`, { method: 'POST' });
+      const res = await fetch(`/api/dataset/${jobId}/export`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target_dir: exportDir || null }),
+      });
       const data = await res.json();
       setExportResult(data);
     } catch (err) {
@@ -577,23 +596,44 @@ function CurationPhase({ jobId }) {
             {approvedCount} approved
           </span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           {exportResult && (
             <span style={{
               fontSize: '0.72rem', fontFamily: 'monospace',
               color: exportResult.ok ? 'var(--success-color, #22c55e)' : 'var(--error-color, #ef4444)',
-              overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '300px', whiteSpace: 'nowrap',
+              overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '280px', whiteSpace: 'nowrap',
             }}>
-              {exportResult.ok ? `✓ ${exportResult.exported} images → ${exportResult.path}` : `✗ ${exportResult.error}`}
+              {exportResult.ok ? `✓ ${exportResult.exported} → ${exportResult.path}` : `✗ ${exportResult.error}`}
             </span>
           )}
+          {/* Directory picker */}
+          <div
+            className="fuk-input"
+            onClick={handleBrowseExportDir}
+            title="Click to choose export folder (defaults to job's approved/ subfolder)"
+            style={{
+              fontSize: '0.72rem', cursor: 'pointer', maxWidth: '200px',
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              color: exportDir ? 'var(--text-primary)' : 'var(--text-muted)',
+              userSelect: 'none',
+            }}
+          >
+            {exportDir || 'Default: approved/'}
+          </div>
+          <button
+            className="fuk-btn fuk-btn-secondary"
+            onClick={handleBrowseExportDir}
+            style={{ fontSize: '0.72rem', padding: '0.15rem 0.5rem', flexShrink: 0 }}
+          >
+            Browse
+          </button>
           <button
             className="fuk-btn fuk-btn-primary"
             onClick={handleExport}
             disabled={approvedCount === 0 || exporting}
-            style={{ fontSize: '0.8rem' }}
+            style={{ fontSize: '0.8rem', flexShrink: 0 }}
           >
-            {exporting ? 'Exporting…' : `Export Approved (${approvedCount})`}
+            {exporting ? 'Exporting…' : `Export (${approvedCount})`}
           </button>
         </div>
       </div>

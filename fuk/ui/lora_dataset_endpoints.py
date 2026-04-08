@@ -219,20 +219,22 @@ async def cancel_job(job_id: str):
     return {"ok": True}
 
 
+class ExportRequest(BaseModel):
+    target_dir: Optional[str] = None   # if omitted, defaults to job's approved/ subfolder
+
+
 @router.post("/{job_id}/export")
-async def export_job(job_id: str):
-    """Copy all approved images into the approved/ subfolder."""
+async def export_job(job_id: str, request: ExportRequest = ExportRequest()):
+    """Copy all approved images to target_dir (or job's approved/ if not specified)."""
     if job_id not in dataset_jobs:
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
     try:
-        count = export_approved(job_id)
+        count, out_dir = export_approved(job_id, request.target_dir)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-    job = dataset_jobs[job_id]
-    approved_dir = Path(job["job_dir"]) / "approved"
-    return {"ok": True, "exported": count, "path": str(approved_dir)}
+    return {"ok": True, "exported": count, "path": out_dir}
 
 
 # ============================================================================

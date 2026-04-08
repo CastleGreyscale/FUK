@@ -333,23 +333,30 @@ async def run_dataset_job(job_id: str, generation_backend):
 # Export approved images
 # ============================================================================
 
-def export_approved(job_id: str) -> int:
-    """Copy all approved generated images into the approved/ folder. Returns count."""
+def export_approved(job_id: str, target_dir: Optional[str] = None) -> tuple:
+    """Copy all approved generated images to target_dir (or job's approved/ if not given).
+    Returns (count, resolved_dir_str).
+    """
     job = dataset_jobs.get(job_id)
     if not job:
         raise ValueError(f"Job {job_id} not found")
 
     job_dir = Path(job["job_dir"])
-    approved_dir = job_dir / "approved"
-    approved_dir.mkdir(exist_ok=True)
+
+    if target_dir:
+        out_dir = Path(target_dir)
+    else:
+        out_dir = job_dir / "approved"
+
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     count = 0
     for variation in job["variations"]:
         if variation.get("approved") is True and variation["status"] == "completed":
             src = job_dir / "generated" / variation["id"] / "generated.png"
             if src.exists():
-                dst = approved_dir / f"{variation['id']}.png"
+                dst = out_dir / f"{variation['id']}.png"
                 shutil.copy2(src, dst)
                 count += 1
 
-    return count
+    return count, str(out_dir)
