@@ -32,7 +32,15 @@ const AUTOSAVE_DELAY = 2000;
 export function useProject() {
   // Persist last used project folder
   const [savedProjectFolder, setSavedProjectFolder] = useLocalStorage('fuk_project_folder', null);
-  
+
+  // Persist last loaded file (for restoring shot/version on reload)
+  const [savedLastFile, setSavedLastFile] = useLocalStorage('fuk_last_file', null);
+  const savedLastFileRef = useRef(savedLastFile);
+  useEffect(() => { savedLastFileRef.current = savedLastFile; }, [savedLastFile]);
+
+  // Ref so refreshProjectFiles (empty deps) can always call current loadProjectFile
+  const loadProjectFileRef = useRef(null);
+
   // Project folder state (actual current folder)
   const [projectFolder, setProjectFolderLocal] = useState(null);
   
@@ -150,9 +158,19 @@ export function useProject() {
       // Auto-load most recent file if available
       if (result.files && result.files.length > 0) {
         const organized = organizeProjectFiles(result.files);
-        const firstShot = Object.values(organized)[0];
-        if (firstShot?.versions?.length > 0) {
-          await loadProjectFile(firstShot.versions[0].filename);
+        const fileNames = result.files.map(f => f.name);
+        const lastFile = savedLastFileRef.current;
+        const loader = loadProjectFileRef.current || loadProjectFile;
+
+        if (lastFile && fileNames.includes(lastFile)) {
+          // Restore the last file the user had open
+          await loader(lastFile);
+        } else {
+          // Fall back to first shot's latest version
+          const firstShot = Object.values(organized)[0];
+          if (firstShot?.versions?.length > 0) {
+            await loader(firstShot.versions[0].filename);
+          }
         }
       }
       
@@ -213,18 +231,19 @@ export function useProject() {
   const loadProjectFile = useCallback(async (filename) => {
     setIsLoading(true);
     setError(null);
-    
+
     try {
       console.log('[Project] Loading file:', filename);
       const response = await loadProject(filename);
-      
+
       // Handle new response format with comprehensive info
       const data = response.data || response;  // Backwards compatible
       const merged = mergeWithDefaults(data, defaults || {});
-      
+
       setProjectState(merged);
       setCurrentFilename(filename);
       setHasUnsavedChanges(false);
+      setSavedLastFile(filename);
       
       // Log cache information
       if (response.projectCache) {
@@ -254,7 +273,10 @@ export function useProject() {
     } finally {
       setIsLoading(false);
     }
-  }, [defaults]);
+  }, [defaults, setSavedLastFile]);
+
+  // Keep ref current so refreshProjectFiles (empty deps) calls the latest version
+  useEffect(() => { loadProjectFileRef.current = loadProjectFile; }, [loadProjectFile]);
 
   /**
    * Save current project state

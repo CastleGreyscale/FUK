@@ -388,9 +388,9 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
     
     const basePayload = {
       ...formData,
-      image_path: formData.image_path ? formData.image_path.replace(/^\/outputs\//, '').replace(/^\//, '') : null,
-      end_image_path: formData.end_image_path ? formData.end_image_path.replace(/^\/outputs\//, '').replace(/^\//, '') : null,
-      control_path: formData.control_path ? formData.control_path.replace(/^\/outputs\//, '').replace(/^\//, '') : null,
+      image_path: formData.image_path ? formData.image_path.replace(/^\/outputs\//, '') : null,
+      end_image_path: formData.end_image_path ? formData.end_image_path.replace(/^\/outputs\//, '') : null,
+      control_path: formData.control_path ? formData.control_path.replace(/^\/outputs\//, '') : null,
     };
 
     // Build seed queue for batch
