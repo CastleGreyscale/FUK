@@ -13,6 +13,7 @@ from typing import Optional, Dict, Any, List
 from pydantic import BaseModel
 import json
 import mimetypes
+import io
 from datetime import datetime, timedelta
 import subprocess
 import sys
@@ -1656,11 +1657,19 @@ async def serve_cache_file(file_path: str, request: Request):
         except ValueError:
             raise HTTPException(status_code=403, detail="Access denied")
     
+    # EXR files: convert to PNG on-the-fly so browsers can display them
+    if full_path.suffix.lower() == '.exr':
+        try:
+            png_bytes = _exr_to_png_bytes(full_path)
+            return StreamingResponse(io.BytesIO(png_bytes), media_type="image/png")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Could not convert EXR for display: {e}")
+
     # Determine content type
     content_type, _ = mimetypes.guess_type(str(full_path))
     if content_type is None:
         content_type = "application/octet-stream"
-    
+
     # For video files, support HTTP range requests so browsers can seek/play
     if content_type and content_type.startswith("video/"):
         file_size = full_path.stat().st_size
@@ -1740,6 +1749,30 @@ def get_default_cache_root() -> Optional[Path]:
     return _default_cache_root
 
 # ============================================================================
+# EXR Preview Helper
+# ============================================================================
+
+def _exr_to_png_bytes(path: Path) -> bytes:
+    """
+    Convert an EXR file to a PNG-encoded byte buffer for browser display.
+
+    Normalizes the full float dynamic range to [0, 1] and applies gamma 2.2
+    (linear → sRGB) so the image renders correctly in a browser <img> tag.
+    Handles grayscale (depth/Z passes), RGB, and RGBA EXR files.
+    """
+    import cv2
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from core.exr_utils import load_exr_bgr
+
+    bgr = load_exr_bgr(path)
+    ok, buf = cv2.imencode('.png', bgr)
+    if not ok:
+        raise ValueError(f"Could not encode EXR as PNG: {path}")
+    return bytes(buf)
+
+
+# ============================================================================
 # External File Serving (for imports and files outside cache)
 # ============================================================================
 
@@ -1787,11 +1820,19 @@ async def serve_external_file(file_path: str):
     if not is_allowed:
         raise HTTPException(status_code=403, detail="Access denied - path not in allowed locations")
     
+    # EXR files: convert to PNG on-the-fly so browsers can display them
+    if full_path.suffix.lower() == '.exr':
+        try:
+            png_bytes = _exr_to_png_bytes(full_path)
+            return StreamingResponse(io.BytesIO(png_bytes), media_type="image/png")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Could not convert EXR for display: {e}")
+
     # Determine content type
     content_type, _ = mimetypes.guess_type(str(full_path))
     if content_type is None:
         content_type = "application/octet-stream"
-    
+
     return FileResponse(
         path=full_path,
         media_type=content_type,

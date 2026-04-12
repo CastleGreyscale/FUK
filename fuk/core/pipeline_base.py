@@ -139,7 +139,18 @@ class PipelineRunner:
         if not p.exists():
             _log(self.log_prefix, f"Image not found: {p}", "warning")
             return None
-        img = Image.open(str(p)).convert("RGB")
+        if p.suffix.lower() == '.exr':
+            import cv2
+            from core.exr_utils import load_exr_bgr
+            try:
+                bgr = load_exr_bgr(p)
+            except Exception as e:
+                _log(self.log_prefix, f"Could not read EXR '{p}': {e}", "warning")
+                return None
+            rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+            img = Image.fromarray(rgb)
+        else:
+            img = Image.open(str(p)).convert("RGB")
         if width and height:
             img = img.resize((width, height))
         return img

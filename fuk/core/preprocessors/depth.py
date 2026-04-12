@@ -350,12 +350,9 @@ class DepthPreprocessor(BasePreprocessor):
         process_res = kwargs.get('process_res', self.da3_process_res)
         process_res_method = kwargs.get('process_res_method', self.da3_process_res_method)
         
-        image = cv2.imread(str(image_path))
-        if image is None:
-            raise ValueError(f"Could not load image: {image_path}")
-        
+        image = self.load_image_bgr(image_path)
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        
+
         depth = self._infer_depth(image_rgb, str(image_path), process_res, process_res_method)
         
         if normalize:
@@ -531,9 +528,11 @@ class DepthPreprocessor(BasePreprocessor):
                 
                 # Optional guided edge refinement (off by default)
                 if guided_filter:
-                    guide_bgr = cv2.imread(str(frame_path))
-                    if guide_bgr is not None:
+                    try:
+                        guide_bgr = self.load_image_bgr(frame_path)
                         depth_map = self._guided_upsample(depth_map, guide_bgr)
+                    except ValueError:
+                        pass
                 
                 output_image = apply_depth_greyscale(depth_map, range_min=range_min, range_max=range_max)
                 cv2.imwrite(str(output_frame_path), output_image)
@@ -670,9 +669,9 @@ class DepthPreprocessor(BasePreprocessor):
         """
         self._ensure_initialized()
         
-        image = cv2.imread(str(image_path))
+        image = self.load_image_bgr(image_path)
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        
+
         depth = self._infer_depth(image_rgb, str(image_path))
         depth = (depth - depth.min()) / (depth.max() - depth.min() + 1e-8)
         return depth.astype(np.float32)

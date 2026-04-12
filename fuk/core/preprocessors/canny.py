@@ -71,10 +71,8 @@ class CannyPreprocessor(SimplePreprocessor):
         blur_kernel = blur_kernel if blur_kernel is not None else self.defaults.get('blur_kernel', 5)
         invert = invert if invert is not None else self.defaults.get('invert', False)
         
-        # Load image
-        image = cv2.imread(str(image_path))
-        if image is None:
-            raise ValueError(f"Could not load image: {image_path}")
+        # Load image (handles EXR via ANYDEPTH + gamma correction)
+        image = self.load_image_bgr(image_path)
         
         # Convert to grayscale
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)

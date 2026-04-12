@@ -16,6 +16,8 @@ import json
 import hashlib
 import time
 import torch
+import numpy as np
+import cv2
 
 
 class BasePreprocessor(ABC):
@@ -234,8 +236,31 @@ class BasePreprocessor(ABC):
     @staticmethod
     def is_image(path: Union[str, Path]) -> bool:
         """Check if path is an image file"""
-        image_extensions = {'.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tiff', '.tif'}
+        image_extensions = {'.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tiff', '.tif', '.exr'}
         return Path(path).suffix.lower() in image_extensions
+
+    @staticmethod
+    def load_image_bgr(path: Union[str, Path]) -> np.ndarray:
+        """
+        Load an image as uint8 BGR, with proper handling for EXR/HDR formats.
+
+        EXR files contain linear float data that browsers and most tools expect
+        in 8-bit sRGB. This method normalizes the full dynamic range to [0, 1]
+        and applies gamma 2.2 so linear EXR inputs look correct to ML models
+        (which are trained on sRGB data) and for display.
+
+        Returns:
+            uint8 BGR numpy array, or raises ValueError if load fails.
+        """
+        path = Path(path)
+        if path.suffix.lower() == '.exr':
+            from core.exr_utils import load_exr_bgr
+            return load_exr_bgr(path)
+        else:
+            image = cv2.imread(str(path))
+            if image is None:
+                raise ValueError(f"Could not load image: {path}")
+            return image
 
 
 class SimplePreprocessor(BasePreprocessor):

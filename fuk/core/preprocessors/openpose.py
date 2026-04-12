@@ -68,8 +68,14 @@ class OpenPosePreprocessor(BasePreprocessor):
         """
         self._ensure_initialized()
         
-        # Load image
-        image = Image.open(image_path)
+        # Load image (handle EXR via cv2, convert to PIL)
+        if Path(image_path).suffix.lower() == '.exr':
+            import cv2 as _cv2
+            bgr = self.load_image_bgr(image_path)
+            rgb = _cv2.cvtColor(bgr, _cv2.COLOR_BGR2RGB)
+            image = Image.fromarray(rgb)
+        else:
+            image = Image.open(image_path)
         
         # Process with OpenPose
         pose_image = self.processor(

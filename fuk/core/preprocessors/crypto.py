@@ -306,10 +306,7 @@ class CryptoPreprocessor(BasePreprocessor):
         """
         self._ensure_initialized()
         
-        image = cv2.imread(str(image_path))
-        if image is None:
-            raise ValueError(f"Could not load image: {image_path}")
-        
+        image = self.load_image_bgr(image_path)
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         h, w = image.shape[:2]
         
@@ -616,9 +613,9 @@ class CryptoPreprocessor(BasePreprocessor):
         """
         self._ensure_initialized()
         
-        image = cv2.imread(str(image_path))
+        image = self.load_image_bgr(image_path)
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        
+
         masks = self.mask_generator.generate(image_rgb)
         masks = [m for m in masks if m['area'] >= min_area]
         masks = sorted(masks, key=lambda x: x['area'], reverse=True)[:max_objects]

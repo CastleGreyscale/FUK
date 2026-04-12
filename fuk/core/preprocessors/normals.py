@@ -181,11 +181,9 @@ class NormalsPreprocessor(BasePreprocessor):
         """
         self._ensure_initialized()
         
-        # Load image
-        image = cv2.imread(str(image_path))
-        if image is None:
-            raise ValueError(f"Could not load image: {image_path}")
-        
+        # Load image (handles EXR via ANYDEPTH + gamma correction)
+        image = self.load_image_bgr(image_path)
+
         # Generate normals based on method
         if self.method == NormalsMethod.FROM_DEPTH:
             normals = self._normals_from_depth(image_path, intensity)
@@ -303,8 +301,8 @@ class NormalsPreprocessor(BasePreprocessor):
         """
         self._ensure_initialized()
         
-        image = cv2.imread(str(image_path))
-        
+        image = self.load_image_bgr(image_path)
+
         if self.method == NormalsMethod.FROM_DEPTH:
             return self._normals_from_depth(image_path, intensity)
         else:
