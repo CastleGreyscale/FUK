@@ -636,6 +636,8 @@ class VideoGenerationRequest(BaseModel):
     sigma_shift: Optional[float] = None  # Timestep control (default 5.0)
     motion_bucket_id: Optional[float] = None  # Motion amplitude control (null = auto)
     denoising_strength: Optional[float] = None  # Edit strength when input image/video present
+    sliding_window_size: Optional[int] = None  # Sliding window size for tiled inference
+    sliding_window_stride: Optional[int] = None  # Sliding window stride for tiled inference
     
 class GenerationResponse(BaseModel):
     generation_id: str
@@ -1140,6 +1142,8 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
             sigma_shift=request.sigma_shift,
             motion_bucket_id=request.motion_bucket_id,
             denoising_strength=request.denoising_strength,
+            sliding_window_size=request.sliding_window_size,
+            sliding_window_stride=request.sliding_window_stride,
         )
         
         # Extract thumbnail from generated video

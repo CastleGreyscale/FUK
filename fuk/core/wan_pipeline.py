@@ -86,8 +86,10 @@ class WanPipelineRunner(PipelineRunner):
                        else defaults.get("sigma_shift", 5.0))
         motion_bucket_id = (kwargs.get("motion_bucket_id") if "motion_bucket_id" in kwargs
                             else defaults.get("motion_bucket_id"))
-        sliding_window_size = defaults.get("sliding_window_size")
-        sliding_window_stride = defaults.get("sliding_window_stride")
+        sliding_window_size = (kwargs.get("sliding_window_size") if kwargs.get("sliding_window_size") is not None
+                               else defaults.get("sliding_window_size"))
+        sliding_window_stride = (kwargs.get("sliding_window_stride") if kwargs.get("sliding_window_stride") is not None
+                                 else defaults.get("sliding_window_stride"))
 
         # --- Logging ---
         self.log_generation_header("VIDEO GENERATION", model_type, entry, {

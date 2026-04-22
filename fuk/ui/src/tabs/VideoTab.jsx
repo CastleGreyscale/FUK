@@ -82,6 +82,8 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
     guidance_scale: videoDefaults.guidance_scale ?? 5.0,
     sigma_shift: videoDefaults.sigma_shift ?? 5.0,
     motion_bucket_id: videoDefaults.motion_bucket_id ?? null,
+    sliding_window_size: videoDefaults.sliding_window_size ?? null,
+    sliding_window_stride: videoDefaults.sliding_window_stride ?? null,
     denoising_strength: videoDefaults.denoising_strength ?? 1.0,
     lora: videoDefaults.lora ?? null,
     lora_multiplier: videoDefaults.lora_multiplier ?? 1.0,
@@ -990,6 +992,50 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
               </p>
             </div>
             
+            <div className="fuk-form-group-compact">
+              <label className="fuk-label">
+                Sliding Window Size
+                <span className="fuk-help-text-inline"> (blank = disabled)</span>
+              </label>
+              <input
+                type="number"
+                className="fuk-input"
+                value={formData.sliding_window_size ?? ''}
+                onChange={(e) => setFormData({
+                  ...formData,
+                  sliding_window_size: e.target.value ? parseInt(e.target.value) : null
+                })}
+                placeholder="disabled"
+                step={1}
+                min={1}
+              />
+              <p className="fuk-help-text fuk-mt-1">
+                Number of frames per sliding window chunk. Leave blank to disable.
+              </p>
+            </div>
+
+            <div className="fuk-form-group-compact">
+              <label className="fuk-label">
+                Sliding Window Stride
+                <span className="fuk-help-text-inline"> (blank = disabled)</span>
+              </label>
+              <input
+                type="number"
+                className="fuk-input"
+                value={formData.sliding_window_stride ?? ''}
+                onChange={(e) => setFormData({
+                  ...formData,
+                  sliding_window_stride: e.target.value ? parseInt(e.target.value) : null
+                })}
+                placeholder="disabled"
+                step={1}
+                min={1}
+              />
+              <p className="fuk-help-text fuk-mt-1">
+                Step size between sliding windows. Leave blank to disable.
+              </p>
+            </div>
+
             <div className="fuk-form-group-compact">
               <label className="fuk-label">VRAM Management</label>
               <select
