@@ -14,119 +14,41 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 
 # ============================================================================
-# Variation Presets
+# Variation Presets — derived from defaults.json at runtime
 # ============================================================================
 
-# Variation structure: ids + labels only. Prompts are loaded from defaults.json
-# at runtime via the `prompt_config` passed to _build_variation_list().
-VARIATION_PRESETS: Dict[str, Dict[str, Any]] = {
-    "character": {
-        "angles": {
-            "label": "Angles",
-            "variations": [
-                {"id": "left_profile",        "label": "Left Profile"},
-                {"id": "right_profile",       "label": "Right Profile"},
-                {"id": "back_view",           "label": "Back View"},
-                {"id": "three_quarter_left",  "label": "¾ Left"},
-                {"id": "three_quarter_right", "label": "¾ Right"},
-                {"id": "low_angle",           "label": "Low Angle"},
-                {"id": "top_down",            "label": "Top-Down"},
-            ],
-        },
-        "expressions": {
-            "label": "Expressions",
-            "variations": [
-                {"id": "neutral",   "label": "Neutral"},
-                {"id": "smile",     "label": "Smile"},
-                {"id": "laughing",  "label": "Laughing"},
-                {"id": "angry",     "label": "Angry"},
-                {"id": "sad",       "label": "Sad"},
-                {"id": "surprised", "label": "Surprised"},
-                {"id": "thinking",  "label": "Thinking"},
-            ],
-        },
-        "environments": {
-            "label": "Environments",
-            "variations": [
-                {"id": "outdoor_park",   "label": "Outdoor Park"},
-                {"id": "urban_street",   "label": "Urban Street"},
-                {"id": "indoor_office",  "label": "Indoor Office"},
-                {"id": "forest",         "label": "Forest"},
-                {"id": "studio_neutral", "label": "Studio Neutral"},
-            ],
-        },
-        "lighting": {
-            "label": "Lighting",
-            "variations": [
-                {"id": "golden_hour",   "label": "Golden Hour"},
-                {"id": "overcast",      "label": "Overcast"},
-                {"id": "night",         "label": "Night"},
-                {"id": "dramatic_side", "label": "Dramatic Side"},
-                {"id": "backlit",       "label": "Backlit"},
-            ],
-        },
-    },
-    "product": {
-        "angles": {
-            "label": "Angles",
-            "variations": [
-                {"id": "45_left",        "label": "45° Left"},
-                {"id": "45_right",       "label": "45° Right"},
-                {"id": "top_down",       "label": "Top-Down"},
-                {"id": "underside",      "label": "Underside"},
-                {"id": "front_straight", "label": "Front Straight"},
-            ],
-        },
-        "surfaces": {
-            "label": "Surfaces",
-            "variations": [
-                {"id": "wooden_table",    "label": "Wooden Table"},
-                {"id": "marble",          "label": "Marble"},
-                {"id": "white_seamless",  "label": "White Seamless"},
-                {"id": "outdoor_natural", "label": "Outdoor / Natural"},
-            ],
-        },
-        "lighting": {
-            "label": "Lighting",
-            "variations": [
-                {"id": "studio_3point", "label": "Studio 3-Point"},
-                {"id": "single_key",    "label": "Single Key"},
-                {"id": "soft_diffuse",  "label": "Soft Diffuse"},
-                {"id": "dramatic",      "label": "Dramatic"},
-            ],
-        },
-    },
-    "environment": {
-        "time_of_day": {
-            "label": "Time of Day",
-            "variations": [
-                {"id": "dawn",   "label": "Dawn"},
-                {"id": "noon",   "label": "Noon"},
-                {"id": "sunset", "label": "Sunset"},
-                {"id": "night",  "label": "Night"},
-            ],
-        },
-        "weather": {
-            "label": "Weather",
-            "variations": [
-                {"id": "clear",    "label": "Clear"},
-                {"id": "overcast", "label": "Overcast"},
-                {"id": "rain",     "label": "Rain"},
-                {"id": "fog",      "label": "Fog"},
-                {"id": "snow",     "label": "Snow"},
-            ],
-        },
-        "season": {
-            "label": "Season",
-            "variations": [
-                {"id": "spring", "label": "Spring"},
-                {"id": "summer", "label": "Summer"},
-                {"id": "autumn", "label": "Autumn"},
-                {"id": "winter", "label": "Winter"},
-            ],
-        },
-    },
-}
+_prompt_config: Optional[Dict] = None
+
+
+def set_prompt_config(cfg: Optional[Dict]):
+    global _prompt_config
+    _prompt_config = cfg or {}
+
+
+def _key_to_label(key: str) -> str:
+    return key.replace('_', ' ').title()
+
+
+def get_variation_presets() -> Dict:
+    """Build the presets structure from the loaded prompt config."""
+    if not _prompt_config:
+        return {}
+    presets = {}
+    for subject_type, subject_data in _prompt_config.items():
+        if not isinstance(subject_data, dict):
+            continue
+        presets[subject_type] = {}
+        for pack_key, pack_data in subject_data.items():
+            if pack_key == 'base' or not isinstance(pack_data, dict):
+                continue
+            presets[subject_type][pack_key] = {
+                'label': _key_to_label(pack_key),
+                'variations': [
+                    {'id': var_id, 'label': _key_to_label(var_id)}
+                    for var_id in pack_data
+                ],
+            }
+    return presets
 
 
 # ============================================================================
@@ -153,26 +75,31 @@ def _build_variation_list(
     seed_strategy: str,
     base_seed: int,
     prompt_config: Optional[Dict] = None,
+    excluded_variation_ids: Optional[List[str]] = None,
 ) -> List[Dict]:
     """Resolve selected pack keys into an ordered variation list with seeds.
-    Prompts are sourced from prompt_config (defaults.json lora_dataset.variation_prompts).
+    Variations and prompts are sourced entirely from prompt_config
+    (defaults.json lora_dataset.variation_prompts).
     """
-    packs = VARIATION_PRESETS.get(subject_type, {})
-    type_prompts = (prompt_config or {}).get(subject_type, {})
+    excluded = set(excluded_variation_ids or [])
+    cfg = prompt_config or _prompt_config or {}
+    type_cfg = cfg.get(subject_type, {})
+    base_prompt = type_cfg.get("base", "")
     variations = []
     idx = 1
     for pack_key in selected_packs:
-        pack = packs.get(pack_key)
-        if not pack:
+        pack_prompts = type_cfg.get(pack_key)
+        if not isinstance(pack_prompts, dict):
             continue
-        pack_prompts = type_prompts.get(pack_key, {})
-        for v in pack["variations"]:
-            prompt = pack_prompts.get(v["id"], f"Edit: {v['label']}")
-            seed = base_seed if seed_strategy == "fixed" else random.randint(0, 2**32 - 1)
+        for var_id, var_prompt in pack_prompts.items():
+            if var_id in excluded:
+                continue
+            prompt = f"{base_prompt} {var_prompt}".strip() if base_prompt else var_prompt
+            seed = (base_seed + idx) % (2**32) if seed_strategy == "fixed" else random.randint(0, 2**32 - 1)
             variations.append({
-                "id":       f"{idx:03d}_{v['id']}",
+                "id":       f"{idx:03d}_{var_id}",
                 "pack":     pack_key,
-                "label":    v["label"],
+                "label":    _key_to_label(var_id),
                 "prompt":   prompt,
                 "seed":     seed,
                 "status":   "pending",
@@ -214,6 +141,7 @@ def create_dataset_job(
     selected_packs: List[str],
     params: Dict,
     prompt_config: Optional[Dict] = None,
+    excluded_variation_ids: Optional[List[str]] = None,
 ) -> str:
     """Create a new dataset job, set up directories, copy sources. Returns job_id."""
     job_id = str(uuid.uuid4())[:8]
@@ -236,7 +164,25 @@ def create_dataset_job(
 
     seed_strategy = params.get("seed_strategy", "fixed")
     base_seed = params.get("seed", 42)
-    variations = _build_variation_list(subject_type, selected_packs, seed_strategy, base_seed, prompt_config)
+    base_variations = _build_variation_list(
+        subject_type, selected_packs, seed_strategy, base_seed, prompt_config, excluded_variation_ids
+    )
+
+    # When multiple sources, replicate variations per source so each image is generated independently
+    if len(copied_sources) > 1:
+        variations = []
+        for src_idx, _ in enumerate(copied_sources):
+            src_num = src_idx + 1
+            for v in base_variations:
+                new_v = {**v,
+                         "id": f"s{src_num}_{v['id']}",
+                         "label": f"[Src {src_num}] {v['label']}",
+                         "source_idx": src_idx}
+                if seed_strategy == "random":
+                    new_v["seed"] = random.randint(0, 2**32 - 1)
+                variations.append(new_v)
+    else:
+        variations = [{**v, "source_idx": 0} for v in base_variations]
 
     job = {
         "job_id":       job_id,
@@ -296,6 +242,10 @@ async def run_dataset_job(job_id: str, generation_backend):
 
         print(f"[LoRA Dataset] Generating {idx+1}/{total} — {variation['label']}")
 
+        # Use per-variation source when multiple inputs were provided
+        src_idx = variation.get("source_idx", 0)
+        ctrl_image = [source_paths[src_idx]] if source_paths and src_idx < len(source_paths) else (source_paths or None)
+
         try:
             seed = variation["seed"]
             result = await asyncio.to_thread(
@@ -307,10 +257,10 @@ async def run_dataset_job(job_id: str, generation_backend):
                 seed=seed,
                 steps=params.get("steps", 28),
                 guidance_scale=params.get("cfg_scale", 5.0),
-                denoising_strength=params.get("denoising_strength", 0.65),
+                denoising_strength=1.0,
                 lora=params.get("lora") or None,
                 lora_multiplier=params.get("lora_alpha", 1.0),
-                control_image=source_paths if source_paths else None,
+                control_image=ctrl_image,
             )
             variation["status"] = "completed"
             print(f"[LoRA Dataset] Done: {variation['label']}")
@@ -327,6 +277,62 @@ async def run_dataset_job(job_id: str, generation_backend):
     job["progress"] = 1.0
     _save_manifest(job)
     print(f"[LoRA Dataset] Job {job_id} complete — {total} variations")
+
+
+# ============================================================================
+# Rerun a single variation
+# ============================================================================
+
+async def rerun_single_variation(job_id: str, variation_id: str, generation_backend):
+    """Re-generate one variation in place, replacing its previous output."""
+    job = dataset_jobs.get(job_id)
+    if not job:
+        raise ValueError(f"Job {job_id} not found")
+
+    variation = next((v for v in job["variations"] if v["id"] == variation_id), None)
+    if not variation:
+        raise ValueError(f"Variation {variation_id!r} not found")
+
+    job_dir = Path(job["job_dir"])
+    params = job["params"]
+    source_paths = [Path(p) for p in job["source_paths"] if Path(p).exists()]
+
+    var_dir = job_dir / "generated" / variation["id"]
+    var_dir.mkdir(parents=True, exist_ok=True)
+    output_path = var_dir / "generated.png"
+
+    variation["status"] = "running"
+    variation["error"] = None
+    variation["approved"] = None
+    variation["seed"] = random.randint(0, 2**32 - 1)
+    _save_manifest(job)
+
+    src_idx = variation.get("source_idx", 0)
+    ctrl_image = [source_paths[src_idx]] if source_paths and src_idx < len(source_paths) else (source_paths or None)
+
+    try:
+        await asyncio.to_thread(
+            generation_backend.run,
+            "image",
+            prompt=variation["prompt"],
+            output_path=output_path,
+            model="qwen_edit",
+            seed=variation["seed"],
+            steps=params.get("steps", 28),
+            guidance_scale=params.get("cfg_scale", 5.0),
+            denoising_strength=1.0,
+            lora=params.get("lora") or None,
+            lora_multiplier=params.get("lora_alpha", 1.0),
+            control_image=ctrl_image,
+        )
+        variation["status"] = "completed"
+        print(f"[LoRA Dataset] Rerun done: {variation['label']}")
+    except Exception as e:
+        variation["status"] = "failed"
+        variation["error"] = str(e)
+        print(f"[LoRA Dataset] Rerun failed: {variation['label']} — {e}")
+
+    _save_manifest(job)
 
 
 # ============================================================================

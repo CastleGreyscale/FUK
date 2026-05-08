@@ -99,12 +99,21 @@ FUK treats AI generation as source material that enters a professional pipeline,
 - Per-shot configuration persistence
 - Intelligent VRAM management and model offloading
 
+**LoRA Dataset Builder:**
+- Generate structured training datasets from a single reference image
+- Supports characters, objects, and environments as subject types
+- Variation packs cover angles (50+ camera positions) and lighting conditions per subject type
+- Uses Qwen-Edit to synthesize each variation from the source reference
+- Built-in curation UI: approve or reject individual variations before export
+- Re-run any single variation without restarting the job
+- Export approved images directly to your training directory
+- Fully configurable via `lora_dataset.variation_prompts` in `defaults.json`
+
 ### In Development
 
 - **Extended latent operations** - Camera control, lighting adjustment via latent manipulation
 - **Scene builder workflows** - Multi-camera coverage from single generations
 - **Advanced temporal processing** - Enhanced frame-to-frame coherence
-- **LoRA training pipeline** - Automated character consistency workflows
 - **Extended model support** - Additional models for image/video generation, upscaling, and interpolation
 
 ### Roadmap
@@ -345,6 +354,7 @@ The interface follows a left-to-right pipeline:
 4. **Postprocess Tab** - Upscale, interpolate, temporal processing
 5. **Layers Tab** - Multi-layer EXR assembly
 6. **Export Tab** - Project delivery and packaging
+7. **LoRA Dataset Tab** - Training dataset generation and curation
 
 Projects auto-version using date-based identifiers (`YYMMDD_NN`).
 

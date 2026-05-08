@@ -15,10 +15,12 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from lora_dataset_manager import (
-    VARIATION_PRESETS,
+    get_variation_presets,
+    set_prompt_config,
     dataset_jobs,
     create_dataset_job,
     run_dataset_job,
+    rerun_single_variation,
     export_approved,
 )
 
@@ -27,8 +29,8 @@ router = APIRouter(prefix="/api/dataset", tags=["dataset"])
 # Injected by setup_dataset_routes
 _generation_backend = None
 _datasets_root: Optional[Path] = None
-_prompt_config: Optional[dict] = None   # defaults["lora_dataset"]["variation_prompts"]
-_resolve_path = None                    # resolve_input_path fn from the main server
+_prompt_config: Optional[dict] = None  # defaults["lora_dataset"]["variation_prompts"]
+_resolve_path = None                   # resolve_input_path fn from the main server
 
 
 # ============================================================================
@@ -37,9 +39,10 @@ _resolve_path = None                    # resolve_input_path fn from the main se
 
 class CreateDatasetRequest(BaseModel):
     subject_name: str
-    subject_type: str                    # character | product | environment
+    subject_type: str                    # character | object | environment
     source_paths: List[str]
     selected_packs: List[str]
+    excluded_variation_ids: List[str] = []
     params: dict = {}
 
 
@@ -54,8 +57,8 @@ class ApproveRequest(BaseModel):
 
 @router.get("/presets")
 async def get_presets():
-    """Return the full variation preset library."""
-    return VARIATION_PRESETS
+    """Return the full variation preset library (derived from defaults.json)."""
+    return get_variation_presets()
 
 
 @router.get("/list")
@@ -86,7 +89,7 @@ async def create_job(request: CreateDatasetRequest, background_tasks: Background
         raise HTTPException(status_code=400, detail="At least one source image is required")
     if not request.selected_packs:
         raise HTTPException(status_code=400, detail="At least one variation pack must be selected")
-    if request.subject_type not in VARIATION_PRESETS:
+    if request.subject_type not in get_variation_presets():
         raise HTTPException(status_code=400, detail=f"Unknown subject_type: {request.subject_type!r}")
 
     # Resolve API-relative paths (e.g. api/project/cache/...) to absolute filesystem paths
@@ -106,6 +109,7 @@ async def create_job(request: CreateDatasetRequest, background_tasks: Background
         selected_packs=request.selected_packs,
         params=request.params,
         prompt_config=_prompt_config,
+        excluded_variation_ids=request.excluded_variation_ids or [],
     )
 
     background_tasks.add_task(run_dataset_job, job_id, _generation_backend)
@@ -207,6 +211,21 @@ async def approve_variation(job_id: str, request: ApproveRequest):
     raise HTTPException(status_code=404, detail=f"Variation {request.variation_id!r} not found")
 
 
+@router.post("/{job_id}/rerun/{variation_id}")
+async def rerun_variation(job_id: str, variation_id: str, background_tasks: BackgroundTasks):
+    """Re-generate a single variation, replacing its previous output."""
+    job = dataset_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    variation = next((v for v in job["variations"] if v["id"] == variation_id), None)
+    if not variation:
+        raise HTTPException(status_code=404, detail=f"Variation {variation_id!r} not found")
+    if variation["status"] == "running":
+        raise HTTPException(status_code=409, detail="Variation is already running")
+    background_tasks.add_task(rerun_single_variation, job_id, variation_id, _generation_backend)
+    return {"ok": True, "variation_id": variation_id}
+
+
 @router.post("/{job_id}/cancel")
 async def cancel_job(job_id: str):
     """Signal the running job to stop after the current variation completes."""
@@ -254,7 +273,9 @@ def setup_dataset_routes(app, generation_backend, datasets_root: Path, defaults:
     global _generation_backend, _datasets_root, _prompt_config, _resolve_path
     _generation_backend = generation_backend
     _datasets_root = datasets_root
-    _prompt_config = (defaults or {}).get("lora_dataset", {}).get("variation_prompts")
+    lora_dataset_cfg = (defaults or {}).get("lora_dataset", {})
+    _prompt_config = lora_dataset_cfg.get("variation_prompts")
+    set_prompt_config(_prompt_config)
     _resolve_path = resolve_input_path
     _datasets_root.mkdir(parents=True, exist_ok=True)
     app.include_router(router)

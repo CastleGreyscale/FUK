@@ -27,8 +27,7 @@ const DEFAULT_SETTINGS = {
   // Upscaling
   upscaleMethod: 'realesrgan',
   upscaleFactor: 4,
-  denoise: 0.5,
-  
+
   // Frame Interpolation
   interpolationMethod: 'rife',
   targetFramerate: 24,
@@ -282,7 +281,6 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
           source_path: sourceInput,
           scale: settings.upscaleFactor,
           model: settings.upscaleMethod,
-          denoise: settings.denoise,
           output_mode: settings.videoOutputMode,
         };
       } else {
@@ -291,7 +289,6 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
           source_path: sourceInput,
           scale: settings.upscaleFactor,
           model: settings.upscaleMethod,
-          denoise: settings.denoise,
         };
       }
 
@@ -712,36 +709,6 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                 </p>
               </div>
               
-              {settings.upscaleMethod === 'realesrgan' && (
-                <div className="fuk-form-group-compact">
-                  <label className="fuk-label">Denoise Strength</label>
-                  <div className="fuk-input-inline">
-                    <input
-                      type="range"
-                      className="fuk-range fuk-input--flex-2"
-                      value={settings.denoise}
-                      onChange={(e) => updateSettings({ denoise: parseFloat(e.target.value) })}
-                      min={0}
-                      max={1}
-                      step={0.05}
-                      disabled={generating}
-                    />
-                    <input
-                      type="number"
-                      className="fuk-input fuk-input--w-80"
-                      value={settings.denoise}
-                      onChange={(e) => updateSettings({ denoise: parseFloat(e.target.value) })}
-                      step={0.05}
-                      min={0}
-                      max={1}
-                      disabled={generating}
-                    />
-                  </div>
-                  <p className="fuk-help-text--inline">
-                    Higher = more noise reduction (may soften details)
-                  </p>
-                </div>
-              )}
             </div>
           )}
 

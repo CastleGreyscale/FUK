@@ -63,8 +63,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
     steps: imageDefaults.steps ?? 20,
     stepsMode: imageDefaults.stepsMode ?? 'preset',
     guidance_scale: imageDefaults.guidance_scale ?? 5,
-    lora: imageDefaults.lora ?? null,
-    lora_multiplier: imageDefaults.lora_multiplier ?? 1.0,
+    loras: imageDefaults.loras ?? (imageDefaults.lora ? [{ key: imageDefaults.lora, multiplier: imageDefaults.lora_multiplier ?? 1.0 }] : []),
     seed: imageDefaults.seed ?? null,
     seedMode: imageDefaults.seedMode ?? SEED_MODES.RANDOM,
     lastUsedSeed: imageDefaults.lastUsedSeed ?? null,
@@ -89,6 +88,13 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
     }
     return { ...initialDefaults, ...localFormData };
   }, [project?.projectState?.tabs?.image, localFormData, initialDefaults]);
+
+  // Migrate old lora/lora_multiplier fields from saved state to loras array
+  const effectiveLoras = useMemo(() => {
+    if (formData.loras?.length > 0) return formData.loras;
+    if (formData.lora) return [{ key: formData.lora, multiplier: formData.lora_multiplier ?? 1.0 }];
+    return [];
+  }, [formData.loras, formData.lora, formData.lora_multiplier]);
 
   // Ref to track latest formData for setFormData callback
   const formDataRef = useRef(formData);
@@ -308,6 +314,9 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
       exponential_shift_mu: formData.exponential_shift_mu,
       eligen_source: formData.eligen_source || null,
       eligen_alpha: formData.eligen_source ? (formData.eligen_alpha ?? 1.0) : null,  // ← ADD
+      lora: effectiveLoras[0]?.key || null,
+      lora_multiplier: effectiveLoras[0]?.multiplier ?? 1.0,
+      loras: effectiveLoras,
       // [LAYER STACK DISABLED]
       // stack_id: stackId || null,
       // layer_name: stackId ? (formData.prompt?.slice(0, 40) || 'edit') : null,
@@ -379,8 +388,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
       if (meta.model)                  updates.model            = resolveModelKey(meta.model);
       if (meta.guidance_scale != null) updates.guidance_scale   = meta.guidance_scale;
       if (meta.infer_steps != null)    updates.steps            = meta.infer_steps;
-      if (meta.lora != null)           updates.lora             = meta.lora;
-      if (meta.lora_multiplier != null) updates.lora_multiplier = meta.lora_multiplier;
+      if (meta.lora != null)            updates.loras = [{ key: meta.lora, multiplier: meta.lora_multiplier ?? 1.0 }];
       if (meta.seed != null) {
         updates.seed     = meta.seed;
         updates.seedMode = SEED_MODES.FIXED;
@@ -816,46 +824,53 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
             </div>
             
             <div className="fuk-form-group-compact">
-              <label className="fuk-label">LoRA</label>
-              <select
-                className="fuk-select"
-                value={formData.lora || ''}
-                onChange={(e) => setFormData({...formData, lora: e.target.value || null})}
-              >
-                <option value="">None</option>
-                {config?.models?.loras?.map((lora, idx) => (
-                  <option key={typeof lora === 'string' ? lora : lora.key || idx} value={typeof lora === 'string' ? lora : lora.key}>
-                    {typeof lora === 'string' ? lora : (lora.name || lora.description || lora.key) + (lora.size_mb ? ` (${lora.size_mb}MB)` : '')}
-                  </option>
-                ))}
-              </select>
-            </div>
-            
-            {formData.lora && (
-              <div className="fuk-form-group-compact">
-                <label className="fuk-label">LoRA Strength</label>
-                <div className="fuk-input-inline">
-                  <input
-                    type="range"
-                    className="fuk-input fuk-input--flex-2"
-                    value={formData.lora_multiplier}
-                    onChange={(e) => setFormData({...formData, lora_multiplier: parseFloat(e.target.value)})}
-                    min={0}
-                    max={2}
-                    step={0.1}
-                  />
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                <label className="fuk-label" style={{ marginBottom: 0 }}>LoRA</label>
+                <button
+                  type="button"
+                  onClick={() => setFormData({...formData, loras: [...effectiveLoras, { key: '', multiplier: 1.0 }]})}
+                  style={{ fontSize: '11px', padding: '2px 8px', cursor: 'pointer', background: 'transparent', border: '1px solid var(--border)', borderRadius: '4px', color: 'var(--text-muted)', lineHeight: 1.4 }}
+                >+ Add</button>
+              </div>
+              {effectiveLoras.map((entry, idx) => (
+                <div key={idx} style={{ display: 'flex', gap: '6px', alignItems: 'center', width: '100%', marginBottom: idx < effectiveLoras.length - 1 ? 4 : 0 }}>
+                  <select
+                    className="fuk-select"
+                    style={{ flex: '1 1 0', minWidth: 0 }}
+                    value={entry.key || ''}
+                    onChange={(e) => {
+                      const updated = effectiveLoras.map((l, i) => i === idx ? { ...l, key: e.target.value } : l);
+                      setFormData({...formData, loras: updated, lora: null, lora_multiplier: 1.0});
+                    }}
+                  >
+                    <option value="">None</option>
+                    {config?.models?.loras?.map((lora, i) => (
+                      <option key={typeof lora === 'string' ? lora : lora.key || i} value={typeof lora === 'string' ? lora : lora.key}>
+                        {typeof lora === 'string' ? lora : (lora.name || lora.description || lora.key) + (lora.size_mb ? ` (${lora.size_mb}MB)` : '')}
+                      </option>
+                    ))}
+                  </select>
                   <input
                     type="number"
-                    className="fuk-input fuk-input--w-80"
-                    value={formData.lora_multiplier}
-                    onChange={(e) => setFormData({...formData, lora_multiplier: parseFloat(e.target.value)})}
-                    step={0.1}
+                    className="fuk-input"
+                    style={{ width: '64px', flexShrink: 0 }}
+                    value={entry.multiplier}
+                    onChange={(e) => {
+                      const updated = effectiveLoras.map((l, i) => i === idx ? { ...l, multiplier: parseFloat(e.target.value) } : l);
+                      setFormData({...formData, loras: updated, lora: null, lora_multiplier: 1.0});
+                    }}
+                    step={0.05}
                     min={0}
                     max={2}
                   />
+                  <button
+                    type="button"
+                    onClick={() => setFormData({...formData, loras: effectiveLoras.filter((_, i) => i !== idx), lora: null, lora_multiplier: 1.0})}
+                    style={{ padding: '4px 7px', cursor: 'pointer', background: 'transparent', border: '1px solid var(--border)', borderRadius: '4px', color: 'var(--text-muted)', flexShrink: 0, lineHeight: 1 }}
+                  >×</button>
                 </div>
-              </div>
-            )}
+              ))}
+            </div>
           </div>
           
           {/* Generation Settings Card */}

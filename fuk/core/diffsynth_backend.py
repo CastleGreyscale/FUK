@@ -307,8 +307,8 @@ class DiffSynthBackend:
         # Multi-LoRA list
         if loras:
             for entry in loras:
-                name = entry.get("name") or entry.get("path", "")
-                alpha = entry.get("alpha", 1.0)
+                name = entry.get("name") or entry.get("key") or entry.get("path", "")
+                alpha = entry.get("alpha") if entry.get("alpha") is not None else entry.get("multiplier", 1.0)
                 if not name:
                     continue
                 path = self._resolve_lora_path(name)

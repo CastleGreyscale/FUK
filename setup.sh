@@ -456,7 +456,7 @@ cat > fuk/config/defaults.json.template << 'EOL'
     "negative_prompt": "low resolution, low quality, limb deformities, finger deformities, over-saturated image, wax figure appearance, lack of facial detail, overly smooth, AI-generated look. Chaotic composition. Blurry, distorted text",
     "model": "qwen_image",
     "width": 1280,
-    "aspectRatio": "2.39",
+    "aspectRatio": "2.39:1",
     "steps": 20,
     "stepsMode": "preset",
     "guidance_scale": 4,
@@ -478,7 +478,7 @@ cat > fuk/config/defaults.json.template << 'EOL'
     "model": "wan_i2v_a14b",
     "prompt": "",
     "negative_prompt": "bright colors, overexposed, static, blurred details, subtitles, style, artwork, painting, picture, still, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, malformed limbs, fused fingers, still picture, cluttered background, three legs, many people in the background, walking backwards",
-    "task": "i2v-A14B",
+    "task": "wan_i2v_a14b",
     "video_length": 41,
     "scale_factor": 1.0,
     "steps": 20,
@@ -515,7 +515,7 @@ cat > fuk/config/defaults.json.template << 'EOL'
         "label": "None — Full VRAM",
         "description": "No offloading. Fastest but needs 48GB+ for 14B models.",
         "config": null,
-        "buffer_gb": 0.5
+        "buffer_gb": 2
       },
       "low": {
         "label": "Low — CPU Offload (bf16)",
@@ -609,7 +609,7 @@ cat > fuk/config/defaults.json.template << 'EOL'
       "scale": 4
     },
     "interpolate": {
-      "model": "film",
+      "model": "rife",
       "multiplier": 2
     }
   },
@@ -619,6 +619,202 @@ cat > fuk/config/defaults.json.template << 'EOL'
     "versioning": "DATE",
     "autosave_interval": 30,
     "cache_cleanup_days": 7
+  },
+
+  "tools": {
+    "blender": "/usr/bin/blender",
+    "blender_template": "/path/to/your/template.blend"
+  },
+
+  "spec_tool": {
+    "ratio_idx": 6,
+    "resolution_width": 1920,
+    "guides": {
+      "thirds":     true,
+      "golden":     false,
+      "vp":         false,
+      "actionSafe": false,
+      "titleSafe":  false,
+      "center":     false
+    },
+    "guide_color":    "#ffffff",
+    "bg_color":       "#1a1a1a",
+    "bg_alpha":       0,
+    "burn_in":        true,
+    "blend_fps":      24,
+    "blend_filename": "template"
+  },
+
+  "lora_dataset": {
+    "_comment": "Controls dataset generation in the LoRA Dataset Builder tab. Set variation_prompts.character.base / object.base to describe the subject.",
+    "denoising_strength": 1.0,
+    "seed": 509327136,
+    "seed_strategy": "fixed",
+    "cfg_scale": 5,
+    "steps": 28,
+
+    "variation_prompts": {
+      "character": {
+        "base": "",
+
+        "angles": {
+          "front_full_body":          "On a plain neutral grey background with flat studio lighting, reframe to a full-body front view, feet to crown fully visible with a small margin at top and bottom.",
+          "front_seven_eighths":      "On a plain neutral grey background with flat studio lighting, reframe to a front view cropped from mid-thigh to just above the crown.",
+          "front_medium":             "On a plain neutral grey background with flat studio lighting, reframe to a front medium shot cropped from the waist to just above the crown.",
+          "front_medium_tight":       "On a plain neutral grey background with flat studio lighting, reframe to a front shot cropped from just below the chest to just above the crown.",
+          "front_bust":               "On a plain neutral grey background with flat studio lighting, reframe to a front bust shot cropped from the mid-chest to just above the crown.",
+          "front_shoulder":           "On a plain neutral grey background with flat studio lighting, reframe to a front shot cropped from the tops of the shoulders to just above the crown.",
+          "front_closeup":            "On a plain neutral grey background with flat studio lighting, reframe to a front close-up cropped from the collarbone to just above the crown, face prominent.",
+          "front_face":               "On a plain neutral grey background with flat studio lighting, reframe to a front shot cropped from the chin to just above the crown, full face filling the frame.",
+          "front_extreme_closeup":    "On a plain neutral grey background with flat studio lighting, reframe to an extreme close-up cropped from the chin to the eyebrows, eyes and nose centered.",
+          "front_eyes":               "On a plain neutral grey background with flat studio lighting, reframe to an extreme close-up of just the eye region, cropped from the upper lip to the hairline, both eyes fully visible.",
+
+          "left_profile_full":        "On a plain neutral grey background with flat studio lighting, rotate the subject to face directly left, full body visible feet to crown.",
+          "left_profile_medium":      "On a plain neutral grey background with flat studio lighting, rotate the subject to face directly left, cropped from the waist to just above the crown.",
+          "left_profile_bust":        "On a plain neutral grey background with flat studio lighting, rotate the subject to face directly left, cropped from the chest to just above the crown.",
+          "left_profile_face":        "On a plain neutral grey background with flat studio lighting, rotate the subject to face directly left in a strict profile, cropped from the chin to just above the crown, full side of the face visible.",
+          "left_profile_closeup":     "On a plain neutral grey background with flat studio lighting, rotate the subject to face directly left, tight close-up showing only the side profile of the face from chin to crown.",
+
+          "right_profile_full":       "On a plain neutral grey background with flat studio lighting, rotate the subject to face directly right, full body visible feet to crown.",
+          "right_profile_medium":     "On a plain neutral grey background with flat studio lighting, rotate the subject to face directly right, cropped from the waist to just above the crown.",
+          "right_profile_bust":       "On a plain neutral grey background with flat studio lighting, rotate the subject to face directly right, cropped from the chest to just above the crown.",
+          "right_profile_face":       "On a plain neutral grey background with flat studio lighting, rotate the subject to face directly right in a strict profile, cropped from the chin to just above the crown, full side of the face visible.",
+          "right_profile_closeup":    "On a plain neutral grey background with flat studio lighting, rotate the subject to face directly right, tight close-up showing only the side profile of the face from chin to crown.",
+
+          "three_quarter_left_full":  "On a plain neutral grey background with flat studio lighting, turn the subject 45 degrees to the left, full body visible feet to crown.",
+          "three_quarter_left_medium":"On a plain neutral grey background with flat studio lighting, turn the subject 45 degrees to the left, cropped from the waist to just above the crown.",
+          "three_quarter_left_bust":  "On a plain neutral grey background with flat studio lighting, turn the subject 45 degrees to the left, cropped from the chest to just above the crown.",
+          "three_quarter_left_face":  "On a plain neutral grey background with flat studio lighting, turn the subject 45 degrees to the left, cropped from the chin to just above the crown.",
+
+          "three_quarter_right_full": "On a plain neutral grey background with flat studio lighting, turn the subject 45 degrees to the right, full body visible feet to crown.",
+          "three_quarter_right_medium":"On a plain neutral grey background with flat studio lighting, turn the subject 45 degrees to the right, cropped from the waist to just above the crown.",
+          "three_quarter_right_bust": "On a plain neutral grey background with flat studio lighting, turn the subject 45 degrees to the right, cropped from the chest to just above the crown.",
+          "three_quarter_right_face": "On a plain neutral grey background with flat studio lighting, turn the subject 45 degrees to the right, cropped from the chin to just above the crown.",
+
+          "slight_left":              "On a plain neutral grey background with flat studio lighting, rotate the subject very slightly to the left, approximately 15 degrees off front-facing, framed from the chest up.",
+          "slight_right":             "On a plain neutral grey background with flat studio lighting, rotate the subject very slightly to the right, approximately 15 degrees off front-facing, framed from the chest up.",
+
+          "back_full":                "On a plain neutral grey background with flat studio lighting, rotate the subject to face directly away from camera, full body visible feet to crown.",
+          "back_medium":              "On a plain neutral grey background with flat studio lighting, rotate the subject to face directly away from camera, cropped from the waist to just above the crown.",
+          "back_bust":                "On a plain neutral grey background with flat studio lighting, rotate the subject to face directly away from camera, cropped from the mid-back to just above the crown.",
+          "back_three_quarter_left":  "On a plain neutral grey background with flat studio lighting, turn the subject to a rear three-quarter angle facing back-left, full body visible.",
+          "back_three_quarter_right": "On a plain neutral grey background with flat studio lighting, turn the subject to a rear three-quarter angle facing back-right, full body visible.",
+          "back_three_quarter_left_medium": "On a plain neutral grey background with flat studio lighting, turn the subject to a rear three-quarter angle facing back-left, cropped from the waist up.",
+          "back_three_quarter_right_medium":"On a plain neutral grey background with flat studio lighting, turn the subject to a rear three-quarter angle facing back-right, cropped from the waist up.",
+          "over_shoulder_left":       "On a plain neutral grey background with flat studio lighting, the subject's back is toward the camera with their right shoulder and the back of their head filling the foreground. The subject faces directly away from camera. The viewpoint is from just over their right shoulder, close behind them. A small amount of the face is visible.",
+          "over_shoulder_right":      "On a plain neutral grey background with flat studio lighting, the subject's back is toward the camera with their left shoulder and the back of their head filling the foreground. The subject faces directly away from camera. The viewpoint is from just over their left shoulder, close behind them. A small amount of the face is visible.",
+
+          "low_angle_full":           "On a plain neutral grey background with flat studio lighting, shoot from a low angle with the camera at knee level looking upward, full body visible.",
+          "low_angle_medium":         "On a plain neutral grey background with flat studio lighting, shoot from a low angle with the camera at waist level looking upward, cropped from the waist to above the crown.",
+          "low_angle_face":           "On a plain neutral grey background with flat studio lighting, shoot from a low angle with the camera at chin level looking upward, face and crown visible with chin prominent in frame.",
+          "low_angle_three_quarter_left": "On a plain neutral grey background with flat studio lighting, shoot from a low angle at knee level with the subject turned 45 degrees to the left, full body visible.",
+          "low_angle_three_quarter_right":"On a plain neutral grey background with flat studio lighting, shoot from a low angle at knee level with the subject turned 45 degrees to the right, full body visible.",
+
+          "high_angle_full":          "On a plain neutral grey background with flat studio lighting, shoot from a high angle with the camera well above head height looking steeply downward, full body visible.",
+          "high_angle_medium":        "On a plain neutral grey background with flat studio lighting, shoot from a high angle with the camera above eye level looking downward, cropped from the chest up.",
+          "high_angle_face":          "On a plain neutral grey background with flat studio lighting, shoot from a high angle directly above the face looking steeply downward, face filling the frame crown prominent.",
+          "top_down":                 "On a plain neutral grey background with flat studio lighting, shoot from directly above in a true top-down bird's eye view, full body visible.",
+
+          "seated_front_full":        "On a plain neutral grey background with flat studio lighting, show the subject seated facing front, full body visible from feet to crown.",
+          "seated_front_medium":      "On a plain neutral grey background with flat studio lighting, show the subject seated facing front, cropped from the lap to just above the crown.",
+          "seated_three_quarter_left":"On a plain neutral grey background with flat studio lighting, show the subject seated and turned 45 degrees to the left, full body visible.",
+          "seated_three_quarter_right":"On a plain neutral grey background with flat studio lighting, show the subject seated and turned 45 degrees to the right, full body visible.",
+          "kneeling_front":           "On a plain neutral grey background with flat studio lighting, show the subject kneeling facing front, full body visible.",
+          "kneeling_three_quarter_left":"On a plain neutral grey background with flat studio lighting, show the subject kneeling and turned 45 degrees to the left, full body visible."
+        },
+
+        "lighting": {
+          "overcast":           "On a plain neutral grey background, change the lighting to soft diffuse overcast with no directional shadows, even illumination across the entire face.",
+          "hard_frontal":       "On a plain neutral grey background, change the lighting to a hard on-axis frontal spot, sharp cast shadows falling directly behind facial features.",
+          "three_quarter_soft": "On a plain neutral grey background, change the lighting to a soft key light from the upper right at 45 degrees, with a gentle fill light from the left reducing shadow depth.",
+          "overhead":           "On a plain neutral grey background, change the lighting to a direct overhead source, casting downward shadows deep into the eye sockets, under the nose, and beneath the chin.",
+          "under_light":        "On a plain neutral grey background, change the lighting to a source from directly below, casting upward shadows across the jaw, cheeks, nose bridge, and brow ridge.",
+          "split":              "On a plain neutral grey background, change the lighting to a hard split light with one side of the face fully lit and the opposite side in complete shadow.",
+          "rim":                "On a plain neutral grey background, change the lighting to a strong rim light from behind and to one side, creating a bright edge outline on the hair and shoulder with the face in shadow."
+        }
+      },
+
+      "object": {
+        "base": "",
+
+        "angles": {
+          "front_full":             "On a plain neutral grey background with flat studio lighting, show the object from directly in front, full object visible with small margin on all sides.",
+          "front_closeup":          "On a plain neutral grey background with flat studio lighting, show the object from directly in front in a tight close-up, filling the frame with the object's front face and primary details.",
+          "front_detail":           "On a plain neutral grey background with flat studio lighting, show the most visually distinctive feature of the object in an extreme close-up from directly in front.",
+
+          "slight_left":            "On a plain neutral grey background with flat studio lighting, rotate the object approximately 15 degrees to the left, full object visible.",
+          "slight_right":           "On a plain neutral grey background with flat studio lighting, rotate the object approximately 15 degrees to the right, full object visible.",
+
+          "45_left":                "On a plain neutral grey background with flat studio lighting, rotate the object 45 degrees to the left, full object visible.",
+          "45_right":               "On a plain neutral grey background with flat studio lighting, rotate the object 45 degrees to the right, full object visible.",
+          "45_left_closeup":        "On a plain neutral grey background with flat studio lighting, rotate the object 45 degrees to the left in a tight close-up filling the frame.",
+          "45_right_closeup":       "On a plain neutral grey background with flat studio lighting, rotate the object 45 degrees to the right in a tight close-up filling the frame.",
+
+          "90_left":                "On a plain neutral grey background with flat studio lighting, rotate the object 90 degrees to show the strict left side profile, full object visible.",
+          "90_right":               "On a plain neutral grey background with flat studio lighting, rotate the object 90 degrees to show the strict right side profile, full object visible.",
+          "90_left_closeup":        "On a plain neutral grey background with flat studio lighting, rotate the object 90 degrees to the left side profile in a tight close-up filling the frame.",
+          "90_right_closeup":       "On a plain neutral grey background with flat studio lighting, rotate the object 90 degrees to the right side profile in a tight close-up filling the frame.",
+
+          "135_left":               "On a plain neutral grey background with flat studio lighting, rotate the object 135 degrees to the left, showing the rear-left three-quarter angle, full object visible.",
+          "135_right":              "On a plain neutral grey background with flat studio lighting, rotate the object 135 degrees to the right, showing the rear-right three-quarter angle, full object visible.",
+
+          "back_full":              "On a plain neutral grey background with flat studio lighting, rotate the object to face directly away, showing the full back face, full object visible.",
+          "back_closeup":           "On a plain neutral grey background with flat studio lighting, rotate the object to face directly away in a tight close-up, back face filling the frame.",
+
+          "orbit_high_front":       "On a plain neutral grey background with flat studio lighting, elevate the camera to 45 degrees above and shoot downward at the front of the object, full object visible.",
+          "orbit_high_45_left":     "On a plain neutral grey background with flat studio lighting, elevate the camera to 45 degrees above and orbit to the front-left, shooting downward at the object at a 45 degree horizontal angle, full object visible.",
+          "orbit_high_45_right":    "On a plain neutral grey background with flat studio lighting, elevate the camera to 45 degrees above and orbit to the front-right, shooting downward at the object at a 45 degree horizontal angle, full object visible.",
+          "orbit_high_90_left":     "On a plain neutral grey background with flat studio lighting, elevate the camera to 45 degrees above and orbit directly to the left side, shooting downward at the object, full object visible.",
+          "orbit_high_90_right":    "On a plain neutral grey background with flat studio lighting, elevate the camera to 45 degrees above and orbit directly to the right side, shooting downward at the object, full object visible.",
+          "orbit_high_back":        "On a plain neutral grey background with flat studio lighting, elevate the camera to 45 degrees above and orbit to directly behind the object, shooting downward, full object visible.",
+
+          "top_down":               "On a plain neutral grey background with flat studio lighting, shoot the object from directly above in a true top-down view, full object visible with small margin on all sides.",
+          "top_down_slight_front":  "On a plain neutral grey background with flat studio lighting, shoot the object from above at a very steep angle tilted slightly toward the front face, full object visible.",
+
+          "orbit_low_front":        "On a plain neutral grey background with flat studio lighting, lower the camera to 20 degrees below center and shoot upward at the front of the object, full object visible.",
+          "orbit_low_45_left":      "On a plain neutral grey background with flat studio lighting, lower the camera to 20 degrees below center and orbit to the front-left, shooting upward at the object, full object visible.",
+          "orbit_low_45_right":     "On a plain neutral grey background with flat studio lighting, lower the camera to 20 degrees below center and orbit to the front-right, shooting upward at the object, full object visible.",
+          "orbit_low_90_left":      "On a plain neutral grey background with flat studio lighting, lower the camera to 20 degrees below center and orbit directly to the left side shooting upward at the object, full object visible.",
+          "orbit_low_90_right":     "On a plain neutral grey background with flat studio lighting, lower the camera to 20 degrees below center and orbit directly to the right side shooting upward at the object, full object visible.",
+
+          "underside":              "On a plain neutral grey background with flat studio lighting, flip the object to show the underside or bottom face directly facing the camera, full object visible.",
+          "underside_slight_tilt":  "On a plain neutral grey background with flat studio lighting, tilt the object to show the underside at a slight angle, bottom and one side visible simultaneously."
+        },
+
+        "lighting": {
+          "overcast":           "On a plain neutral grey background, change the lighting to soft diffuse overcast with no directional shadows, even illumination across the entire object.",
+          "hard_frontal":       "On a plain neutral grey background, change the lighting to a hard on-axis frontal spot, sharp cast shadows falling directly behind the object revealing surface planes.",
+          "three_quarter_soft": "On a plain neutral grey background, change the lighting to a soft 45-degree key light from the upper right with a gentle fill light from the left reducing shadow depth.",
+          "overhead":           "On a plain neutral grey background, change the lighting to a direct overhead source casting downward shadows that reveal the object's top surface geometry.",
+          "under_light":        "On a plain neutral grey background, change the lighting to a source from directly below casting upward shadows that reveal the object's underside geometry.",
+          "split":              "On a plain neutral grey background, change the lighting to a hard split with one side of the object fully lit and the opposite side in complete shadow, revealing surface contours.",
+          "rim":                "On a plain neutral grey background, change the lighting to a strong rim light from behind and to one side, creating a bright edge outline around the object's silhouette with the front face in shadow.",
+          "top_backlit":        "On a plain neutral grey background, change the lighting to a strong backlight from directly above and behind, creating a halo edge on the top surface with the front face in shadow."
+        }
+      },
+
+      "environment": {
+        "time_of_day": {
+          "dawn":   "Change the lighting to early dawn with soft pink and purple pre-sunrise light on the horizon",
+          "noon":   "Change the lighting to bright midday noon sun with harsh overhead light and short shadows",
+          "sunset": "Change the lighting to golden sunset with warm orange-red light from the horizon",
+          "night":  "Change the scene to night-time with dark sky, stars, and ambient artificial or moonlight lighting"
+        },
+        "weather": {
+          "clear":    "Change the weather to a clear sunny day with bright blue sky and no clouds",
+          "overcast": "Change the weather to overcast with thick cloud cover and diffuse grey light",
+          "rain":     "Change the weather to rainy with visible rainfall, wet glistening surfaces, and grey atmosphere",
+          "fog":      "Change the weather to foggy with thick mist reducing visibility and creating soft diffuse ambient lighting",
+          "snow":     "Change the weather to snowy with gently falling snow and white snow coverage on all surfaces"
+        },
+        "season": {
+          "spring": "Change the season to spring with fresh green leaves, blooming flowers, and mild soft light",
+          "summer": "Change the season to summer with full lush green foliage, bright warm light, and vibrant atmosphere",
+          "autumn": "Change the season to autumn with orange, red, and yellow falling leaves and warm earthy tones",
+          "winter": "Change the season to winter with bare trees, frost on surfaces, and cold blue-grey atmosphere"
+        }
+      }
+    }
   }
 }
 EOL

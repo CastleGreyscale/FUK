@@ -9,15 +9,7 @@ import ImageUploader from '../components/ImageUploader';
 import { ThumbsUp, ThumbsDown, CheckCircle } from '../components/Icons';
 import { buildImageUrl } from '../utils/constants';
 
-// Pack labels — used when presets haven't loaded yet (avoids blank UI on first render)
-const PACK_LABELS = {
-  character:   { angles: 'Angles', expressions: 'Expressions', environments: 'Environments', lighting: 'Lighting' },
-  product:     { angles: 'Angles', surfaces: 'Surfaces', lighting: 'Lighting' },
-  environment: { time_of_day: 'Time of Day', weather: 'Weather', season: 'Season' },
-};
-
-// Fallback defaults if not in config
-const DEFAULT_DENOISE = { character: 1.0, product: 1.0, environment: 1.0 };
+const toLabel = key => key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 
 // ============================================================================
 // Helpers
@@ -41,8 +33,9 @@ function SetupPhase({ config, onStart }) {
   const [sources, setSources]           = useState([]);
   const [subjectName, setSubjectName]   = useState('');
   const [subjectType, setSubjectType]   = useState('character');
-  const [packs, setPacks]               = useState({ character: {}, product: {}, environment: {} });
-  const [denoising, setDenoising]       = useState(d.denoising_strength ?? DEFAULT_DENOISE.character);
+  const [packs, setPacks]               = useState({ character: {}, object: {}, environment: {} });
+  const [deselectedVars, setDeselectedVars] = useState({ character: {}, object: {}, environment: {} });
+  const [expandedPacks, setExpandedPacks]   = useState({});
   const [seedStrategy, setSeedStrategy] = useState(d.seed_strategy ?? 'fixed');
   const [seed, setSeed]                 = useState(d.seed ?? 509327136);
   const [lora, setLora]                 = useState('');
@@ -68,7 +61,7 @@ function SetupPhase({ config, onStart }) {
   }, [subjectType]);
 
   // ── Drag-drop from history panel ──
-  const handleSourceDrop = useCallback(async (e) => {
+  const handleSourceDrop = useCallback((e) => {
     e.preventDefault();
     setSourceDragOver(false);
 
@@ -79,28 +72,30 @@ function SetupPhase({ config, onStart }) {
     try { gen = JSON.parse(fukGenData); } catch { return; }
     if (gen.type === 'video' || gen.type === 'interpolate') return;
 
-    // Add the output image as a source
     const imgPath = gen.path || gen.preview;
     if (imgPath) setSources(prev => prev.includes(imgPath) ? prev : [...prev, imgPath]);
-
-    // Inherit generation params from metadata
-    try {
-      const res = await fetch(`/api/project/generations/${encodeURIComponent(gen.id)}/metadata`);
-      if (!res.ok) return;
-      const meta = await res.json();
-      if (meta.seed != null) {
-        setSeed(meta.seed);
-        setSeedStrategy('fixed');
-      }
-      if (meta.guidance_scale != null) setCfg(meta.guidance_scale);
-    } catch (_) {}
   }, []);
 
   const togglePack = (type, packKey) => {
+    const nowOn = !packs[type]?.[packKey];
     setPacks(prev => ({
       ...prev,
-      [type]: { ...prev[type], [packKey]: !prev[type][packKey] },
+      [type]: { ...prev[type], [packKey]: nowOn },
     }));
+    if (nowOn) setExpandedPacks(prev => ({ ...prev, [packKey]: true }));
+  };
+
+  const toggleVar = (packKey, varId) => {
+    setDeselectedVars(prev => {
+      const packDesel = prev[subjectType]?.[packKey] ?? {};
+      return {
+        ...prev,
+        [subjectType]: {
+          ...prev[subjectType],
+          [packKey]: { ...packDesel, [varId]: !packDesel[varId] },
+        },
+      };
+    });
   };
 
   const selectedPacks = Object.entries(packs[subjectType] || {})
@@ -108,26 +103,35 @@ function SetupPhase({ config, onStart }) {
     .map(([k]) => k);
 
   const totalVariations = selectedPacks.reduce((acc, pk) => {
-    return acc + (serverPresets?.[subjectType]?.[pk]?.variations?.length ?? 0);
+    const allVars = serverPresets?.[subjectType]?.[pk]?.variations ?? [];
+    const desel = deselectedVars[subjectType]?.[pk] ?? {};
+    return acc + allVars.filter(v => !desel[v.id]).length;
   }, 0);
 
-  const canStart = sources.length > 0 && subjectName.trim() && selectedPacks.length > 0;
+  const totalGenerations = totalVariations * Math.max(sources.length, 1);
+
+  const canStart = sources.length > 0 && subjectName.trim() && selectedPacks.length > 0 && totalVariations > 0;
 
   const handleStart = async () => {
     if (!canStart || starting) return;
     setStarting(true);
     setError(null);
     try {
+      const excludedVariationIds = selectedPacks.flatMap(pk => {
+        const desel = deselectedVars[subjectType]?.[pk] ?? {};
+        return Object.keys(desel).filter(id => desel[id]);
+      });
+
       const res = await fetch('/api/dataset/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          subject_name:   subjectName.trim(),
-          subject_type:   subjectType,
-          source_paths:   sources,
-          selected_packs: selectedPacks,
+          subject_name:           subjectName.trim(),
+          subject_type:           subjectType,
+          source_paths:           sources,
+          selected_packs:         selectedPacks,
+          excluded_variation_ids: excludedVariationIds,
           params: {
-            denoising_strength: denoising,
             seed_strategy:      seedStrategy,
             seed:               seed,
             steps:              steps,
@@ -146,12 +150,9 @@ function SetupPhase({ config, onStart }) {
     }
   };
 
-  // Derive pack list from server presets (live count) with PACK_LABELS as fallback labels
-  const currentPacks = Object.entries(
-    serverPresets?.[subjectType] ?? PACK_LABELS[subjectType] ?? {}
-  ).reduce((acc, [key, val]) => {
+  const currentPacks = Object.entries(serverPresets?.[subjectType] ?? {}).reduce((acc, [key, val]) => {
     acc[key] = {
-      label: val.label ?? PACK_LABELS[subjectType]?.[key] ?? key,
+      label: val.label ?? toLabel(key),
       count: val.variations?.length ?? 0,
     };
     return acc;
@@ -182,7 +183,7 @@ function SetupPhase({ config, onStart }) {
             style={{ width: '100%' }}
           >
             <option value="character">Character</option>
-            <option value="product">Product</option>
+            <option value="object">Object</option>
             <option value="environment">Environment</option>
           </select>
         </div>
@@ -213,7 +214,7 @@ function SetupPhase({ config, onStart }) {
               pointerEvents: 'none',
             }}>
               <span style={{ fontSize: '0.8rem', color: 'var(--accent-color, #a855f7)', fontWeight: 600 }}>
-                Drop to add source + inherit settings
+                Drop to add source
               </span>
             </div>
           )}
@@ -221,14 +222,6 @@ function SetupPhase({ config, onStart }) {
 
         {/* Generation params */}
         <div className="fuk-card" style={card}>
-          <span style={lbl}>Denoising Strength — {denoising.toFixed(2)}</span>
-          <input
-            type="range" min={0.3} max={1.0} step={0.01}
-            value={denoising}
-            onChange={e => setDenoising(parseFloat(e.target.value))}
-            style={{ width: '100%', marginBottom: '0.6rem' }}
-          />
-
           <span style={lbl}>Seed Strategy</span>
           <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.5rem' }}>
             {['fixed', 'random'].map(s => (
@@ -300,35 +293,105 @@ function SetupPhase({ config, onStart }) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
             {Object.entries(currentPacks).map(([packKey, packMeta]) => {
               const on = !!packs[subjectType]?.[packKey];
+              const expanded = !!expandedPacks[packKey];
+              const packVars = serverPresets?.[subjectType]?.[packKey]?.variations ?? [];
+              const desel = deselectedVars[subjectType]?.[packKey] ?? {};
+              const enabledCount = packVars.filter(v => !desel[v.id]).length;
               return (
-                <label key={packKey} style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  padding: '0.45rem 0.6rem',
+                <div key={packKey} style={{
                   background: on ? 'var(--accent-color, #a855f7)22' : 'var(--bg-tertiary, #1e1e1e)',
                   borderRadius: '4px',
                   border: `1px solid ${on ? 'var(--accent-color, #a855f7)' : 'var(--border-color)'}`,
-                  cursor: 'pointer',
                   transition: 'all 0.1s',
+                  overflow: 'hidden',
                 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <input
-                      type="checkbox"
-                      checked={on}
-                      onChange={() => togglePack(subjectType, packKey)}
-                    />
-                    <span style={{ fontSize: '0.84rem' }}>{packMeta.label}</span>
+                  <div style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '0.45rem 0.6rem',
+                    cursor: 'pointer',
+                  }}
+                    onClick={() => togglePack(subjectType, packKey)}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <input
+                        type="checkbox"
+                        checked={on}
+                        onChange={() => {}}
+                        onClick={e => e.stopPropagation()}
+                      />
+                      <span style={{ fontSize: '0.84rem' }}>{packMeta.label}</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      {on && (
+                        <span style={{ fontSize: '0.7rem', color: enabledCount < packMeta.count ? 'var(--accent-color, #a855f7)' : 'var(--text-muted)' }}>
+                          {enabledCount}/{packMeta.count}
+                        </span>
+                      )}
+                      {!on && (
+                        <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                          {packMeta.count} var{packMeta.count !== 1 ? 's' : ''}
+                        </span>
+                      )}
+                      {on && packVars.length > 0 && (
+                        <button
+                          onClick={e => { e.stopPropagation(); setExpandedPacks(prev => ({ ...prev, [packKey]: !prev[packKey] })); }}
+                          style={{
+                            background: 'none', border: 'none', cursor: 'pointer',
+                            color: 'var(--text-muted)', fontSize: '0.7rem', padding: '0 0.15rem',
+                            lineHeight: 1,
+                          }}
+                          title={expanded ? 'Collapse' : 'Expand to filter variations'}
+                        >
+                          {expanded ? '▲' : '▼'}
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                    {packMeta.count} variation{packMeta.count !== 1 ? 's' : ''}
-                  </span>
-                </label>
+
+                  {on && expanded && packVars.length > 0 && (
+                    <div style={{
+                      borderTop: '1px solid var(--border-color)',
+                      padding: '0.4rem 0.6rem',
+                      maxHeight: '180px',
+                      overflowY: 'auto',
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
+                      gap: '0.15rem 0.5rem',
+                    }}>
+                      {packVars.map(v => {
+                        const checked = !desel[v.id];
+                        return (
+                          <label key={v.id} style={{
+                            display: 'flex', alignItems: 'center', gap: '0.3rem',
+                            fontSize: '0.7rem', cursor: 'pointer', padding: '0.1rem 0',
+                            color: checked ? 'var(--text-secondary)' : 'var(--text-muted)',
+                            opacity: checked ? 1 : 0.5,
+                          }}>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleVar(packKey, v.id)}
+                              style={{ accentColor: 'var(--accent-color, #a855f7)', flexShrink: 0 }}
+                            />
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {v.label}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               );
             })}
           </div>
 
           {totalVariations > 0 && (
             <div style={{ marginTop: '0.75rem', fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-              {totalVariations} total variation{totalVariations !== 1 ? 's' : ''} selected
+              {sources.length > 1
+                ? `${totalVariations} variation${totalVariations !== 1 ? 's' : ''} × ${sources.length} sources = ${totalGenerations} images`
+                : `${totalVariations} variation${totalVariations !== 1 ? 's' : ''} selected`
+              }
             </div>
           )}
         </div>
@@ -345,7 +408,7 @@ function SetupPhase({ config, onStart }) {
           disabled={!canStart || starting}
           style={{ width: '100%', padding: '0.6rem', fontSize: '0.9rem' }}
         >
-          {starting ? 'Starting…' : `Generate Dataset — ${totalVariations} image${totalVariations !== 1 ? 's' : ''}`}
+          {starting ? 'Starting…' : `Generate Dataset — ${totalGenerations} image${totalGenerations !== 1 ? 's' : ''}`}
         </button>
       </div>
     </div>
@@ -359,6 +422,7 @@ function SetupPhase({ config, onStart }) {
 function RunningPhase({ jobId, onComplete }) {
   const [state, setState]       = useState(null);
   const [cancelling, setCancelling] = useState(false);
+  const [thumbSize, setThumbSize]   = useState(130);
   const esRef = useRef(null);
 
   const handleCancel = async () => {
@@ -425,6 +489,16 @@ function RunningPhase({ jobId, onComplete }) {
             <span style={{ fontFamily: 'monospace', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
               {done}/{total}{failed > 0 ? ` · ${failed} failed` : ''}
             </span>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+              <span>Size</span>
+              <input
+                type="range" min={80} max={280} step={20}
+                value={thumbSize}
+                onChange={e => setThumbSize(Number(e.target.value))}
+                style={{ width: '70px', accentColor: 'var(--accent-color, #a855f7)' }}
+              />
+              <span style={{ fontFamily: 'monospace', width: '2.5rem' }}>{thumbSize}px</span>
+            </label>
             {state.status === 'running' && (
               <button
                 className="fuk-btn fuk-btn-secondary"
@@ -449,7 +523,7 @@ function RunningPhase({ jobId, onComplete }) {
 
       {/* Thumbnail grid */}
       <div style={{ flex: 1, overflowY: 'auto' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '0.5rem' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${thumbSize}px, 1fr))`, gap: '0.5rem' }}>
           {(state.variations ?? []).map(v => (
             <VariationThumbnail key={v.id} variation={v} jobId={jobId} />
           ))}
@@ -522,15 +596,49 @@ function CurationPhase({ jobId }) {
   const [exportDir, setExportDir]   = useState('');
   const [exporting, setExporting]   = useState(false);
   const [exportResult, setExportResult] = useState(null);
+  const [thumbSize, setThumbSize]   = useState(180);
+  const [rerunning, setRerunning]   = useState(new Set());
+  const pollRef = useRef(null);
 
-  const fetchJob = useCallback(() => {
-    fetch(`/api/dataset/${jobId}`)
-      .then(r => r.json())
-      .then(setJob)
-      .catch(console.error);
+  const fetchJob = useCallback(async () => {
+    try {
+      const data = await fetch(`/api/dataset/${jobId}`).then(r => r.json());
+      setJob(data);
+      return data;
+    } catch (e) { console.error(e); }
   }, [jobId]);
 
   useEffect(() => { fetchJob(); }, [fetchJob]);
+
+  // Poll while any variation is being rerun
+  useEffect(() => {
+    if (rerunning.size === 0) {
+      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+      return;
+    }
+    if (pollRef.current) return;
+    pollRef.current = setInterval(() => {
+      fetchJob().then(data => {
+        if (!data) return;
+        setRerunning(prev => {
+          const still = new Set([...prev].filter(id => {
+            const v = data.variations?.find(vv => vv.id === id);
+            return v?.status === 'running' || v?.status === 'pending';
+          }));
+          return still;
+        });
+      });
+    }, 1500);
+    return () => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } };
+  }, [rerunning.size, fetchJob]);
+
+  const handleRerun = async (variationId) => {
+    try {
+      const res = await fetch(`/api/dataset/${jobId}/rerun/${variationId}`, { method: 'POST' });
+      if (!res.ok) return;
+      setRerunning(prev => new Set([...prev, variationId]));
+    } catch (_) {}
+  };
 
   const handleApprove = async (variationId, approved) => {
     await fetch(`/api/dataset/${jobId}/approve`, {
@@ -576,7 +684,7 @@ function CurationPhase({ jobId }) {
   }
 
   const approvedCount = job.approved_count ?? 0;
-  const completedVariations = job.variations?.filter(v => v.status === 'completed') ?? [];
+  const completedVariations = job.variations?.filter(v => v.status === 'completed' || v.status === 'running' || v.status === 'failed') ?? [];
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
@@ -597,6 +705,16 @@ function CurationPhase({ jobId }) {
           </span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+            <span>Size</span>
+            <input
+              type="range" min={100} max={320} step={20}
+              value={thumbSize}
+              onChange={e => setThumbSize(Number(e.target.value))}
+              style={{ width: '70px', accentColor: 'var(--accent-color, #a855f7)' }}
+            />
+            <span style={{ fontFamily: 'monospace', width: '2.5rem' }}>{thumbSize}px</span>
+          </label>
           {exportResult && (
             <span style={{
               fontSize: '0.72rem', fontFamily: 'monospace',
@@ -645,9 +763,9 @@ function CurationPhase({ jobId }) {
             No completed variations to review.
           </div>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '0.75rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${thumbSize}px, 1fr))`, gap: '0.75rem' }}>
             {completedVariations.map(v => (
-              <CurationCard key={v.id} variation={v} onApprove={handleApprove} />
+              <CurationCard key={v.id} variation={v} onApprove={handleApprove} onRerun={handleRerun} isRerunning={rerunning.has(v.id)} />
             ))}
           </div>
         )}
@@ -656,11 +774,15 @@ function CurationPhase({ jobId }) {
   );
 }
 
-function CurationCard({ variation, onApprove }) {
+function CurationCard({ variation, onApprove, onRerun, isRerunning }) {
   const imgUrl = variation.image_url ? variationImageUrl(variation.image_url) : null;
   const approved = variation.approved;
+  const isFailed = variation.status === 'failed';
+  const isRunning = variation.status === 'running' || isRerunning;
 
   const borderColor =
+    isRunning          ? 'var(--accent-color, #a855f7)' :
+    isFailed           ? 'var(--error-color, #ef4444)' :
     approved === true  ? 'var(--success-color, #22c55e)' :
     approved === false ? 'var(--error-color, #ef4444)' :
     'var(--border-color)';
@@ -672,14 +794,25 @@ function CurationCard({ variation, onApprove }) {
       overflow: 'hidden',
       border: `2px solid ${borderColor}`,
       display: 'flex', flexDirection: 'column',
+      transition: 'border-color 0.2s',
     }}>
-      <div style={{ aspectRatio: '1', background: 'var(--bg-tertiary, #1a1a1a)', overflow: 'hidden' }}>
-        {imgUrl ? (
+      <div style={{ aspectRatio: '1', background: 'var(--bg-tertiary, #1a1a1a)', overflow: 'hidden', position: 'relative' }}>
+        {imgUrl && !isRunning ? (
           <img src={imgUrl} alt={variation.label}
             style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
         ) : (
-          <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>No image</span>
+          <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '0.4rem' }}>
+            {isRunning ? (
+              <>
+                {imgUrl && <img src={imgUrl} alt={variation.label} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', opacity: 0.3 }} />}
+                <div style={{ width: '20px', height: '20px', borderRadius: '50%', border: '2px solid var(--accent-color, #a855f7)', animation: 'pulse 1.5s ease-in-out infinite', position: 'relative' }} />
+                <span style={{ fontSize: '0.62rem', color: 'var(--accent-color, #a855f7)', position: 'relative' }}>Regenerating…</span>
+              </>
+            ) : (
+              <span style={{ fontSize: '0.7rem', color: isFailed ? 'var(--error-color, #ef4444)' : 'var(--text-muted)' }}>
+                {isFailed ? 'Failed' : 'No image'}
+              </span>
+            )}
           </div>
         )}
       </div>
@@ -691,12 +824,13 @@ function CurationCard({ variation, onApprove }) {
           <button
             onClick={() => onApprove(variation.id, true)}
             title="Approve"
+            disabled={isRunning || isFailed}
             style={{
-              flex: 1, padding: '0.3rem', border: 'none', borderRadius: '3px', cursor: 'pointer',
+              flex: 1, padding: '0.3rem', border: 'none', borderRadius: '3px', cursor: isRunning || isFailed ? 'default' : 'pointer',
               background: approved === true ? 'var(--success-color, #22c55e)' : 'var(--bg-tertiary, #333)',
               color: approved === true ? '#fff' : 'var(--text-muted)',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              transition: 'all 0.1s',
+              transition: 'all 0.1s', opacity: isRunning || isFailed ? 0.4 : 1,
             }}
           >
             <ThumbsUp style={{ width: '0.9rem', height: '0.9rem' }} />
@@ -704,15 +838,31 @@ function CurationCard({ variation, onApprove }) {
           <button
             onClick={() => onApprove(variation.id, false)}
             title="Reject"
+            disabled={isRunning || isFailed}
             style={{
-              flex: 1, padding: '0.3rem', border: 'none', borderRadius: '3px', cursor: 'pointer',
+              flex: 1, padding: '0.3rem', border: 'none', borderRadius: '3px', cursor: isRunning || isFailed ? 'default' : 'pointer',
               background: approved === false ? 'var(--error-color, #ef4444)' : 'var(--bg-tertiary, #333)',
               color: approved === false ? '#fff' : 'var(--text-muted)',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              transition: 'all 0.1s',
+              transition: 'all 0.1s', opacity: isRunning || isFailed ? 0.4 : 1,
             }}
           >
             <ThumbsDown style={{ width: '0.9rem', height: '0.9rem' }} />
+          </button>
+          <button
+            onClick={() => onRerun(variation.id)}
+            title="Rerun this generation"
+            disabled={isRunning}
+            style={{
+              padding: '0.3rem 0.45rem', border: 'none', borderRadius: '3px', cursor: isRunning ? 'default' : 'pointer',
+              background: 'var(--bg-tertiary, #333)',
+              color: 'var(--text-muted)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              transition: 'all 0.1s', opacity: isRunning ? 0.4 : 1,
+              fontSize: '0.75rem',
+            }}
+          >
+            ↺
           </button>
         </div>
       </div>

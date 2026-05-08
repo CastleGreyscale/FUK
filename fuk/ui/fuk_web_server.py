@@ -604,6 +604,7 @@ class ImageGenerationRequest(BaseModel):
     seed: Optional[int] = None
     lora: Optional[str] = None
     lora_multiplier: float = 1.0
+    loras: Optional[List[Dict[str, Any]]] = None
     control_image_path: Optional[str] = None  # For backward compatibility (single image)
     control_image_paths: Optional[List[str]] = None  # For multiple images
     output_format: str = "png"  # png, exr, both
@@ -948,6 +949,7 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
             negative_prompt=request.negative_prompt,
             lora=request.lora,
             lora_multiplier=request.lora_multiplier,
+            loras=request.loras,
             control_image=control_images if control_images else None,
             vram_preset=request.vram_preset,
             denoising_strength=request.denoising_strength,
