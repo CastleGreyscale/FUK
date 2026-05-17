@@ -3,8 +3,8 @@
  * Shows past generations with drag-and-drop, pagination, and pinning
  */
 
-import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
-import { Film, Camera, Clock, Trash2, RefreshCw, ChevronDown, ChevronRight, Enhance, Zap, ArrowUp, Layers, Download, PinIcon, ImportIcon, SequenceIcon, ThumbsUp, ThumbsDown, Maximize2, X, Info } from './Icons';
+import { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from 'react';
+import { Film, Camera, Clock, Trash2, RefreshCw, ChevronDown, ChevronRight, Enhance, Zap, ArrowUp, Layers, Download, PinIcon, ImportIcon, SequenceIcon, ThumbsUp, ThumbsDown, Maximize2, X } from './Icons';
 import { buildImageUrl, API_URL } from '../utils/constants';
 import { useVideoPlayback } from '../hooks/useVideoPlayback';
 
@@ -386,7 +386,7 @@ function processingType(g) {
 
 // ─── single gallery thumbnail ─────────────────────────────────────────────────
 
-function GalleryThumb({ generation, isPinned, isSelected, vote, onSelect, onTogglePin, onVote, onDelete }) {
+function GalleryThumb({ generation, isPinned, isSelected, isMultiSelected, vote, onSelect, onTogglePin, onVote, onDelete }) {
   const [imgErr, setImgErr] = useState(false);
   const video   = isGenVideo(generation);
   const seq     = generation.isSequence;
@@ -398,8 +398,8 @@ function GalleryThumb({ generation, isPinned, isSelected, vote, onSelect, onTogg
 
   return (
     <div
-      className={`gallery-thumb${isSelected ? ' selected' : ''}${isPinned ? ' pinned' : ''}`}
-      onClick={() => onSelect(generation)}
+      className={`gallery-thumb${isSelected ? ' selected' : ''}${isPinned ? ' pinned' : ''}${isMultiSelected ? ' multi-selected' : ''}`}
+      onClick={e => onSelect(generation, e.shiftKey)}
     >
       <div className="gallery-thumb-media">
         {!imgErr ? (
@@ -428,6 +428,9 @@ function GalleryThumb({ generation, isPinned, isSelected, vote, onSelect, onTogg
         )}
         {isPinned && (
           <div className="gen-history-pinned-badge"><PinIcon /></div>
+        )}
+        {isMultiSelected && (
+          <div className="gallery-thumb-check">✓</div>
         )}
       </div>
 
@@ -458,13 +461,16 @@ function GalleryThumb({ generation, isPinned, isSelected, vote, onSelect, onTogg
   );
 }
 
-// ─── metadata detail panel ────────────────────────────────────────────────────
+// ─── large preview (top panel in the gallery) ────────────────────────────────
 
-function GalleryDetail({ generation, isPinned, vote, onTogglePin, onVote, onDelete }) {
-  const preview = buildImageUrl(generation.preview);
-  const video   = isGenVideo(generation);
+function GalleryLargeView({ generation, generations, isPinned, vote, onTogglePin, onVote, onDelete, onNavigate, multiSelected, onBulkVote, onBulkDelete, onClearSelection }) {
+  const preview  = buildImageUrl(generation.preview);
+  const video    = isGenVideo(generation);
   const ProcIcon = processingIcon(generation);
   const procType = processingType(generation);
+  const currentIdx = generations.findIndex(g => g.id === generation.id);
+  const hasPrev = currentIdx > 0;
+  const hasNext = currentIdx < generations.length - 1;
 
   const typeColors = {
     depth: '#3b82f6', normals: '#a855f7', crypto: '#f59e0b',
@@ -472,18 +478,48 @@ function GalleryDetail({ generation, isPinned, vote, onTogglePin, onVote, onDele
   };
 
   return (
-    <div className="gallery-detail">
-      {/* large preview */}
-      <div className="gallery-detail-preview">
+    <div className="gallery-large-view">
+      {/* media + nav arrows */}
+      <div className="gallery-large-media">
+        <button
+          className={`gallery-large-nav prev${!hasPrev ? ' disabled' : ''}`}
+          onClick={() => hasPrev && onNavigate('prev')}
+          disabled={!hasPrev}
+          title="Previous (←)"
+        >‹</button>
+
         {video
-          ? <video src={preview} controls muted loop playsInline />
-          : <img src={preview} alt={generation.name || generation.id} />
+          ? <video key={preview} src={preview} controls muted loop playsInline />
+          : <img key={preview} src={preview} alt={generation.name || generation.id} />
         }
+
+        <button
+          className={`gallery-large-nav next${!hasNext ? ' disabled' : ''}`}
+          onClick={() => hasNext && onNavigate('next')}
+          disabled={!hasNext}
+          title="Next (→)"
+        >›</button>
       </div>
 
-      {/* metadata */}
-      <div className="gallery-detail-meta">
-        <div className="gallery-detail-name">{generation.name || generation.id}</div>
+      {/* sidebar */}
+      <div className="gallery-large-sidebar">
+        {/* bulk selection controls */}
+        {multiSelected && multiSelected.size > 1 && (
+          <div className="gallery-bulk-section">
+            <div className="gallery-bulk-header">{multiSelected.size} selected</div>
+            <div className="gallery-detail-actions">
+              <button className="gen-history-vote up" onClick={() => onBulkVote(1)}><ThumbsUp />Good all</button>
+              <button className="gen-history-vote down" onClick={() => onBulkVote(-1)}><ThumbsDown />Bad all</button>
+              <button className="gen-history-delete" onClick={onBulkDelete}><Trash2 />Delete all</button>
+              <button className="gallery-bulk-clear" onClick={onClearSelection}><X />Clear</button>
+            </div>
+            <div className="gallery-bulk-divider" />
+          </div>
+        )}
+
+        <div className="gallery-large-name">{generation.name || generation.id}</div>
+
+        <div className="gallery-large-position">{currentIdx + 1} / {generations.length}</div>
 
         <div className="gallery-detail-badges">
           <span className={`gallery-badge type-${procType}`}>
@@ -505,9 +541,9 @@ function GalleryDetail({ generation, isPinned, vote, onTogglePin, onVote, onDele
         </div>
 
         <div className="gallery-detail-rows">
-          {generation.date      && <div className="gallery-detail-row"><span>Date</span><span>{generation.date}</span></div>}
-          {generation.timestamp && <div className="gallery-detail-row"><span>Time</span><span>{generation.timestamp}</span></div>}
-          {generation.path      && <div className="gallery-detail-row path"><span>Path</span><span title={generation.path}>{generation.path}</span></div>}
+          {generation.date       && <div className="gallery-detail-row"><span>Date</span><span>{generation.date}</span></div>}
+          {generation.timestamp  && <div className="gallery-detail-row"><span>Time</span><span>{generation.timestamp}</span></div>}
+          {generation.path       && <div className="gallery-detail-row path"><span>Path</span><span title={generation.path}>{generation.path}</span></div>}
           {generation.sourcePath && <div className="gallery-detail-row path"><span>Source</span><span title={generation.sourcePath}>{generation.sourcePath}</span></div>}
         </div>
 
@@ -515,7 +551,6 @@ function GalleryDetail({ generation, isPinned, vote, onTogglePin, onVote, onDele
           <button
             className={`gen-history-pin ${isPinned ? 'active' : ''}`}
             onClick={() => onTogglePin(generation)}
-            title={isPinned ? 'Unpin' : 'Pin'}
           ><PinIcon />{isPinned ? 'Unpin' : 'Pin'}</button>
           <button
             className={`gen-history-vote up ${vote === 1 ? 'active' : ''}`}
@@ -538,19 +573,31 @@ function GalleryDetail({ generation, isPinned, vote, onTogglePin, onVote, onDele
 // ─── fullscreen gallery overlay ───────────────────────────────────────────────
 
 function FullscreenGallery({ generations, pinnedIds, votes, onTogglePin, onVote, onDelete, onClose }) {
-  const [zoom, setZoom]       = useState(160);
-  const [selected, setSelected] = useState(null);
+  const [zoom, setZoom]               = useState(160);
+  const [selected, setSelected]       = useState(generations[0] || null);
+  const [previewPct, setPreviewPct]   = useState(55);
+  const [multiSelected, setMultiSelected] = useState(new Set());
+  const bodyRef      = useRef(null);
+  const isDragging   = useRef(false);
+  const dragStartY   = useRef(0);
+  const dragStartPct = useRef(55);
+  const anchorId     = useRef(null);
 
-  // Close on Escape, arrow-key navigation, +/- zoom
+  // Flat ordered list for range-selection (pinned first, then unpinned)
+  const pinnedGens   = useMemo(() => generations.filter(g =>  pinnedIds.includes(g.id)), [generations, pinnedIds]);
+  const unpinnedGens = useMemo(() => generations.filter(g => !pinnedIds.includes(g.id)), [generations, pinnedIds]);
+  const orderedGens  = useMemo(() => [...pinnedGens, ...unpinnedGens], [pinnedGens, unpinnedGens]);
+
+  // Keyboard: Escape, arrows, +/-
   useEffect(() => {
     const handle = e => {
       if (e.key === 'Escape') { onClose(); return; }
       if (e.key === '+' || e.key === '=') { setZoom(z => Math.min(z + 20, 320)); return; }
-      if (e.key === '-')                  { setZoom(z => Math.max(z - 20, 80));  return; }
+      if (e.key === '-')                   { setZoom(z => Math.max(z - 20, 80));  return; }
       if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
         setSelected(prev => {
           if (!prev) return generations[0] || null;
-          const idx = generations.findIndex(g => g.id === prev.id);
+          const idx  = generations.findIndex(g => g.id === prev.id);
           const next = e.key === 'ArrowRight' ? idx + 1 : idx - 1;
           return generations[Math.max(0, Math.min(next, generations.length - 1))] || prev;
         });
@@ -560,18 +607,83 @@ function FullscreenGallery({ generations, pinnedIds, votes, onTogglePin, onVote,
     return () => window.removeEventListener('keydown', handle);
   }, [onClose, generations]);
 
-  // Wrap delete so gallery deselects a deleted item
+  // Draggable divider
+  const handleDividerMouseDown = (e) => {
+    e.preventDefault();
+    isDragging.current   = true;
+    dragStartY.current   = e.clientY;
+    dragStartPct.current = previewPct;
+
+    const onMove = (e) => {
+      if (!isDragging.current || !bodyRef.current) return;
+      const bodyH = bodyRef.current.getBoundingClientRect().height;
+      const delta = ((e.clientY - dragStartY.current) / bodyH) * 100;
+      setPreviewPct(Math.max(15, Math.min(85, dragStartPct.current + delta)));
+    };
+    const onUp = () => {
+      isDragging.current = false;
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+
+  // Thumb click: shift-click ranges, plain click sets anchor
+  const handleThumbSelect = useCallback((generation, shiftKey) => {
+    if (shiftKey && anchorId.current) {
+      const ids = orderedGens.map(g => g.id);
+      const aIdx = ids.indexOf(anchorId.current);
+      const cIdx = ids.indexOf(generation.id);
+      const [lo, hi] = [Math.min(aIdx, cIdx), Math.max(aIdx, cIdx)];
+      setMultiSelected(new Set(ids.slice(lo, hi + 1)));
+    } else {
+      setMultiSelected(new Set());
+      anchorId.current = generation.id;
+    }
+    setSelected(generation);
+  }, [orderedGens]);
+
   const handleDelete = useCallback(async generation => {
     if (!confirm(`Delete ${generation.name || generation.id}?`)) return;
     await onDelete(generation);
     setSelected(s => s?.id === generation.id ? null : s);
+    setMultiSelected(prev => { const next = new Set(prev); next.delete(generation.id); return next; });
   }, [onDelete]);
 
-  const pinnedGens   = generations.filter(g => pinnedIds.includes(g.id));
-  const unpinnedGens = generations.filter(g => !pinnedIds.includes(g.id));
+  const handleNavigate = useCallback((dir) => {
+    setMultiSelected(new Set());
+    setSelected(prev => {
+      if (!prev) return generations[0] || null;
+      const idx  = generations.findIndex(g => g.id === prev.id);
+      const next = dir === 'next' ? idx + 1 : idx - 1;
+      const gen  = generations[Math.max(0, Math.min(next, generations.length - 1))] || prev;
+      anchorId.current = gen.id;
+      return gen;
+    });
+  }, [generations]);
+
+  const handleBulkVote = useCallback(async (value) => {
+    for (const id of multiSelected) {
+      const gen = generations.find(g => g.id === id);
+      if (gen) await onVote(gen, value);
+    }
+  }, [multiSelected, generations, onVote]);
+
+  const handleBulkDelete = useCallback(async () => {
+    const count = multiSelected.size;
+    if (!confirm(`Delete ${count} items?`)) return;
+    const ids = [...multiSelected];
+    for (const id of ids) {
+      const gen = generations.find(g => g.id === id);
+      if (gen) await onDelete(gen);
+    }
+    setMultiSelected(new Set());
+    setSelected(s => (s && multiSelected.has(s.id)) ? null : s);
+  }, [multiSelected, generations, onDelete]);
 
   return (
-    <div className="gallery-overlay" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="gallery-overlay">
       {/* header */}
       <div className="gallery-header">
         <div className="gallery-header-left">
@@ -581,7 +693,7 @@ function FullscreenGallery({ generations, pinnedIds, votes, onTogglePin, onVote,
         </div>
         <div className="gallery-header-center">
           <label className="gallery-zoom-label">
-            <span>Size</span>
+            <span>Thumb size</span>
             <input
               type="range" min={80} max={320} step={20}
               value={zoom}
@@ -592,19 +704,40 @@ function FullscreenGallery({ generations, pinnedIds, votes, onTogglePin, onVote,
           </label>
         </div>
         <div className="gallery-header-right">
-          {selected && (
-            <button className="gallery-deselect-btn" onClick={() => setSelected(null)} title="Close detail">
-              <Info />
-            </button>
-          )}
-          <button className="gallery-close-btn" onClick={onClose} title="Close gallery (Esc)">
-            <X />
-          </button>
+          <button className="gallery-close-btn" onClick={onClose} title="Close (Esc)"><X /></button>
         </div>
       </div>
 
-      {/* body */}
-      <div className={`gallery-body${selected ? ' has-detail' : ''}`}>
+      {/* body: vertical split */}
+      <div className="gallery-body" ref={bodyRef}>
+        {/* large preview */}
+        <div className="gallery-large-preview" style={{ height: `${previewPct}%` }}>
+          {selected ? (
+            <GalleryLargeView
+              generation={selected}
+              generations={generations}
+              isPinned={pinnedIds.includes(selected.id)}
+              vote={votes[selected.id] || 0}
+              onTogglePin={onTogglePin}
+              onVote={onVote}
+              onDelete={handleDelete}
+              onNavigate={handleNavigate}
+              multiSelected={multiSelected}
+              onBulkVote={handleBulkVote}
+              onBulkDelete={handleBulkDelete}
+              onClearSelection={() => setMultiSelected(new Set())}
+            />
+          ) : (
+            <div className="gallery-large-empty">Click a thumbnail to preview</div>
+          )}
+        </div>
+
+        {/* draggable divider */}
+        <div className="gallery-drag-handle" onMouseDown={handleDividerMouseDown}>
+          <div className="gallery-drag-handle-grip" />
+        </div>
+
+        {/* thumbnail grid */}
         <div className="gallery-grid-wrap">
           {pinnedGens.length > 0 && (
             <div className="gallery-section-label"><PinIcon /> Pinned</div>
@@ -616,8 +749,9 @@ function FullscreenGallery({ generations, pinnedIds, votes, onTogglePin, onVote,
                   key={g.id} generation={g}
                   isPinned={true}
                   isSelected={selected?.id === g.id}
+                  isMultiSelected={multiSelected.has(g.id)}
                   vote={votes[g.id] || 0}
-                  onSelect={setSelected}
+                  onSelect={handleThumbSelect}
                   onTogglePin={onTogglePin}
                   onVote={onVote}
                   onDelete={handleDelete}
@@ -634,8 +768,9 @@ function FullscreenGallery({ generations, pinnedIds, votes, onTogglePin, onVote,
                 key={g.id} generation={g}
                 isPinned={false}
                 isSelected={selected?.id === g.id}
+                isMultiSelected={multiSelected.has(g.id)}
                 vote={votes[g.id] || 0}
-                onSelect={setSelected}
+                onSelect={handleThumbSelect}
                 onTogglePin={onTogglePin}
                 onVote={onVote}
                 onDelete={handleDelete}
@@ -643,17 +778,6 @@ function FullscreenGallery({ generations, pinnedIds, votes, onTogglePin, onVote,
             ))}
           </div>
         </div>
-
-        {selected && (
-          <GalleryDetail
-            generation={selected}
-            isPinned={pinnedIds.includes(selected.id)}
-            vote={votes[selected.id] || 0}
-            onTogglePin={onTogglePin}
-            onVote={onVote}
-            onDelete={handleDelete}
-          />
-        )}
       </div>
     </div>
   );

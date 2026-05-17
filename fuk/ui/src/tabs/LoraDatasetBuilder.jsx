@@ -649,6 +649,18 @@ function CurationPhase({ jobId }) {
     fetchJob();
   };
 
+  const handleApproveAll = async (approved) => {
+    const eligible = job?.variations?.filter(v => v.status === 'completed' && !rerunning.has(v.id)) ?? [];
+    await Promise.all(eligible.map(v =>
+      fetch(`/api/dataset/${jobId}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ variation_id: v.id, approved }),
+      })
+    ));
+    fetchJob();
+  };
+
   const handleBrowseExportDir = async () => {
     try {
       const res = await fetch('/api/browser/directory', {
@@ -705,6 +717,22 @@ function CurationPhase({ jobId }) {
           </span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <button
+            className="fuk-btn fuk-btn-secondary"
+            onClick={() => handleApproveAll(true)}
+            style={{ fontSize: '0.72rem', padding: '0.15rem 0.5rem', color: 'var(--success-color, #22c55e)', flexShrink: 0 }}
+            title="Approve all completed images"
+          >
+            Approve All
+          </button>
+          <button
+            className="fuk-btn fuk-btn-secondary"
+            onClick={() => handleApproveAll(false)}
+            style={{ fontSize: '0.72rem', padding: '0.15rem 0.5rem', color: 'var(--error-color, #ef4444)', flexShrink: 0 }}
+            title="Reject all completed images"
+          >
+            Reject All
+          </button>
           <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
             <span>Size</span>
             <input
