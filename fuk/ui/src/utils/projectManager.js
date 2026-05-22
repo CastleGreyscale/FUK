@@ -135,61 +135,16 @@ export function createEmptyProjectState(defaults = {}) {
       version: '',
     },
     
-    // Tab states - all generation settings
-    // Field names match defaults.json keys (camelCase)
+    // Tab states - all generation settings.
+    // Per-model format: { activeModel, modelSettings: { [modelKey]: {...} } }
     tabs: {
       image: {
-        prompt: imageDefaults.prompt || '',
-        negative_prompt: imageDefaults.negative_prompt || '',
-        model: imageDefaults.model || 'qwen_image',
-        aspectRatio: imageDefaults.aspectRatio || '1.78:1',
-        width: imageDefaults.width || 1280,
-        height: null,  // Calculated from width and aspect ratio
-        steps: imageDefaults.steps || 20,
-        stepsMode: imageDefaults.stepsMode || 'preset',
-        guidance_scale: imageDefaults.guidance_scale ?? 4,
-        cfg_scale: imageDefaults.cfg_scale ?? 5.0,
-        denoising_strength: imageDefaults.denoising_strength ?? 1,
-        seed: imageDefaults.seed ?? null,
-        seedMode: imageDefaults.seedMode || 'random',
-        lastUsedSeed: null,
-        lora: imageDefaults.lora ?? null,
-        lora_multiplier: imageDefaults.lora_multiplier ?? 1.0,
-        output_format: imageDefaults.output_format || 'png',
-        edit_strength: imageDefaults.edit_strength ?? 1,
-        exponential_shift_mu: imageDefaults.exponential_shift_mu ?? null,
-        save_latent: imageDefaults.save_latent ?? true,
-        control_image_paths: imageDefaults.control_image_paths || [],
+        activeModel: imageDefaults.model || 'qwen_image',
+        modelSettings: {},
       },
       video: {
-        prompt: videoDefaults.prompt || '',
-        negative_prompt: videoDefaults.negative_prompt || '',
-        model: videoDefaults.model || 'wan_t2v_14b',
-        task: videoDefaults.task || 'i2v-A14B',
-        video_length: videoDefaults.video_length || 41,
-        scale_factor: videoDefaults.scale_factor ?? 1.0,
-        steps: videoDefaults.steps || 20,
-        stepsMode: videoDefaults.stepsMode || 'preset',
-        guidance_scale: videoDefaults.guidance_scale ?? 5.0,
-        cfg_scale: videoDefaults.cfg_scale ?? 6.0,
-        denoising_strength: videoDefaults.denoising_strength ?? 1.0,
-        sigma_shift: videoDefaults.sigma_shift ?? 5.0,
-        sliding_window_size: videoDefaults.sliding_window_size ?? null,
-        sliding_window_stride: videoDefaults.sliding_window_stride ?? null,
-        motion_bucket_id: videoDefaults.motion_bucket_id ?? null,
-        seed: videoDefaults.seed ?? null,
-        seedMode: videoDefaults.seedMode || 'random',
-        lastUsedSeed: null,
-        lora: videoDefaults.lora ?? null,
-        lora_multiplier: videoDefaults.lora_multiplier ?? 1.0,
-        save_latent: videoDefaults.save_latent ?? true,
-        width: videoDefaults.width ?? null,
-        height: videoDefaults.height ?? null,
-        source_width: videoDefaults.source_width ?? null,
-        source_height: videoDefaults.source_height ?? null,
-        image_path: null,
-        end_image_path: null,
-        control_path: null,
+        activeModel: videoDefaults.task || 'i2v-A14B',
+        modelSettings: {},
       },
       preprocess: preprocessDefaults,
       postprocess: postprocessDefaults,
@@ -226,22 +181,40 @@ export function createEmptyProjectState(defaults = {}) {
   };
 }
 /**
+ * Migrate old flat tab state to per-model format.
+ * Old: { prompt, model, steps, ... }
+ * New: { activeModel, modelSettings: { [modelKey]: {...} } }
+ */
+function migrateTabToPerModel(loaded, emptyTab) {
+  if (!loaded) return emptyTab;
+  if (loaded.modelSettings) {
+    // Already new format — deep merge with empty to fill any missing structure
+    return deepMerge(emptyTab, loaded);
+  }
+  // Old flat format — wrap into per-model structure
+  const modelKey = loaded.model || loaded.task || emptyTab.activeModel;
+  return {
+    activeModel: modelKey,
+    modelSettings: { [modelKey]: loaded },
+  };
+}
+
+/**
  * Merge loaded state with defaults (handles version upgrades)
  * Uses deep merge to properly handle nested configuration objects
- * 
+ *
  * @param {Object} loadedState - State loaded from .json file
  * @param {Object} defaults - User defaults from defaults.json (optional)
  */
 export function mergeWithDefaults(loadedState, defaults = {}) {
   const emptyState = createEmptyProjectState(defaults);
-  
-  // Deep merge each top-level section
+
   return {
     meta: deepMerge(emptyState.meta, loadedState.meta || {}),
     project: deepMerge(emptyState.project, loadedState.project || {}),
     tabs: {
-      image: deepMerge(emptyState.tabs.image, loadedState.tabs?.image || {}),
-      video: deepMerge(emptyState.tabs.video, loadedState.tabs?.video || {}),
+      image: migrateTabToPerModel(loadedState.tabs?.image, emptyState.tabs.image),
+      video: migrateTabToPerModel(loadedState.tabs?.video, emptyState.tabs.video),
       preprocess: deepMerge(emptyState.tabs.preprocess, loadedState.tabs?.preprocess || {}),
       postprocess: deepMerge(emptyState.tabs.postprocess, loadedState.tabs?.postprocess || {}),
       layers: deepMerge(emptyState.tabs.layers, loadedState.tabs?.layers || {}),

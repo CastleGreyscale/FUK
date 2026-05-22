@@ -988,10 +988,12 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
             infer_steps=request.steps,
             guidance_scale=request.guidance_scale,
             negative_prompt=request.negative_prompt or "",
-
             lora=request.lora,
             lora_multiplier=request.lora_multiplier,
+            loras=request.loras or [],
             control_image=[str(p) for p in control_images] if control_images else None,
+            denoising_strength=request.denoising_strength,
+            exponential_shift_mu=request.exponential_shift_mu,
             eligen_source=str(eligen_source_abs) if eligen_source_abs else None,
             eligen_alpha=request.eligen_alpha,
         )
@@ -1203,6 +1205,12 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
             lora_multiplier=request.lora_multiplier,
             start_image=request.image_path,
             end_image=request.end_image_path,
+            control_path=request.control_path,
+            sigma_shift=request.sigma_shift,
+            motion_bucket_id=request.motion_bucket_id,
+            denoising_strength=request.denoising_strength,
+            sliding_window_size=request.sliding_window_size,
+            sliding_window_stride=request.sliding_window_stride,
         )
         
         # Mark complete

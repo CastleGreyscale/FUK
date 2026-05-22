@@ -80,11 +80,18 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
   // Fallback localStorage for when no project is loaded
   const [localFormData, setLocalFormData] = useLocalStorage('fuk_image_settings', initialDefaults);
 
-  // Use project state if available, otherwise localStorage
-  // Order: initialDefaults <- localStorage/projectState (overwrites)
+  // Use project state if available, otherwise localStorage.
+  // New format: tabs.image = { activeModel, modelSettings: { [key]: {...} } }
+  // Old format: tabs.image = flat object (backward compat — detected by absence of modelSettings)
   const formData = useMemo(() => {
-    if (project?.projectState?.tabs?.image) {
-      return { ...initialDefaults, ...project.projectState.tabs.image };
+    const tabState = project?.projectState?.tabs?.image;
+    if (tabState?.modelSettings) {
+      const activeModel = tabState.activeModel || initialDefaults.model;
+      const modelData = tabState.modelSettings[activeModel] || {};
+      return { ...initialDefaults, ...modelData, model: activeModel };
+    }
+    if (tabState) {
+      return { ...initialDefaults, ...tabState };
     }
     return { ...initialDefaults, ...localFormData };
   }, [project?.projectState?.tabs?.image, localFormData, initialDefaults]);
@@ -102,6 +109,12 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
     formDataRef.current = formData;
   }, [formData]);
 
+  // Ref to access current tab state in setFormData without adding it to deps
+  const projectTabRef = useRef(null);
+  useEffect(() => {
+    projectTabRef.current = project?.projectState?.tabs?.image ?? null;
+  }, [project?.projectState?.tabs?.image]);
+
   // Resolve alias model values to canonical keys when models config loads
   useEffect(() => {
     if (imageModels.length > 0 && formData.model) {
@@ -112,15 +125,29 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
     }
   }, [imageModels.length]);
 
-  // Update function that writes to project or localStorage
+  // Update function that writes to project or localStorage.
+  // On model switch: saves current model's settings, then activates new model's saved settings.
   const setFormData = useCallback((updater) => {
     const currentData = formDataRef.current;
-    const newData = typeof updater === 'function' 
-      ? updater(currentData) 
-      : updater;
-    
+    const newData = typeof updater === 'function' ? updater(currentData) : updater;
+
     if (project?.isProjectLoaded && project?.updateTabState) {
-      project.updateTabState('image', newData);
+      const currentModel = currentData.model;
+      const newModel = newData.model;
+      const existingModelSettings = projectTabRef.current?.modelSettings || {};
+
+      if (newModel !== currentModel) {
+        // Save current model's state, switch activeModel — formData recomputes from new model's saved settings
+        project.updateTabState('image', {
+          activeModel: newModel,
+          modelSettings: { ...existingModelSettings, [currentModel]: currentData },
+        });
+      } else {
+        project.updateTabState('image', {
+          activeModel: currentModel,
+          modelSettings: { ...existingModelSettings, [currentModel]: newData },
+        });
+      }
     } else {
       setLocalFormData(newData);
     }
@@ -383,12 +410,19 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
       const meta = await res.json();
 
       const updates = {};
-      if (meta.prompt)                 updates.prompt           = meta.prompt;
-      if (meta.negative_prompt)        updates.negative_prompt  = meta.negative_prompt;
-      if (meta.model)                  updates.model            = resolveModelKey(meta.model);
-      if (meta.guidance_scale != null) updates.guidance_scale   = meta.guidance_scale;
-      if (meta.infer_steps != null)    updates.steps            = meta.infer_steps;
-      if (meta.lora != null)            updates.loras = [{ key: meta.lora, multiplier: meta.lora_multiplier ?? 1.0 }];
+      if (meta.prompt)                    updates.prompt                = meta.prompt;
+      if (meta.negative_prompt)           updates.negative_prompt       = meta.negative_prompt;
+      if (meta.model)                     updates.model                 = resolveModelKey(meta.model);
+      if (meta.guidance_scale != null)    updates.guidance_scale        = meta.guidance_scale;
+      if (meta.infer_steps != null)       updates.steps                 = meta.infer_steps;
+      if (meta.denoising_strength != null) updates.edit_strength        = meta.denoising_strength;
+      if (meta.exponential_shift_mu != null) updates.exponential_shift_mu = meta.exponential_shift_mu;
+      // Prefer full loras array; fall back to legacy single lora field
+      if (meta.loras?.length > 0) {
+        updates.loras = meta.loras;
+      } else if (meta.lora != null) {
+        updates.loras = [{ key: meta.lora, multiplier: meta.lora_multiplier ?? 1.0 }];
+      }
       if (meta.seed != null) {
         updates.seed     = meta.seed;
         updates.seedMode = SEED_MODES.FIXED;

@@ -105,11 +105,18 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
   // Fallback localStorage for when no project is loaded
   const [localFormData, setLocalFormData] = useLocalStorage('fuk_video_settings', initialDefaults);
 
-  // Use project state if available, otherwise localStorage
-  // Order: initialDefaults <- localStorage/projectState (overwrites)
+  // Use project state if available, otherwise localStorage.
+  // New format: tabs.video = { activeModel, modelSettings: { [task]: {...} } }
+  // Old format: tabs.video = flat object (backward compat — detected by absence of modelSettings)
   const formData = useMemo(() => {
-    if (project?.projectState?.tabs?.video) {
-      return { ...initialDefaults, ...project.projectState.tabs.video };
+    const tabState = project?.projectState?.tabs?.video;
+    if (tabState?.modelSettings) {
+      const activeModel = tabState.activeModel || initialDefaults.task;
+      const modelData = tabState.modelSettings[activeModel] || {};
+      return { ...initialDefaults, ...modelData, task: activeModel };
+    }
+    if (tabState) {
+      return { ...initialDefaults, ...tabState };
     }
     return { ...initialDefaults, ...localFormData };
   }, [project?.projectState?.tabs?.video, localFormData, initialDefaults]);
@@ -120,15 +127,35 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
     formDataRef.current = formData;
   }, [formData]);
 
-  // Update function that writes to project or localStorage
+  // Ref to access current tab state in setFormData without adding it to deps
+  const projectTabRef = useRef(null);
+  useEffect(() => {
+    projectTabRef.current = project?.projectState?.tabs?.video ?? null;
+  }, [project?.projectState?.tabs?.video]);
+
+  // Update function that writes to project or localStorage.
+  // On model switch: saves current model's settings, then activates new model's saved settings.
   const setFormData = useCallback((updater) => {
     const currentData = formDataRef.current;
-    const newData = typeof updater === 'function' 
-      ? updater(currentData) 
-      : updater;
-    
+    const newData = typeof updater === 'function' ? updater(currentData) : updater;
+
     if (project?.isProjectLoaded && project?.updateTabState) {
-      project.updateTabState('video', newData);
+      const currentModel = currentData.task;
+      const newModel = newData.task;
+      const existingModelSettings = projectTabRef.current?.modelSettings || {};
+
+      if (newModel !== currentModel) {
+        // Save current model's state, switch activeModel — formData recomputes from new model's saved settings
+        project.updateTabState('video', {
+          activeModel: newModel,
+          modelSettings: { ...existingModelSettings, [currentModel]: currentData },
+        });
+      } else {
+        project.updateTabState('video', {
+          activeModel: currentModel,
+          modelSettings: { ...existingModelSettings, [currentModel]: newData },
+        });
+      }
     } else {
       setLocalFormData(newData);
     }
@@ -480,15 +507,20 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
       const meta = await res.json();
 
       const updates = {};
-      if (meta.prompt)                  updates.prompt            = meta.prompt;
-      if (meta.negative_prompt)         updates.negative_prompt   = meta.negative_prompt;
+      if (meta.prompt)                     updates.prompt              = meta.prompt;
+      if (meta.negative_prompt)            updates.negative_prompt     = meta.negative_prompt;
       // Video model is stored as 'model' but the tab uses 'task'
-      if (meta.model)                   updates.task              = meta.model;
-      if (meta.guidance_scale != null)  updates.guidance_scale    = meta.guidance_scale;
-      if (meta.infer_steps != null)     updates.steps             = meta.infer_steps;
-      if (meta.video_length != null)    updates.video_length      = meta.video_length;
-      if (meta.lora != null)            updates.lora              = meta.lora;
-      if (meta.lora_multiplier != null) updates.lora_multiplier   = meta.lora_multiplier;
+      if (meta.model)                      updates.task                = meta.model;
+      if (meta.guidance_scale != null)     updates.guidance_scale      = meta.guidance_scale;
+      if (meta.infer_steps != null)        updates.steps               = meta.infer_steps;
+      if (meta.video_length != null)       updates.video_length        = meta.video_length;
+      if (meta.lora != null)               updates.lora                = meta.lora;
+      if (meta.lora_multiplier != null)    updates.lora_multiplier     = meta.lora_multiplier;
+      if (meta.sigma_shift != null)        updates.sigma_shift         = meta.sigma_shift;
+      if (meta.motion_bucket_id != null)   updates.motion_bucket_id    = meta.motion_bucket_id;
+      if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoising_strength;
+      if (meta.sliding_window_size != null)   updates.sliding_window_size   = meta.sliding_window_size;
+      if (meta.sliding_window_stride != null) updates.sliding_window_stride = meta.sliding_window_stride;
       if (meta.seed != null) {
         updates.seed     = meta.seed;
         updates.seedMode = SEED_MODES.FIXED;
