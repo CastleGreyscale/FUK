@@ -3,6 +3,7 @@
  * Contains progress bar, tabs, and action buttons
  */
 
+import { useState, useEffect } from 'react';
 import TabButton from './TabButton';
 import ProgressBar from './ProgressBar';
 import { Camera, Film, Pipeline, Enhance, Save, FukMonogram, Loader2, X, Layers, Wrench } from './Icons';
@@ -21,6 +22,15 @@ export default function Footer({
   batchCount,
   onBatchCountChange,
 }) {
+  const [batchInput, setBatchInput] = useState(String(batchCount ?? 1));
+  useEffect(() => { setBatchInput(String(batchCount ?? 1)); }, [batchCount]);
+
+  const commitBatch = (raw) => {
+    const parsed = Math.max(1, Math.min(50, parseInt(raw) || 1));
+    setBatchInput(String(parsed));
+    onBatchCountChange?.(parsed);
+  };
+
   return (
     <div className="fuk-footer" style={{ position: 'relative' }}>
 
@@ -82,8 +92,10 @@ export default function Footer({
               type="number"
               min="1"
               max="50"
-              value={batchCount ?? 1}
-              onChange={e => onBatchCountChange(Math.max(1, Math.min(50, parseInt(e.target.value) || 1)))}
+              value={batchInput}
+              onChange={e => setBatchInput(e.target.value)}
+              onBlur={e => commitBatch(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && commitBatch(e.target.value)}
               disabled={generating}
               className="fuk-input"
               style={{ width: '3.5rem', textAlign: 'center', padding: '0.35rem 0.4rem' }}
