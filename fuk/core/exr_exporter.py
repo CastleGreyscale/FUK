@@ -948,15 +948,14 @@ class EXRExporter:
                 channels_dict[ch_name] = ch_data.astype(np.float32).tobytes()
                 channel_info[ch_name] = self.Imath.Channel(float_type)
         elif 'crypto' in loaded_layers:
-            # PNG fallback — just store as generic RGB (not spec-compliant)
             arr = loaded_layers['crypto']
-            channels_dict['crypto.R'] = self._to_bytes(arr[:, :, 0], bit_depth)
-            channels_dict['crypto.G'] = self._to_bytes(arr[:, :, 1], bit_depth)
-            channels_dict['crypto.B'] = self._to_bytes(arr[:, :, 2], bit_depth)
-            channel_info['crypto.R'] = self.Imath.Channel(pixel_type)
-            channel_info['crypto.G'] = self.Imath.Channel(pixel_type)
-            channel_info['crypto.B'] = self.Imath.Channel(pixel_type)
-            crypto_metadata = {}
+            r_channel = arr[:, :, 0] if arr.ndim == 3 else arr
+            id_matte = (r_channel * 255.0).round().astype(np.uint16)
+            crypto_channels, crypto_metadata = self._build_cryptomatte_channels(id_matte, quiet=quiet)
+            float_type = self.Imath.PixelType(self.Imath.PixelType.FLOAT)
+            for ch_name, ch_data in crypto_channels.items():
+                channels_dict[ch_name] = ch_data.astype(np.float32).tobytes()
+                channel_info[ch_name] = self.Imath.Channel(float_type)
         else:
             crypto_metadata = {}
         
@@ -1118,19 +1117,23 @@ class EXRExporter:
             channel_info['N.Y'] = self.Imath.Channel(pixel_type)
             channel_info['N.Z'] = self.Imath.Channel(pixel_type)
         
+        crypto_metadata = {}
         if 'crypto' in loaded_layers:
             arr = loaded_layers['crypto']
-            channels_dict['crypto.R'] = self._to_bytes(arr[:, :, 0], bit_depth)
-            channels_dict['crypto.G'] = self._to_bytes(arr[:, :, 1], bit_depth)
-            channels_dict['crypto.B'] = self._to_bytes(arr[:, :, 2], bit_depth)
-            channel_info['crypto.R'] = self.Imath.Channel(pixel_type)
-            channel_info['crypto.G'] = self.Imath.Channel(pixel_type)
-            channel_info['crypto.B'] = self.Imath.Channel(pixel_type)
-        
+            r_channel = arr[:, :, 0] if arr.ndim == 3 else arr
+            id_matte = (r_channel * 255.0).round().astype(np.uint16)
+            crypto_channels, crypto_metadata = self._build_cryptomatte_channels(id_matte)
+            float_type = self.Imath.PixelType(self.Imath.PixelType.FLOAT)
+            for ch_name, ch_data in crypto_channels.items():
+                channels_dict[ch_name] = ch_data.astype(np.float32).tobytes()
+                channel_info[ch_name] = self.Imath.Channel(float_type)
+
         # Create EXR header
         header = self.OpenEXR.Header(width, height)
         header['channels'] = channel_info
-        
+        for meta_key, meta_val in crypto_metadata.items():
+            header[meta_key] = meta_val.encode('utf-8') if isinstance(meta_val, str) else meta_val
+
         # Write EXR
         exr_file = self.OpenEXR.OutputFile(str(output_path), header)
         exr_file.writePixels(channels_dict)
