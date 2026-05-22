@@ -21,6 +21,7 @@ dependencies = [
     
     # Preprocessors & Control
     "controlnet_aux>=0.0.10",
+    "geffnet>=1.0.2",
     
     # Image/Video Processing
     "opencv-python>=4.10.0",

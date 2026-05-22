@@ -64,86 +64,59 @@ class NormalsPreprocessor(BasePreprocessor):
     
     def _load_dsine(self):
         """
-        Load DSINE normal estimator
-        
-        Requires vendor: git clone https://github.com/baegwangbin/DSINE vendor/DSINE
+        Load DSINE normal estimator (v02, dsine.pt checkpoint).
+        Manually manages sys.path so DSINE's local 'utils/' is found before
+        any installed PyPI 'utils' package (pip install utils installs the
+        wrong thing — uninstall it if present).
         """
         try:
             vendor_path = self._get_vendor_path("DSINE")
-            
+
             if not vendor_path.exists():
                 raise ImportError(
                     f"DSINE not found at {vendor_path}\n"
-                    f"Install with: git clone https://github.com/baegwangbin/DSINE {vendor_path}"
+                    f"Install: git clone https://github.com/baegwangbin/DSINE {vendor_path}"
                 )
-            
-            import sys
-            # Add vendor path to sys.path if not already there
-            vendor_str = str(vendor_path)
-            if vendor_str not in sys.path:
-                sys.path.insert(0, vendor_str)
-            
-            print("Loading DSINE normal estimator...")
-            
-            # Try different import patterns depending on DSINE structure
-            DSINE = None
-            import_error = None
-            
-            # Pattern 1: Direct import from models.dsine
-            try:
-                from models.dsine import DSINE as DSINEModel
-                DSINE = DSINEModel
-            except ImportError as e1:
-                import_error = str(e1)
-                
-                # Pattern 2: Try importing from projects.dsine 
-                try:
-                    from projects.dsine.models.dsine import DSINE as DSINEModel
-                    DSINE = DSINEModel
-                except ImportError as e2:
-                    
-                    # Pattern 3: Try main DSINE module
-                    try:
-                        from DSINE.models.dsine import DSINE as DSINEModel
-                        DSINE = DSINEModel
-                    except ImportError as e3:
-                        raise ImportError(
-                            f"Could not import DSINE model. Tried:\n"
-                            f"  1. from models.dsine import DSINE - {e1}\n"
-                            f"  2. from projects.dsine.models.dsine import DSINE - {e2}\n"
-                            f"  3. from DSINE.models.dsine import DSINE - {e3}\n"
-                            f"Check your DSINE installation at: {vendor_path}"
-                        )
-            
-            # Find checkpoint
-            checkpoint_path = None
-            possible_checkpoint_paths = [
-                vendor_path / "checkpoints" / "dsine.pt",
-                vendor_path / "weights" / "dsine.pt",
-                vendor_path / "pretrained" / "dsine.pt",
-                vendor_path / "checkpoints" / "dsine_v00.pt",
-            ]
-            
-            for path in possible_checkpoint_paths:
-                if path.exists():
-                    checkpoint_path = path
-                    break
-            
-            if checkpoint_path is None:
+
+            checkpoint_path = vendor_path / "checkpoints" / "dsine.pt"
+            if not checkpoint_path.exists():
                 raise FileNotFoundError(
-                    f"DSINE checkpoint not found. Tried:\n" +
-                    "\n".join(f"  - {p}" for p in possible_checkpoint_paths) +
-                    f"\n\nDownload from: https://github.com/baegwangbin/DSINE/releases"
+                    f"DSINE checkpoint not found: {checkpoint_path}\n"
+                    f"Download: https://huggingface.co/camenduru/DSINE/resolve/main/dsine.pt"
                 )
-            
-            # Load model
-            self.model = DSINE()
-            self.model.load_state_dict(torch.load(str(checkpoint_path), map_location='cpu'))
-            self.model.to(self.device)
-            self.model.eval()
-            
+
+            print("Loading DSINE normal estimator...")
+
+            import sys
+            vendor_str = str(vendor_path)
+
+            # Ensure DSINE's local dirs come first — beats any installed PyPI 'utils'
+            if vendor_str in sys.path:
+                sys.path.remove(vendor_str)
+            sys.path.insert(0, vendor_str)
+
+            # Evict any cached PyPI 'utils' and any stale DSINE model imports so
+            # everything re-resolves fresh from vendor_str at the front of sys.path.
+            stale = [
+                k for k in list(sys.modules)
+                if k == 'utils' or k.startswith('utils.')
+                or k == 'models' or k.startswith('models.')
+            ]
+            for k in stale:
+                del sys.modules[k]
+
+            from models.dsine import DSINE as DSINEFactory
+
+            ckpt = torch.load(str(checkpoint_path), map_location='cpu', weights_only=False)
+            model = DSINEFactory()
+            model.load_state_dict(ckpt['model'], strict=True)
+            model.eval()
+            model = model.to(self.device)
+            model.pixel_coords = model.pixel_coords.to(self.device)
+            self.model = model
+
             print(f"✓ DSINE loaded from {checkpoint_path.name}")
-                
+
         except Exception as e:
             print(f"⚠ Could not load DSINE: {e}")
             print("  Falling back to depth-derived normals...")
@@ -263,35 +236,70 @@ class NormalsPreprocessor(BasePreprocessor):
         
         return normals
     
+    @staticmethod
+    def _dsine_padding(H: int, W: int):
+        """Compute (l, r, t, b) padding to make H and W multiples of 32."""
+        def _side(n):
+            if n % 32 == 0:
+                return 0, 0
+            new = 32 * ((n // 32) + 1)
+            a = (new - n) // 2
+            return a, (new - n) - a
+        l, r = _side(W)
+        t, b = _side(H)
+        return l, r, t, b
+
+    def _dsine_intrins(self, H: int, W: int, fov_deg: float = 60.0):
+        """Pinhole intrinsic matrix from FOV, principal point at image centre."""
+        import math
+        f = (max(H, W) / 2.0) / math.tan(math.radians(fov_deg / 2.0))
+        intrins = torch.tensor(
+            [[f, 0, W / 2.0 - 0.5],
+             [0, f, H / 2.0 - 0.5],
+             [0, 0, 1.0]],
+            dtype=torch.float32, device=self.device,
+        ).unsqueeze(0)  # (1, 3, 3)
+        return intrins
+
     def _normals_from_dsine(self, image: np.ndarray) -> np.ndarray:
         """
-        Compute normals using DSINE model
-        
+        Compute normals using the DSINE v02 model.
+        Preprocessing is inlined (ImageNet norm, 32px padding, pinhole intrinsics)
+        so there is no runtime dependency on DSINE's local utils/ package.
+
         Args:
-            image: Input image as BGR numpy array
-            
+            image: BGR uint8 numpy array
+
         Returns:
-            Normal map as float32 array in [-1, 1] range, shape (H, W, 3)
+            float32 normal map in [-1, 1], shape (H, W, 3)
         """
-        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        import torch.nn.functional as F
+        from torchvision.transforms.functional import normalize as tvf_normalize
+
         h, w = image.shape[:2]
-        
-        # Prepare input tensor
-        image_tensor = torch.from_numpy(image_rgb).permute(2, 0, 1).float() / 255.0
-        image_tensor = image_tensor.unsqueeze(0).to(self.device)
-        
-        # Inference
+
+        # BGR -> RGB float32 tensor [0, 1]
+        rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+        img = torch.from_numpy(rgb).permute(2, 0, 1).unsqueeze(0).to(self.device)
+
+        # Pad to multiples of 32
+        l, r, t, b = self._dsine_padding(h, w)
+        img = F.pad(img, (l, r, t, b), mode="constant", value=0.0)
+
+        # ImageNet normalisation
+        img = tvf_normalize(img, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+
+        # Pinhole intrinsics; shift principal point to account for padding
+        intrins = self._dsine_intrins(h, w)
+        intrins[:, 0, 2] += l
+        intrins[:, 1, 2] += t
+
         with torch.no_grad():
-            normals = self.model(image_tensor)
-        
-        # Convert to numpy
-        normals = normals.squeeze().permute(1, 2, 0).cpu().numpy()
-        
-        # Resize if needed
-        if normals.shape[:2] != (h, w):
-            normals = cv2.resize(normals, (w, h), interpolation=cv2.INTER_LINEAR)
-        
-        return normals
+            pred = self.model(img, intrins=intrins)[-1]  # (1, 3, H_pad, W_pad)
+            pred = pred[:, :, t:t + h, l:l + w]         # unpad
+
+        normals = pred[0].permute(1, 2, 0).cpu().numpy()  # (H, W, 3)
+        return normals.astype(np.float32)
     
     def get_raw_normals(self, image_path: Path, intensity: float = 1.0) -> np.ndarray:
         """
