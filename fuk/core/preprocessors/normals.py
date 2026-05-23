@@ -135,25 +135,33 @@ class NormalsPreprocessor(BasePreprocessor):
         flip_x: bool = False,
         intensity: float = 1.0,
         exact_output: bool = False,
+        # DSINE-specific quality settings
+        num_iter: int = 5,
+        fov_deg: float = 60.0,
         **kwargs
     ) -> Dict[str, Any]:
         """
         Estimate surface normals
-        
+
         Args:
             image_path: Input image
             output_path: Where to save result
             space: Normal space ('tangent', 'world', 'object')
             flip_y: Flip Y component (for different engine conventions)
             flip_x: Flip X component
-            intensity: Normal intensity multiplier (affects depth-derived)
+            intensity: Gradient multiplier for depth-derived normals
             exact_output: If True, write to exact output_path (for video frames)
-            
+            num_iter: DSINE GRU refinement iterations (default 5, trained value).
+                      The checkpoint was trained with exactly 5 steps — going
+                      beyond 7 causes GRU divergence and severe artifacts.
+            fov_deg: DSINE assumed camera field-of-view in degrees (default 60).
+                     Wrong FOV causes blob artifacts at depth discontinuities.
+
         Returns:
             Dict with output_path and metadata
         """
         self._ensure_initialized()
-        
+
         # Load image (handles EXR via ANYDEPTH + gamma correction)
         image = self.load_image_bgr(image_path)
 
@@ -161,22 +169,21 @@ class NormalsPreprocessor(BasePreprocessor):
         if self.method == NormalsMethod.FROM_DEPTH:
             normals = self._normals_from_depth(image_path, intensity)
         else:
-            normals = self._normals_from_dsine(image)
-        
+            normals = self._normals_from_dsine(image, num_iter=num_iter, fov_deg=fov_deg)
+
         # Apply flips if needed
         if flip_x:
             normals[:, :, 0] = -normals[:, :, 0]
         if flip_y:
             normals[:, :, 1] = -normals[:, :, 1]
-        
+
         # Convert from [-1, 1] to [0, 255] for standard normal map encoding
         # Normal map convention: R=X, G=Y, B=Z
         normals_uint8 = ((normals + 1) * 0.5 * 255).astype(np.uint8)
-        
+
         # OpenCV uses BGR, so swap R and B
         normals_bgr = cv2.cvtColor(normals_uint8, cv2.COLOR_RGB2BGR)
-        
-        # Save - use exact path for video frames, unique path for single images
+
         params = {
             'method': 'normals',
             'estimation': self.method.value,
@@ -184,10 +191,12 @@ class NormalsPreprocessor(BasePreprocessor):
             'flip_y': flip_y,
             'flip_x': flip_x,
             'intensity': intensity,
+            'num_iter': num_iter,
+            'fov_deg': fov_deg,
         }
         final_output = self._make_unique_path(output_path, params, exact_output=exact_output)
         cv2.imwrite(str(final_output), normals_bgr)
-        
+
         return {
             "output_path": str(final_output),
             "method": "normals",
@@ -261,14 +270,19 @@ class NormalsPreprocessor(BasePreprocessor):
         ).unsqueeze(0)  # (1, 3, 3)
         return intrins
 
-    def _normals_from_dsine(self, image: np.ndarray) -> np.ndarray:
+    def _normals_from_dsine(
+        self,
+        image: np.ndarray,
+        num_iter: int = 10,
+        fov_deg: float = 60.0,
+    ) -> np.ndarray:
         """
         Compute normals using the DSINE v02 model.
-        Preprocessing is inlined (ImageNet norm, 32px padding, pinhole intrinsics)
-        so there is no runtime dependency on DSINE's local utils/ package.
 
         Args:
             image: BGR uint8 numpy array
+            num_iter: GRU refinement iterations (higher = sharper fine detail)
+            fov_deg: Assumed camera FOV in degrees
 
         Returns:
             float32 normal map in [-1, 1], shape (H, W, 3)
@@ -277,6 +291,9 @@ class NormalsPreprocessor(BasePreprocessor):
         from torchvision.transforms.functional import normalize as tvf_normalize
 
         h, w = image.shape[:2]
+
+        # Clamp to safe range — checkpoint trained at 5, diverges past ~7
+        self.model.num_iter_train = max(1, min(num_iter, 7))
 
         # BGR -> RGB float32 tensor [0, 1]
         rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
@@ -290,31 +307,37 @@ class NormalsPreprocessor(BasePreprocessor):
         img = tvf_normalize(img, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 
         # Pinhole intrinsics; shift principal point to account for padding
-        intrins = self._dsine_intrins(h, w)
+        intrins = self._dsine_intrins(h, w, fov_deg=fov_deg)
         intrins[:, 0, 2] += l
         intrins[:, 1, 2] += t
 
         with torch.no_grad():
             pred = self.model(img, intrins=intrins)[-1]  # (1, 3, H_pad, W_pad)
-            pred = pred[:, :, t:t + h, l:l + w]         # unpad
+            pred = pred[:, :, t:t + h, l:l + w]                      # unpad
 
         normals = pred[0].permute(1, 2, 0).cpu().numpy()  # (H, W, 3)
         return normals.astype(np.float32)
     
-    def get_raw_normals(self, image_path: Path, intensity: float = 1.0) -> np.ndarray:
+    def get_raw_normals(
+        self,
+        image_path: Path,
+        intensity: float = 1.0,
+        num_iter: int = 5,
+        fov_deg: float = 60.0,
+    ) -> np.ndarray:
         """
         Get raw normal vectors (for EXR export, etc.)
-        
+
         Returns float32 normal array in [-1, 1] range
         """
         self._ensure_initialized()
-        
+
         image = self.load_image_bgr(image_path)
 
         if self.method == NormalsMethod.FROM_DEPTH:
             return self._normals_from_depth(image_path, intensity)
         else:
-            return self._normals_from_dsine(image)
+            return self._normals_from_dsine(image, num_iter=num_iter, fov_deg=fov_deg)
     
     def unload(self):
         """

@@ -75,7 +75,9 @@ class VideoPreprocessRequest(BaseModel):
     normals_flip_y: bool = False
     normals_flip_x: bool = False
     normals_intensity: float = 1.0
-    
+    normals_num_iter: int = 5
+    normals_fov_deg: float = 60.0
+
     # Crypto parameters
     crypto_model: str = "sam2_hiera_large"
     crypto_max_objects: int = 50
@@ -114,11 +116,16 @@ class VideoLayersRequest(BaseModel):
     normals_space: str = "tangent"
     normals_flip_y: bool = False
     normals_intensity: float = 1.0
-    
+    normals_num_iter: int = 5
+    normals_fov_deg: float = 60.0
+
     # Crypto settings
     crypto_model: str = "sam2_hiera_large"
     crypto_max_objects: int = 50
     crypto_min_area: int = 500
+
+    # Preview mode — process only the first frame and return images instead of video
+    first_frame_only: bool = False
 
 
 # ============================================================================
@@ -388,6 +395,8 @@ def setup_video_routes(
                         flip_y=request.normals_flip_y,
                         flip_x=request.normals_flip_x,
                         intensity=request.normals_intensity,
+                        num_iter=request.normals_num_iter,
+                        fov_deg=request.normals_fov_deg,
                         exact_output=True,
                     )
                 processor_kwargs = {"normals_method": request.normals_method}
@@ -735,12 +744,101 @@ def setup_video_routes(
             
             if not enabled_layers:
                 raise HTTPException(status_code=400, detail="No layers enabled")
-            
+
+            # ----------------------------------------------------------
+            # FIRST-FRAME PREVIEW — extract frame 0 and run as a single image
+            # Skips all video encoding; returns PNGs just like the image handler.
+            # ----------------------------------------------------------
+            if request.first_frame_only:
+                log.info("VideoLayers", "first_frame_only=True — extracting frame 0 for preview")
+                frame0_path = gen_dir / "preview_frame.png"
+                extracted = extract_thumbnail(input_path, frame0_path)
+                if not extracted or not frame0_path.exists():
+                    raise HTTPException(status_code=500, detail="Could not extract first frame from video")
+
+                results = {
+                    "success": True,
+                    "source": get_project_relative_url(frame0_path),
+                    "layers": {},
+                    "errors": {},
+                }
+
+                if request.layers.get("depth"):
+                    try:
+                        depth_model = DEPTH_MODEL_MAP.get(request.depth_model, DepthModel.DA3_MONO_LARGE)
+                        log.info("VideoLayers", f"Preview: depth ({depth_model.value})")
+                        r = preprocessor_manager.depth(
+                            image_path=frame0_path,
+                            output_path=gen_dir / "depth.png",
+                            model=depth_model,
+                            invert=request.depth_invert,
+                            normalize=request.depth_normalize,
+                            range_min=request.depth_range_min,
+                            range_max=request.depth_range_max,
+                        )
+                        results["layers"]["depth"] = {
+                            "url": get_project_relative_url(Path(r["output_path"])),
+                            "path": r["output_path"],
+                            "model": r.get("model", request.depth_model),
+                        }
+                    except Exception as e:
+                        log.error("VideoLayers", f"Preview depth failed: {e}")
+                        results["errors"]["depth"] = str(e)
+
+                if request.layers.get("normals"):
+                    try:
+                        normals_method = NORMALS_METHOD_MAP.get(request.normals_method, NormalsMethod.FROM_DEPTH)
+                        depth_model = DEPTH_MODEL_MAP.get(request.normals_depth_model, DepthModel.DA3_MONO_LARGE)
+                        log.info("VideoLayers", f"Preview: normals ({normals_method.value})")
+                        r = preprocessor_manager.normals(
+                            image_path=frame0_path,
+                            output_path=gen_dir / "normals.png",
+                            method=normals_method,
+                            depth_model=depth_model,
+                            space=request.normals_space,
+                            flip_y=request.normals_flip_y,
+                            intensity=request.normals_intensity,
+                            num_iter=request.normals_num_iter,
+                            fov_deg=request.normals_fov_deg,
+                        )
+                        results["layers"]["normals"] = {
+                            "url": get_project_relative_url(Path(r["output_path"])),
+                            "path": r["output_path"],
+                            "method": r.get("estimation", request.normals_method),
+                        }
+                    except Exception as e:
+                        log.error("VideoLayers", f"Preview normals failed: {e}")
+                        results["errors"]["normals"] = str(e)
+
+                if request.layers.get("crypto"):
+                    try:
+                        sam_model = SAM_MODEL_MAP.get(request.crypto_model, SAMModel.LARGE)
+                        log.info("VideoLayers", "Preview: cryptomatte")
+                        r = preprocessor_manager.crypto(
+                            image_path=frame0_path,
+                            output_path=gen_dir / "crypto.png",
+                            model=sam_model,
+                            max_objects=request.crypto_max_objects,
+                            min_area=request.crypto_min_area,
+                            output_mode="id_matte",
+                        )
+                        results["layers"]["crypto"] = {
+                            "url": get_project_relative_url(Path(r["output_path"])),
+                            "path": r["output_path"],
+                            "num_objects": r.get("num_objects", 0),
+                        }
+                    except Exception as e:
+                        log.error("VideoLayers", f"Preview crypto failed: {e}")
+                        results["errors"]["crypto"] = str(e)
+
+                log.success("VideoLayers", f"First-frame preview done: {list(results['layers'].keys())}")
+                return results
+
             start_time = time.time()
-            
+
             # Collect all layer results here
             all_layer_results: Dict[str, Dict[str, Any]] = {}
-            
+
             # ----------------------------------------------------------
             # Depth layer - always MP4 + raw .npy (saved by preprocessor)
             # ----------------------------------------------------------
@@ -792,6 +890,8 @@ def setup_video_routes(
                         space=request.normals_space,
                         flip_y=request.normals_flip_y,
                         intensity=request.normals_intensity,
+                        num_iter=request.normals_num_iter,
+                        fov_deg=request.normals_fov_deg,
                         exact_output=True,
                     )
                     # Capture raw float32 normals [-1, 1] for lossless export

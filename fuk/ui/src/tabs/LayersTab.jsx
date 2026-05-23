@@ -43,6 +43,9 @@ const DEFAULT_SETTINGS = {
   normalsSpace: 'tangent',
   normalsFlipY: false,
   normalsIntensity: 1.0,
+  normalsNumIter: 5,
+  normalsFovDeg: 60.0,
+  firstFrameOnly: false,
   
   // Cryptomatte settings
   cryptoModel: 'sam2_hiera_large',
@@ -217,9 +220,12 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
           normals_space: settings.normalsSpace,
           normals_flip_y: settings.normalsFlipY,
           normals_intensity: settings.normalsIntensity,
+          normals_num_iter: settings.normalsNumIter,
+          normals_fov_deg: settings.normalsFovDeg,
           crypto_model: settings.cryptoModel,
           crypto_max_objects: settings.cryptoMaxObjects,
           crypto_min_area: settings.cryptoMinArea,
+          first_frame_only: settings.firstFrameOnly,
         };
       } else {
         taskType = 'layers';
@@ -236,6 +242,8 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
           normals_space: settings.normalsSpace,
           normals_flip_y: settings.normalsFlipY,
           normals_intensity: settings.normalsIntensity,
+          normals_num_iter: settings.normalsNumIter,
+          normals_fov_deg: settings.normalsFovDeg,
           crypto_model: settings.cryptoModel,
           crypto_max_objects: settings.cryptoMaxObjects,
           crypto_min_area: settings.cryptoMinArea,
@@ -427,9 +435,21 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
             </p>
             
             {isVideo && (
-              <div className="fuk-alert fuk-alert--info fuk-mt-3">
-                <Film className="fuk-alert-icon" />
-                <span className="fuk-alert-text">Video: Processing frame-by-frame</span>
+              <div className="fuk-mt-3">
+                <div className="fuk-alert fuk-alert--info">
+                  <Film className="fuk-alert-icon" />
+                  <span className="fuk-alert-text">Video: Processing frame-by-frame</span>
+                </div>
+                <label className="fuk-checkbox-group fuk-mt-2">
+                  <input
+                    type="checkbox"
+                    className="fuk-checkbox"
+                    checked={settings.firstFrameOnly}
+                    onChange={(e) => updateSettings({ firstFrameOnly: e.target.checked })}
+                    disabled={processing}
+                  />
+                  <span className="fuk-checkbox-label">Preview first frame only</span>
+                </label>
               </div>
             )}
           </div>
@@ -640,7 +660,7 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
                         <option value="da3_giant">DA3 Giant (Highest quality)</option>
                     </select>
                   </div>
-                  
+
                   <div className="fuk-form-group-compact">
                     <label className="fuk-label">Intensity: {settings.normalsIntensity.toFixed(1)}</label>
                     <input
@@ -656,6 +676,46 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
                     <div className="fuk-range-labels">
                       <span>Subtle</span>
                       <span>Strong</span>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {settings.normalsMethod === 'dsine' && (
+                <>
+                  <div className="fuk-form-group-compact">
+                    <label className="fuk-label">Refinement Steps: {settings.normalsNumIter}</label>
+                    <input
+                      type="range"
+                      className="fuk-slider"
+                      min="1"
+                      max="7"
+                      step="1"
+                      value={settings.normalsNumIter}
+                      onChange={(e) => updateSettings({ normalsNumIter: parseInt(e.target.value) })}
+                      disabled={processing}
+                    />
+                    <div className="fuk-range-labels">
+                      <span>Fast (1)</span>
+                      <span>Max (7)</span>
+                    </div>
+                  </div>
+
+                  <div className="fuk-form-group-compact">
+                    <label className="fuk-label">Camera FOV: {settings.normalsFovDeg.toFixed(0)}°</label>
+                    <input
+                      type="range"
+                      className="fuk-slider"
+                      min="30"
+                      max="120"
+                      step="5"
+                      value={settings.normalsFovDeg}
+                      onChange={(e) => updateSettings({ normalsFovDeg: parseFloat(e.target.value) })}
+                      disabled={processing}
+                    />
+                    <div className="fuk-range-labels">
+                      <span>Tele (30°)</span>
+                      <span>Wide (120°)</span>
                     </div>
                   </div>
                 </>
