@@ -468,20 +468,18 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
     setFormData(prev => ({ ...prev, control_path: paths[0] || null }));
   };
 
-  // Check if task requires images or control video — derive from model supports if available,
-  // fall back to string-matching legacy task values (e.g. when videoModels haven't loaded yet)
+  // Check if task requires images or control video — always check both model supports and task
+  // name so neither source alone can cause a false negative during config load or key mismatches.
   const selectedModel = videoModels.find(m => m.key === formData.task);
   const modelSupports = selectedModel?.supports || [];
-  const requiresControlVideo = modelSupports.length > 0
-    ? modelSupports.includes('vace_video')
-    : formData.task.includes('-FC');
+  const requiresControlVideo = modelSupports.includes('vace_video') || formData.task?.includes('-FC');
   const isFunControl = requiresControlVideo;
-  const requiresStartImage = modelSupports.length > 0
-    ? modelSupports.includes('input_image') || modelSupports.includes('vace_reference_image')
-    : formData.task.includes('i2v') || formData.task.includes('flf2v');
-  const requiresEndImage = modelSupports.length > 0
-    ? modelSupports.includes('end_image')
-    : formData.task.includes('flf2v');
+  const requiresStartImage = modelSupports.includes('input_image')
+    || modelSupports.includes('vace_reference_image')
+    || formData.task?.includes('i2v')
+    || formData.task?.includes('flf2v')
+    || formData.task?.includes('inp');
+  const requiresEndImage = modelSupports.includes('end_image') || formData.task?.includes('flf2v');
   
   // Calculate whether current frame input is valid
   const currentFrameValid = (parseInt(frameInput) - 1) % 4 === 0;
@@ -822,31 +820,30 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
                 </div>
               </div>
             )}
-            
+
+
             {/* Resolution from input + scale factor */}
             <div className="fuk-form-group-compact">
               <label className="fuk-label">
-                Resolution 
+                Resolution
                 {formData.source_width && (
                   <span className="fuk-label-description">
                     (from {formData.source_width}×{formData.source_height})
                   </span>
                 )}
               </label>
-              <div className="fuk-input-inline">
-                <select
-                  className="fuk-select"
-                  value={formData.scale_factor}
-                  onChange={(e) => handleScaleChange(parseFloat(e.target.value))}
-                >
-                  {SCALE_FACTORS.map(sf => (
-                    <option key={sf.value} value={sf.value}>{sf.label}</option>
-                  ))}
-                </select>
-                <span className="fuk-input-result">
-                  → {formData.width || '---'} × {formData.height || '---'}
-                </span>
-              </div>
+              <select
+                className="fuk-select"
+                value={formData.scale_factor}
+                onChange={(e) => handleScaleChange(parseFloat(e.target.value))}
+              >
+                {SCALE_FACTORS.map(sf => (
+                  <option key={sf.value} value={sf.value}>{sf.label}</option>
+                ))}
+              </select>
+              <p className="fuk-help-text fuk-mt-1">
+                → {formData.width || '---'} × {formData.height || '---'}
+              </p>
               {!formData.source_width && (
                 <p className="fuk-help-text fuk-help-text--warning">
                   <AlertCircle className="fuk-icon--sm" />
@@ -917,6 +914,21 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
                   <span className="fuk-input-result">frames max</span>
                 </div>
               )}
+              </div>
+              <div className="fuk-form-group-compact">
+              <label className="fuk-label">VRAM Management</label>
+              <select
+                className="fuk-select"
+                value={formData.vram_preset || 'low'}
+                onChange={(e) => setFormData({...formData, vram_preset: e.target.value})}
+              >
+                {(config?.models?.vram_presets || []).map(preset => (
+                  <option key={preset.key} value={preset.key} title={preset.description}>
+                    {preset.label}
+                  </option>
+                ))}
+              </select>
+            
             </div>
           </div>
 
@@ -1068,20 +1080,6 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
               </p>
             </div>
 
-            <div className="fuk-form-group-compact">
-              <label className="fuk-label">VRAM Management</label>
-              <select
-                className="fuk-select"
-                value={formData.vram_preset || 'low'}
-                onChange={(e) => setFormData({...formData, vram_preset: e.target.value})}
-              >
-                {(config?.models?.vram_presets || []).map(preset => (
-                  <option key={preset.key} value={preset.key} title={preset.description}>
-                    {preset.label}
-                  </option>
-                ))}
-              </select>
-            </div>
           </div>
 
           {/* Seed Control Card */}

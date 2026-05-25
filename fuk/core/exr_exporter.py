@@ -380,11 +380,7 @@ class EXRExporter:
                 
                 for frame_idx in range(num_frames):
                     frame = pixels[0, :, frame_idx, :, :]  # (C, H, W)
-                    
-                    # [-1, 1] → [0, 1]
-                    if frame.min() < 0:
-                        frame = (frame + 1.0) / 2.0
-                    
+
                     # CHW → HWC
                     frame = np.transpose(frame, (1, 2, 0))
                     
@@ -401,10 +397,7 @@ class EXRExporter:
             
             elif pixels.ndim == 4:
                 frame = pixels[0]
-                
-                if frame.min() < 0:
-                    frame = (frame + 1.0) / 2.0
-                
+
                 if frame.shape[0] in [1, 3, 4]:
                     frame = np.transpose(frame, (1, 2, 0))
                 

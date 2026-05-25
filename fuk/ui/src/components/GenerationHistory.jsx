@@ -572,7 +572,7 @@ function GalleryLargeView({ generation, generations, isPinned, vote, onTogglePin
 
 // ─── fullscreen gallery overlay ───────────────────────────────────────────────
 
-function FullscreenGallery({ generations, pinnedIds, votes, onTogglePin, onVote, onDelete, onClose }) {
+function FullscreenGallery({ generations, pinnedIds, votes, onTogglePin, onVote, onDelete, onClose, hasMore, loading, onLoadMore, onLoadAll }) {
   const [zoom, setZoom]               = useState(160);
   const [selected, setSelected]       = useState(generations[0] || null);
   const [previewPct, setPreviewPct]   = useState(55);
@@ -777,6 +777,16 @@ function FullscreenGallery({ generations, pinnedIds, votes, onTogglePin, onVote,
               />
             ))}
           </div>
+          {(hasMore?.image || hasMore?.video) && (
+            <div className="gen-history-load-more gallery-load-more">
+              <button onClick={onLoadMore} disabled={loading}>
+                Load More (+5 each)
+              </button>
+              <button onClick={onLoadAll} disabled={loading} className="secondary">
+                Load All
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -795,7 +805,23 @@ export default function GenerationHistory({ project, collapsed, onToggle, playba
   // votes: { [generation.id]: 1 | -1 | 0 }
   const [votes, setVotes] = useState({});
   const [galleryOpen, setGalleryOpen] = useState(false);
-  
+
+  // H key: close gallery if open, otherwise toggle docked panel
+  useEffect(() => {
+    const handle = (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
+      if (e.key === 'h' || e.key === 'H') {
+        if (galleryOpen) {
+          setGalleryOpen(false);
+        } else {
+          onToggle();
+        }
+      }
+    };
+    window.addEventListener('keydown', handle);
+    return () => window.removeEventListener('keydown', handle);
+  }, [galleryOpen, onToggle]);
+
   // Video playback speed refs
   const hoverVideoRef = useVideoPlayback(playbackSpeed);
   const thumbVideoRef = useVideoPlayback(playbackSpeed);
@@ -1185,6 +1211,10 @@ export default function GenerationHistory({ project, collapsed, onToggle, playba
           onVote={handleVote}
           onDelete={deleteGeneration}
           onClose={() => setGalleryOpen(false)}
+          hasMore={hasMore}
+          loading={loading}
+          onLoadMore={handleLoadMore}
+          onLoadAll={handleLoadAll}
         />
       )}
     </div>

@@ -190,6 +190,8 @@ class DiffSynthBackend:
         # Setup environment
         os.environ["DIFFSYNTH_MODEL_BASE_PATH"] = models_root
         os.environ["DIFFSYNTH_SKIP_DOWNLOAD"] = "TRUE"
+        # Reduce CUDA allocator fragmentation across repeated generations
+        os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
         
         _log("BACKEND", f"Models base path: {models_root}")
         
@@ -673,6 +675,7 @@ class DiffSynthBackend:
             torch_dtype=torch.bfloat16,
             device="cuda",
             model_configs=model_configs,
+            redirect_common_files=False,
         )
 
         # VRAM limit — only set when offloading is active

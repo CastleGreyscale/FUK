@@ -203,6 +203,10 @@ class WanPipelineRunner(PipelineRunner):
         finally:
             if cleanup_hook:
                 cleanup_hook()
+            import gc
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
     # ------------------------------------------------------------------
     # Wan-specific input mapping overrides

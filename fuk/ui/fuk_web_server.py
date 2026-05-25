@@ -772,28 +772,6 @@ def _prune_stale_generations(max_age_minutes: int = 30):
     if stale:
         print(f"Pruned {len(stale)} stale generation(s) from tracking")
 
-def _prune_stale_generations(max_age_minutes: int = 30):
-    """Remove completed/failed generation entries older than max_age."""
-    from datetime import datetime, timedelta
-    cutoff = datetime.now() - timedelta(minutes=max_age_minutes)
-    stale = []
-    for gid, gen in active_generations.items():
-        if gen.get("status") not in ("complete", "failed"):
-            continue
-        completed = gen.get("completed_at") or gen.get("failed_at")
-        if not completed:
-            continue
-        try:
-            ts = datetime.fromisoformat(completed)
-            if ts < cutoff:
-                stale.append(gid)
-        except (ValueError, TypeError):
-            pass
-    for gid in stale:
-        del active_generations[gid]
-    if stale:
-        print(f"Pruned {len(stale)} stale generation(s) from tracking")
-
 # ============================================================================
 # Image Generation
 # ============================================================================
@@ -1082,10 +1060,21 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
     try:
         log.header("VIDEO GENERATION")
         log.info("VideoGen", f"Generation ID: {generation_id}")
-        
+
+        # Force Python GC before starting so previous generation's objects are
+        # collected and their GPU memory released before we measure baseline.
+        import gc as _gc
+        import torch as _torch
+        _gc.collect()
+        if _torch.cuda.is_available():
+            _torch.cuda.empty_cache()
+            _alloc = _torch.cuda.memory_allocated() / (1024**3)
+            _reserved = _torch.cuda.memory_reserved() / (1024**3)
+            log.info("VideoGen", f"VRAM at start — allocated: {_alloc:.2f}GB  reserved: {_reserved:.2f}GB")
+
         active_generations[generation_id]["status"] = "running"
         active_generations[generation_id]["phase"] = "initialization"
-        
+
         # Create generation directory in project cache
         gen_dir = get_generation_output_dir("video")
         paths = build_output_paths(gen_dir)
