@@ -695,7 +695,10 @@ class DiffSynthBackend:
         if proc:
             kwargs["processor_config"] = proc
 
-        pipeline = PipelineCls.from_pretrained(**kwargs)
+        import inspect as _inspect
+        valid_params = _inspect.signature(PipelineCls.from_pretrained).parameters
+        filtered_kwargs = {k: v for k, v in kwargs.items() if k in valid_params}
+        pipeline = PipelineCls.from_pretrained(**filtered_kwargs)
         _log("BACKEND", f"Pipeline loaded: {cache_key}", "success")
 
         # Model-bundled LoRA (e.g. Control-Union, EliGen) — load and track config
