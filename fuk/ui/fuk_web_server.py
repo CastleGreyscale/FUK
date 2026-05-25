@@ -3000,7 +3000,11 @@ class ExportEXRRequest(BaseModel):
     
     # True latent export (bypasses MP4/PNG lossy compression)
     use_latent: bool = False  # Auto-use latent.safetensors if available
-    
+    bracketed_latent: bool = False  # Mertens fusion of 0.7×/1.0×/1.3× latent decodes
+    bracket_scales: Optional[List[float]] = None  # Custom scales (default [0.7, 1.0, 1.3])
+    noise_bracketed_latent: bool = False  # Mertens fusion of noise-perturbed decodes
+    noise_bracket_sigmas: Optional[List[float]] = None  # Custom sigmas (default [0.0, 0.05, 0.10])
+
     # Output naming and location
     filename: Optional[str] = None  # Custom filename (without extension)
     export_path: Optional[str] = None  # Custom save directory (empty = use project cache)
@@ -3023,6 +3027,10 @@ class EXRSequenceExportRequest(BaseModel):
     compression: str = "ZIP"
     start_frame: int = 1001
     model_type: str = "auto"
+    bracketed_latent: bool = False
+    bracket_scales: Optional[List[float]] = None
+    noise_bracketed_latent: bool = False
+    noise_bracket_sigmas: Optional[List[float]] = None
 
 
 @app.post("/api/export/exr")
@@ -3079,12 +3087,20 @@ async def export_to_exr(request: ExportEXRRequest):
                 resolved_layers[layer_name] = str(resolved_path)
                 log.info("Export", f"  {layer_name}: {resolved_path.name}")
                 
-                # Check for latent.safetensors alongside beauty layer
+                # Find latent file alongside beauty layer.
+                # Image pipeline saves: {image_dir}/latents/{stem}.latent.pt
+                # Video pipeline saves: {image_dir}/latent.safetensors
                 if layer_name == 'beauty' and request.use_latent:
-                    potential_latent = resolved_path.parent / "latent.safetensors"
-                    if potential_latent.exists():
-                        latent_path = potential_latent
-                        log.info("Export", f"  Found latent: {latent_path.name}")
+                    latent_candidates = [
+                        resolved_path.parent / "latents" / f"{resolved_path.stem}.latent.pt",
+                        resolved_path.parent / "latent.safetensors",
+                        resolved_path.parent / "latent.pt",
+                    ]
+                    for candidate in latent_candidates:
+                        if candidate.exists():
+                            latent_path = candidate
+                            log.info("Export", f"  Found latent: {latent_path.name}")
+                            break
             else:
                 log.warning("Export", f"  {layer_name}: not found ({layer_path})")
         
@@ -3102,55 +3118,32 @@ async def export_to_exr(request: ExportEXRRequest):
             output_path = export_dir / f"{base_filename}.exr"
             
             # Check if we can use true latent export (beauty layer only for now)
+            if not latent_path:
+                log.info("Export", "No latent found — using PNG path")
+            elif len(resolved_layers) > 1:
+                log.info("Export", f"Multiple layers ({list(resolved_layers.keys())}) — latent only supports beauty-only export, using PNG path")
             if latent_path and 'beauty' in resolved_layers and len(resolved_layers) == 1:
                 # TRUE LATENT PATH - bypasses PNG entirely
-                log.info("Export", "Using TRUE LATENT-to-EXR path (no PNG compression)")
-                
-                # Get VAE path from models config
-                vae_path = None
-                # TODO: Use DiffSynth backend VAE directly instead of standalone VAE file
-                # For now, latent-to-EXR falls back to PNG path
-                
+                decode_mode = "noise-bracketed" if request.noise_bracketed_latent else ("bracketed" if request.bracketed_latent else "standard")
+                log.info("Export", f"TRUE LATENT path | latent={latent_path.name} | decode={decode_mode}")
                 try:
-                    models_config = CONFIG_DIR / "models.json"
-                    if models_config.exists():
-                        import json
-                        with open(models_config) as f:
-                            models = json.load(f)
-                        # Try Qwen VAE first (for images), fall back to Wan
-                        for model_key in ["qwen_image", "wan_i2v_14b", "wan_t2v_14b"]:
-                            if model_key in models.get("models", {}):
-                                vae_path = models["models"][model_key].get("vae")
-                                if vae_path:
-                                    break
+                    result = exporter.export_from_latent(
+                        latent_path=latent_path,
+                        output_path=output_path,
+                        backend=generation_backend,
+                        model_type="qwen_image",
+                        bit_depth=request.bit_depth,
+                        compression=request.compression,
+                        bracketed=request.bracketed_latent,
+                        scales=request.bracket_scales,
+                        noise_bracketed=request.noise_bracketed_latent,
+                        sigmas=request.noise_bracket_sigmas,
+                    )
+                    result["is_true_latent"] = True
+                    log.success("Export", f"TRUE LATENT EXR: {output_path}")
                 except Exception as e:
-                    log.warning("Export", f"Could not get VAE path: {e}")
-                
-                if vae_path and Path(vae_path).exists():
-                    try:
-                        result = exporter.export_from_latent(
-                            latent_path=latent_path,
-                            output_path=output_path,
-                            vae_path=vae_path,
-                            musubi_path=None,
-                            bit_depth=request.bit_depth,
-                            compression=request.compression,
-                        )
-                        result["is_true_latent"] = True
-                        log.success("Export", f"TRUE LATENT EXR: {output_path}")
-                    except Exception as e:
-                        log.warning("Export", f"Latent export failed, falling back to PNG: {e}")
-                        # Fall back to PNG path
-                        result = exporter.export_multilayer(
-                            layers=resolved_layers,
-                            output_path=output_path,
-                            bit_depth=request.bit_depth,
-                            compression=request.compression,
-                            linear=(request.color_space == "Linear"),
-                        )
-                        result["is_true_latent"] = False
-                else:
-                    log.warning("Export", f"VAE not found, falling back to PNG path")
+                    import traceback
+                    log.warning("Export", f"Latent export failed, falling back to PNG: {e}\n{traceback.format_exc()}")
                     result = exporter.export_multilayer(
                         layers=resolved_layers,
                         output_path=output_path,
@@ -3348,6 +3341,10 @@ async def export_exr_sequence(request: EXRSequenceExportRequest):
             compression=request.compression,
             start_frame=request.start_frame,
             model_type=request.model_type,
+            bracketed=request.bracketed_latent,
+            scales=request.bracket_scales,
+            noise_bracketed=request.noise_bracketed_latent,
+            sigmas=request.noise_bracket_sigmas,
         )
         
         log.success("SeqExport", f"Exported {result['frame_count']} frames (LATENT-ONLY)")

@@ -279,6 +279,73 @@ Current paths:
 """
         raise RuntimeError(error_msg)
     
+    def _prepare_image_latent(self, latent_tensor):
+        """
+        Normalize a raw latent tensor to the shape the VAE expects for image decode.
+
+        Returns a (B, C, T, H, W) or (B, C, H, W) tensor on the correct device/dtype,
+        ready to be scaled and passed to _vae_decode_image.
+        """
+        import torch
+
+        vae_dtype = getattr(self.vae, 'dtype', torch.bfloat16)
+        latent = latent_tensor.to(device=self.device, dtype=vae_dtype)
+
+        if self.vae_type in ("musubi", "wan_causal"):
+            if latent.dim() == 3:
+                latent = latent.unsqueeze(0).unsqueeze(2)   # (C,H,W) -> (1,C,1,H,W)
+            elif latent.dim() == 4:
+                latent = latent.unsqueeze(2)                # (B,C,H,W) -> (B,C,1,H,W)
+        elif self.vae_type in ("diffusers", "safetensors"):
+            if latent.dim() == 5:
+                latent = latent[:, :, 0, :, :]             # drop temporal dim
+        return latent
+
+    def _vae_decode_image(self, latent):
+        """
+        Run a single VAE decode pass and return a (B, C, H, W) float tensor.
+
+        Caller is responsible for no_grad context and correct latent shape.
+        """
+        import torch
+
+        if self.vae_type in ("musubi", "wan_causal"):
+            _log("LATENT", f"VAE decode shape: {latent.shape}")
+            decoded = self.vae.decode(latent)
+
+            if isinstance(decoded, dict):
+                tensor_found = False
+                for key in ('sample', 'x', 'output', 'decoded', 'video', 'image',
+                            'samples', 'recon', 'reconstruction'):
+                    if key in decoded and isinstance(decoded[key], torch.Tensor):
+                        decoded = decoded[key]
+                        tensor_found = True
+                        break
+                if not tensor_found:
+                    for v in decoded.values():
+                        if isinstance(v, torch.Tensor) and v.dim() >= 3:
+                            decoded = v
+                            tensor_found = True
+                            break
+                if not tensor_found:
+                    raise ValueError(f"Could not find tensor in VAE output dict. Keys: {list(decoded.keys())}")
+
+            if decoded.dim() == 5:
+                decoded = decoded[:, :, 0, :, :]  # (B,C,T,H,W) -> (B,C,H,W)
+
+        elif self.vae_type in ("diffusers", "safetensors"):
+            decoded = self.vae.decode(latent).sample
+
+        else:
+            _log("LATENT", f"Using generic decode for VAE type: {self.vae_type}", "warning")
+            decoded = self.vae.decode(latent)
+            if isinstance(decoded, dict):
+                decoded = decoded.get('sample', decoded.get('x', list(decoded.values())[0]))
+            if decoded.dim() == 5:
+                decoded = decoded[:, :, 0, :, :]
+
+        return decoded
+
     def decode_image_latent(
         self,
         latent_path: Path,
@@ -286,119 +353,166 @@ Current paths:
     ) -> np.ndarray:
         """
         Decode a single image latent to pixel array.
-        
+
         Args:
             latent_path: Path to latent.safetensors
             normalize: Normalize output to [0, 1] range
-            
+
         Returns:
             Float32 numpy array of shape (H, W, C) in [0, 1] range
         """
         import torch
-        from safetensors.torch import load_file
-        
+
         self._ensure_vae_loaded()
-        
+
         _log("LATENT", f"Decoding image latent: {latent_path}")
-        
-        # Load latent tensor
-        latent_dict = load_file(str(latent_path))
-        
-        # Find the latent tensor (key varies by generator)
+
+        latent_dict = self._load_latent_file(latent_path)
         latent = self._find_latent_tensor(latent_dict)
         _log("LATENT", f"Latent shape: {latent.shape}, VAE type: {self.vae_type}")
-        
-        # Move to device with correct dtype
-        vae_dtype = getattr(self.vae, 'dtype', torch.bfloat16)
-        latent = latent.to(device=self.device, dtype=vae_dtype)
-        
-        # Decode based on VAE type
+
+        latent = self._prepare_image_latent(latent)
+
         with torch.no_grad():
-            if self.vae_type == "musubi":
-                # Musubi VAE (Qwen/Wan) expects 5D: (B, C, T, H, W)
-                # The latent from Qwen is already 5D with T=1
-                if latent.dim() == 4:
-                    # (B, C, H, W) -> (B, C, 1, H, W)
-                    latent = latent.unsqueeze(2)
-                elif latent.dim() == 3:
-                    # (C, H, W) -> (1, C, 1, H, W)
-                    latent = latent.unsqueeze(0).unsqueeze(2)
-                
-                _log("LATENT", f"Calling musubi VAE decode with shape: {latent.shape}")
-                decoded = self.vae.decode(latent)
-                
-                # Handle dict return type (musubi VAE returns dict)
-                if isinstance(decoded, dict):
-                    _log("LATENT", f"Decode returned dict with keys: {list(decoded.keys())}")
-                    # Log types of values
-                    for k, v in decoded.items():
-                        _log("LATENT", f"  Key '{k}': type={type(v).__name__}, shape={getattr(v, 'shape', 'N/A')}")
-                    
-                    # Try common keys first
-                    tensor_found = False
-                    for key in ['sample', 'x', 'output', 'decoded', 'video', 'image', 'samples', 'recon', 'reconstruction']:
-                        if key in decoded and isinstance(decoded[key], torch.Tensor):
-                            decoded = decoded[key]
-                            _log("LATENT", f"Extracted tensor from key '{key}'")
-                            tensor_found = True
-                            break
-                    
-                    # If no known key, find first tensor
-                    if not tensor_found:
-                        for k, v in decoded.items():
-                            if isinstance(v, torch.Tensor) and v.dim() >= 3:
-                                decoded = v
-                                _log("LATENT", f"Extracted tensor from key '{k}'")
-                                tensor_found = True
-                                break
-                    
-                    if not tensor_found:
-                        raise ValueError(f"Could not find tensor in VAE output dict. Keys: {list(decoded.keys())}")
-                
-                _log("LATENT", f"Decoded shape: {decoded.shape}")
-                
-                # Output is (B, C, T, H, W) - extract single frame
-                if decoded.dim() == 5:
-                    decoded = decoded[:, :, 0, :, :]  # (B, C, H, W)
-                    
-            elif self.vae_type == "wan_causal":
-                # Wan VAE expects (B, C, T, H, W)
-                if latent.dim() == 4:
-                    latent = latent.unsqueeze(2)
-                decoded = self.vae.decode(latent)
-                if isinstance(decoded, dict):
-                    decoded = decoded.get('sample', decoded.get('x', list(decoded.values())[0]))
-                if decoded.dim() == 5:
-                    decoded = decoded[:, :, 0, :, :]
-                    
-            elif self.vae_type in ["diffusers", "safetensors"]:
-                # Standard diffusers VAE expects (B, C, H, W)
-                if latent.dim() == 5:
-                    latent = latent[:, :, 0, :, :]
-                decoded = self.vae.decode(latent).sample
-                
-            else:
-                # Generic fallback
-                _log("LATENT", f"Using generic decode for VAE type: {self.vae_type}", "warning")
-                decoded = self.vae.decode(latent)
-                if isinstance(decoded, dict):
-                    decoded = decoded.get('sample', decoded.get('x', list(decoded.values())[0]))
-                if decoded.dim() == 5:
-                    decoded = decoded[:, :, 0, :, :]
-        
-        # Convert to numpy (B, C, H, W) -> (H, W, C)
-        _log("LATENT", f"Final decoded shape before permute: {decoded.shape}")
+            decoded = self._vae_decode_image(latent)
+
         pixels = decoded[0].permute(1, 2, 0).cpu().float().numpy()
-        
+
         if normalize:
-            # VAE typically outputs in [-1, 1], normalize to [0, 1]
             pixels = (pixels + 1.0) / 2.0
             pixels = np.clip(pixels, 0.0, 1.0)
-        
+
         _log("LATENT", f"Decoded to {pixels.shape}, range [{pixels.min():.3f}, {pixels.max():.3f}]", "success")
-        
         return pixels.astype(np.float32)
-    
+
+    def decode_image_latent_bracketed(
+        self,
+        latent_path: Path,
+        scales: List[float] = None,
+    ) -> np.ndarray:
+        """
+        Decode an image latent at multiple latent scales and fuse with Mertens exposure fusion.
+
+        Multiplying the latent before VAE decode is analogous to exposure bracketing:
+        darker brackets recover highlight detail, brighter brackets lift shadow detail.
+        cv2.createMergeMertens() then fuses the best-exposed regions from each bracket.
+
+        Args:
+            latent_path: Path to latent.safetensors
+            scales: Latent scale factors, default [0.7, 1.0, 1.3].
+                    Narrow brackets (±0.2) are safer; wide brackets risk VAE artifacts.
+
+        Returns:
+            Float32 numpy array of shape (H, W, C) in [0, 1] range
+        """
+        import cv2
+        import torch
+
+        if scales is None:
+            scales = [0.85, 1.0, 1.15]
+
+        self._ensure_vae_loaded()
+
+        _log("LATENT", f"Bracketed decode: {latent_path}, scales={scales}")
+
+        latent_dict = self._load_latent_file(latent_path)
+        raw_latent = self._find_latent_tensor(latent_dict)
+        _log("LATENT", f"Latent shape: {raw_latent.shape}, VAE type: {self.vae_type}")
+
+        base_latent = self._prepare_image_latent(raw_latent)
+
+        brackets: List[np.ndarray] = []
+        with torch.no_grad():
+            for scale in scales:
+                _log("LATENT", f"Decoding at scale {scale:.2f}x")
+                scaled = base_latent * scale
+                decoded = self._vae_decode_image(scaled)
+                pixels = decoded[0].permute(1, 2, 0).cpu().float().numpy()
+                # Normalize [-1,1] -> [0,1], clip hard
+                pixels = np.clip((pixels + 1.0) / 2.0, 0.0, 1.0)
+                brackets.append(pixels.astype(np.float32))
+                _log("LATENT", f"  range [{pixels.min():.3f}, {pixels.max():.3f}]")
+
+        _log("LATENT", "Running Mertens exposure fusion...")
+        merge_mertens = cv2.createMergeMertens()
+        fused = merge_mertens.process(brackets)
+        fused = np.clip(fused, 0.0, 1.0).astype(np.float32)
+
+        _log("LATENT", f"Fused result: {fused.shape}, range [{fused.min():.3f}, {fused.max():.3f}]", "success")
+        return fused
+
+    def decode_image_latent_noise_bracketed(
+        self,
+        latent_path: Path,
+        sigmas: List[float] = None,
+        seed: int = 42,
+    ) -> np.ndarray:
+        """
+        Decode an image latent with controlled noise perturbations, fused via Mertens.
+
+        Adds small amounts of Gaussian noise to the clean final latent before each VAE
+        decode. The VAE interprets noise differently in shadow vs highlight regions, so
+        each bracket has subtly different soft detail. Mertens fusion picks the
+        best-exposed regions across all brackets.
+
+        The clean decode (sigma=0) is always included as the first bracket so the
+        fusion has an unperturbed anchor.
+
+        Args:
+            latent_path: Path to latent.safetensors
+            sigmas: Noise std-devs to add to the latent, default [0.0, 0.05, 0.10].
+                    Higher sigmas produce softer/blurrier brackets — keep below 0.2
+                    to avoid the VAE going badly out-of-distribution.
+            seed: RNG seed for reproducible noise (same latent → same fused result)
+
+        Returns:
+            Float32 numpy array of shape (H, W, C) in [0, 1] range
+        """
+        import cv2
+        import torch
+
+        if sigmas is None:
+            sigmas = [0.0, 0.025, 0.05]
+
+        self._ensure_vae_loaded()
+
+        _log("LATENT", f"Noise-bracketed decode: {latent_path}, sigmas={sigmas}, seed={seed}")
+
+        latent_dict = self._load_latent_file(latent_path)
+        raw_latent = self._find_latent_tensor(latent_dict)
+        _log("LATENT", f"Latent shape: {raw_latent.shape}, VAE type: {self.vae_type}")
+
+        base_latent = self._prepare_image_latent(raw_latent)
+
+        rng = torch.Generator(device=self.device)
+        rng.manual_seed(seed)
+
+        brackets: List[np.ndarray] = []
+        with torch.no_grad():
+            for sigma in sigmas:
+                if sigma == 0.0:
+                    perturbed = base_latent
+                    _log("LATENT", "Decoding clean latent (σ=0)")
+                else:
+                    noise = torch.randn(base_latent.shape, dtype=base_latent.dtype,
+                                        device=self.device, generator=rng)
+                    perturbed = base_latent + noise * sigma
+                    _log("LATENT", f"Decoding with σ={sigma:.3f}")
+
+                decoded = self._vae_decode_image(perturbed)
+                pixels = decoded[0].permute(1, 2, 0).cpu().float().numpy()
+                pixels = np.clip((pixels + 1.0) / 2.0, 0.0, 1.0)
+                brackets.append(pixels.astype(np.float32))
+                _log("LATENT", f"  range [{pixels.min():.3f}, {pixels.max():.3f}]")
+
+        _log("LATENT", "Running Mertens fusion over noise brackets...")
+        merge_mertens = cv2.createMergeMertens()
+        fused = merge_mertens.process(brackets)
+        fused = np.clip(fused, 0.0, 1.0).astype(np.float32)
+
+        _log("LATENT", f"Fused result: {fused.shape}, range [{fused.min():.3f}, {fused.max():.3f}]", "success")
+        return fused
+
     def decode_video_latent(
         self,
         latent_path: Path,
@@ -419,14 +533,12 @@ Current paths:
             Tuple of (frame_index, frame_array) where frame_array is (H, W, C) float32
         """
         import torch
-        from safetensors.torch import load_file
-        
+
         self._ensure_vae_loaded()
-        
+
         _log("LATENT", f"Decoding video latent: {latent_path}")
-        
-        # Load latent tensor
-        latent_dict = load_file(str(latent_path))
+
+        latent_dict = self._load_latent_file(latent_path)
         latent = self._find_latent_tensor(latent_dict)
         _log("LATENT", f"Video latent shape: {latent.shape}, VAE type: {self.vae_type}")
         
@@ -533,22 +645,50 @@ Current paths:
         """
         return [frame for _, frame in self.decode_video_latent(latent_path, normalize)]
     
-    def _find_latent_tensor(self, latent_dict: dict):
-        """Find the latent tensor in a safetensors dict"""
+    def _load_latent_file(self, latent_path: Path) -> dict:
+        """
+        Load a latent file as a dict regardless of whether it's .safetensors or .pt.
+
+        The image pipeline saves torch dicts via torch.save() (.latent.pt).
+        The video pipeline saves via safetensors.  Both are handled here.
+        """
         import torch
-        
-        # Common keys used by different generators
+
+        latent_path = Path(latent_path)
+        suffix = latent_path.suffix.lower()
+
+        if suffix == '.pt' or latent_path.name.endswith('.latent.pt'):
+            data = torch.load(str(latent_path), map_location='cpu', weights_only=False)
+            # _capture_latent_hook stores {'latent': tensor, 'shape': ..., 'dtype': ...}
+            # _save_latent_tensor stores the same structure
+            if isinstance(data, dict) and 'latent' in data and hasattr(data['latent'], 'shape'):
+                return data
+            # Raw tensor saved directly
+            if hasattr(data, 'shape'):
+                return {'latent': data}
+            return data
+        else:
+            from safetensors.torch import load_file
+            return load_file(str(latent_path))
+
+    def _find_latent_tensor(self, latent_dict: dict):
+        """Find the latent tensor in a loaded latent dict."""
+        import torch
+
+        # Common keys used by different generators / save formats
         for key in ['latent', 'latents', 'x', 'sample', 'z']:
             if key in latent_dict:
-                return latent_dict[key]
-        
-        # Fall back to first tensor
-        if latent_dict:
-            first_key = list(latent_dict.keys())[0]
-            _log("LATENT", f"Using tensor key: {first_key}", "warning")
-            return latent_dict[first_key]
-        
-        raise ValueError("No latent tensor found in safetensors file")
+                val = latent_dict[key]
+                if isinstance(val, torch.Tensor):
+                    return val
+
+        # Fall back to first tensor value
+        for key, val in latent_dict.items():
+            if isinstance(val, torch.Tensor):
+                _log("LATENT", f"Using tensor key: {key}", "warning")
+                return val
+
+        raise ValueError(f"No latent tensor found. Keys: {list(latent_dict.keys())}")
     
     def get_latent_info(self, latent_path: Path) -> Dict[str, Any]:
         """

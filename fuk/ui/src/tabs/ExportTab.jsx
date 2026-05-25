@@ -27,6 +27,8 @@ const DEFAULT_SETTINGS = {
   exrColorSpace: 'Linear',
   exportFilename: 'export',
   exportPath: '',
+  bracketedLatent: false,
+  noiseBracketedLatent: false,
   // Video sequence settings
   sequenceStartFrame: 1,
   sequencePattern: '{name}.{frame:04d}',
@@ -286,6 +288,9 @@ const {
           single_files: settings.exports.singleLayerEXRs,
           filename: settings.exportFilename,
           export_path: settings.exportPath || null,
+          use_latent: true,
+          bracketed_latent: settings.bracketedLatent,
+          noise_bracketed_latent: settings.noiseBracketedLatent,
         };
       }
 
@@ -634,6 +639,38 @@ const {
                   <option value="sRGB">sRGB</option>
                 </select>
               </div>
+
+              <label className="fuk-checkbox-group compact-form-row">
+                  <input
+                    type="checkbox"
+                    className="fuk-checkbox"
+                    checked={settings.bracketedLatent}
+                    onChange={(e) => updateSettings({ bracketedLatent: e.target.checked })}
+                    disabled={exporting}
+                  />
+                  <div>
+                    <span className="fuk-label">Bracketed Latent</span>
+                    <span className="fuk-help-text fuk-help-text--sm" style={{ display: 'block' }}>
+                      Fuse 0.85× / 1.0× / 1.15× decodes for extended dynamic range
+                    </span>
+                  </div>
+                </label>
+
+              <label className="fuk-checkbox-group compact-form-row">
+                  <input
+                    type="checkbox"
+                    className="fuk-checkbox"
+                    checked={settings.noiseBracketedLatent}
+                    onChange={(e) => updateSettings({ noiseBracketedLatent: e.target.checked })}
+                    disabled={exporting}
+                  />
+                  <div>
+                    <span className="fuk-label">Noise Bracketed Latent</span>
+                    <span className="fuk-help-text fuk-help-text--sm" style={{ display: 'block' }}>
+                      Fuse σ=0 / 0.025 / 0.05 noise-perturbed decodes for softer shadow detail
+                    </span>
+                  </div>
+                </label>
             </div>
           </div>
 

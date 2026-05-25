@@ -264,161 +264,156 @@ class EXRExporter:
     def _decode_beauty_latents(
         self,
         latent_path: Path,
-        backend,  # DiffSynthBackend instance
+        backend,
         model_type: str = "auto",
         progress_callback: Optional[Callable[[int, int], None]] = None,
+        bracketed: bool = False,
+        scales: Optional[List[float]] = None,
+        noise_bracketed: bool = False,
+        sigmas: Optional[List[float]] = None,
+        seed: int = 42,
     ) -> List[np.ndarray]:
         """
-        Decode beauty pass latents to numpy arrays.
-        
-        Loads only the VAE (not the full pipeline) and decodes on CPU.
-        CPU decode avoids both VRAM pressure and the conv3d CUDA kernel
-        issue present in many PyTorch builds.
-        
-        Args:
-            latent_path: Path to .latent.pt file
-            backend: DiffSynthBackend instance
-            model_type: Model type ("auto" to detect, or explicit key)
-            progress_callback: Optional progress callback
-        
-        Returns:
-            List of decoded frames as float32 numpy arrays [H, W, C] in linear [0, 1]
+        Decode beauty pass latents to float32 linear numpy arrays.
+
+        When bracketed or noise_bracketed is True, decodes the latent multiple
+        times with scale or noise perturbations and fuses each frame with Mertens
+        before linearising.  The VAE is loaded once and reused for all passes.
         """
         import torch
         import inspect
-        
+
+        if scales is None:
+            scales = [0.85, 1.0, 1.15]
+        if sigmas is None:
+            sigmas = [0.0, 0.025, 0.05]
+
         print(f"  📄 Decoding beauty latents: {latent_path.name}")
-        
-        # Load latent
-        latent_data = torch.load(str(latent_path), map_location='cpu')
-        latent = latent_data['latent']
+
+        latent_data = torch.load(str(latent_path), map_location='cpu', weights_only=False)
+        latent = latent_data['latent'] if isinstance(latent_data, dict) else latent_data
         is_video = latent.ndim == 5
-        
-        # Auto-detect model type
+
         if model_type == "auto":
             if is_video:
-                wan_models = [k for k, v in backend.models_config.items() 
-                             if isinstance(v, dict) and v.get("pipeline") == "wan"]
+                wan_models = [k for k, v in backend.models_config.items()
+                              if isinstance(v, dict) and v.get("pipeline") == "wan"]
                 if wan_models:
                     model_type = wan_models[0]
                 else:
                     raise ValueError("No Wan pipeline in models.json for video decode")
             else:
                 model_type = "qwen_image"
-        
-        print(f"  📄 Latent shape: {latent.shape}, type: {'video' if is_video else 'image'}")
-        print(f"  📄 Using model: {model_type}")
-        
-        # ------------------------------------------------------------------
-        # Load VAE only — no DiT, no text encoder, no VRAM usage
-        # ------------------------------------------------------------------
+
+        decode_mode = ("noise" if noise_bracketed else "scale" if bracketed else "standard")
+        print(f"  📄 Latent shape: {latent.shape}, model: {model_type}, decode: {decode_mode}")
+
         vae, needs_device_arg = self._load_vae_only(backend, model_type)
-        
-        # ------------------------------------------------------------------
-        # Decode: GPU (float32) first, CPU fallback
-        # float32 avoids the bf16 conv3d kernel issue (cuDNN handles f32).
-        # VAE-only load (~1.3GB) leaves ~22GB free on a 24GB card.
-        # ------------------------------------------------------------------
         vae = vae.to(dtype=torch.float32).eval()
         latent = latent.to(dtype=torch.float32)
-        
-        def _vae_decode(vae, latent, device, needs_device_arg):
-            vae.to(device)
-            lat = latent.to(device)
-            with torch.no_grad():
-                if needs_device_arg:
-                    return vae.decode(lat, device=device, tiled=False)
-                else:
-                    return vae.decode(lat)
-        
-        decoded = None
-        
-        if torch.cuda.is_available():
-            try:
-                free_gb = torch.cuda.mem_get_info()[0] / (1024**3)
-                print(f"  📄 Attempting GPU decode (float32, tiled=False, {free_gb:.1f} GB free)...")
-                decoded = _vae_decode(vae, latent, torch.device('cuda'), needs_device_arg)
-                print(f"  📄 GPU decode complete")
-            except (RuntimeError, torch.cuda.OutOfMemoryError) as e:
-                err_short = str(e).split('\n')[0][:120]
-                print(f"  ⚠️  GPU decode failed: {err_short}")
-                print(f"  📄 Falling back to CPU...")
-                vae.cpu()
-                if torch.cuda.is_available():
+
+        def _vae_decode(lat):
+            """GPU-first, CPU fallback. Returns float32 tensor."""
+            def _run(device):
+                vae.to(device)
+                l = lat.to(device)
+                with torch.no_grad():
+                    if needs_device_arg:
+                        return vae.decode(l, device=device, tiled=False)
+                    else:
+                        return vae.decode(l)
+
+            result = None
+            if torch.cuda.is_available():
+                try:
+                    free_gb = torch.cuda.mem_get_info()[0] / (1024**3)
+                    print(f"  📄 GPU decode ({free_gb:.1f} GB free)...")
+                    result = _run(torch.device('cuda'))
+                    print(f"  📄 GPU decode complete")
+                except (RuntimeError, torch.cuda.OutOfMemoryError) as e:
+                    print(f"  ⚠️  GPU failed: {str(e).split(chr(10))[0][:80]}, falling back to CPU...")
+                    vae.cpu()
                     torch.cuda.empty_cache()
-                decoded = None
-        
-        if decoded is None:
-            import os
-            num_threads = os.cpu_count() or 4
-            torch.set_num_threads(num_threads)
-            print(f"  📄 Decoding on CPU (float32, {num_threads} threads, tiled=False)...")
-            decoded = _vae_decode(vae, latent, torch.device('cpu'), needs_device_arg)
-            print(f"  📄 CPU decode complete")
-        
-        # Clean up VAE
+            if result is None:
+                import os
+                torch.set_num_threads(os.cpu_count() or 4)
+                print(f"  📄 CPU decode...")
+                result = _run(torch.device('cpu'))
+                print(f"  📄 CPU decode complete")
+            if result.dtype == torch.bfloat16:
+                result = result.to(torch.float32)
+            return result
+
+        def _tensor_to_frames(decoded):
+            """Convert decoded tensor → list of HWC float32 frames in sRGB [0, 1]."""
+            pixels = decoded.cpu().numpy()
+            frames = []
+            if is_video and pixels.ndim == 5:
+                for fi in range(pixels.shape[2]):
+                    f = np.transpose(pixels[0, :, fi, :, :], (1, 2, 0))
+                    frames.append(np.clip(f[:, :, :3], 0.0, 1.0).astype(np.float32))
+            elif pixels.ndim == 4:
+                f = pixels[0]
+                if f.shape[0] in (1, 3, 4):
+                    f = np.transpose(f, (1, 2, 0))
+                frames.append(np.clip(f[:, :, :3], 0.0, 1.0).astype(np.float32))
+            else:
+                raise ValueError(f"Unexpected decoded shape: {pixels.shape}")
+            return frames
+
+        # Build bracket passes
+        if noise_bracketed:
+            rng = torch.Generator()
+            rng.manual_seed(seed)
+            passes = []
+            for sigma in sigmas:
+                label = f"σ={sigma:.3f}"
+                print(f"  [BRACKET] noise {label}")
+                lat = latent if sigma == 0.0 else latent + torch.randn(latent.shape, dtype=latent.dtype, generator=rng) * sigma
+                passes.append(_tensor_to_frames(_vae_decode(lat)))
+        elif bracketed:
+            passes = []
+            for s in scales:
+                print(f"  [BRACKET] scale {s:.2f}×")
+                passes.append(_tensor_to_frames(_vae_decode(latent * s)))
+        else:
+            passes = [_tensor_to_frames(_vae_decode(latent))]
+
+        # Release VAE
         vae.cpu()
         del vae, latent
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-        
-        # ------------------------------------------------------------------
-        # Convert to numpy frames with sRGB → Linear
-        # ------------------------------------------------------------------
-        decoded_frames = []
-        
-        if isinstance(decoded, torch.Tensor):
-            if decoded.dtype == torch.bfloat16:
-                decoded = decoded.to(torch.float32)
-            
-            pixels = decoded.cpu().numpy()
-            del decoded
-            
-            if is_video and pixels.ndim == 5:
-                num_frames = pixels.shape[2]
-                print(f"  📄 Extracting {num_frames} frames...")
-                
-                for frame_idx in range(num_frames):
-                    frame = pixels[0, :, frame_idx, :, :]  # (C, H, W)
 
-                    # CHW → HWC
-                    frame = np.transpose(frame, (1, 2, 0))
-                    
-                    if frame.shape[2] == 4:
-                        frame = frame[:, :, :3]
-                    
-                    # sRGB → Linear (VAE trained on sRGB, EXR needs linear)
-                    frame = self._srgb_to_linear(frame)
-                    
-                    decoded_frames.append(frame.astype(np.float32))
-                    
-                    if progress_callback and (frame_idx + 1) % 10 == 0:
-                        progress_callback(frame_idx + 1, num_frames)
-            
-            elif pixels.ndim == 4:
-                frame = pixels[0]
+        # Fuse brackets and linearise
+        num_frames = len(passes[0])
+        if len(passes) > 1:
+            import cv2
+            merge_mertens = cv2.createMergeMertens()
+            decoded_frames = []
+            print(f"  [BRACKET] Mertens fusing {num_frames} frames × {len(passes)} brackets...")
+            for fi in range(num_frames):
+                imgs_u8 = [(p[fi] * 255).astype(np.uint8) for p in passes]
+                fused = np.clip(merge_mertens.process(imgs_u8), 0.0, 1.0).astype(np.float32)
+                decoded_frames.append(self._srgb_to_linear(fused))
+                if progress_callback and (fi + 1) % 10 == 0:
+                    progress_callback(fi + 1, num_frames)
+        else:
+            decoded_frames = []
+            for fi, frame in enumerate(passes[0]):
+                decoded_frames.append(self._srgb_to_linear(frame))
+                if progress_callback and (fi + 1) % 10 == 0:
+                    progress_callback(fi + 1, num_frames)
 
-                if frame.shape[0] in [1, 3, 4]:
-                    frame = np.transpose(frame, (1, 2, 0))
-                
-                if frame.shape[2] == 4:
-                    frame = frame[:, :, :3]
-                
-                frame = self._srgb_to_linear(frame)
-                decoded_frames.append(frame.astype(np.float32))
-            
-            else:
-                raise ValueError(f"Unexpected decoded shape: {pixels.shape}")
-        
-        print(f"  ✅ Decoded {len(decoded_frames)} beauty frames (linear color space)")
+        print(f"  ✅ {len(decoded_frames)} beauty frames decoded ({decode_mode})")
         return decoded_frames
 
     
     def export_video_sequence(
         self,
-        beauty_latent: Path,  # REQUIRED - no fallback!
-        aov_layers: Dict[str, str],  # depth, normals, crypto (optional)
-        backend,  # DiffSynthBackend instance - REQUIRED
+        beauty_latent: Path,
+        aov_layers: Dict[str, str],
+        backend,
         output_dir: Path,
         filename_pattern: str = "frame.{frame:04d}.exr",
         bit_depth: Literal[16, 32] = 32,
@@ -426,6 +421,11 @@ class EXRExporter:
         start_frame: int = 1,
         model_type: str = "auto",
         progress_callback: Optional[Callable[[int, int], None]] = None,
+        bracketed: bool = False,
+        scales: Optional[List[float]] = None,
+        noise_bracketed: bool = False,
+        sigmas: Optional[List[float]] = None,
+        seed: int = 42,
     ) -> Dict[str, Any]:
         """
         Export video sequence to multilayer EXR (LATENT-ONLY VERSION)
@@ -479,6 +479,11 @@ class EXRExporter:
             backend=backend,
             model_type=model_type,
             progress_callback=None,
+            bracketed=bracketed,
+            scales=scales,
+            noise_bracketed=noise_bracketed,
+            sigmas=sigmas,
+            seed=seed,
         )
         
         total_frames = len(beauty_decoded_frames)
@@ -1151,6 +1156,186 @@ class EXRExporter:
             "layers_included": list(loaded_layers.keys()),
         }
     
+    def export_from_latent(
+        self,
+        latent_path: Path,
+        output_path: Path,
+        backend,
+        model_type: str = "qwen_image",
+        bit_depth: Literal[16, 32] = 32,
+        compression: str = "ZIP",
+        bracketed: bool = False,
+        scales: Optional[List[float]] = None,
+        noise_bracketed: bool = False,
+        sigmas: Optional[List[float]] = None,
+        seed: int = 42,
+    ) -> Dict[str, Any]:
+        """
+        Decode a .latent.pt file directly to an EXR using the DiffSynth VAE.
+
+        Uses _load_vae_only — no musubi-tuner, no full pipeline load.
+
+        Decode modes:
+          - default: single clean decode
+          - bracketed=True: scale bracketing (0.7×/1.0×/1.3×) + Mertens fusion
+          - noise_bracketed=True: noise perturbation (σ=0/0.05/0.10) + Mertens fusion
+        """
+        import torch
+        import inspect
+
+        if not self._has_openexr:
+            raise RuntimeError("OpenEXR not installed")
+
+        if scales is None:
+            scales = [0.85, 1.0, 1.15]
+        if sigmas is None:
+            sigmas = [0.0, 0.025, 0.05]
+
+        latent_path = Path(latent_path)
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Load latent (.pt dict or raw tensor)
+        latent_data = torch.load(str(latent_path), map_location='cpu', weights_only=False)
+        if isinstance(latent_data, dict) and 'latent' in latent_data:
+            latent = latent_data['latent']
+        elif isinstance(latent_data, torch.Tensor):
+            latent = latent_data
+        else:
+            raise ValueError(f"Unrecognised latent format in {latent_path}")
+
+        # Load VAE via DiffSynth (reuses cached pipeline if already loaded)
+        vae, needs_device_arg = self._load_vae_only(backend, model_type)
+        vae = vae.to(dtype=torch.float32).eval()
+        latent = latent.to(dtype=torch.float32)
+
+        def _decode(lat):
+            """GPU-first decode, CPU fallback. Returns float32 numpy (H, W, C)."""
+            def _run(device):
+                vae.to(device)
+                l = lat.to(device)
+                with torch.no_grad():
+                    if needs_device_arg:
+                        out = vae.decode(l, device=device, tiled=False)
+                    else:
+                        out = vae.decode(l)
+                if isinstance(out, torch.Tensor):
+                    return out
+                # Some VAEs return a dict
+                if isinstance(out, dict):
+                    for k in ('sample', 'x', 'output', 'decoded'):
+                        if k in out and isinstance(out[k], torch.Tensor):
+                            return out[k]
+                    return list(out.values())[0]
+                raise ValueError(f"Unexpected VAE output type: {type(out)}")
+
+            t = None
+            if torch.cuda.is_available():
+                try:
+                    t = _run(torch.device('cuda'))
+                except (RuntimeError, torch.cuda.OutOfMemoryError):
+                    vae.cpu()
+                    torch.cuda.empty_cache()
+            if t is None:
+                t = _run(torch.device('cpu'))
+
+            # (1, C, H, W) or (1, C, 1, H, W) → (H, W, C)
+            if t.dtype == torch.bfloat16:
+                t = t.to(torch.float32)
+            arr = t.cpu().numpy()
+            if arr.ndim == 5:
+                arr = arr[0, :, 0, :, :]   # drop batch + temporal
+            elif arr.ndim == 4:
+                arr = arr[0]               # drop batch
+            if arr.shape[0] in (1, 3, 4):
+                arr = np.transpose(arr, (1, 2, 0))
+            arr = arr[:, :, :3].astype(np.float32)
+            # Qwen image VAE outputs in [-1, 1]; map to [0, 1] sRGB before returning
+            arr = (arr + 1.0) / 2.0
+            return arr
+
+        # Build brackets
+        if noise_bracketed:
+            print(f"  [BRACKET] MODE: noise — sigmas={sigmas} seed={seed}")
+            rng = torch.Generator()
+            rng.manual_seed(seed)
+            brackets = []
+            for sigma in sigmas:
+                if sigma == 0.0:
+                    b = _decode(latent)
+                else:
+                    noise = torch.randn(latent.shape, dtype=latent.dtype, generator=rng)
+                    b = _decode(latent + noise * sigma)
+                print(f"  [BRACKET]   σ={sigma:.3f} → raw range [{b.min():.4f}, {b.max():.4f}]")
+                brackets.append(b)
+        elif bracketed:
+            print(f"  [BRACKET] MODE: scale — scales={scales}")
+            brackets = []
+            for s in scales:
+                b = _decode(latent * s)
+                print(f"  [BRACKET]   scale={s:.2f}x → raw range [{b.min():.4f}, {b.max():.4f}]")
+                brackets.append(b)
+        else:
+            print(f"  [BRACKET] MODE: standard (single decode)")
+            b = _decode(latent)
+            print(f"  [BRACKET]   raw range [{b.min():.4f}, {b.max():.4f}]")
+            brackets = [b]
+
+        # Release VAE VRAM
+        vae.cpu()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+        # Clip each bracket to [0, 1] (Mertens expects perceptual-space [0,1])
+        brackets = [np.clip(b, 0.0, 1.0) for b in brackets]
+
+        if len(brackets) > 1:
+            import cv2
+            # Mertens expects uint8 — float32 [0,1] inputs get divided by 255 internally
+            imgs_u8 = [(b * 255).astype(np.uint8) for b in brackets]
+            fused = cv2.createMergeMertens().process(imgs_u8)
+            fused = np.clip(fused, 0.0, 1.0).astype(np.float32)
+            print(f"  [BRACKET] Mertens fused range [{fused.min():.4f}, {fused.max():.4f}]")
+        else:
+            fused = brackets[0]
+
+        # sRGB → scene-linear for EXR
+        arr = self._srgb_to_linear(fused)
+        print(f"  [BRACKET] Post-linearise range [{arr.min():.4f}, {arr.max():.4f}] → writing EXR")
+        height, width = arr.shape[:2]
+
+        pixel_type = (
+            self.Imath.PixelType(self.Imath.PixelType.HALF)
+            if bit_depth == 16
+            else self.Imath.PixelType(self.Imath.PixelType.FLOAT)
+        )
+        channels_dict = {
+            'R': self._to_bytes(arr[:, :, 0], bit_depth),
+            'G': self._to_bytes(arr[:, :, 1], bit_depth),
+            'B': self._to_bytes(arr[:, :, 2], bit_depth),
+        }
+        channel_info = {ch: self.Imath.Channel(pixel_type) for ch in channels_dict}
+
+        header = self.OpenEXR.Header(width, height)
+        header['channels'] = channel_info
+        exr_file = self.OpenEXR.OutputFile(str(output_path), header)
+        exr_file.writePixels(channels_dict)
+        exr_file.close()
+
+        file_size = output_path.stat().st_size
+        return {
+            "output_path": str(output_path),
+            "width": width,
+            "height": height,
+            "channels": list(channels_dict.keys()),
+            "bit_depth": bit_depth,
+            "compression": compression,
+            "file_size": file_size,
+            "layers_included": ["beauty"],
+            "bracketed": bracketed,
+            "noise_bracketed": noise_bracketed,
+        }
+
     def export_single_layers(
         self,
         layers: Dict[str, str],
