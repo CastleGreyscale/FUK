@@ -856,6 +856,26 @@
 
 /* ── bulk selection section ── */
 
+.gallery-delete-confirm {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 0.4rem 0.5rem;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, #ef4444 10%, var(--color-surface));
+  border: 1px solid color-mix(in srgb, #ef4444 30%, transparent);
+  margin-bottom: 0.25rem;
+}
+
+.gallery-delete-confirm span {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: #ef4444;
+  flex: 1;
+  min-width: 0;
+}
+
 .gallery-bulk-section {
   display: flex;
   flex-direction: column;

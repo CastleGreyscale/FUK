@@ -463,7 +463,7 @@ function GalleryThumb({ generation, isPinned, isSelected, isMultiSelected, vote,
 
 // ─── large preview (top panel in the gallery) ────────────────────────────────
 
-function GalleryLargeView({ generation, generations, isPinned, vote, onTogglePin, onVote, onDelete, onNavigate, multiSelected, onBulkVote, onBulkDelete, onClearSelection }) {
+function GalleryLargeView({ generation, generations, isPinned, vote, onTogglePin, onVote, onDelete, onNavigate, multiSelected, onBulkVote, onBulkDelete, onClearSelection, deleteConfirm, onConfirmDelete, onCancelDelete }) {
   const preview  = buildImageUrl(generation.preview);
   const video    = isGenVideo(generation);
   const ProcIcon = processingIcon(generation);
@@ -503,8 +503,17 @@ function GalleryLargeView({ generation, generations, isPinned, vote, onTogglePin
 
       {/* sidebar */}
       <div className="gallery-large-sidebar">
+        {/* inline delete confirmation */}
+        {deleteConfirm && (
+          <div className="gallery-delete-confirm">
+            <span>Delete {deleteConfirm.label}?</span>
+            <button className="gen-history-delete" onClick={onConfirmDelete}><Trash2 />Yes, delete</button>
+            <button className="gallery-bulk-clear" onClick={onCancelDelete}><X />Cancel</button>
+          </div>
+        )}
+
         {/* bulk selection controls */}
-        {multiSelected && multiSelected.size > 1 && (
+        {!deleteConfirm && multiSelected && multiSelected.size > 1 && (
           <div className="gallery-bulk-section">
             <div className="gallery-bulk-header">{multiSelected.size} selected</div>
             <div className="gallery-detail-actions">
@@ -577,6 +586,7 @@ function FullscreenGallery({ generations, pinnedIds, votes, onTogglePin, onVote,
   const [selected, setSelected]       = useState(generations[0] || null);
   const [previewPct, setPreviewPct]   = useState(55);
   const [multiSelected, setMultiSelected] = useState(new Set());
+  const [deleteConfirm, setDeleteConfirm] = useState(null); // { ids: [...], label: '' }
   const bodyRef      = useRef(null);
   const isDragging   = useRef(false);
   const dragStartY   = useRef(0);
@@ -644,12 +654,25 @@ function FullscreenGallery({ generations, pinnedIds, votes, onTogglePin, onVote,
     setSelected(generation);
   }, [orderedGens]);
 
-  const handleDelete = useCallback(async generation => {
-    if (!confirm(`Delete ${generation.name || generation.id}?`)) return;
-    await onDelete(generation);
-    setSelected(s => s?.id === generation.id ? null : s);
-    setMultiSelected(prev => { const next = new Set(prev); next.delete(generation.id); return next; });
-  }, [onDelete]);
+  const handleDelete = useCallback(generation => {
+    setDeleteConfirm({ ids: [generation.id], label: generation.name || generation.id });
+  }, []);
+
+  const executePendingDelete = useCallback(async () => {
+    if (!deleteConfirm) return;
+    const ids = deleteConfirm.ids;
+    setDeleteConfirm(null);
+    for (const id of ids) {
+      const gen = generations.find(g => g.id === id);
+      if (gen) await onDelete(gen);
+    }
+    setMultiSelected(prev => {
+      const next = new Set(prev);
+      ids.forEach(id => next.delete(id));
+      return next;
+    });
+    setSelected(s => (s && ids.includes(s.id)) ? null : s);
+  }, [deleteConfirm, generations, onDelete]);
 
   const handleNavigate = useCallback((dir) => {
     setMultiSelected(new Set());
@@ -670,17 +693,10 @@ function FullscreenGallery({ generations, pinnedIds, votes, onTogglePin, onVote,
     }
   }, [multiSelected, generations, onVote]);
 
-  const handleBulkDelete = useCallback(async () => {
-    const count = multiSelected.size;
-    if (!confirm(`Delete ${count} items?`)) return;
+  const handleBulkDelete = useCallback(() => {
     const ids = [...multiSelected];
-    for (const id of ids) {
-      const gen = generations.find(g => g.id === id);
-      if (gen) await onDelete(gen);
-    }
-    setMultiSelected(new Set());
-    setSelected(s => (s && multiSelected.has(s.id)) ? null : s);
-  }, [multiSelected, generations, onDelete]);
+    setDeleteConfirm({ ids, label: `${ids.length} items` });
+  }, [multiSelected]);
 
   return (
     <div className="gallery-overlay">
@@ -726,6 +742,9 @@ function FullscreenGallery({ generations, pinnedIds, votes, onTogglePin, onVote,
               onBulkVote={handleBulkVote}
               onBulkDelete={handleBulkDelete}
               onClearSelection={() => setMultiSelected(new Set())}
+              deleteConfirm={deleteConfirm}
+              onConfirmDelete={executePendingDelete}
+              onCancelDelete={() => setDeleteConfirm(null)}
             />
           ) : (
             <div className="gallery-large-empty">Click a thumbnail to preview</div>
