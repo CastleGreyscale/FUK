@@ -655,24 +655,24 @@ function FullscreenGallery({ generations, pinnedIds, votes, onTogglePin, onVote,
   }, [orderedGens]);
 
   const handleDelete = useCallback(generation => {
-    setDeleteConfirm({ ids: [generation.id], label: generation.name || generation.id });
+    setDeleteConfirm({ gens: [generation], label: generation.name || generation.id });
   }, []);
 
   const executePendingDelete = useCallback(async () => {
     if (!deleteConfirm) return;
-    const ids = deleteConfirm.ids;
+    const gens = deleteConfirm.gens;
     setDeleteConfirm(null);
-    for (const id of ids) {
-      const gen = generations.find(g => g.id === id);
-      if (gen) await onDelete(gen);
+    for (const gen of gens) {
+      await onDelete(gen);
     }
+    const deletedIds = new Set(gens.map(g => g.id));
     setMultiSelected(prev => {
       const next = new Set(prev);
-      ids.forEach(id => next.delete(id));
+      deletedIds.forEach(id => next.delete(id));
       return next;
     });
-    setSelected(s => (s && ids.includes(s.id)) ? null : s);
-  }, [deleteConfirm, generations, onDelete]);
+    setSelected(s => (s && deletedIds.has(s.id)) ? null : s);
+  }, [deleteConfirm, onDelete]);
 
   const handleNavigate = useCallback((dir) => {
     setMultiSelected(new Set());
@@ -694,9 +694,9 @@ function FullscreenGallery({ generations, pinnedIds, votes, onTogglePin, onVote,
   }, [multiSelected, generations, onVote]);
 
   const handleBulkDelete = useCallback(() => {
-    const ids = [...multiSelected];
-    setDeleteConfirm({ ids, label: `${ids.length} items` });
-  }, [multiSelected]);
+    const gens = [...multiSelected].map(id => generations.find(g => g.id === id)).filter(Boolean);
+    setDeleteConfirm({ gens, label: `${gens.length} items` });
+  }, [multiSelected, generations]);
 
   return (
     <div className="gallery-overlay">
@@ -1058,7 +1058,7 @@ export default function GenerationHistory({ project, collapsed, onToggle, playba
       });
       if (res.ok) {
         setGenerations(prev => prev.filter(g => g.id !== generation.id));
-        setPinnedIds(prev => prev.filter(p => p !== generation.id));
+        setPinnedIds(prev => prev.includes(generation.id) ? prev.filter(p => p !== generation.id) : prev);
       }
     } catch (err) {
       console.error('Failed to delete:', err);
