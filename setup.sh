@@ -504,10 +504,105 @@ cat > fuk/config/defaults.json.template << 'EOL'
     "source_height": null
   },
 
+  "flux2": {
+    "width": 1024,
+    "steps": 30,
+    "cfg_scale": 1.0,
+    "embedded_guidance": 4.0,
+    "denoising_strength": 1.0,
+    "negative_prompt": ""
+  },
+
+  "export": {
+    "prefer_latent": true,
+    "exr_compression": "ZIP",
+    "exr_precision": "float32"
+  },
+
+  "preprocess": {
+    "depth": {
+      "model": "da3_mono_large",
+      "invert": false,
+      "normalize": true,
+      "colormap": "greyscale"
+    },
+    "normals": {
+      "method": "depth_gradient",
+      "depth_model": "da3_mono_large",
+      "blur_radius": 3,
+      "normalize": true,
+      "num_iter": 5,
+      "fov_deg": 60.0
+    },
+    "canny": {
+      "low_threshold": 1,
+      "high_threshold": 20,
+      "blur_kernel": 3,
+      "invert": false
+    },
+    "openpose": {
+      "include_hands": true,
+      "include_face": true
+    },
+    "crypto": {
+      "model": "sam2",
+      "mode": "auto",
+      "points_per_side": 32,
+      "pred_iou_thresh": 0.86,
+      "stability_score_thresh": 0.92
+    }
+  },
+
+  "postprocess": {
+    "upscale": {
+      "model": "real_esrgan_x4",
+      "scale": 4
+    },
+    "interpolate": {
+      "model": "rife",
+      "multiplier": 2
+    }
+  },
+
+  "project": {
+    "shot_label": "shot",
+    "versioning": "DATE",
+    "autosave_interval": 30,
+    "cache_cleanup_days": 7
+  },
+
+  "tools": {
+    "blender": "/usr/bin/blender",
+    "blender_template": "/path/to/your/template.blend"
+  }
+}
+EOL
+echo "    ✓ fuk/config/defaults.json.template"
+
+cat > fuk/config/defaults_loras.json.template << 'EOL'
+{
   "lora_dirs": [
     "/path/to/your/models/loras"
   ],
 
+  "lora_paths": [],
+
+  "loras": [
+    {
+      "name": "example_lora",
+      "path": "/path/to/your/models/loras/example.safetensors",
+      "model": "qwen_image",
+      "default_strength": 1.0,
+      "trigger_word": "",
+      "inject_text": ""
+    }
+  ]
+}
+EOL
+echo "    ✓ fuk/config/defaults_loras.json.template"
+
+cat > fuk/config/defaults_vram.json.template << 'EOL'
+{
   "vram": {
     "preset": "low",
     "presets": {
@@ -563,71 +658,15 @@ cat > fuk/config/defaults.json.template << 'EOL'
         "buffer_gb": 2
       }
     }
-  },
+  }
+}
+EOL
+echo "    ✓ fuk/config/defaults_vram.json.template"
 
-  "export": {
-    "prefer_latent": true,
-    "exr_compression": "ZIP",
-    "exr_precision": "float32"
-  },
-
-  "preprocess": {
-    "depth": {
-      "model": "da3_mono_large",
-      "invert": false,
-      "normalize": true,
-      "colormap": "greyscale"
-    },
-    "normals": {
-      "method": "depth_gradient",
-      "depth_model": "da3_mono_large",
-      "blur_radius": 3,
-      "normalize": true
-    },
-    "canny": {
-      "low_threshold": 1,
-      "high_threshold": 20,
-      "blur_kernel": 3,
-      "invert": false
-    },
-    "openpose": {
-      "include_hands": true,
-      "include_face": true
-    },
-    "crypto": {
-      "model": "sam2",
-      "mode": "auto",
-      "points_per_side": 32,
-      "pred_iou_thresh": 0.86,
-      "stability_score_thresh": 0.92
-    }
-  },
-
-  "postprocess": {
-    "upscale": {
-      "model": "real_esrgan_x4",
-      "scale": 4
-    },
-    "interpolate": {
-      "model": "rife",
-      "multiplier": 2
-    }
-  },
-
-  "project": {
-    "shot_label": "shot",
-    "versioning": "DATE",
-    "autosave_interval": 30,
-    "cache_cleanup_days": 7
-  },
-
-  "tools": {
-    "blender": "/usr/bin/blender",
-    "blender_template": "/path/to/your/template.blend"
-  },
-
+cat > fuk/config/defaults_spec_tool.json.template << 'EOL'
+{
   "spec_tool": {
-    "ratio_idx": 6,
+    "ratio_idx":        6,
     "resolution_width": 1920,
     "guides": {
       "thirds":     true,
@@ -643,10 +682,14 @@ cat > fuk/config/defaults.json.template << 'EOL'
     "burn_in":        true,
     "blend_fps":      24,
     "blend_filename": "template"
-  },
+  }
+}
+EOL
+echo "    ✓ fuk/config/defaults_spec_tool.json.template"
 
+cat > fuk/config/defaults_dataset.json.template << 'EOL'
+{
   "lora_dataset": {
-    "_comment": "Controls dataset generation in the LoRA Dataset Builder tab. Set variation_prompts.character.base / object.base to describe the subject.",
     "denoising_strength": 1.0,
     "seed": 509327136,
     "seed_strategy": "fixed",
@@ -658,6 +701,7 @@ cat > fuk/config/defaults.json.template << 'EOL'
         "base": "",
 
         "angles": {
+
           "front_full_body":          "On a plain neutral grey background with flat studio lighting, reframe to a full-body front view, feet to crown fully visible with a small margin at top and bottom.",
           "front_seven_eighths":      "On a plain neutral grey background with flat studio lighting, reframe to a front view cropped from mid-thigh to just above the crown.",
           "front_medium":             "On a plain neutral grey background with flat studio lighting, reframe to a front medium shot cropped from the waist to just above the crown.",
@@ -721,6 +765,7 @@ cat > fuk/config/defaults.json.template << 'EOL'
           "seated_three_quarter_right":"On a plain neutral grey background with flat studio lighting, show the subject seated and turned 45 degrees to the right, full body visible.",
           "kneeling_front":           "On a plain neutral grey background with flat studio lighting, show the subject kneeling facing front, full body visible.",
           "kneeling_three_quarter_left":"On a plain neutral grey background with flat studio lighting, show the subject kneeling and turned 45 degrees to the left, full body visible."
+
         },
 
         "lighting": {
@@ -738,6 +783,7 @@ cat > fuk/config/defaults.json.template << 'EOL'
         "base": "",
 
         "angles": {
+
           "front_full":             "On a plain neutral grey background with flat studio lighting, show the object from directly in front, full object visible with small margin on all sides.",
           "front_closeup":          "On a plain neutral grey background with flat studio lighting, show the object from directly in front in a tight close-up, filling the frame with the object's front face and primary details.",
           "front_detail":           "On a plain neutral grey background with flat studio lighting, show the most visually distinctive feature of the object in an extreme close-up from directly in front.",
@@ -779,6 +825,7 @@ cat > fuk/config/defaults.json.template << 'EOL'
 
           "underside":              "On a plain neutral grey background with flat studio lighting, flip the object to show the underside or bottom face directly facing the camera, full object visible.",
           "underside_slight_tilt":  "On a plain neutral grey background with flat studio lighting, tilt the object to show the underside at a slight angle, bottom and one side visible simultaneously."
+
         },
 
         "lighting": {
@@ -818,7 +865,7 @@ cat > fuk/config/defaults.json.template << 'EOL'
   }
 }
 EOL
-echo "    ✓ fuk/config/defaults.json.template"
+echo "    ✓ fuk/config/defaults_dataset.json.template"
 
 # Copy templates to live configs only if they don't exist yet
 echo ""
@@ -831,12 +878,14 @@ else
     echo "    ✓ fuk/config/models.json already exists (not overwriting)"
 fi
 
-if [ ! -f "fuk/config/defaults.json" ]; then
-    cp fuk/config/defaults.json.template fuk/config/defaults.json
-    echo "    ✓ Created fuk/config/defaults.json — set your models_root and lora_dirs"
-else
-    echo "    ✓ fuk/config/defaults.json already exists (not overwriting)"
-fi
+for fragment in defaults.json defaults_loras.json defaults_vram.json defaults_spec_tool.json defaults_dataset.json; do
+    if [ ! -f "fuk/config/$fragment" ]; then
+        cp "fuk/config/$fragment.template" "fuk/config/$fragment"
+        echo "    ✓ Created fuk/config/$fragment"
+    else
+        echo "    ✓ fuk/config/$fragment already exists (not overwriting)"
+    fi
+done
 
 # ── Frontend ──────────────────────────────────────────────────────────────────
 echo ""
@@ -877,12 +926,16 @@ echo ""
 echo "Next steps:"
 echo ""
 echo "1. IMPORTANT: Edit your configuration files:"
-echo "   fuk/config/models.json      — set your models_root path"
-echo "   fuk/config/defaults.json    — set your models_root and lora_dirs"
+echo "   fuk/config/models.json             — set your models_root path"
+echo "   fuk/config/defaults.json           — set models_root, aspect_ratios, image/video defaults"
+echo "   fuk/config/defaults_loras.json     — set lora_dirs, lora_paths, and define loras"
+echo "   fuk/config/defaults_vram.json      — set VRAM offload preset"
+echo "   fuk/config/defaults_spec_tool.json — spec tool defaults"
+echo "   fuk/config/defaults_dataset.json   — dataset generation defaults"
 echo ""
 echo "   Templates (tracked in git):"
 echo "   fuk/config/models.json.template"
-echo "   fuk/config/defaults.json.template"
+echo "   fuk/config/defaults*.json.template"
 echo ""
 echo "2. Download models:"
 echo "   python scripts/download_models.py"

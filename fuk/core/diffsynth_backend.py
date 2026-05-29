@@ -79,7 +79,7 @@ class DiffSynthBackend:
     def __init__(self, config_dir: Path):
         self.config_dir = Path(config_dir)
         self.models_config = self._load_config("models.json")
-        self.defaults_config = self._load_config("defaults.json")
+        self.defaults_config = self._load_defaults()
 
         # Setup DiffSynth environment and import pipelines
         self._setup_diffsynth_env()
@@ -143,6 +143,12 @@ class DiffSynthBackend:
         except ImportError:
             _log("BACKEND", "WanPipelineRunner not found — using inline generate_video()", "warning")
 
+        try:
+            from flux2_pipeline import Flux2PipelineRunner
+            self.runners["flux2"] = Flux2PipelineRunner(self)
+        except ImportError as e:
+            _log("BACKEND", f"Flux2PipelineRunner not available: {e}", "warning")
+
         # Future runners:
         # from chained_pipeline import ChainedPipelineRunner
         # self.runners["chain"] = ChainedPipelineRunner(self)
@@ -153,11 +159,28 @@ class DiffSynthBackend:
     def run(self, family: str, **kwargs) -> Dict[str, Any]:
         """
         Dispatch generation to the appropriate runner.
-        
+
+        When a model is specified, auto-detects the runner from the model's
+        pipeline type (e.g. flux2 models route to Flux2PipelineRunner even
+        when called with family="image"). Falls back to family-based routing.
+
         Usage:
             backend.run("image", prompt="...", model="qwen_image", ...)
+            backend.run("image", prompt="...", model="flux2_dev", ...)
             backend.run("video", prompt="...", task="wan_i2v_a14b", ...)
         """
+        # Auto-detect runner from model pipeline type when possible
+        model_name = kwargs.get("model") or kwargs.get("task")
+        if model_name:
+            try:
+                model_type = self.resolve_model_type(model_name)
+                entry = self.get_model_entry(model_type)
+                pipeline_type = entry.get("pipeline")
+                if pipeline_type and pipeline_type in self.runners:
+                    return self.runners[pipeline_type].generate(**kwargs)
+            except (ValueError, KeyError):
+                pass
+
         runner = self.runners.get(family)
         if runner:
             return runner.generate(**kwargs)
@@ -198,14 +221,17 @@ class DiffSynthBackend:
         # Import DiffSynth pipelines (must happen after env setup)
         from diffsynth.pipelines.qwen_image import QwenImagePipeline, ModelConfig
         from diffsynth.pipelines.wan_video import WanVideoPipeline, ModelConfig as WanModelConfig
-        
+        from diffsynth.pipelines.flux2_image import Flux2ImagePipeline, ModelConfig as Flux2ModelConfig
+
         # Store ModelConfig classes as instance attributes for use in other methods
         self.ModelConfig = ModelConfig
         self.WanModelConfig = WanModelConfig
-        
+        self.Flux2ModelConfig = Flux2ModelConfig
+
         # Populate pipeline registry
         PIPELINE_CLASSES["qwen"] = QwenImagePipeline
         PIPELINE_CLASSES["wan"] = WanVideoPipeline
+        PIPELINE_CLASSES["flux2"] = Flux2ImagePipeline
 
     # ------------------------------------------------------------------
     # Config helpers
@@ -218,6 +244,12 @@ class DiffSynthBackend:
             return {}
         with open(path, "r") as f:
             return json.load(f)
+
+    def _load_defaults(self) -> dict:
+        merged = self._load_config("defaults.json")
+        for fragment in ("defaults_loras.json", "defaults_vram.json", "defaults_spec_tool.json", "defaults_dataset.json"):
+            merged.update(self._load_config(fragment))
+        return merged
 
     # ------------------------------------------------------------------
     # LoRA management
@@ -581,6 +613,8 @@ class DiffSynthBackend:
         pipeline_type = entry.get("pipeline", "qwen")
         if pipeline_type == "wan":
             return self.WanModelConfig
+        if pipeline_type == "flux2":
+            return self.Flux2ModelConfig
         return self.ModelConfig
 
     def _build_model_configs(self, entry: dict, vram_config: dict = None) -> list:

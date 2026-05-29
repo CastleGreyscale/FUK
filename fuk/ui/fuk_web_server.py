@@ -611,6 +611,7 @@ class ImageGenerationRequest(BaseModel):
     vram_preset: Optional[str] = None  # none, low, medium, high
     denoising_strength: Optional[float] = None  # Edit strength when control images present
     exponential_shift_mu: Optional[float] = None  # Sampling timestep control (null = auto)
+    embedded_guidance: Optional[float] = None  # FLUX.2 embedded guidance (null = use guidance_scale)
     eligen_source: Optional[str] = None  # Path to EliGen masks (directory, .psd, or .ora)
     eligen_alpha: Optional[float] = None  # Model LoRA strength (EliGen or control union)
     # [LAYER STACK DISABLED]
@@ -932,6 +933,7 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
             vram_preset=request.vram_preset,
             denoising_strength=request.denoising_strength,
             exponential_shift_mu=request.exponential_shift_mu,
+            embedded_guidance=request.embedded_guidance,
             eligen_source=eligen_source_abs,
             eligen_alpha=request.eligen_alpha,
         )
@@ -1568,7 +1570,7 @@ async def get_models():
             "aliases": entry.get("aliases", []),
         }
         
-        if entry["pipeline"] == "qwen":
+        if entry["pipeline"] in ("qwen", "flux2"):
             image_models.append(model_info)
         elif entry["pipeline"] == "wan":
             video_models.append(model_info)
