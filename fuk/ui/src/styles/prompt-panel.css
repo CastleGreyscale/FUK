@@ -1,0 +1,54 @@
+/* ============================================================================
+ * PROMPT PANEL - Floating overlay on preview area
+ * ========================================================================== */
+
+.prompt-panel {
+  position: absolute;
+  bottom: 1rem;
+  right: 1rem;
+  width: 300px;
+  background: rgba(10, 14, 22, 0.88);
+  backdrop-filter: blur(14px);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.prompt-panel-header {
+  display: flex;
+  align-items: center;
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.prompt-panel-title {
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-primary-400);
+}
+
+.prompt-panel-body {
+  padding: 0.5rem 0.625rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.prompt-panel-textarea {
+  font-size: 0.75rem !important;
+  line-height: 1.4;
+  resize: none;
+  overflow: hidden;
+}
+
+.prompt-panel-neg-label {
+  font-size: 0.65rem;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}

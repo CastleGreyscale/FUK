@@ -16,6 +16,7 @@
   padding: 1rem 2rem;
   overflow: hidden;
   min-height: 0; /* Allow flex shrinking */
+  position: relative;
 }
 
 .fuk-preview-container {

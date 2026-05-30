@@ -29,6 +29,7 @@ import {
   API_URL,
 } from '../../src/utils/constants';
 import Footer from '../components/Footer';
+import PromptPanel from '../components/PromptPanel';
 
 
 // Scale factor presets for VRAM management
@@ -85,9 +86,7 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
     sliding_window_size: videoDefaults.sliding_window_size ?? null,
     sliding_window_stride: videoDefaults.sliding_window_stride ?? null,
     denoising_strength: videoDefaults.denoising_strength ?? 1.0,
-    lora: videoDefaults.lora ?? null,
-    lora_multiplier: videoDefaults.lora_multiplier ?? 1.0,
-    lora_bypass: videoDefaults.lora_bypass ?? false,
+    loras: videoDefaults.loras ?? (videoDefaults.lora ? [{ key: videoDefaults.lora, multiplier: videoDefaults.lora_multiplier ?? 1.0, bypass: videoDefaults.lora_bypass ?? false }] : []),
     seed: videoDefaults.seed ?? null,
     seedMode: videoDefaults.seedMode ?? SEED_MODES.RANDOM,
     lastUsedSeed: videoDefaults.lastUsedSeed ?? null,
@@ -121,6 +120,13 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
     }
     return { ...initialDefaults, ...localFormData };
   }, [project?.projectState?.tabs?.video, localFormData, initialDefaults]);
+
+  // Migrate old single lora fields to loras array
+  const effectiveLoras = useMemo(() => {
+    if (formData.loras?.length > 0) return formData.loras;
+    if (formData.lora) return [{ key: formData.lora, multiplier: formData.lora_multiplier ?? 1.0, bypass: formData.lora_bypass ?? false }];
+    return [];
+  }, [formData.loras, formData.lora, formData.lora_multiplier, formData.lora_bypass]);
 
   // Ref to track latest formData for setFormData callback
   const formDataRef = useRef(formData);
@@ -161,13 +167,6 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
       setLocalFormData(newData);
     }
   }, [project?.isProjectLoaded, project?.updateTabState, setLocalFormData]);
-
-  // Auto-resize textarea handler
-  const handleTextareaResize = useCallback((e) => {
-    const textarea = e.target;
-    textarea.style.height = 'auto';
-    textarea.style.height = textarea.scrollHeight + 'px';
-  }, []);
 
   // Frame input state (for controlled input before validation)
   const [frameInput, setFrameInput] = useState(String(formData.video_length || 81));
@@ -416,13 +415,15 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
     const effectiveSeed = getEffectiveSeed();
     const count = formData.batchCount || 1;
     
-    const { lora_bypass, ...restFormData } = formData;
     const basePayload = {
-      ...restFormData,
+      ...formData,
       image_path: formData.image_path ? formData.image_path.replace(/^\/outputs\//, '') : null,
       end_image_path: formData.end_image_path ? formData.end_image_path.replace(/^\/outputs\//, '') : null,
       control_path: formData.control_path ? formData.control_path.replace(/^\/outputs\//, '') : null,
-      lora: lora_bypass ? null : formData.lora,
+      lora: null,
+      lora_multiplier: 1.0,
+      lora_bypass: undefined,
+      loras: effectiveLoras,
     };
 
     // Build seed queue for batch
@@ -515,8 +516,11 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
       if (meta.guidance_scale != null)     updates.guidance_scale      = meta.guidance_scale;
       if (meta.infer_steps != null)        updates.steps               = meta.infer_steps;
       if (meta.video_length != null)       updates.video_length        = meta.video_length;
-      if (meta.lora != null)               updates.lora                = meta.lora;
-      if (meta.lora_multiplier != null)    updates.lora_multiplier     = meta.lora_multiplier;
+      if (meta.loras?.length > 0) {
+        updates.loras = meta.loras;
+      } else if (meta.lora != null) {
+        updates.loras = [{ key: meta.lora, multiplier: meta.lora_multiplier ?? 1.0 }];
+      }
       if (meta.sigma_shift != null)        updates.sigma_shift         = meta.sigma_shift;
       if (meta.motion_bucket_id != null)   updates.motion_bucket_id    = meta.motion_bucket_id;
       if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoising_strength;
@@ -646,6 +650,13 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
             <span>Load Settings</span>
           </div>
         )}
+
+        <PromptPanel
+          prompt={formData.prompt}
+          negativePrompt={formData.negative_prompt}
+          onChange={(key, value) => setFormData(prev => ({ ...prev, [key]: value }))}
+          disabled={generating}
+        />
       </div>
 
       {/* Settings Area */}
@@ -781,152 +792,154 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
               </select>
             </div>
             
-            <div className="fuk-form-group-compact">
-              <label className="fuk-label">LoRA</label>
-              <div className={`lora-simple-row${formData.lora_bypass ? ' lora-simple-row--bypassed' : ''}`}>
+            {/* Resolution + Frames inline */}
+            <div className="fuk-form-pair">
+              <div className="fuk-form-group-compact">
+                <label className="fuk-label">
+                  Resolution
+                  {formData.source_width && (
+                    <span className="fuk-label-description">
+                      (from {formData.source_width}×{formData.source_height})
+                    </span>
+                  )}
+                </label>
                 <select
-                  className="fuk-select lora-simple-row-select"
-                  value={formData.lora || ''}
-                  onChange={(e) => setFormData({...formData, lora: e.target.value || null})}
+                  className="fuk-select"
+                  value={formData.scale_factor}
+                  onChange={(e) => handleScaleChange(parseFloat(e.target.value))}
                 >
-                  <option value="">None</option>
-                  {config?.models?.loras?.map((lora, idx) => (
-                    <option key={typeof lora === 'string' ? lora : lora.key || idx} value={typeof lora === 'string' ? lora : lora.key}>
-                      {typeof lora === 'string' ? lora : (lora.name || lora.description || lora.key) + (lora.size_mb ? ` (${lora.size_mb}MB)` : '')}
-                    </option>
+                  {SCALE_FACTORS.map(sf => (
+                    <option key={sf.value} value={sf.value}>{sf.label}</option>
                   ))}
                 </select>
-                {formData.lora && (
-                  <button
-                    type="button"
-                    title={formData.lora_bypass ? 'Enable LoRA' : 'Bypass LoRA'}
-                    className={`lora-row-btn${formData.lora_bypass ? ' lora-row-btn--active' : ''}`}
-                    onClick={() => setFormData({...formData, lora_bypass: !formData.lora_bypass})}
-                  >⊘</button>
+                <p className="fuk-help-text fuk-mt-1">
+                  → {formData.width || '---'} × {formData.height || '---'}
+                </p>
+                {!formData.source_width && (
+                  <p className="fuk-help-text fuk-help-text--warning">
+                    <AlertCircle className="fuk-icon--sm" />
+                    Upload a start image to auto-detect dimensions
+                  </p>
                 )}
               </div>
-            </div>
-            
-            {formData.lora && (
+
               <div className="fuk-form-group-compact">
-                <label className="fuk-label">LoRA Strength</label>
+                <label className="fuk-label">
+                  Frames
+                  <span className="fuk-label-description">(must be 4n+1)</span>
+                </label>
+
+                {sourceVideoInfo && (
+                  <div className="fuk-input-inline fuk-mb-2">
+                    <span className="fuk-label-description">
+                      Source: {sourceVideoInfo.frame_count} frames @ {sourceVideoInfo.fps.toFixed(1)}fps
+                    </span>
+                    <label className="fuk-checkbox-option fuk-label--push-right">
+                      <input
+                        type="checkbox"
+                        className="fuk-checkbox"
+                        checked={formData.frame_inherit !== false}
+                        onChange={(e) => handleFrameInheritToggle(e.target.checked)}
+                      />
+                      <span>Inherit</span>
+                    </label>
+                  </div>
+                )}
+
                 <div className="fuk-input-inline">
                   <input
-                    type="range"
-                    className="fuk-slider fuk-input--flex-2"
-                    value={formData.lora_multiplier}
-                    onChange={(e) => setFormData({...formData, lora_multiplier: parseFloat(e.target.value)})}
-                    min={0}
-                    max={2}
-                    step={0.1}
-                  />
-                  <input
                     type="number"
-                    className="fuk-input fuk-input--w-80"
-                    value={formData.lora_multiplier}
-                    onChange={(e) => setFormData({...formData, lora_multiplier: parseFloat(e.target.value)})}
-                    step={0.1}
-                    min={0}
-                    max={2}
-                  />
-                </div>
-              </div>
-            )}
-
-
-            {/* Resolution from input + scale factor */}
-            <div className="fuk-form-group-compact">
-              <label className="fuk-label">
-                Resolution
-                {formData.source_width && (
-                  <span className="fuk-label-description">
-                    (from {formData.source_width}×{formData.source_height})
-                  </span>
-                )}
-              </label>
-              <select
-                className="fuk-select"
-                value={formData.scale_factor}
-                onChange={(e) => handleScaleChange(parseFloat(e.target.value))}
-              >
-                {SCALE_FACTORS.map(sf => (
-                  <option key={sf.value} value={sf.value}>{sf.label}</option>
-                ))}
-              </select>
-              <p className="fuk-help-text fuk-mt-1">
-                → {formData.width || '---'} × {formData.height || '---'}
-              </p>
-              {!formData.source_width && (
-                <p className="fuk-help-text fuk-help-text--warning">
-                  <AlertCircle className="fuk-icon--sm" />
-                  Upload a start image to auto-detect dimensions
-                </p>
-              )}
-            </div>
-            
-            {/* Frame count with duration feedback */}
-            <div className="fuk-form-group-compact">
-              <label className="fuk-label">
-                Frames
-                <span className="fuk-label-description">(must be 4n+1)</span>
-              </label>
-
-              {/* Source video info + inherit toggle */}
-              {sourceVideoInfo && (
-                <div className="fuk-input-inline fuk-mb-2">
-                  <span className="fuk-label-description">
-                    Source: {sourceVideoInfo.frame_count} frames @ {sourceVideoInfo.fps.toFixed(1)}fps
-                  </span>
-                  <label className="fuk-checkbox-option fuk-label--push-right">
-                    <input
-                      type="checkbox"
-                      className="fuk-checkbox"
-                      checked={formData.frame_inherit !== false}
-                      onChange={(e) => handleFrameInheritToggle(e.target.checked)}
-                    />
-                    <span>Inherit</span>
-                  </label>
-                </div>
-              )}
-
-              <div className="fuk-input-inline">
-                <input
-                  type="number"
-                  className={`fuk-input ${!currentFrameValid ? 'fuk-input--warning' : ''}`}
-                  value={frameInput}
-                  onChange={(e) => handleFrameInputChange(e.target.value)}
-                  onBlur={handleFrameInputBlur}
-                  min={5}
-                  max={241}
-                  step={4}
-                />
-                <span className="fuk-input-result">
-                  ≈ {getFrameDuration(formData.video_length)} @ 24fps
-                </span>
-              </div>
-              {!currentFrameValid && (
-                <p className="fuk-help-text fuk-help-text--info">
-                  Will round to {validFrameCount} frames ({getFrameDuration(validFrameCount)})
-                </p>
-              )}
-
-              {/* Trim — visible when source video detected, caps inherited frame count */}
-              {sourceVideoInfo && (
-                <div className="fuk-input-inline fuk-mt-2">
-                  <label className="fuk-label fuk-label--nowrap">Trim to</label>
-                  <input
-                    type="number"
-                    className="fuk-input fuk-input--w-80"
-                    value={formData.trim_frames ?? ''}
-                    onChange={(e) => handleTrimChange(e.target.value)}
-                    placeholder="no limit"
+                    className={`fuk-input ${!currentFrameValid ? 'fuk-input--warning' : ''}`}
+                    value={frameInput}
+                    onChange={(e) => handleFrameInputChange(e.target.value)}
+                    onBlur={handleFrameInputBlur}
                     min={5}
+                    max={241}
                     step={4}
                   />
-                  <span className="fuk-input-result">frames max</span>
+                  <span className="fuk-input-result">
+                    ≈ {getFrameDuration(formData.video_length)} @ 24fps
+                  </span>
                 </div>
-              )}
+                {!currentFrameValid && (
+                  <p className="fuk-help-text fuk-help-text--info">
+                    Will round to {validFrameCount} frames ({getFrameDuration(validFrameCount)})
+                  </p>
+                )}
+
+                {sourceVideoInfo && (
+                  <div className="fuk-input-inline fuk-mt-2">
+                    <label className="fuk-label fuk-label--nowrap">Trim to</label>
+                    <input
+                      type="number"
+                      className="fuk-input fuk-input--w-80"
+                      value={formData.trim_frames ?? ''}
+                      onChange={(e) => handleTrimChange(e.target.value)}
+                      placeholder="no limit"
+                      min={5}
+                      step={4}
+                    />
+                    <span className="fuk-input-result">frames max</span>
+                  </div>
+                )}
               </div>
+            </div>
+
+            <div className="fuk-form-group-compact">
+              <div className="lora-header">
+                <label className="fuk-label">LoRA</label>
+                <button
+                  type="button"
+                  className="lora-add-btn"
+                  onClick={() => setFormData({...formData, loras: [...effectiveLoras, { key: '', multiplier: 1.0 }]})}
+                >+ Add</button>
+              </div>
+              {effectiveLoras.map((entry, idx) => (
+                <div key={idx} className={`lora-row${entry.bypass ? ' lora-row--bypassed' : ''}`}>
+                  <select
+                    className="fuk-select lora-row-select"
+                    value={entry.key || ''}
+                    onChange={(e) => {
+                      const updated = effectiveLoras.map((l, i) => i === idx ? { ...l, key: e.target.value } : l);
+                      setFormData({...formData, loras: updated});
+                    }}
+                  >
+                    <option value="">None</option>
+                    {config?.models?.loras?.map((lora, i) => (
+                      <option key={typeof lora === 'string' ? lora : lora.key || i} value={typeof lora === 'string' ? lora : lora.key}>
+                        {typeof lora === 'string' ? lora : (lora.name || lora.description || lora.key) + (lora.size_mb ? ` (${lora.size_mb}MB)` : '')}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    type="number"
+                    className="fuk-input lora-row-multiplier"
+                    value={entry.multiplier}
+                    onChange={(e) => {
+                      const updated = effectiveLoras.map((l, i) => i === idx ? { ...l, multiplier: parseFloat(e.target.value) } : l);
+                      setFormData({...formData, loras: updated});
+                    }}
+                    step={0.05}
+                    min={0}
+                    max={2}
+                  />
+                  <button
+                    type="button"
+                    title={entry.bypass ? 'Enable LoRA' : 'Bypass LoRA'}
+                    className={`lora-row-btn${entry.bypass ? ' lora-row-btn--active' : ''}`}
+                    onClick={() => {
+                      const updated = effectiveLoras.map((l, i) => i === idx ? { ...l, bypass: !l.bypass } : l);
+                      setFormData({...formData, loras: updated});
+                    }}
+                  >⊘</button>
+                  <button
+                    type="button"
+                    className="lora-row-btn"
+                    onClick={() => setFormData({...formData, loras: effectiveLoras.filter((_, i) => i !== idx)})}
+                  >×</button>
+                </div>
+              ))}
+            </div>
           </div>
 
           {/* Generation Parameters Card */}
@@ -1099,39 +1112,6 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
             />
           </div>
 
-          {/* Prompt Card */}
-          <div className="fuk-card">
-            <h3 className="fuk-card-title fuk-mb-3">Prompt</h3>
-            
-            <div className="fuk-form-group-compact">
-              <textarea
-                className="fuk-textarea fuk-textarea--auto"
-                value={formData.prompt}
-                onChange={(e) => {
-                  setFormData({...formData, prompt: e.target.value});
-                  handleTextareaResize(e);
-                }}
-                onInput={handleTextareaResize}
-                placeholder="A cinematic video of..."
-                rows={4}
-              />
-            </div>
-            
-            <div className="fuk-form-group-compact">
-              <label className="fuk-label">Negative Prompt</label>
-              <textarea
-                className="fuk-textarea fuk-textarea--auto"
-                value={formData.negative_prompt}
-                onChange={(e) => {
-                  setFormData({...formData, negative_prompt: e.target.value});
-                  handleTextareaResize(e);
-                }}
-                onInput={handleTextareaResize}
-                placeholder="blurry, low quality..."
-                rows={4}
-              />
-            </div>
-          </div>
         </div>
       </div>
       {/* Footer */}

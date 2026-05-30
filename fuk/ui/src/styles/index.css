@@ -29,6 +29,7 @@
 @import './video-sync-controller.css';
 @import './generation-modal.css';
 @import './animations.css';
+@import './prompt-panel.css';
 
 /* ============================================================================
  * GLOBAL RESETS
