@@ -1554,14 +1554,16 @@ async def get_models():
     
     with open(CONFIG_DIR / "defaults.json") as f:
         defaults = json.load(f)
-    
+    with open(CONFIG_DIR / "defaults_vram.json") as f:
+        defaults_vram = json.load(f)
+
     image_models = []
     video_models = []
-    
+
     for key, entry in config.items():
         if key.startswith("_") or not isinstance(entry, dict) or "pipeline" not in entry:
             continue
-        
+
         model_info = {
             "key": key,
             "description": entry.get("description", key),
@@ -1569,14 +1571,14 @@ async def get_models():
             "supports": entry.get("supports", []),
             "aliases": entry.get("aliases", []),
         }
-        
+
         if entry["pipeline"] in ("qwen", "flux2"):
             image_models.append(model_info)
         elif entry["pipeline"] == "wan":
             video_models.append(model_info)
-    
+
     # VRAM presets
-    vram_section = defaults.get("vram", {})
+    vram_section = defaults_vram.get("vram", {})
     vram_presets = []
     for key, preset in vram_section.get("presets", {}).items():
         vram_presets.append({
