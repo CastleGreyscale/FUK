@@ -7,6 +7,7 @@ import { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } fr
 import { Film, Camera, Clock, Trash2, RefreshCw, ChevronDown, ChevronRight, Enhance, Zap, ArrowUp, Layers, Download, PinIcon, ImportIcon, SequenceIcon, ThumbsUp, ThumbsDown, Maximize2, X } from './Icons';
 import { buildImageUrl, API_URL } from '../utils/constants';
 import { useVideoPlayback } from '../hooks/useVideoPlayback';
+import ZoomableImage from './ZoomableImage';
 
 
 
@@ -476,7 +477,7 @@ function GalleryLargeView({ generation, generations, isPinned, vote, onTogglePin
 
         {video
           ? <video key={preview} src={preview} controls muted loop playsInline />
-          : <img key={preview} src={preview} alt={generation.name || generation.id} />
+          : <ZoomableImage key={preview} src={preview} alt={generation.name || generation.id} defaultZoom={2} />
         }
 
         <button
