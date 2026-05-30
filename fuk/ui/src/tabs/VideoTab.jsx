@@ -87,6 +87,7 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
     denoising_strength: videoDefaults.denoising_strength ?? 1.0,
     lora: videoDefaults.lora ?? null,
     lora_multiplier: videoDefaults.lora_multiplier ?? 1.0,
+    lora_bypass: videoDefaults.lora_bypass ?? false,
     seed: videoDefaults.seed ?? null,
     seedMode: videoDefaults.seedMode ?? SEED_MODES.RANDOM,
     lastUsedSeed: videoDefaults.lastUsedSeed ?? null,
@@ -415,11 +416,13 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
     const effectiveSeed = getEffectiveSeed();
     const count = formData.batchCount || 1;
     
+    const { lora_bypass, ...restFormData } = formData;
     const basePayload = {
-      ...formData,
+      ...restFormData,
       image_path: formData.image_path ? formData.image_path.replace(/^\/outputs\//, '') : null,
       end_image_path: formData.end_image_path ? formData.end_image_path.replace(/^\/outputs\//, '') : null,
       control_path: formData.control_path ? formData.control_path.replace(/^\/outputs\//, '') : null,
+      lora: lora_bypass ? null : formData.lora,
     };
 
     // Build seed queue for batch
@@ -781,18 +784,29 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
             
             <div className="fuk-form-group-compact">
               <label className="fuk-label">LoRA</label>
-              <select
-                className="fuk-select"
-                value={formData.lora || ''}
-                onChange={(e) => setFormData({...formData, lora: e.target.value || null})}
-              >
-                <option value="">None</option>
-                {config?.models?.loras?.map((lora, idx) => (
-                  <option key={typeof lora === 'string' ? lora : lora.key || idx} value={typeof lora === 'string' ? lora : lora.key}>
-                    {typeof lora === 'string' ? lora : (lora.name || lora.description || lora.key) + (lora.size_mb ? ` (${lora.size_mb}MB)` : '')}
-                  </option>
-                ))}
-              </select>
+              <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                <select
+                  className="fuk-select"
+                  style={{ flex: '1 1 0', minWidth: 0, opacity: formData.lora_bypass ? 0.45 : 1 }}
+                  value={formData.lora || ''}
+                  onChange={(e) => setFormData({...formData, lora: e.target.value || null})}
+                >
+                  <option value="">None</option>
+                  {config?.models?.loras?.map((lora, idx) => (
+                    <option key={typeof lora === 'string' ? lora : lora.key || idx} value={typeof lora === 'string' ? lora : lora.key}>
+                      {typeof lora === 'string' ? lora : (lora.name || lora.description || lora.key) + (lora.size_mb ? ` (${lora.size_mb}MB)` : '')}
+                    </option>
+                  ))}
+                </select>
+                {formData.lora && (
+                  <button
+                    type="button"
+                    title={formData.lora_bypass ? 'Enable LoRA' : 'Bypass LoRA'}
+                    onClick={() => setFormData({...formData, lora_bypass: !formData.lora_bypass})}
+                    style={{ padding: '4px 7px', cursor: 'pointer', background: formData.lora_bypass ? 'var(--border)' : 'transparent', border: '1px solid var(--border)', borderRadius: '4px', color: 'var(--text-muted)', flexShrink: 0, lineHeight: 1 }}
+                  >⊘</button>
+                )}
+              </div>
             </div>
             
             {formData.lora && (

@@ -341,8 +341,8 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
       exponential_shift_mu: formData.exponential_shift_mu,
       eligen_source: formData.eligen_source || null,
       eligen_alpha: formData.eligen_source ? (formData.eligen_alpha ?? 1.0) : null,  // ← ADD
-      lora: effectiveLoras[0]?.key || null,
-      lora_multiplier: effectiveLoras[0]?.multiplier ?? 1.0,
+      lora: null,
+      lora_multiplier: 1.0,
       loras: effectiveLoras,
       // [LAYER STACK DISABLED]
       // stack_id: stackId || null,
@@ -867,7 +867,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                 >+ Add</button>
               </div>
               {effectiveLoras.map((entry, idx) => (
-                <div key={idx} style={{ display: 'flex', gap: '6px', alignItems: 'center', width: '100%', marginBottom: idx < effectiveLoras.length - 1 ? 4 : 0 }}>
+                <div key={idx} style={{ display: 'flex', gap: '6px', alignItems: 'center', width: '100%', marginBottom: idx < effectiveLoras.length - 1 ? 4 : 0, opacity: entry.bypass ? 0.45 : 1 }}>
                   <select
                     className="fuk-select"
                     style={{ flex: '1 1 0', minWidth: 0 }}
@@ -897,6 +897,15 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                     min={0}
                     max={2}
                   />
+                  <button
+                    type="button"
+                    title={entry.bypass ? 'Enable LoRA' : 'Bypass LoRA'}
+                    onClick={() => {
+                      const updated = effectiveLoras.map((l, i) => i === idx ? { ...l, bypass: !l.bypass } : l);
+                      setFormData({...formData, loras: updated, lora: null, lora_multiplier: 1.0});
+                    }}
+                    style={{ padding: '4px 7px', cursor: 'pointer', background: entry.bypass ? 'var(--border)' : 'transparent', border: '1px solid var(--border)', borderRadius: '4px', color: 'var(--text-muted)', flexShrink: 0, lineHeight: 1 }}
+                  >⊘</button>
                   <button
                     type="button"
                     onClick={() => setFormData({...formData, loras: effectiveLoras.filter((_, i) => i !== idx), lora: null, lora_multiplier: 1.0})}
