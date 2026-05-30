@@ -3,10 +3,10 @@
  * Contains progress bar, tabs, and action buttons
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import TabButton from './TabButton';
 import ProgressBar from './ProgressBar';
-import { Camera, Film, Pipeline, Enhance, Save, FukMonogram, Loader2, X, Layers, Wrench } from './Icons';
+import { Camera, Film, Pipeline, Enhance, Save, FukMonogram, Loader2, X, Layers, Wrench, Trash2, RefreshCw } from './Icons';
 
 export default function Footer({
   activeTab,
@@ -25,6 +25,34 @@ export default function Footer({
   const [batchInput, setBatchInput] = useState(String(batchCount ?? 1));
   useEffect(() => { setBatchInput(String(batchCount ?? 1)); }, [batchCount]);
 
+  const [evicting, setEvicting] = useState(false);
+  const [restarting, setRestarting] = useState(false);
+
+  const handleEvict = useCallback(async () => {
+    setEvicting(true);
+    try {
+      await fetch('/api/system/evict', { method: 'POST' });
+    } finally {
+      setEvicting(false);
+    }
+  }, []);
+
+  const handleRestart = useCallback(async () => {
+    setRestarting(true);
+    try {
+      await fetch('/api/system/restart', { method: 'POST' });
+    } catch (_) {}
+    // Poll until server is back, then reload
+    const poll = async () => {
+      try {
+        const r = await fetch('/api/config/models');
+        if (r.ok) { window.location.reload(); return; }
+      } catch (_) {}
+      setTimeout(poll, 1000);
+    };
+    setTimeout(poll, 1500);
+  }, []);
+
   const commitBatch = (raw) => {
     const parsed = Math.max(1, Math.min(50, parseInt(raw) || 1));
     setBatchInput(String(parsed));
@@ -33,6 +61,34 @@ export default function Footer({
 
   return (
     <div className="fuk-footer" style={{ position: 'relative' }}>
+
+      {/* System buttons - Left */}
+      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+        <button
+          onClick={handleEvict}
+          disabled={evicting || restarting}
+          className="fuk-btn fuk-btn-secondary"
+          title="Evict all models from VRAM"
+          style={{ padding: '0.35rem 0.65rem' }}
+        >
+          {evicting
+            ? <Loader2 style={{ width: '1rem', height: '1rem', animation: 'spin 1s linear infinite' }} />
+            : <Trash2 style={{ width: '1rem', height: '1rem' }} />}
+          Evict
+        </button>
+        <button
+          onClick={handleRestart}
+          disabled={evicting || restarting}
+          className="fuk-btn fuk-btn-secondary"
+          title="Restart the server"
+          style={{ padding: '0.35rem 0.65rem' }}
+        >
+          {restarting
+            ? <Loader2 style={{ width: '1rem', height: '1rem', animation: 'spin 1s linear infinite' }} />
+            : <RefreshCw style={{ width: '1rem', height: '1rem' }} />}
+          {restarting ? 'Restarting...' : 'Restart'}
+        </button>
+      </div>
 
       {/* Tabs - Center */}
       <div className="fuk-footer-center">

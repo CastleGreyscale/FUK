@@ -774,6 +774,61 @@ def _prune_stale_generations(max_age_minutes: int = 30):
         print(f"Pruned {len(stale)} stale generation(s) from tracking")
 
 # ============================================================================
+# System Management Endpoints
+# ============================================================================
+
+@app.post("/api/system/evict")
+async def evict_all_models():
+    """Evict all loaded pipelines and preprocessor caches from VRAM."""
+    import gc
+    import torch
+
+    pipeline_count = len(generation_backend.pipelines)
+    generation_backend.pipelines.clear()
+    generation_backend._active_user_loras.clear()
+    generation_backend._model_lora_config.clear()
+    generation_backend._model_lora_alpha.clear()
+
+    preprocessor_manager.clear_caches(None)
+
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+        allocated = torch.cuda.memory_allocated() / (1024**3)
+        reserved  = torch.cuda.memory_reserved()  / (1024**3)
+        total     = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+    else:
+        allocated = reserved = total = 0.0
+
+    print(f"[SYSTEM] Evicted {pipeline_count} pipeline(s). VRAM reserved: {reserved:.2f}GB / {total:.2f}GB")
+    return {
+        "success": True,
+        "pipelines_evicted": pipeline_count,
+        "vram": {
+            "allocated_gb": round(allocated, 2),
+            "reserved_gb":  round(reserved,  2),
+            "total_gb":     round(total,      2),
+            "free_gb":      round(total - reserved, 2),
+        },
+    }
+
+
+@app.post("/api/system/restart")
+async def restart_server():
+    """Restart the server process via os.execv."""
+    import asyncio
+
+    async def _do_restart():
+        await asyncio.sleep(0.3)
+        print("[SYSTEM] Restarting server...")
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+
+    asyncio.create_task(_do_restart())
+    return {"success": True, "message": "Server restarting"}
+
+
+# ============================================================================
 # Image Generation
 # ============================================================================
 
