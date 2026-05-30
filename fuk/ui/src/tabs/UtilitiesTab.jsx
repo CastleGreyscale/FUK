@@ -224,7 +224,7 @@ function drawGuides(canvas, width, height, { guides, guideColor, bgColor, bgAlph
 // Spec Tool sub-tab
 // ============================================================================
 
-const CHIP = { padding: '0.15rem 0.4rem', fontSize: '0.72rem' };
+const CHIP_CLASS = 'spec-tool-chip';
 
 function SpecTool({ config }) {
   const d = config?.defaults?.spec_tool ?? {};
@@ -330,80 +330,57 @@ function SpecTool({ config }) {
   const widthAdjusted  = rawW !== snapW;
   const framesAdjusted = snapFrames !== null && parsedF !== snapFrames;
 
-  // ── Shared small-label style ──
-  const lbl = { fontSize: '0.68rem', color: 'var(--text-muted)', marginBottom: '0.2rem', display: 'block' };
-
   return (
-    <div style={{ display: 'flex', gap: '1.5rem', padding: '1rem 1.25rem', height: '100%', boxSizing: 'border-box', overflow: 'hidden' }}>
+    <div className="spec-tool">
 
       {/* ── Left panel: two-column grid of controls ── */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: '1fr 1fr',
-        gridAutoRows: 'min-content',
-        gap: '0.6rem',
-        width: '520px',
-        flexShrink: 0,
-        alignContent: 'start',
-      }}>
+      <div className="spec-tool-controls">
 
         {/* Aspect Ratio — full width */}
-        <div className="fuk-card" style={{ gridColumn: '1 / -1', padding: '0.6rem 0.75rem' }}>
-          <span style={lbl}>Aspect Ratio</span>
-          <select className="fuk-select" value={ratioIdx}
-            onChange={e => setRatioIdx(Number(e.target.value))}
-            style={{ width: '100%' }}>
+        <div className="fuk-card spec-tool-card spec-tool-card-full">
+          <span className="spec-tool-label">Aspect Ratio</span>
+          <select className="fuk-select" value={ratioIdx} onChange={e => setRatioIdx(Number(e.target.value))}>
             {ASPECT_RATIOS.map((r, i) => <option key={i} value={i}>{r.label}</option>)}
           </select>
           {ratio.w === null && (
-            <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.4rem', alignItems: 'center' }}>
+            <div className="spec-tool-custom-ratio">
               <input type="number" min="1" max="999" className="fuk-input" value={customW}
-                onChange={e => setCustomW(Math.max(1, parseInt(e.target.value) || 1))}
-                style={{ width: '4rem', textAlign: 'center' }} />
-              <span style={{ color: 'var(--text-muted)' }}>:</span>
+                onChange={e => setCustomW(Math.max(1, parseInt(e.target.value) || 1))} />
+              <span className="spec-tool-separator">:</span>
               <input type="number" min="1" max="999" className="fuk-input" value={customH}
-                onChange={e => setCustomH(Math.max(1, parseInt(e.target.value) || 1))}
-                style={{ width: '4rem', textAlign: 'center' }} />
+                onChange={e => setCustomH(Math.max(1, parseInt(e.target.value) || 1))} />
             </div>
           )}
         </div>
 
         {/* Resolution — full width */}
-        <div className="fuk-card" style={{ gridColumn: '1 / -1', padding: '0.6rem 0.75rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.4rem' }}>
-            <span style={{ ...lbl, marginBottom: 0 }}>Resolution</span>
-            {/* ×16 snapped badge inline */}
-            <span style={{
-              fontFamily: 'monospace', fontSize: '0.85rem',
-              color: widthAdjusted ? 'var(--accent-color, #a855f7)' : 'var(--text-secondary)',
-            }}>
+        <div className="fuk-card spec-tool-card spec-tool-card-full">
+          <div className="spec-tool-resolution-header">
+            <span className="spec-tool-label">Resolution</span>
+            <span className={`spec-tool-snapped ${widthAdjusted ? 'spec-tool-snapped--adjusted' : ''}`}>
               {snapW} × {snapH}
-              {widthAdjusted && <span style={{ fontSize: '0.65rem', marginLeft: '0.3rem', opacity: 0.8 }}>↑×16</span>}
+              {widthAdjusted && <span className="spec-tool-snapped-badge">↑×16</span>}
             </span>
           </div>
-          {/* Preset chips */}
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', marginBottom: '0.5rem' }}>
+          <div className="spec-tool-preset-chips">
             {PRESET_RESOLUTIONS.map(p => (
-              <button key={p.label} className="fuk-btn fuk-btn-secondary" style={CHIP} onClick={() => setRawW(p.width)}>
+              <button key={p.label} className={`fuk-btn fuk-btn-secondary ${CHIP_CLASS}`} onClick={() => setRawW(p.width)}>
                 {p.label}
               </button>
             ))}
           </div>
-          {/* W / H inputs */}
-          <div style={{ display: 'flex', alignItems: 'flex-end', gap: '0.4rem' }}>
-            <div style={{ flex: 1 }}>
-              <span style={lbl}>Width</span>
+          <div className="spec-tool-row">
+            <div className="spec-tool-col">
+              <span className="spec-tool-label">Width</span>
               <input type="number" min="16" max="16384" className="fuk-input"
                 value={rawW}
                 onChange={e => setRawW(Math.max(16, parseInt(e.target.value) || 16))}
-                onBlur={() => setRawW(snapW)}
-                style={{ width: '100%', textAlign: 'center' }} />
+                onBlur={() => setRawW(snapW)} />
             </div>
-            <span style={{ color: 'var(--text-muted)', paddingBottom: '0.35rem' }}>×</span>
-            <div style={{ flex: 1 }}>
-              <span style={lbl}>Height (derived)</span>
-              <div className="fuk-input"
-                style={{ width: '100%', textAlign: 'center', background: 'var(--bg-secondary)', color: 'var(--text-muted)', userSelect: 'none' }}>
+            <span className="spec-tool-separator-bottom">×</span>
+            <div className="spec-tool-col">
+              <span className="spec-tool-label">Height (derived)</span>
+              <div className="fuk-input spec-tool-derived-display">
                 {Math.round((rawW / ratioW) * ratioH)}
               </div>
             </div>
@@ -411,104 +388,93 @@ function SpecTool({ config }) {
         </div>
 
         {/* Frame Count */}
-        <div className="fuk-card" style={{ padding: '0.6rem 0.75rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.4rem' }}>
-            <span style={{ ...lbl, marginBottom: 0 }}>Frame Count</span>
+        <div className="fuk-card spec-tool-card">
+          <div className="spec-tool-resolution-header">
+            <span className="spec-tool-label">Frame Count</span>
             {snapFrames !== null && (
-              <span style={{
-                fontFamily: 'monospace', fontSize: '0.85rem',
-                color: framesAdjusted ? 'var(--accent-color, #a855f7)' : 'var(--text-secondary)',
-              }}>
+              <span className={`spec-tool-snapped ${framesAdjusted ? 'spec-tool-snapped--adjusted' : ''}`}>
                 {snapFrames}f
-                {framesAdjusted && <span style={{ fontSize: '0.65rem', marginLeft: '0.3rem', opacity: 0.8 }}>↑4m+1</span>}
+                {framesAdjusted && <span className="spec-tool-snapped-badge">↑4m+1</span>}
               </span>
             )}
           </div>
           <input
             type="number" min="1" max="99999"
-            className="fuk-input"
+            className="fuk-input spec-tool-input-center"
             placeholder="e.g. 25"
             value={frameStr}
             onChange={e => setFrameStr(e.target.value)}
             onBlur={handleFrameBlur}
-            style={{ width: '100%', textAlign: 'center' }}
           />
         </div>
 
         {/* Burn-in */}
-        <div className="fuk-card" style={{ padding: '0.6rem 0.75rem', display: 'flex', alignItems: 'center' }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.82rem', width: '100%' }}>
+        <div className="fuk-card spec-tool-card spec-tool-card--row">
+          <label className="spec-tool-burn-in-label">
             <input type="checkbox" checked={burnIn} onChange={e => setBurnIn(e.target.checked)} />
             Burn-in frame count
           </label>
         </div>
 
         {/* Composition Guides */}
-        <div className="fuk-card" style={{ padding: '0.6rem 0.75rem' }}>
-          <span style={lbl}>Composition Guides</span>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', marginBottom: '0.55rem' }}>
+        <div className="fuk-card spec-tool-card">
+          <span className="spec-tool-label">Composition Guides</span>
+          <div className="spec-tool-checklist">
             {COMPOSITION_GUIDES.map(g => (
-              <label key={g.key} style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', cursor: 'pointer', fontSize: '0.8rem' }}>
+              <label key={g.key}>
                 <input type="checkbox" checked={guides[g.key]} onChange={() => toggleGuide(g.key)} />
                 {g.label}
               </label>
             ))}
           </div>
-          <span style={lbl}>Line Color</span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <input type="color" value={guideColor} onChange={e => setGuideColor(e.target.value)}
-              style={{ width: '1.8rem', height: '1.8rem', border: 'none', background: 'none', cursor: 'pointer', padding: 0 }} />
-            <span style={{ fontFamily: 'monospace', fontSize: '0.75rem', color: 'var(--text-muted)' }}>{guideColor}</span>
-            <button className="fuk-btn fuk-btn-secondary" style={CHIP} onClick={() => setGuideColor('#ffffff')}>White</button>
-            <button className="fuk-btn fuk-btn-secondary" style={CHIP} onClick={() => setGuideColor('#ff0000')}>Red</button>
+          <span className="spec-tool-label">Line Color</span>
+          <div className="spec-tool-color-row">
+            <input type="color" value={guideColor} onChange={e => setGuideColor(e.target.value)} className="spec-tool-color-input" />
+            <span className="spec-tool-color-hex">{guideColor}</span>
+            <button className={`fuk-btn fuk-btn-secondary ${CHIP_CLASS}`} onClick={() => setGuideColor('#ffffff')}>White</button>
+            <button className={`fuk-btn fuk-btn-secondary ${CHIP_CLASS}`} onClick={() => setGuideColor('#ff0000')}>Red</button>
           </div>
         </div>
 
         {/* Background */}
-        <div className="fuk-card" style={{ padding: '0.6rem 0.75rem' }}>
-          <span style={lbl}>Background</span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
-            <input type="color" value={bgColor} onChange={e => setBgColor(e.target.value)}
-              style={{ width: '1.8rem', height: '1.8rem', border: 'none', background: 'none', cursor: 'pointer', padding: 0 }} />
-            <span style={{ fontFamily: 'monospace', fontSize: '0.75rem', color: 'var(--text-muted)' }}>{bgColor}</span>
-            <button className="fuk-btn fuk-btn-secondary" style={CHIP} onClick={() => setBgColor('#000000')}>Black</button>
-            <button className="fuk-btn fuk-btn-secondary" style={CHIP} onClick={() => setBgColor('#808080')}>Gray</button>
+        <div className="fuk-card spec-tool-card">
+          <span className="spec-tool-label">Background</span>
+          <div className="spec-tool-bg-row">
+            <input type="color" value={bgColor} onChange={e => setBgColor(e.target.value)} className="spec-tool-color-input" />
+            <span className="spec-tool-color-hex">{bgColor}</span>
+            <button className={`fuk-btn fuk-btn-secondary ${CHIP_CLASS}`} onClick={() => setBgColor('#000000')}>Black</button>
+            <button className={`fuk-btn fuk-btn-secondary ${CHIP_CLASS}`} onClick={() => setBgColor('#808080')}>Gray</button>
           </div>
-          <span style={lbl}>Opacity: {bgAlpha}%{bgAlpha < 100 && <span style={{ marginLeft: '0.4rem', color: 'var(--accent-color, #a855f7)' }}>transparent PNG</span>}</span>
-          <input type="range" min="0" max="100" value={bgAlpha}
-            onChange={e => setBgAlpha(Number(e.target.value))}
-            style={{ width: '100%' }} />
+          <span className="spec-tool-label">
+            Opacity: {bgAlpha}%
+            {bgAlpha < 100 && <span className="spec-tool-opacity-accent">transparent PNG</span>}
+          </span>
+          <input type="range" min="0" max="100" value={bgAlpha} onChange={e => setBgAlpha(Number(e.target.value))}
+ />
         </div>
 
         {/* Download PNG — full width */}
-        <div style={{ gridColumn: '1 / -1' }}>
-          <button className="fuk-btn fuk-btn-primary" onClick={handleDownloadPNG} style={{ width: '100%' }}>
+        <div className="spec-tool-card-full">
+          <button className="fuk-btn fuk-btn-primary fuk-btn-full" onClick={handleDownloadPNG}>
             Download Template PNG
-            <span style={{ opacity: 0.65, fontSize: '0.8em', marginLeft: '0.5rem' }}>
+            <span className="spec-tool-download-info">
               {snapW}×{snapH}{snapFrames != null ? ` · ${snapFrames}f` : ''}
             </span>
           </button>
         </div>
 
         {/* Save .blend Template — full width */}
-        <div className="fuk-card" style={{ gridColumn: '1 / -1', padding: '0.6rem 0.75rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-          <span style={lbl}>Save Blender Template (.blend)</span>
+        <div className="fuk-card spec-tool-card spec-tool-card-full--col">
+          <span className="spec-tool-label">Save Blender Template (.blend)</span>
 
-          {/* Row 1: filename + fps */}
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-end' }}>
-            <div style={{ flex: 1 }}>
-              <span style={lbl}>Filename</span>
-              <input
-                className="fuk-input"
-                value={blendName}
-                onChange={e => setBlendName(e.target.value)}
-                placeholder="template"
-                style={{ width: '100%' }}
-              />
+          <div className="spec-tool-blend-row">
+            <div className="spec-tool-col">
+              <span className="spec-tool-label">Filename</span>
+              <input className="fuk-input" value={blendName} onChange={e => setBlendName(e.target.value)} placeholder="template" />
             </div>
-            <div style={{ width: '5.5rem' }}>
-              <span style={lbl}>FPS</span>
-              <select className="fuk-select" value={blendFps} onChange={e => setBlendFps(Number(e.target.value))} style={{ width: '100%' }}>
+            <div className="spec-tool-blend-fps">
+              <span className="spec-tool-label">FPS</span>
+              <select className="fuk-select" value={blendFps} onChange={e => setBlendFps(Number(e.target.value))}>
                 {[23.976, 24, 25, 29.97, 30, 48, 60].map(f => (
                   <option key={f} value={f}>{f}</option>
                 ))}
@@ -516,36 +482,25 @@ function SpecTool({ config }) {
             </div>
           </div>
 
-          {/* Row 2: directory picker */}
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-            <div
-              className="fuk-input"
-              style={{ flex: 1, color: blendDir ? 'var(--text-primary)' : 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', userSelect: 'none', fontSize: '0.8rem' }}
-            >
+          <div className="spec-tool-blend-dir-row">
+            <div className={`fuk-input spec-tool-blend-dir ${blendDir ? 'spec-tool-blend-dir--set' : 'spec-tool-blend-dir--empty'}`}>
               {blendDir || 'No folder selected'}
             </div>
-            <button className="fuk-btn fuk-btn-secondary" style={CHIP} onClick={handleBrowseBlendDir}>
+            <button className={`fuk-btn fuk-btn-secondary ${CHIP_CLASS}`} onClick={handleBrowseBlendDir}>
               Browse
             </button>
           </div>
 
-          {/* Row 3: save button + result */}
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <div className="spec-tool-blend-result-row">
             <button
               className="fuk-btn fuk-btn-secondary"
               onClick={handleSaveBlend}
               disabled={!blendDir || blendSaving}
-              style={{ flexShrink: 0 }}
             >
               {blendSaving ? 'Saving…' : 'Save .blend'}
             </button>
             {blendResult && (
-              <span style={{
-                fontSize: '0.72rem',
-                fontFamily: 'monospace',
-                color: blendResult.ok ? 'var(--success-color, #22c55e)' : 'var(--error-color, #ef4444)',
-                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-              }}>
+              <span className={`spec-tool-blend-result ${blendResult.ok ? 'spec-tool-blend-result--ok' : 'spec-tool-blend-result--error'}`}>
                 {blendResult.ok ? `✓ ${blendResult.msg}` : `✗ ${blendResult.msg}`}
               </span>
             )}
@@ -555,31 +510,20 @@ function SpecTool({ config }) {
       </div>
 
       {/* ── Right panel — preview ── */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.5rem', minWidth: 0, overflow: 'hidden' }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.75rem', flexWrap: 'wrap', flexShrink: 0 }}>
+      <div className="spec-tool-preview-panel">
+        <div className="spec-tool-preview-header">
           <span className="fuk-label">Preview</span>
-          <span style={{ fontFamily: 'monospace', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+          <span className="spec-tool-preview-meta">
             {snapW} × {snapH}{snapFrames != null ? ` · ${snapFrames}f` : ''} &nbsp;|&nbsp; {ratioW}:{ratioH}
           </span>
         </div>
 
-        {/* Checkerboard to show alpha */}
-        <div style={{
-          display: 'inline-flex',
-          backgroundImage: 'repeating-conic-gradient(#555 0% 25%, #333 0% 50%)',
-          backgroundSize: '14px 14px',
-          borderRadius: '4px',
-          border: '1px solid var(--border-color)',
-          overflow: 'hidden',
-          alignSelf: 'flex-start',
-          maxWidth: '100%',
-          maxHeight: 'calc(100% - 2rem)',
-        }}>
+        <div className="spec-tool-checkerboard">
           <canvas
             ref={canvasRef}
             width={PREVIEW_W}
             height={previewH}
-            style={{ display: 'block', maxWidth: '100%', maxHeight: 'calc(100vh - 260px)' }}
+            className="spec-tool-preview-canvas"
           />
         </div>
       </div>
@@ -600,33 +544,25 @@ export default function UtilitiesTab({ activeTab, setActiveTab, config }) {
   const [subTab, setSubTab] = useState('spec');
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+    <div className="utilities-tab">
 
       {/* Inner sub-tab bar */}
-      <div style={{
-        display: 'flex',
-        gap: '0.25rem',
-        padding: '0.5rem 1rem 0',
-        borderBottom: '1px solid var(--border-color)',
-        background: 'var(--bg-secondary)',
-        flexShrink: 0,
-      }}>
+      <div className="utilities-subtab-bar">
         {SUB_TABS.map(t => (
           <button
             key={t.key}
             disabled={t.disabled}
             onClick={() => !t.disabled && setSubTab(t.key)}
             className={`fuk-tab ${subTab === t.key ? 'active' : ''}`}
-            style={{ opacity: t.disabled ? 0.4 : 1, cursor: t.disabled ? 'not-allowed' : 'pointer', fontSize: '0.8rem' }}
           >
             {t.label}
-            {t.disabled && <span style={{ marginLeft: '0.35rem', fontSize: '0.65rem', color: 'var(--text-muted)' }}>soon</span>}
+            {t.disabled && <span className="utilities-subtab-soon">soon</span>}
           </button>
         ))}
       </div>
 
       {/* Sub-tab content */}
-      <div style={{ flex: 1, overflow: 'hidden' }}>
+      <div className="utilities-subtab-content">
         {subTab === 'spec' && <SpecTool config={config} />}
         {subTab === 'lora' && <LoraDatasetBuilder config={config} />}
       </div>

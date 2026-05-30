@@ -79,6 +79,15 @@ body {
   background-color: rgba(16, 185, 129, 0.1);
 }
 
+.fuk-dropzone--disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.fuk-file-input-hidden {
+  display: none;
+}
+
 .fuk-dropzone-label {
   display: flex;
   flex-direction: column;
@@ -129,6 +138,11 @@ body {
 
 .fuk-thumbnail-remove:hover {
   background: rgba(239, 68, 68, 0.9);
+}
+
+.fuk-thumbnail-remove svg {
+  width: 0.75rem;
+  height: 0.75rem;
 }
 
 /* Badge for items from history */

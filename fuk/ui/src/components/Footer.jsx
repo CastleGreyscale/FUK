@@ -60,32 +60,30 @@ export default function Footer({
   };
 
   return (
-    <div className="fuk-footer" style={{ position: 'relative' }}>
+    <div className="fuk-footer">
 
       {/* System buttons - Left */}
-      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+      <div className="fuk-footer-system">
         <button
           onClick={handleEvict}
           disabled={evicting || restarting}
-          className="fuk-btn fuk-btn-secondary"
+          className="fuk-btn fuk-btn-secondary fuk-btn-compact"
           title="Evict all models from VRAM"
-          style={{ padding: '0.35rem 0.65rem' }}
         >
           {evicting
-            ? <Loader2 style={{ width: '1rem', height: '1rem', animation: 'spin 1s linear infinite' }} />
-            : <Trash2 style={{ width: '1rem', height: '1rem' }} />}
+            ? <Loader2 className="animate-spin" />
+            : <Trash2 />}
           Evict
         </button>
         <button
           onClick={handleRestart}
           disabled={evicting || restarting}
-          className="fuk-btn fuk-btn-secondary"
+          className="fuk-btn fuk-btn-secondary fuk-btn-compact"
           title="Restart the server"
-          style={{ padding: '0.35rem 0.65rem' }}
         >
           {restarting
-            ? <Loader2 style={{ width: '1rem', height: '1rem', animation: 'spin 1s linear infinite' }} />
-            : <RefreshCw style={{ width: '1rem', height: '1rem' }} />}
+            ? <Loader2 className="animate-spin" />
+            : <RefreshCw />}
           {restarting ? 'Restarting...' : 'Restart'}
         </button>
       </div>
@@ -93,57 +91,22 @@ export default function Footer({
       {/* Tabs - Center */}
       <div className="fuk-footer-center">
         <div className="fuk-tabs">
-          <TabButton
-            active={activeTab === 'utilities'}
-            onClick={() => setActiveTab('utilities')}
-            icon={<Wrench style={{ width: '1rem', height: '1rem' }} />}
-            label="Utilities"
-          />
-          <TabButton
-            active={activeTab === 'preprocess'}
-            onClick={() => setActiveTab('preprocess')}
-            icon={<Pipeline style={{ width: '1rem', height: '1rem' }} />}
-            label="Pre-Processors"
-          />
-          <TabButton
-            active={activeTab === 'image'}
-            onClick={() => setActiveTab('image')}
-            icon={<Camera style={{ width: '1rem', height: '1rem' }} />}
-            label="Image"
-          />
-          <TabButton
-            active={activeTab === 'video'}
-            onClick={() => setActiveTab('video')}
-            icon={<Film style={{ width: '1rem', height: '1rem' }} />}
-            label="Video"
-          />
-          <TabButton
-            active={activeTab === 'postprocess'}
-            onClick={() => setActiveTab('postprocess')}
-            icon={<Enhance style={{ width: '1rem', height: '1rem' }} />}
-            label="Post-Processors"
-          />
-          <TabButton
-            active={activeTab === 'layers'}
-            onClick={() => setActiveTab('layers')}
-            icon={<Layers style={{ width: '1rem', height: '1rem' }} />}
-            label="Layers"
-          />
-          <TabButton
-            active={activeTab === 'export'}
-            onClick={() => setActiveTab('export')}
-            icon={<Save style={{ width: '1rem', height: '1rem' }} />}
-            label="Exports"
-          />
+          <TabButton active={activeTab === 'utilities'} onClick={() => setActiveTab('utilities')} icon={<Wrench />} label="Utilities" />
+          <TabButton active={activeTab === 'preprocess'} onClick={() => setActiveTab('preprocess')} icon={<Pipeline />} label="Pre-Processors" />
+          <TabButton active={activeTab === 'image'} onClick={() => setActiveTab('image')} icon={<Camera />} label="Image" />
+          <TabButton active={activeTab === 'video'} onClick={() => setActiveTab('video')} icon={<Film />} label="Video" />
+          <TabButton active={activeTab === 'postprocess'} onClick={() => setActiveTab('postprocess')} icon={<Enhance />} label="Post-Processors" />
+          <TabButton active={activeTab === 'layers'} onClick={() => setActiveTab('layers')} icon={<Layers />} label="Layers" />
+          <TabButton active={activeTab === 'export'} onClick={() => setActiveTab('export')} icon={<Save />} label="Exports" />
         </div>
       </div>
 
       {/* Buttons - Right */}
-      <div className="fuk-footer-right" style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+      <div className="fuk-footer-right">
         {/* Batch Count */}
         {onBatchCountChange && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', userSelect: 'none' }}>×</span>
+          <div className="fuk-batch-counter">
+            <span className="fuk-batch-multiplier">×</span>
             <input
               type="number"
               min="1"
@@ -153,8 +116,7 @@ export default function Footer({
               onBlur={e => commitBatch(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && commitBatch(e.target.value)}
               disabled={generating}
-              className="fuk-input"
-              style={{ width: '3.5rem', textAlign: 'center', padding: '0.35rem 0.4rem' }}
+              className="fuk-input fuk-batch-input"
               title="Batch count"
             />
           </div>
@@ -166,30 +128,20 @@ export default function Footer({
         >
           {generating ? (
             <>
-              <Loader2 
-                style={{ 
-                  width: '1.25rem', 
-                  height: '1.25rem',
-                  animation: 'spin 1s linear infinite'
-                }} 
-              />
+              <Loader2 className="animate-spin" />
               {generatingLabel}
             </>
           ) : (
             <>
-              <FukMonogram style={{ width: '1.25rem', height: '1.25rem' }} />
+              <FukMonogram />
               {generateLabel}
             </>
           )}
         </button>
-        
+
         {generating && (
-          <button
-            onClick={onCancel}
-            className="fuk-btn fuk-btn-secondary"
-            style={{ paddingLeft: '1.5rem', paddingRight: '1.5rem' }}
-          >
-            <X style={{ width: '1rem', height: '1rem' }} />
+          <button onClick={onCancel} className="fuk-btn fuk-btn-secondary fuk-btn-cancel">
+            <X />
             Cancel
           </button>
         )}

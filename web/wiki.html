@@ -49,34 +49,86 @@
         <!-- Sidebar -->
         <aside class="wiki-sidebar">
             <nav class="sidebar-nav">
-                <div class="sidebar-category">Getting Started</div>
-                <a href="#overview" class="sidebar-link">Overview</a>
-                <a href="#installation" class="sidebar-link">Installation</a>
-                <a href="#system-requirements" class="sidebar-link">System Requirements</a>
 
-                <div class="sidebar-category">Generation</div>
-                <a href="#image-generation" class="sidebar-link">Image Generation</a>
-                <a href="#video-generation" class="sidebar-link">Video Generation</a>
-                <a href="#preprocessors" class="sidebar-link">Preprocessors</a>
-                <a href="#regional-conditioning" class="sidebar-link">Regional Conditioning</a>
+                <div class="sidebar-group">
+                    <button class="sidebar-category" aria-expanded="true">
+                        Getting Started
+                        <svg class="sidebar-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+                    <div class="sidebar-links">
+                        <a href="#overview" class="sidebar-link">Overview</a>
+                        <a href="#installation" class="sidebar-link">Installation</a>
+                        <a href="#system-requirements" class="sidebar-link">System Requirements</a>
+                    </div>
+                </div>
 
-                <div class="sidebar-category">Post-Processing</div>
-                <a href="#upscaling" class="sidebar-link">Upscaling</a>
-                <a href="#interpolation" class="sidebar-link">Frame Interpolation</a>
+                <div class="sidebar-group">
+                    <button class="sidebar-category" aria-expanded="false">
+                        Capabilities
+                        <svg class="sidebar-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+                    <div class="sidebar-links" hidden>
+                        <a href="#image-generation" class="sidebar-link">Image Generation</a>
+                        <a href="#video-generation" class="sidebar-link">Video Generation</a>
+                        <a href="#preprocessors" class="sidebar-link">Preprocessors</a>
+                        <a href="#regional-conditioning" class="sidebar-link">Regional Conditioning</a>
+                        <a href="#upscaling" class="sidebar-link">Upscaling</a>
+                        <a href="#interpolation" class="sidebar-link">Frame Interpolation</a>
+                        <a href="#aovs" class="sidebar-link">AOVs & Passes</a>
+                        <a href="#exr-export" class="sidebar-link">EXR Export</a>
+                        <a href="#lora-dataset-builder" class="sidebar-link">LoRA Dataset Builder</a>
+                    </div>
+                </div>
 
-                <div class="sidebar-category">Technical Outputs</div>
-                <a href="#aovs" class="sidebar-link">AOVs & Passes</a>
-                <a href="#exr-export" class="sidebar-link">EXR Export</a>
+                <div class="sidebar-group">
+                    <button class="sidebar-category" aria-expanded="false">
+                        UI
+                        <svg class="sidebar-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+                    <div class="sidebar-links" hidden>
+                        <a href="#app-layout" class="sidebar-link">App Layout</a>
+                        <a href="#project-bar" class="sidebar-link">Project Bar</a>
+                        <a href="#media-input" class="sidebar-link">Media Input</a>
+                        <a href="#seed-control" class="sidebar-link">Seed Control</a>
+                        <a href="#image-panel" class="sidebar-link">Image Panel</a>
+                        <a href="#video-panel" class="sidebar-link">Video Panel</a>
+                        <a href="#preprocess-panel" class="sidebar-link">Preprocess Panel</a>
+                        <a href="#postprocess-panel" class="sidebar-link">Postprocess Panel</a>
+                        <a href="#layers-panel" class="sidebar-link">Layers Panel</a>
+                        <a href="#export-panel" class="sidebar-link">Export Panel</a>
+                        <a href="#spec-tool" class="sidebar-link">Spec Tool</a>
+                        <a href="#generation-history" class="sidebar-link">Generation History</a>
+                    </div>
+                </div>
 
-                <div class="sidebar-category">Tools & UI</div>
-                <a href="#history-panel" class="sidebar-link">History Panel</a>
-                <a href="#template-generator" class="sidebar-link">Template Generator</a>
-                <a href="#lora-dataset-builder" class="sidebar-link">LoRA Dataset Builder</a>
+                <div class="sidebar-group">
+                    <button class="sidebar-category" aria-expanded="false">
+                        Config
+                        <svg class="sidebar-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+                    <div class="sidebar-links" hidden>
+                        <a href="#config-overview" class="sidebar-link">Overview</a>
+                        <a href="#config-defaults" class="sidebar-link">defaults.json</a>
+                        <a href="#config-models" class="sidebar-link">models.json</a>
+                        <a href="#config-vram" class="sidebar-link">defaults_vram.json</a>
+                        <a href="#config-loras" class="sidebar-link">defaults_loras.json</a>
+                        <a href="#config-dataset" class="sidebar-link">defaults_dataset.json</a>
+                        <a href="#config-tools" class="sidebar-link">Tool Configs</a>
+                    </div>
+                </div>
 
-                <div class="sidebar-category">Reference</div>
-                <a href="#shortcuts" class="sidebar-link">Keyboard Shortcuts</a>
-                <a href="#file-locations" class="sidebar-link">File Locations</a>
-                <a href="#metadata" class="sidebar-link">Metadata & Repeatability</a>
+                <div class="sidebar-group">
+                    <button class="sidebar-category" aria-expanded="false">
+                        Reference
+                        <svg class="sidebar-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+                    <div class="sidebar-links" hidden>
+                        <a href="#shortcuts" class="sidebar-link">Keyboard Shortcuts</a>
+                        <a href="#file-locations" class="sidebar-link">File Locations</a>
+                        <a href="#metadata" class="sidebar-link">Metadata & Repeatability</a>
+                    </div>
+                </div>
+
             </nav>
         </aside>
 
@@ -88,6 +140,19 @@
                 <h2>Overview</h2>
                 <p>FUK (Framework for Unified Kreation) is a local-first AI rendering pipeline built for VFX professionals. It provides a structured, stable environment for image and video generation that integrates cleanly into existing production pipelines — without telemetry, cloud dependencies, or workflows designed around consumer use cases.</p>
                 <p>FUK runs entirely on your hardware. Models, outputs, and project data stay on your machine.</p>
+
+                <h3>Design Philosophy</h3>
+                <p>Most AI generation tools are built around exploration — infinite scroll, quick iterations, no project structure. FUK is built around production. Every output lives in a project/shot/version hierarchy. Every generation captures complete metadata. Nothing is ephemeral unless you want it to be.</p>
+                <p>The pipeline is intentionally minimal in its interface and maximal in its output. Controls are exposed where they matter. Defaults are sane. The goal is repeatability and composability with downstream tools, not hiding complexity behind a friendly UI.</p>
+
+                <h3>What FUK Is Not</h3>
+                <ul>
+                    <li>Not a cloud service — no API keys, no usage limits, no data leaving your machine</li>
+                    <li>Not a consumer tool — designed for pipeline integration, not social sharing</li>
+                    <li>Not a model trainer — FUK generates; training happens in dedicated tools</li>
+                    <li>Not locked to one model family — new pipelines can be added via configuration</li>
+                </ul>
+
                 <div class="wiki-note">
                     <p>FUK is in active development. Core generation is stable. AOV outputs are functional but being refined. See the <a href="./index.html#roadmap">roadmap section</a> on the main page for current focus areas.</p>
                 </div>
@@ -108,17 +173,19 @@
                 <h3>Steps</h3>
                 <ol>
                     <li>Clone the repository:<br><code>git clone https://github.com/CastleGreyscale/FUK</code></li>
-                    <li>Install dependencies:<br><code>pip install e .</code></li>
-                    <li>Download required models — see <a href="#file-locations">File Locations</a> for expected paths</li>
-                    <li>Run Setup:<br><code>chmod +x setup.sh</code></li>
-                    <li>Choose models - edit config/models.json - remove unwanted models</li>
-                    <li>Set model paths - edit config/defaults.json - ret model root directory</li>
+                    <li>Install dependencies:<br><code>pip install -e .</code></li>
+                    <li>Run setup:<br><code>chmod +x setup.sh && ./setup.sh</code></li>
+                    <li>Configure models — edit <code>config/models.json</code> to select which models to use, remove entries for any you don't want</li>
+                    <li>Set model root — edit <code>config/defaults.json</code> and set the model root directory to wherever your models live</li>
                     <li>Download models:<br><code>./download_models.sh</code></li>
                     <li>Launch FUK:<br><code>./start.sh</code></li>
                 </ol>
 
+                <h3>First Launch</h3>
+                <p>On first launch FUK will verify model paths and report any missing files. The interface will open at <code>http://localhost:7860</code> by default. If a model fails to load it will appear grayed out in the model selector — check the terminal output for the specific error.</p>
+
                 <div class="wiki-note">
-                    <p>See the <a href="https://github.com/CastleGreyscale/FUK" target="_blank">GitHub README</a> for the complete and up-to-date installation instructions.</p>
+                    <p>See the <a href="https://github.com/CastleGreyscale/FUK" target="_blank">GitHub README</a> for the complete and up-to-date installation instructions, including Windows/WSL2 setup.</p>
                 </div>
             </div>
 
@@ -132,132 +199,196 @@
                         <tr><th>Component</th><th>Tested On</th><th>Notes</th></tr>
                     </thead>
                     <tbody>
-                        <tr><td>GPU</td><td>NVIDIA RTX 4090 (24GB VRAM)</td><td>~8GB VRAM recommended minimum</td></tr>
+                        <tr><td>GPU</td><td>NVIDIA RTX 4090 (24GB VRAM)</td><td>8GB VRAM recommended minimum</td></tr>
                         <tr><td>CPU</td><td>AMD Threadripper</td><td>Modern multi-core</td></tr>
                         <tr><td>RAM</td><td>256GB</td><td>32GB recommended minimum</td></tr>
-                        <tr><td>Storage</td><td>M.2 NVMe SSD</td><td>Fast SSD strongly recommended</td></tr>
-                        <tr><td>OS</td><td>Arch Linux</td><td>Linux primary, Windows via WSL2</td></tr>
+                        <tr><td>Storage</td><td>M.2 NVMe SSD</td><td>Fast SSD strongly recommended for model loading</td></tr>
+                        <tr><td>OS</td><td>Arch Linux</td><td>Linux primary; Windows via WSL2</td></tr>
                     </tbody>
                 </table>
+
+                <h3>VRAM Considerations</h3>
+                <p>VRAM requirements scale with model size and output resolution. As a rough guide:</p>
+                <ul>
+                    <li><strong>8GB</strong> — base image generation at moderate resolutions; some models will not load</li>
+                    <li><strong>12GB</strong> — comfortable for most image generation pipelines</li>
+                    <li><strong>16GB+</strong> — video generation, high-resolution image gen, AOV passes</li>
+                    <li><strong>24GB</strong> — full pipeline with all features; recommended for production use</li>
+                </ul>
+                <p>FUK will attempt to offload to system RAM when VRAM is insufficient, but generation will be significantly slower. The VRAM Management preset in each generation panel controls the offload strategy.</p>
 
                 <h3>Disk Space</h3>
                 <ul>
                     <li>Base install: ~15GB</li>
-                    <li>Models: ~500GB depending on selection</li>
+                    <li>Models: 50GB–500GB+ depending on selection — see <a href="#file-locations">File Locations</a> for where models are expected</li>
+                    <li>Outputs: variable; EXR files with all AOV passes are substantially larger than standard image formats</li>
                 </ul>
-                 <div class="wiki-note">
-                    <p>Model and app install locations can be different. See the <a href="https://github.com/CastleGreyscale/FUKdocs/WINDOWS.md" target="_blank">Windows Storage Doc</a> for model location considerations.</p>
+
+                <div class="wiki-note">
+                    <p>Model and application install directories can be on separate drives. See the <a href="https://github.com/CastleGreyscale/FUK/docs/WINDOWS.md" target="_blank">Windows Storage Doc</a> for model location considerations on Windows.</p>
                 </div>
             </div>
 
             <!-- Image Generation -->
             <div class="wiki-section" id="image-generation">
                 <h2>Image Generation</h2>
-                <p>FUK's image generation pipeline supports most <a href="https://huggingface.co/Qwen/Qwen-Image" target="_blank">Qwen Image</a> models with full control over generation parameters. Outputs are organized by project / shot / version hierarchy and accompanied by full metadata sidecar files.</p>
+                <p>FUK's image generation pipeline supports Qwen Image models with full control over generation parameters. Outputs are organized by project / shot / version hierarchy and accompanied by full metadata sidecar files. Every generation is reproducible from its sidecar alone.</p>
 
                 <h3>Supported Models</h3>
-                <ul>
-                    <li>Qwen Image</li>
-                    <li>Qwen Image + Control Nets</li>
-                    <li>Qwen Image + EliGen</li>
-                    <li>Qwen Image 2512</li>
-                    <li>Qwen Image Edit 2511</li>
-                </ul>
-                <h3>Easily Added Models</h3>
-                <ul>                   
-                     <li><a href="https://huggingface.co/black-forest-labs/FLUX.2-dev" target="_blank">Flux 2</a></li>
-                     <li><a href="https://huggingface.co/Tongyi-MAI/Z-Image-Turbo" target="_blank">Z-Image Turbo</a></li>
-                    <li><a href="https://www.modelscope.cn/models/PaddlePaddle/ERNIE-Image" target="_blank">ERNIE-Image</a></li>
-                    <li><a href="https://joyaiimage.com/" target="_blank">JoyAI Image Edit</a></li>
-                    <li><a href="https://www.modelscope.cn/models/stabilityai/stable-diffusion-xl-base-1.0" target="_blank">Stable Diffusion XL</a></li>
-                    <li><a href="https://www.modelscope.cn/models/stabilityai/stable-diffusion-xl-base-1.0" target="_blank">Stable Diffusion 1.5</a></li>
-                </ul>
-
-                <h3>Parameters</h3>
                 <table class="wiki-table">
                     <thead>
-                        <tr><th>Parameter</th><th>Description</th><th>Default</th></tr>
+                        <tr><th>Model</th><th>Notes</th></tr>
                     </thead>
                     <tbody>
-                        <tr><td>Width / Height</td><td>Output resolution in pixels</td><td>[default]</td></tr>
-                        <tr><td>Steps</td><td>Denoising steps — more steps, longer generation</td><td>[default]</td></tr>
-                        <tr><td>CFG Scale</td><td>How closely output follows the prompt</td><td>[default]</td></tr>
-                        <tr><td>Seed</td><td>Controls randomness. Fixed seed = repeatable output</td><td>Random</td></tr>
-                        <tr><td>Sampler</td><td>[Available samplers]</td><td>[default]</td></tr>
-                        <tr><td>Prompt</td><td>Text description of desired output</td><td>—</td></tr>
-                        <tr><td>Negative Prompt</td><td>Elements to exclude from generation</td><td>—</td></tr>
+                        <tr><td>Qwen Image</td><td>Base text-to-image pipeline</td></tr>
+                        <tr><td>Qwen Image + ControlNet</td><td>Structural conditioning via depth, pose, edge maps</td></tr>
+                        <tr><td>Qwen Image + EliGen</td><td>Regional prompt conditioning — see <a href="#regional-conditioning">Regional Conditioning</a></td></tr>
+                        <tr><td>Qwen Image 2512</td><td>High-resolution variant</td></tr>
+                        <tr><td>Qwen Image Edit 2511</td><td>Image-to-image editing</td></tr>
                     </tbody>
                 </table>
 
-                <h3>Image Input / ControlNet</h3>
-                <p>External images can be used as generation conditioning via ControlNet. See <a href="#preprocessors">Preprocessors</a> for generating compatible control images from reference input.</p>
+                <h3>Easily Added Models</h3>
+                <p>FUK's pipeline architecture supports additional model families with minimal configuration. The following have been tested or are known to be compatible:</p>
+                <ul>
+                    <li><a href="https://huggingface.co/black-forest-labs/FLUX.2-dev" target="_blank">Flux 2</a></li>
+                    <li><a href="https://huggingface.co/Tongyi-MAI/Z-Image-Turbo" target="_blank">Z-Image Turbo</a></li>
+                    <li><a href="https://www.modelscope.cn/models/PaddlePaddle/ERNIE-Image" target="_blank">ERNIE-Image</a></li>
+                    <li><a href="https://joyaiimage.com/" target="_blank">JoyAI Image Edit</a></li>
+                    <li><a href="https://www.modelscope.cn/models/stabilityai/stable-diffusion-xl-base-1.0" target="_blank">Stable Diffusion XL</a></li>
+                    <li>Stable Diffusion 1.5</li>
+                </ul>
+
+                <h3>Generation Parameters</h3>
+                <table class="wiki-table">
+                    <thead>
+                        <tr><th>Parameter</th><th>Description</th><th>Notes</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>Width / Height</td><td>Output resolution in pixels</td><td>Use the <a href="#spec-tool">Spec Tool</a> for spec-compliant resolutions; dimensions snap to 16px alignment</td></tr>
+                        <tr><td>Steps</td><td>Denoising steps — higher step counts increase quality and generation time</td><td>20–40 is typical; presets available</td></tr>
+                        <tr><td>Guidance Scale</td><td>Prompt adherence. Higher values follow the prompt more strictly but can reduce image quality</td><td>Range 1.0–10.0; 6–8 is a common starting point</td></tr>
+                        <tr><td>Seed</td><td>Randomness seed. A fixed seed with identical parameters produces identical output</td><td>See <a href="#seed-control">Seed Control</a></td></tr>
+                        <tr><td>Sampler</td><td>Denoising schedule algorithm — affects quality/speed tradeoff and output character</td><td>—</td></tr>
+                        <tr><td>Prompt</td><td>Text description of desired output</td><td>—</td></tr>
+                        <tr><td>Negative Prompt</td><td>Elements to suppress in the output</td><td>—</td></tr>
+                        <tr><td>LoRA</td><td>One or more LoRA weights to blend into the base model, each with an independent multiplier</td><td>See <a href="#image-panel">Image Panel</a> for per-LoRA controls</td></tr>
+                        <tr><td>VRAM Management</td><td>Controls model offloading strategy when VRAM is limited</td><td>Higher offload = slower generation but lower VRAM floor</td></tr>
+                    </tbody>
+                </table>
+
+                <h3>Image Input & ControlNet</h3>
+                <p>Edit and context models accept one or more reference images as conditioning input. Load a reference image via the <a href="#media-input">Media Input</a> component, select a preprocessor to extract a conditioning signal, and set the edit strength. See <a href="#preprocessors">Preprocessors</a> for available preprocessing modes.</p>
+
+                <h3>Batch Generation</h3>
+                <p>FUK supports batch generation — queue multiple runs from the same settings in a single pass. Each result is saved as its own versioned output with its own metadata sidecar. Batch jobs run sequentially and can be monitored from the generation modal.</p>
             </div>
 
             <!-- Video Generation -->
             <div class="wiki-section" id="video-generation">
                 <h2>Video Generation</h2>
-                <p>FUK supports video generation from text prompts and image inputs. Output is organized under the same project / shot / version hierarchy as images.</p>
+                <p>FUK supports video generation from text prompts and image inputs using Wan pipelines. Output is organized under the same project / shot / version hierarchy as images. Generated video can be passed directly to <a href="#interpolation">Frame Interpolation</a> to increase frame rate before delivery.</p>
 
                 <h3>Supported Pipelines</h3>
-                <p>[List supported video generation models / pipelines]</p>
-
-                <h3>Parameters</h3>
                 <table class="wiki-table">
                     <thead>
-                        <tr><th>Parameter</th><th>Description</th><th>Default</th></tr>
+                        <tr><th>Pipeline</th><th>Input</th><th>Notes</th></tr>
                     </thead>
                     <tbody>
-                        <tr><td>Frame Count</td><td>Number of frames to generate</td><td>[default]</td></tr>
-                        <tr><td>FPS</td><td>Playback frame rate</td><td>[default]</td></tr>
-                        <tr><td>Motion Strength</td><td>[description]</td><td>[default]</td></tr>
-                        <tr><td>Seed</td><td>Seed for repeatability</td><td>Random</td></tr>
+                        <tr><td>I2V-A14B</td><td>Image + text prompt</td><td>Image anchors the first frame; motion is synthesized toward the prompt</td></tr>
+                        <tr><td>Fun Control</td><td>Control video + optional start/end images</td><td>Uses a reference video as a motion/structure guide</td></tr>
                     </tbody>
                 </table>
 
+                <h3>Generation Parameters</h3>
+                <table class="wiki-table">
+                    <thead>
+                        <tr><th>Parameter</th><th>Description</th><th>Notes</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>Frame Count</td><td>Total number of frames to generate</td><td>Must satisfy the 4n+1 pattern (e.g. 5, 9, 13, 17…); longer sequences require significantly more VRAM</td></tr>
+                        <tr><td>Scale Factor</td><td>Output resolution as a percentage of the input image dimensions</td><td>100%, 75%, 50%, or 25%; dimensions round to nearest 64px</td></tr>
+                        <tr><td>Steps</td><td>Denoising steps</td><td>20–40 typical; presets available</td></tr>
+                        <tr><td>Guidance Scale</td><td>Prompt adherence</td><td>—</td></tr>
+                        <tr><td>Sigma Shift</td><td>Adjusts the noise schedule — higher values shift more denoising toward early steps</td><td>Range 0.0–10.0</td></tr>
+                        <tr><td>Motion Bucket ID</td><td>Controls baseline motion amount in supported pipelines</td><td>Optional; leave blank to use model default</td></tr>
+                        <tr><td>Denoising Strength</td><td>How much the model deviates from the input image (img2vid modes)</td><td>Range 0.0–1.0; lower values stay closer to the input</td></tr>
+                        <tr><td>Sliding Window</td><td>Size and stride for sliding window video processing</td><td>Optional; used to process sequences longer than the model's native context</td></tr>
+                        <tr><td>Seed</td><td>Seed for repeatability</td><td>See <a href="#seed-control">Seed Control</a></td></tr>
+                        <tr><td>VRAM Management</td><td>Offloading strategy for VRAM-limited hardware</td><td>—</td></tr>
+                    </tbody>
+                </table>
+
+                <h3>Output Format</h3>
+                <p>Video is saved as a PNG frame sequence plus a composited MP4 for preview. The frame sequence is the primary output — import it directly into Nuke, After Effects, DaVinci Resolve, or any compositing application. EXR passes are generated per-frame when AOV export is enabled via the <a href="#layers-panel">Layers Panel</a>.</p>
+
                 <div class="wiki-note">
-                    <p>Frame rate can be increased post-generation via FILM interpolation. See <a href="#interpolation">Frame Interpolation</a>.</p>
+                    <p>Frame rate can be increased post-generation via FILM interpolation. See <a href="#interpolation">Frame Interpolation</a>. Interpolation runs on the frame sequence, not the MP4.</p>
                 </div>
             </div>
 
             <!-- Preprocessors -->
             <div class="wiki-section" id="preprocessors">
                 <h2>Preprocessors</h2>
-                <p>Preprocessors convert input images into conditioning signals that guide generation — giving precise control over pose, depth, structure, and edges in the output without fighting the model through prompt engineering.</p>
+                <p>Preprocessors convert input images into conditioning signals that guide generation — giving precise control over pose, depth, structure, and edges in the output without fighting the model through prompt engineering alone. Preprocessing is done in the <a href="#preprocess-panel">Preprocess Panel</a>; the output is then used as a ControlNet conditioning input in the Image Panel.</p>
+
+                <h3>Canny Edge Detection</h3>
+                <p>Extracts hard edges and structural lines from an input image. Useful for preserving architectural forms, hard-surface geometry, or any scene with defined edges that should carry through to the output.</p>
+                <table class="wiki-table">
+                    <thead><tr><th>Parameter</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td>Low Threshold</td><td>Minimum gradient magnitude to consider as an edge — lower values detect more edges</td></tr>
+                        <tr><td>High Threshold</td><td>Minimum gradient magnitude for a strong edge — edges below this but above low threshold are kept only if connected to a strong edge</td></tr>
+                        <tr><td>Blur Kernel</td><td>Pre-detection smoothing — reduces noise at the cost of fine edge detail</td></tr>
+                        <tr><td>Invert</td><td>Flips the edge map — white edges on black vs. black edges on white</td></tr>
+                    </tbody>
+                </table>
 
                 <h3>OpenPose</h3>
-                <p>Detects human body pose from an input image and extracts a skeleton map. Use this to replicate or constrain body positions in generated output.</p>
-                <ul>
-                    <li>Full body keypoint detection</li>
-                    <li>Hand and face keypoints [if supported]</li>
-                </ul>
+                <p>Detects human body pose from an input image and extracts a skeleton map. Use this to replicate or constrain body positions across generations. Useful for character work where posture and gesture need to be consistent shot to shot.</p>
+                <table class="wiki-table">
+                    <thead><tr><th>Parameter</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td>Body</td><td>Full body keypoint detection — always enabled</td></tr>
+                        <tr><td>Hands</td><td>Adds wrist, palm, and finger keypoints</td></tr>
+                        <tr><td>Face</td><td>Adds facial landmark keypoints</td></tr>
+                    </tbody>
+                </table>
 
-                <h3>Depth</h3>
-                <p>Generates a depth map from an input image, encoding near-to-far distance as a greyscale gradient. Used for spatial conditioning — maintaining scene depth structure across generations.</p>
+                <h3>Depth Estimation</h3>
+                <p>Generates a depth map from an input image using Depth Anything v3, encoding near-to-far distance as a greyscale gradient. Used for spatial conditioning — maintaining scene depth structure across generations.</p>
+                <table class="wiki-table">
+                    <thead><tr><th>Parameter</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td>Model</td><td>DA3 model variant — larger models produce more accurate depth at higher cost: <code>da3_mono_large</code>, <code>da3_metric_large</code>, <code>da3_giant</code></td></tr>
+                        <tr><td>Invert</td><td>Flips near/far encoding</td></tr>
+                        <tr><td>Normalize</td><td>Stretches depth values to fill the full 0–1 range</td></tr>
+                        <tr><td>Range Min / Max</td><td>Clamps the depth range — useful for isolating a specific depth band</td></tr>
+                    </tbody>
+                </table>
 
-                <h3>Edge Detection</h3>
-                <p>Extracts edges and structural lines from an input image. Useful for preserving architectural forms, hard-surface geometry, or any scene with defined edges that should carry through to the output.</p>
-
-                <h3>Using Preprocessors</h3>
+                <h3>Workflow</h3>
                 <ol>
-                    <li>Select a preprocessor in the interface</li>
-                    <li>Load or specify an input image</li>
-                    <li>Run the preprocessor — the output is used automatically as a ControlNet conditioning input</li>
-                    <li>Adjust conditioning weight to balance prompt influence vs. structural control</li>
+                    <li>Go to the <a href="#preprocess-panel">Preprocess Panel</a> and load a reference image or video</li>
+                    <li>Select a preprocessing method and configure its parameters</li>
+                    <li>Generate — the conditioned output is saved alongside your source</li>
+                    <li>In the <a href="#image-panel">Image Panel</a>, load the preprocessed result as a ControlNet input</li>
+                    <li>Set conditioning weight and guidance range, then generate</li>
                 </ol>
+
+                <div class="wiki-note">
+                    <p>Preprocessors also run on video sequences — the output is a per-frame conditioning sequence. Depth + pose is a common combination for character shots.</p>
+                </div>
             </div>
 
             <!-- Regional Conditioning -->
             <div class="wiki-section" id="regional-conditioning">
                 <h2>Regional Conditioning (EliGen)</h2>
-                <p>EliGen integration brings regional conditioning directly into the generation pipeline. Define compositional zones within the frame and assign independent parameters to each — separate prompts, weights, and conditioning per region.</p>
+                <p>EliGen integration brings regional conditioning directly into the generation pipeline. Define compositional zones within the frame and assign independent parameters to each — separate prompts, weights, and conditioning per region. This gives you direct spatial control over composition without relying entirely on prompt engineering.</p>
 
                 <h3>How It Works</h3>
-                <p>Rather than fighting the model for spatial control through prompt engineering alone, EliGen lets you explicitly partition the frame into regions. Each region gets its own prompt and conditioning weight, giving you direct control over composition.</p>
-
-                <h3>Defining Zones</h3>
-                <ol>
-                    <li>[Step-by-step for defining zones — to be documented]</li>
-                </ol>
+                <p>Rather than sending a single prompt to the model and hoping for a specific composition, EliGen lets you explicitly partition the frame. Each zone is a mask that defines a spatial area, paired with a prompt and weight that apply only within that area. Zones are composited during the denoising process — the model integrates them into a coherent result rather than pasting regions together.</p>
+                <p>EliGen is activated by selecting a Qwen Image + EliGen model in the <a href="#image-panel">Image Panel</a>. Zone masks are loaded as <code>.psd</code> or <code>.ora</code> files — each layer in the file becomes a separate conditioning zone.</p>
 
                 <h3>Zone Parameters</h3>
                 <table class="wiki-table">
@@ -265,17 +396,26 @@
                         <tr><th>Parameter</th><th>Description</th></tr>
                     </thead>
                     <tbody>
-                        <tr><td>Region Mask</td><td>Defines the spatial area of this zone within the frame</td></tr>
-                        <tr><td>Prompt</td><td>Text description specific to this zone</td></tr>
-                        <tr><td>Weight</td><td>Conditioning strength for this zone relative to others</td></tr>
+                        <tr><td>Entity Masks</td><td>Path to a <code>.psd</code> or <code>.ora</code> file — each layer is treated as a separate zone mask</td></tr>
+                        <tr><td>Context Image</td><td>Optional reference image for the overall scene; set EliGen alpha (0.0–2.0) to control its influence</td></tr>
+                        <tr><td>EliGen Alpha</td><td>Strength of the context image's influence on the full generation (0.0 = no influence, 2.0 = strong)</td></tr>
+                        <tr><td>Mask Strength</td><td>Per-zone conditioning strength</td></tr>
                     </tbody>
                 </table>
+
+                <h3>Practical Notes</h3>
+                <ul>
+                    <li>The global prompt still applies to the whole frame — zone prompts add to it rather than replace it</li>
+                    <li>Zones work best for broad compositional control (foreground subject, background environment, sky) rather than fine detail placement</li>
+                    <li>EliGen and ControlNet can be used together — ControlNet handles structural conditioning, EliGen handles content per region</li>
+                    <li>Create zone masks in any application that exports layered PSD or ORA files — Photoshop, Krita, and Affinity Photo all work</li>
+                </ul>
             </div>
 
             <!-- Upscaling -->
             <div class="wiki-section" id="upscaling">
                 <h2>Upscaling</h2>
-                <p>FUK integrates Real-ESRGAN for post-generation upscaling. Apply to single images or to video frame sequences before compositing or delivery.</p>
+                <p>FUK integrates Real-ESRGAN for post-generation upscaling. Apply to single images or to video frame sequences. Upscaling runs as a separate pass in the <a href="#postprocess-panel">Postprocess Panel</a> — it does not require re-running the full generation pipeline, and the original output is always preserved.</p>
 
                 <h3>Available Models</h3>
                 <table class="wiki-table">
@@ -283,28 +423,32 @@
                         <tr><th>Model</th><th>Best For</th><th>Scale</th></tr>
                     </thead>
                     <tbody>
-                        <tr><td>Real-ESRGAN x4</td><td>General photographic content</td><td>4×</td></tr>
-                        <tr><td>Real-ESRGAN x2</td><td>Moderate upscale, less processing time</td><td>2×</td></tr>
-                        <tr><td>[Other models]</td><td>[description]</td><td>[scale]</td></tr>
+                        <tr><td>Real-ESRGAN x4 Plus</td><td>General photographic and detailed content</td><td>4×</td></tr>
+                        <tr><td>Real-ESRGAN x2 Plus</td><td>Moderate upscale with less processing time</td><td>2×</td></tr>
+                        <tr><td>Real-ESRGAN x4 Anime</td><td>Illustrated, stylized, or anime-adjacent output</td><td>4×</td></tr>
+                        <tr><td>RealESR-General-x4v3</td><td>General-purpose; handles a wider variety of content types</td><td>4×</td></tr>
                     </tbody>
                 </table>
 
-                <div class="wiki-note">
-                    <p>Upscaling is a post-process step and does not require a new generation pass.</p>
-                </div>
+                <h3>Workflow</h3>
+                <ol>
+                    <li>Go to the <a href="#postprocess-panel">Postprocess Panel</a> and select the Upscale tab</li>
+                    <li>Load an image or frame sequence</li>
+                    <li>Select an upscaling model and scale factor</li>
+                    <li>Run — the upscaled result is saved as a new version alongside the original</li>
+                </ol>
+
+                <h3>Upscaling Video</h3>
+                <p>When applied to a video sequence, upscaling runs frame by frame. Processing time scales linearly with frame count. The output is a new upscaled frame sequence saved in the same version directory.</p>
             </div>
 
             <!-- Frame Interpolation -->
             <div class="wiki-section" id="interpolation">
                 <h2>Frame Interpolation</h2>
-                <p>FILM (Frame Interpolation for Large Motion) synthesizes intermediate frames to increase the effective frame rate of generated video. Useful for smoothing motion or converting a lower frame count output to a deliverable rate.</p>
+                <p>FILM (Frame Interpolation for Large Motion) synthesizes intermediate frames to increase the effective frame rate of generated video. Useful for smoothing motion, converting a 12fps generation to a 24fps deliverable, or creating slow-motion sequences from standard-rate output. Interpolation runs in the <a href="#postprocess-panel">Postprocess Panel</a>.</p>
 
-                <h3>Usage</h3>
-                <ol>
-                    <li>Generate or import a video sequence</li>
-                    <li>Select an interpolation factor (2×, 4×, etc.)</li>
-                    <li>Run interpolation — output is a new sequence at the higher frame rate</li>
-                </ol>
+                <h3>How FILM Works</h3>
+                <p>FILM uses a learned model to estimate motion between adjacent frames and synthesize intermediate frames that are temporally consistent. Unlike traditional optical flow methods, it handles large displacements and occlusions more gracefully — making it a better fit for AI-generated content where frame-to-frame motion can be irregular.</p>
 
                 <h3>Parameters</h3>
                 <table class="wiki-table">
@@ -312,126 +456,927 @@
                         <tr><th>Parameter</th><th>Description</th></tr>
                     </thead>
                     <tbody>
-                        <tr><td>Interpolation Factor</td><td>Frame rate multiplier (2× doubles frames, 4× quadruples)</td></tr>
-                        <tr><td>[Other params]</td><td>[description]</td></tr>
+                        <tr><td>Source Framerate</td><td>The frame rate of the input sequence — must match the actual rate the sequence was generated at</td></tr>
+                        <tr><td>Target Framerate</td><td>Desired output frame rate — FILM synthesizes however many intermediate frames are needed to reach it</td></tr>
+                        <tr><td>Video Output Mode</td><td>Whether to produce an MP4 preview alongside the output frame sequence</td></tr>
                     </tbody>
                 </table>
+
+                <h3>Practical Notes</h3>
+                <ul>
+                    <li>FILM performs best with smooth, continuous motion — highly chaotic or flickering content will not interpolate cleanly</li>
+                    <li>Generated at 12fps → interpolated to 24fps is the most common workflow</li>
+                    <li>Interpolation does not generate new content — it synthesizes in-between frames; it cannot recover motion that wasn't present in the original generation</li>
+                    <li>Interpolation runs on the frame sequence, not the MP4 preview — load the sequence directory, not the video file</li>
+                </ul>
             </div>
 
             <!-- AOVs -->
             <div class="wiki-section" id="aovs">
                 <h2>AOVs & Passes</h2>
-                <p>FUK generates Arbitrary Output Variables (AOVs) alongside the beauty render. These technical passes enable compositing, grading, and integration with professional DCC tools downstream.</p>
+                <p>FUK generates Arbitrary Output Variables (AOVs) alongside the beauty render via the <a href="#layers-panel">Layers Panel</a>. These technical passes enable compositing, grading, and integration with professional DCC tools downstream.</p>
 
                 <div class="wiki-warning">
-                    <p>AOV outputs are currently being refined. Quality and coverage are improving. Feedback on specific issues is appreciated — contributions welcome.</p>
+                    <p>AOV outputs are currently being refined. Quality and coverage are improving across builds. Feedback on specific issues is appreciated — contributions welcome.</p>
                 </div>
 
                 <h3>Available Passes</h3>
                 <table class="wiki-table">
                     <thead>
-                        <tr><th>Pass</th><th>Description</th><th>Status</th></tr>
+                        <tr><th>Pass</th><th>Description</th><th>Channels</th><th>Status</th></tr>
                     </thead>
                     <tbody>
-                        <tr><td>Beauty</td><td>Main generation output</td><td>Stable</td></tr>
-                        <tr><td>Depth</td><td>Scene depth encoded as 32-bit float</td><td>In refinement</td></tr>
-                        <tr><td>Normal</td><td>Surface normal directions (world or camera space)</td><td>In refinement</td></tr>
-                        <tr><td>Cryptomatte</td><td>Object / material segmentation masks</td><td>In refinement</td></tr>
+                        <tr><td>Beauty</td><td>Main generation output — full color render</td><td>RGB</td><td>Stable</td></tr>
+                        <tr><td>Alpha</td><td>Subject mask / transparency channel</td><td>A</td><td>Stable</td></tr>
+                        <tr><td>Depth</td><td>Scene depth encoded as normalized 32-bit float — closer subjects brighter</td><td>Z</td><td>In refinement</td></tr>
+                        <tr><td>Normals</td><td>Surface normal directions in world or tangent space — RGB encodes XYZ orientation</td><td>RGB</td><td>In refinement</td></tr>
+                        <tr><td>Cryptomatte</td><td>Object and material segmentation masks compatible with the Cryptomatte standard, generated via SAM2</td><td>RGBA × layers</td><td>In refinement</td></tr>
                     </tbody>
                 </table>
+
+                <h3>Using AOVs in Compositing</h3>
+                <p>AOV passes are exported together in a single multi-layer EXR file — see <a href="#exr-export">EXR Export</a> for the layer structure. Typical uses:</p>
+                <ul>
+                    <li><strong>Depth</strong> — depth-of-field in comp, Z-based fog, depth sorting of elements</li>
+                    <li><strong>Normals</strong> — relighting in comp, surface-aware grading, integration with CG elements</li>
+                    <li><strong>Cryptomatte</strong> — instant object isolation, per-element color correction, matte extraction without manual rotoscoping</li>
+                    <li><strong>Alpha</strong> — subject extraction, compositing over new backgrounds</li>
+                </ul>
             </div>
 
             <!-- EXR Export -->
             <div class="wiki-section" id="exr-export">
                 <h2>EXR Export</h2>
-                <p>FUK exports multi-layer 32-bit EXR files containing all available AOV passes in a single file. EXR is the standard interchange format in professional VFX and compositing pipelines.</p>
+                <p>FUK exports multi-layer EXR files containing all available AOV passes in a single file via the <a href="#export-panel">Export Panel</a>. EXR is the standard interchange format in professional VFX and compositing pipelines — it preserves full floating-point precision and carries all passes in one file.</p>
 
                 <h3>Layer Structure</h3>
                 <table class="wiki-table">
                     <thead>
-                        <tr><th>Layer</th><th>Channels</th><th>Description</th></tr>
+                        <tr><th>Layer Name</th><th>Channels</th><th>Description</th></tr>
                     </thead>
                     <tbody>
-                        <tr><td>RGBA</td><td>R, G, B, A</td><td>Beauty render</td></tr>
-                        <tr><td>depth</td><td>Z</td><td>Depth pass (32-bit float)</td></tr>
-                        <tr><td>normal</td><td>R, G, B</td><td>Normal pass</td></tr>
-                        <tr><td>crypto_*</td><td>R, G, B, A</td><td>Cryptomatte layers</td></tr>
+                        <tr><td><code>RGBA</code></td><td>R, G, B, A</td><td>Beauty render with alpha</td></tr>
+                        <tr><td><code>depth</code></td><td>Z</td><td>Depth pass</td></tr>
+                        <tr><td><code>normal</code></td><td>R, G, B</td><td>Surface normals</td></tr>
+                        <tr><td><code>crypto_object</code></td><td>R, G, B, A</td><td>Cryptomatte object layer</td></tr>
+                        <tr><td><code>crypto_material</code></td><td>R, G, B, A</td><td>Cryptomatte material layer</td></tr>
                     </tbody>
                 </table>
 
+                <h3>Export Options</h3>
+                <ul>
+                    <li><strong>Multi-Layer EXR</strong> — all passes combined into a single file per frame</li>
+                    <li><strong>Single-Layer EXRs</strong> — one file per pass per frame; useful when downstream tools don't support multi-layer EXR</li>
+                    <li><strong>Bit Depth</strong> — 8, 16, or 32-bit per channel; 32-bit recommended for technical passes</li>
+                    <li><strong>Compression</strong> — ZIP, PIZ, RLE, and others; PIZ is efficient for noisy data, ZIP for smooth gradients</li>
+                </ul>
+
                 <h3>Compatible Applications</h3>
                 <ul>
-                    <li>Nuke</li>
-                    <li>Fusion / DaVinci Resolve</li>
-                    <li>After Effects (with EXtractoR or ProEXR)</li>
-                    <li>Blender Compositor</li>
-                    <li>Houdini</li>
+                    <li>Nuke (full Cryptomatte support via the CryptomatteNode)</li>
+                    <li>Fusion / DaVinci Resolve (Cryptomatte operator)</li>
+                    <li>After Effects (with <a href="https://www.fnordware.com/ProEXR/" target="_blank">ProEXR</a> for multi-layer access)</li>
+                    <li>Blender Compositor (native multi-layer EXR and Cryptomatte)</li>
+                    <li>Houdini COPs</li>
+                    <li>Katana</li>
                 </ul>
-            </div>
-
-            <!-- History Panel -->
-            <div class="wiki-section" id="history-panel">
-                <h2>History Panel</h2>
-                <p>The History Panel is the main hub of FUK. It displays all generated outputs organized by project / shot / version, and provides access to metadata, re-queuing, and asset management.</p>
-
-                <h3>Features</h3>
-                <ul>
-                    <li>Browsable history of all generations organized by project hierarchy</li>
-                    <li>Per-entry metadata display: seed, parameters, model, timestamp</li>
-                    <li>Re-queue any historical generation with identical parameters</li>
-                    <li>Export or locate generated assets on disk</li>
-                    <li>[Additional features — to be documented]</li>
-                </ul>
-
-                <h3>Navigation</h3>
-                <p>[How to navigate the project / shot / version hierarchy — to be documented]</p>
-            </div>
-
-            <!-- Template Generator -->
-            <div class="wiki-section" id="template-generator">
-                <h2>Template Generator</h2>
-                <p>AI generation spec dimensions and aspect ratios have a lot of quirks. The Template Generator provides a guided way to create spec templates — pick what you need and it handles the specifics so you don't have to remember them.</p>
-
-                <h3>How to Use</h3>
-                <ol>
-                    <li>Open the Template Generator</li>
-                    <li>Select your target output type and aspect ratio</li>
-                    <li>Configure any additional parameters</li>
-                    <li>Save the template — it will be available as a preset in generation panels</li>
-                </ol>
-
-                <h3>Available Presets</h3>
-                <p>[List of built-in presets and aspect ratio options — to be documented]</p>
             </div>
 
             <!-- LoRA Dataset Builder -->
             <div class="wiki-section" id="lora-dataset-builder">
                 <h2>LoRA Dataset Builder</h2>
-                <p>The LoRA Dataset Builder automates dataset preparation for training custom LoRA models. Add source images, select a content type preset, and the system handles processing, captioning, and organization.</p>
+                <p>The LoRA Dataset Builder generates training datasets for custom LoRA models using FUK's own generation pipeline. Rather than sourcing and curating images manually, it generates a structured set of variations from a subject description — covering pose, lighting, and context diversity needed for effective LoRA training. The tool lives in the Utilities tab.</p>
 
-                <h3>How to Use</h3>
+                <h3>Workflow</h3>
+                <p>The builder runs in three phases:</p>
                 <ol>
-                    <li>Open the LoRA Dataset Builder</li>
-                    <li>Add source images via drag-and-drop or file picker</li>
-                    <li>Select a content type preset (character, style, object, environment, etc.)</li>
-                    <li>Run — images are automatically processed and organized</li>
-                    <li>Output is ready for use with your LoRA training pipeline</li>
+                    <li><strong>Setup</strong> — configure the subject, model, and generation parameters</li>
+                    <li><strong>Generation</strong> — FUK generates the full variation set; progress is tracked in real time with a cancel option</li>
+                    <li><strong>Curation</strong> — review generated images and vote thumbs up / thumbs down on each; finalize saves only the approved images</li>
                 </ol>
 
-                <h3>Content Type Presets</h3>
+                <h3>Setup Parameters</h3>
                 <table class="wiki-table">
                     <thead>
-                        <tr><th>Preset</th><th>Best For</th><th>Processing Applied</th></tr>
+                        <tr><th>Parameter</th><th>Description</th></tr>
                     </thead>
                     <tbody>
-                        <tr><td>[Preset name]</td><td>[description]</td><td>[processing]</td></tr>
-                        <tr><td>[Preset name]</td><td>[description]</td><td>[processing]</td></tr>
-                        <tr><td>[Preset name]</td><td>[description]</td><td>[processing]</td></tr>
+                        <tr><td>Subject Type</td><td>Category preset: character, object, or environment — sets the variation pack and captioning approach</td></tr>
+                        <tr><td>Subject Name</td><td>Name or token for the subject; used as the trigger word in generated captions</td></tr>
+                        <tr><td>Preset Pack</td><td>Variation pack for the selected subject type — determines what poses, lighting, and contexts are generated</td></tr>
+                        <tr><td>Variation Deselection</td><td>Uncheck specific variations from the pack to skip them</td></tr>
+                        <tr><td>Seed Strategy</td><td>Fixed — all variations use a single seed for consistency; Random — each variation gets its own seed</td></tr>
+                        <tr><td>LoRA</td><td>Optional: generate using an existing LoRA to produce in-style dataset images</td></tr>
+                        <tr><td>LoRA Alpha</td><td>Blend weight for the LoRA if one is selected</td></tr>
+                        <tr><td>Steps / CFG Scale</td><td>Generation quality parameters — same as the Image Panel</td></tr>
                     </tbody>
                 </table>
 
-                <h3>Output Format</h3>
-                <p>[Description of output structure — image files, caption files, folder organization — to be documented]</p>
+                <h3>Curation Phase</h3>
+                <p>After generation completes, every image is presented for review. Thumbs up keeps the image in the final dataset; thumbs down excludes it. Finalize writes only the approved images and their captions to the output directory. Rejected images are not deleted — they remain in a <code>rejected/</code> subdirectory in case you want to revisit them.</p>
+
+                <h3>Output Structure</h3>
+                <pre><code>lora_datasets/[subject_name]/
+├── approved/
+│   ├── 0001.png
+│   ├── 0001.txt       ← caption file, one per image
+│   ├── 0002.png
+│   └── ...
+├── rejected/
+│   └── ...
+└── dataset.json       ← subject name, preset, seed strategy, generation log</code></pre>
+
+                <h3>Captioning</h3>
+                <p>Captions are generated automatically for each image based on the subject name and variation context. The caption format is compatible with most LoRA training pipelines (kohya_ss, SimpleTuner, etc.). Captions can be edited manually after generation — open the caption editor from the dataset panel before finalizing.</p>
+            </div>
+
+            <!-- App Layout -->
+            <div class="wiki-section" id="app-layout">
+                <h2>App Layout</h2>
+                <p>The FUK interface is a single-page application organized around a tab bar at the top, a project bar below it, and a collapsible generation history panel on the right. Each tab corresponds to a stage in the pipeline — from generation through post-processing and export.</p>
+
+                <h3>Tab Overview</h3>
+                <table class="wiki-table">
+                    <thead>
+                        <tr><th>Tab</th><th>Purpose</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>Image</td><td>Text-to-image and image-to-image generation</td></tr>
+                        <tr><td>Video</td><td>Image-to-video and controlled video generation</td></tr>
+                        <tr><td>Preprocess</td><td>Generate conditioning maps — depth, pose, edge — from input images or video</td></tr>
+                        <tr><td>Postprocess</td><td>Upscaling and frame interpolation</td></tr>
+                        <tr><td>Layers</td><td>Generate AOV passes — depth, normals, Cryptomatte — from an existing image or video</td></tr>
+                        <tr><td>Export</td><td>Assemble AOV passes into multi-layer EXR files</td></tr>
+                        <tr><td>Utilities</td><td>Spec Tool and LoRA Dataset Builder</td></tr>
+                    </tbody>
+                </table>
+
+                <h3>Typical Pipeline Flow</h3>
+                <ol>
+                    <li><strong>Image or Video tab</strong> — generate the primary output</li>
+                    <li><strong>Preprocess tab</strong> (optional) — extract conditioning maps if you need ControlNet on the next generation pass</li>
+                    <li><strong>Layers tab</strong> (optional) — generate AOV passes from the output</li>
+                    <li><strong>Postprocess tab</strong> (optional) — upscale or interpolate</li>
+                    <li><strong>Export tab</strong> — assemble all passes into a deliverable EXR</li>
+                </ol>
+
+                <h3>Result Passing Between Tabs</h3>
+                <p>Results from any tab can be dragged from the Generation History panel and dropped onto the input area of any other tab. The output path is inserted automatically. This is the primary way to chain pipeline steps — no manual file picking required.</p>
+
+                <h3>Playback Speed</h3>
+                <p>A global playback speed control (6–48 FPS) is available in the main app header. It applies to video previews across all tabs — set it to match the frame rate of your generated sequences for accurate preview timing.</p>
+            </div>
+
+            <!-- Project Bar -->
+            <div class="wiki-section" id="project-bar">
+                <h2>Project Bar</h2>
+                <p>The Project Bar sits below the tab bar and persists across all tabs. It manages the three-level hierarchy — project / shot / version — that all FUK outputs are organized under. Every save operation writes to the currently selected project, shot, and version.</p>
+
+                <h3>Hierarchy</h3>
+                <ul>
+                    <li><strong>Project</strong> — top-level container; typically a film, commercial, or personal project. Maps to a directory under <code>outputs/</code></li>
+                    <li><strong>Shot</strong> — a discrete sequence or scene within the project. Maps to a subdirectory under the project</li>
+                    <li><strong>Version</strong> — an individual saved result within a shot. Versions increment automatically; each version gets its own directory containing the output files and <code>meta.json</code> sidecar</li>
+                </ul>
+
+                <h3>Controls</h3>
+                <table class="wiki-table">
+                    <thead>
+                        <tr><th>Control</th><th>Action</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>Project dropdown</td><td>Switch between existing projects; opens a folder browser to select or create a project directory</td></tr>
+                        <tr><td>Shot dropdown</td><td>Switch between shots in the current project</td></tr>
+                        <tr><td>Version dropdown</td><td>Switch between saved versions of the current shot; selecting a version loads its metadata back into the active tab</td></tr>
+                        <tr><td>Save</td><td>Save the current generation result to the active project/shot/version</td></tr>
+                        <tr><td>Version Up</td><td>Increment the version number and save — preserves the previous version</td></tr>
+                        <tr><td>New Shot</td><td>Create a new shot within the current project</td></tr>
+                        <tr><td>New Project</td><td>Create a new project directory</td></tr>
+                    </tbody>
+                </table>
+
+                <h3>Unsaved Changes</h3>
+                <p>When a generation result is present but not yet saved, the Project Bar displays an unsaved changes indicator. Switching shots or versions without saving will prompt for confirmation.</p>
+            </div>
+
+            <!-- Media Input -->
+            <div class="wiki-section" id="media-input">
+                <h2>Media Input</h2>
+                <p>The Media Input component (MediaUploader) is the standard file input throughout FUK. It appears in every tab that accepts an image, video, or sequence as input. All instances share the same behavior and supported formats.</p>
+
+                <h3>Input Methods</h3>
+                <ul>
+                    <li><strong>Drag and drop</strong> — drag files or folders directly from your file manager onto the drop zone</li>
+                    <li><strong>File dialog</strong> — click the upload area to open a native file picker (via the backend tkinter dialog); supports multi-select</li>
+                    <li><strong>History drag</strong> — drag an item from the Generation History panel directly onto a Media Input to load that output's path without manual file picking</li>
+                    <li><strong>Path paste</strong> — paste a file path directly into the input field</li>
+                </ul>
+
+                <h3>Supported Formats</h3>
+                <table class="wiki-table">
+                    <thead>
+                        <tr><th>Type</th><th>Extensions</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>Images</td><td><code>.png</code>, <code>.jpg</code>, <code>.jpeg</code>, <code>.webp</code>, <code>.bmp</code>, <code>.tiff</code>, <code>.exr</code>, <code>.dpx</code></td></tr>
+                        <tr><td>Video</td><td><code>.mp4</code>, <code>.mov</code>, <code>.avi</code>, <code>.mkv</code>, <code>.webm</code></td></tr>
+                        <tr><td>Image Sequences</td><td>A directory containing sequentially named image files; FUK detects naming patterns like <code>####.png</code> or <code>%04d.png</code> automatically</td></tr>
+                    </tbody>
+                </table>
+
+                <h3>Dimension Detection</h3>
+                <p>When an image or sequence is loaded, FUK reads its dimensions automatically. Tabs that derive their output resolution from the input (Video, Preprocess, Postprocess) update their dimension display immediately. The Image tab displays a warning if the input dimensions don't align to the model's required 16px grid, and offers a "Pad to [size]" button to adjust automatically.</p>
+            </div>
+
+            <!-- Seed Control -->
+            <div class="wiki-section" id="seed-control">
+                <h2>Seed Control</h2>
+                <p>The Seed Control component appears in the Image and Video tabs. It manages the randomness seed used during generation — the single most important parameter for reproducibility.</p>
+
+                <h3>Modes</h3>
+                <table class="wiki-table">
+                    <thead>
+                        <tr><th>Mode</th><th>Behavior</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>Random</td><td>A new random seed is generated each time you generate. Use this when exploring — every result will be different even with identical settings</td></tr>
+                        <tr><td>Fixed</td><td>The same seed is used for every generation. Combined with identical parameters, this produces identical results — the basis for repeatable output</td></tr>
+                        <tr><td>Increment</td><td>The seed increments by 1 after each generation. Useful for batch exploration — you get a sequence of related but distinct results</td></tr>
+                    </tbody>
+                </table>
+
+                <h3>Controls</h3>
+                <ul>
+                    <li><strong>Seed input</strong> — visible in Fixed and Increment modes; enter any integer</li>
+                    <li><strong>Randomize button</strong> (dice icon) — generates a new random seed and puts it in the field; available in Fixed and Increment modes so you can start from a random point while still locking in repeatability</li>
+                    <li><strong>Save to favorites</strong> (star button) — saves the current seed with an optional label; saved seeds persist across sessions</li>
+                    <li><strong>Saved seeds dropdown</strong> — load any previously saved seed in one click</li>
+                </ul>
+
+                <h3>Favorites</h3>
+                <p>Favorite seeds are stored in local settings and persist across sessions. Add a descriptive note when saving a seed — the note appears in the dropdown, making it easy to identify which seed produced a specific result without having to cross-reference the History Panel.</p>
+            </div>
+
+            <!-- Image Panel -->
+            <div class="wiki-section" id="image-panel">
+                <h2>Image Panel</h2>
+                <p>The Image tab is the primary generation interface. Its layout is divided into a preview area on the left and a column of parameter cards on the right.</p>
+
+                <h3>Preview Area</h3>
+                <p>Displays the current generation result in a zoomable, pannable viewer. Shows the output dimensions and generation time. When no result is present, the placeholder displays the configured target dimensions. History items can be dragged from the Generation History panel and dropped here to reload their metadata into all parameter cards.</p>
+
+                <h3>Image Tools Card</h3>
+                <p>Visible when an edit or context model is selected. Contains controls for reference image input:</p>
+                <ul>
+                    <li><strong>Control Images</strong> — <a href="#media-input">Media Input</a> for one or more reference images used as conditioning; supports multi-image upload</li>
+                    <li><strong>Edit Strength</strong> — how much the model deviates from the reference (0.0 = identical to reference, 1.0 = freely interprets); range 0.0–1.0</li>
+                    <li><strong>Context Image</strong> (EliGen models) — optional scene-level reference; EliGen alpha (0.0–2.0) controls its influence</li>
+                    <li><strong>Entity Masks</strong> (EliGen models) — path to a <code>.psd</code> or <code>.ora</code> file containing per-zone masks; each layer becomes an independent conditioning zone</li>
+                </ul>
+
+                <h3>Model & Style Card</h3>
+                <ul>
+                    <li><strong>Model dropdown</strong> — selects the active image model; the available list is populated from <code>config/models.json</code>; settings are persisted per-model so switching models doesn't lose your configuration for either</li>
+                    <li><strong>LoRA section</strong> — add multiple LoRAs via the add button; each LoRA has its own dropdown (selects from <code>models/loras/</code>), multiplier (0.0–2.0), bypass toggle, and remove button; bypass lets you quickly A/B a LoRA without removing it from the list</li>
+                </ul>
+
+                <h3>Generation Card</h3>
+                <ul>
+                    <li><strong>Steps</strong> — preset buttons (20, 40) or custom input (1–100)</li>
+                    <li><strong>Guidance Scale</strong> — prompt adherence, 1.0–10.0</li>
+                    <li><strong>Exponential Shift Mu</strong> — optional; adjusts noise schedule shift; leave blank for model default or enable auto-calculation</li>
+                    <li><strong>VRAM Management</strong> — preset dropdown controlling the model offloading strategy; higher offload settings reduce VRAM usage at the cost of generation speed</li>
+                </ul>
+
+                <h3>Dimensions Card</h3>
+                <p>For text-to-image models:</p>
+                <ul>
+                    <li><strong>Aspect Ratio</strong> — dropdown of common ratios; changing it recalculates height automatically</li>
+                    <li><strong>Width</strong> — input in pixels (512–2048), snaps to 16px; height is calculated from the aspect ratio</li>
+                </ul>
+                <p>For edit/context models, the Dimensions card instead shows the source image dimensions and flags any 16px alignment issues with a "Pad to [size]" button.</p>
+
+                <h3>Prompt Card</h3>
+                <p>Auto-resizing textareas for the positive prompt and negative prompt. Both expand as you type — no fixed height limit.</p>
+
+                <h3>Footer</h3>
+                <p>Generate button (disabled until a prompt is entered), batch count control, and a generation progress indicator. Clicking Generate opens the generation modal with a live console and progress bar.</p>
+            </div>
+
+            <!-- Video Panel -->
+            <div class="wiki-section" id="video-panel">
+                <h2>Video Panel</h2>
+                <p>The Video tab drives Wan I2V and Fun Control video generation. Its layout mirrors the Image tab — preview on the left, parameter cards on the right.</p>
+
+                <h3>Preview Area</h3>
+                <p>A full video player with playback controls, loop, and autoplay. Displays output dimensions, frame count, and duration. The playback speed respects the global FPS setting in the app header. History items can be dropped here to reload metadata.</p>
+
+                <h3>Input Images Card</h3>
+                <p>Content depends on the selected task:</p>
+                <ul>
+                    <li><strong>Start Image</strong> (I2V) — required; the first frame of the video; <a href="#media-input">Media Input</a>; detected dimensions are shown and used to calculate output resolution</li>
+                    <li><strong>End Image</strong> (I2V, optional) — if provided, the video will transition toward this image as the final frame</li>
+                    <li><strong>Control Video</strong> (Fun Control) — required; a reference video that guides the motion and structure of the output; accepts video files or frame sequences</li>
+                </ul>
+
+                <h3>Frame Settings Card</h3>
+                <ul>
+                    <li><strong>Frame Count</strong> — total frames to generate; must satisfy the 4n+1 pattern (minimum 5); invalid values are flagged inline</li>
+                    <li><strong>Frame Inherit</strong> — when enabled and a control video is loaded, frame count is set automatically to match the control video's length</li>
+                    <li><strong>Trim Frames</strong> — optional upper limit; clips the output at this frame count even if more were generated</li>
+                    <li><strong>Frame Duration display</strong> — shows the calculated duration in seconds and milliseconds based on frame count and the global playback FPS setting</li>
+                </ul>
+
+                <h3>Dimensions Card</h3>
+                <ul>
+                    <li><strong>Source dimensions</strong> — read from the start image; displayed for reference</li>
+                    <li><strong>Scale Factor</strong> — 100%, 75%, 50%, or 25%; output resolution is calculated from the source dimensions × scale factor, rounded to the nearest 64px</li>
+                </ul>
+
+                <h3>Model & Settings Card</h3>
+                <ul>
+                    <li><strong>Task dropdown</strong> — selects the video pipeline (I2V-A14B, Fun Control, etc.)</li>
+                    <li><strong>LoRA</strong> — single LoRA with multiplier and bypass toggle (video generation supports one LoRA at a time)</li>
+                </ul>
+
+                <h3>Generation Card</h3>
+                <p>Steps, Guidance Scale, Sigma Shift, Motion Bucket ID, Denoising Strength, Sliding Window Size/Stride, and VRAM Management — see <a href="#video-generation">Video Generation</a> for parameter descriptions.</p>
+            </div>
+
+            <!-- Preprocess Panel -->
+            <div class="wiki-section" id="preprocess-panel">
+                <h2>Preprocess Panel</h2>
+                <p>The Preprocess tab converts input images or videos into conditioning maps — depth, pose skeleton, or edge maps — for use as ControlNet inputs in the Image tab. Preprocessing is a separate step from generation so you can reuse a conditioning map across many generations without recomputing it.</p>
+
+                <h3>Layout</h3>
+                <p>A method selector at the top (Canny / OpenPose / Depth) switches between preprocessing modes. Below it: an input section with a <a href="#media-input">Media Input</a>, method-specific parameter controls, and a before/after result preview.</p>
+
+                <h3>Video Mode</h3>
+                <p>When a video or frame sequence is loaded, the panel switches to video mode. Preprocessing runs per-frame and outputs a new sequence. The output mode setting controls whether the result is saved as an MP4, a frame sequence, or both.</p>
+
+                <h3>Method Parameters</h3>
+                <p>See <a href="#preprocessors">Preprocessors</a> for full descriptions of each method's parameters.</p>
+
+                <h3>Result Display</h3>
+                <p>The before/after preview shows the original input alongside the preprocessed output. For video, a frame counter lets you step through the sequence to verify quality before committing to a full run.</p>
+            </div>
+
+            <!-- Postprocess Panel -->
+            <div class="wiki-section" id="postprocess-panel">
+                <h2>Postprocess Panel</h2>
+                <p>The Postprocess tab handles upscaling and frame interpolation. Both operations accept the same input types (image, video, or sequence) and save their output as a new versioned result alongside the original.</p>
+
+                <h3>Upscale Tab</h3>
+                <ul>
+                    <li><strong>Input</strong> — <a href="#media-input">Media Input</a>; accepts images, videos, or frame sequences</li>
+                    <li><strong>Method</strong> — upscaling model selector (Real-ESRGAN variants)</li>
+                    <li><strong>Factor</strong> — scale multiplier: 1×, 2×, 3×, or 4×</li>
+                </ul>
+                <p>The result preview shows a before/after comparison. For video, the comparison is shown at the current frame. See <a href="#upscaling">Upscaling</a> for available models.</p>
+
+                <h3>Frame Interpolation Tab</h3>
+                <ul>
+                    <li><strong>Input</strong> — frame sequence or video file</li>
+                    <li><strong>Method</strong> — interpolation model (RIFE)</li>
+                    <li><strong>Source Framerate</strong> — the frame rate of the input sequence; must be set correctly for the output to play at the right speed</li>
+                    <li><strong>Target Framerate</strong> — desired output frame rate; FILM synthesizes as many intermediate frames as needed</li>
+                    <li><strong>Video Output Mode</strong> — whether to generate an MP4 preview alongside the output sequence</li>
+                </ul>
+                <p>See <a href="#interpolation">Frame Interpolation</a> for more detail.</p>
+            </div>
+
+            <!-- Layers Panel -->
+            <div class="wiki-section" id="layers-panel">
+                <h2>Layers Panel</h2>
+                <p>The Layers tab generates AOV passes — depth maps, surface normals, and Cryptomatte segmentation — from an existing image or video. This is a post-generation step: you bring your finished beauty output here and extract the technical passes needed for compositing.</p>
+
+                <h3>Input</h3>
+                <p>A <a href="#media-input">Media Input</a> at the top of the panel accepts a single image, video, or frame sequence. Drop a result from the Generation History to load it automatically.</p>
+
+                <h3>Layer Selection Card</h3>
+                <p>Checkboxes for each available pass: Depth, Normals, Cryptomatte. Only the checked passes are computed — disable passes you don't need to save processing time.</p>
+
+                <h3>Depth Settings Card</h3>
+                <ul>
+                    <li><strong>Model</strong> — Depth Anything v3 variant: <code>da3_mono_large</code>, <code>da3_metric_large</code>, <code>da3_large</code>, <code>da3_giant</code>; larger models are more accurate but slower</li>
+                    <li><strong>Invert</strong> — flips near/far encoding</li>
+                    <li><strong>Normalize</strong> — stretches depth values to fill the 0–1 range</li>
+                    <li><strong>Range Min / Max</strong> — clamps the output depth range; useful for isolating a specific depth band</li>
+                </ul>
+
+                <h3>Normals Settings Card</h3>
+                <ul>
+                    <li><strong>Method</strong> — <code>from_depth</code> derives normals from the depth pass; <code>scratch</code> estimates normals directly from the image</li>
+                    <li><strong>Depth Model</strong> — which DA3 variant to use for the depth step (only relevant when method is <code>from_depth</code>)</li>
+                    <li><strong>Space</strong> — <code>tangent</code> (surface-relative) or <code>world</code> (camera-relative) normal encoding</li>
+                    <li><strong>Flip Y</strong> — flips the Y axis of the normal map; required by some compositing applications</li>
+                    <li><strong>Intensity</strong> — normal map contrast/strength (0.0–2.0)</li>
+                    <li><strong>Num Iterations</strong> — refinement passes for the normal estimation (1–20); more iterations improve accuracy at the cost of speed</li>
+                    <li><strong>FOV Degrees</strong> — assumed camera field of view used in the depth-to-normal conversion (1–180)</li>
+                    <li><strong>First Frame Only</strong> — when processing video, compute normals only for the first frame; useful for quick checks before a full run</li>
+                </ul>
+
+                <h3>Cryptomatte Settings Card</h3>
+                <ul>
+                    <li><strong>Model</strong> — SAM2 variant used for object segmentation (<code>sam2_hiera_large</code>)</li>
+                    <li><strong>Max Objects</strong> — maximum number of distinct objects to segment and track</li>
+                    <li><strong>Min Area</strong> — minimum object size in pixels; objects smaller than this threshold are ignored</li>
+                </ul>
+
+                <h3>Result Display</h3>
+                <p>Generated passes are shown as individual previews below the settings. Each pass can be inspected at full resolution before being passed to the <a href="#export-panel">Export Panel</a>.</p>
+            </div>
+
+            <!-- Export Panel -->
+            <div class="wiki-section" id="export-panel">
+                <h2>Export Panel</h2>
+                <p>The Export tab assembles beauty and AOV pass images into multi-layer EXR files ready for professional compositing pipelines. Each pass is loaded independently — you can mix outputs from different generation runs if needed.</p>
+
+                <h3>Layer Inputs Card</h3>
+                <p>Four inline image inputs, one per pass:</p>
+                <ul>
+                    <li><strong>Beauty</strong> — the primary generation output (RGBA)</li>
+                    <li><strong>Depth</strong> — depth pass from the <a href="#layers-panel">Layers Panel</a></li>
+                    <li><strong>Normals</strong> — normals pass from the Layers Panel</li>
+                    <li><strong>Crypto</strong> — Cryptomatte pass from the Layers Panel</li>
+                </ul>
+                <p>Only layers with a loaded input are included in the export. Drop passes from the Generation History to load paths automatically. When sequence inputs are detected, the panel switches to video mode and exports per-frame EXRs.</p>
+
+                <h3>Save Location Card</h3>
+                <ul>
+                    <li><strong>Export path</strong> — destination directory; click Browse Folder to select via file dialog</li>
+                    <li><strong>Create New Folder</strong> — create a subdirectory within the export path in one step</li>
+                    <li><strong>Filename pattern</strong> — output filename template; supports <code>{name}</code> (source filename without extension) and <code>{frame:04d}</code> (zero-padded frame number)</li>
+                    <li><strong>Sequence start frame</strong> — the frame number assigned to the first file in the export; useful when offsetting into a larger sequence</li>
+                </ul>
+
+                <h3>Export Format Card</h3>
+                <ul>
+                    <li><strong>Multi-Layer EXR</strong> — all passes in a single file per frame; the preferred format for professional compositing</li>
+                    <li><strong>Single-Layer EXRs</strong> — one file per pass per frame; use when your compositing application doesn't support multi-layer EXR</li>
+                </ul>
+
+                <h3>EXR Settings Card</h3>
+                <ul>
+                    <li><strong>Bit Depth</strong> — 8, 16, or 32-bit per channel; 32-bit recommended for depth and normals passes to preserve floating-point precision</li>
+                    <li><strong>Compression</strong> — ZIP (good for smooth gradients), PIZ (efficient for noisy/grainy content), RLE (fast, lower compression ratio)</li>
+                    <li><strong>Color Space</strong> — Linear, sRGB, or ACEScg; use Linear for technical passes, match your project's color management for the beauty</li>
+                </ul>
+
+                <h3>Channels Card</h3>
+                <p>A visual guide showing which input layer maps to which EXR channel group — useful for verifying the layer mapping before committing to a full export run.</p>
+            </div>
+
+            <!-- Spec Tool -->
+            <div class="wiki-section" id="spec-tool">
+                <h2>Spec Tool</h2>
+                <p>The Spec Tool lives in the Utilities tab. AI generation spec dimensions have non-obvious constraints — models are trained on specific aspect ratios and resolution buckets, and going outside those ranges degrades output quality. The Spec Tool provides a guided way to create valid generation specs and downloadable composition guide templates.</p>
+
+                <h3>Spec Configuration</h3>
+                <ul>
+                    <li><strong>Aspect Ratio</strong> — preset dropdown (1:1, 4:3, 16:9, 1.85:1, 2.35:1, 2.39:1, 21:9) or custom W:H input</li>
+                    <li><strong>Resolution Width</strong> — input in pixels; height is calculated from the aspect ratio; snaps to 16px alignment automatically</li>
+                    <li><strong>Frame Count</strong> — for video specs; snaps to the 4n+1 pattern required by Wan video pipelines</li>
+                </ul>
+
+                <h3>Composition Guides</h3>
+                <p>Overlay composition guides on the canvas preview and burn them into the downloadable template:</p>
+                <ul>
+                    <li>Rule of Thirds</li>
+                    <li>Golden Spiral</li>
+                    <li>Vanishing Points</li>
+                    <li>Action Safe</li>
+                    <li>Title Safe</li>
+                    <li>Center Cross</li>
+                </ul>
+                <p>Guide color and background color are configurable via color pickers. Background alpha controls transparency of the canvas (set to 0 for a transparent PNG template).</p>
+
+                <h3>Actions</h3>
+                <ul>
+                    <li><strong>Download PNG</strong> — exports the canvas at the configured resolution with the selected guides burned in; use as a layout reference or import into your generation workflow as a composition guide image</li>
+                    <li><strong>Save Blender Template</strong> — exports the spec as a Blender scene template at the target resolution and frame count</li>
+                </ul>
+
+                <h3>Burn In</h3>
+                <p>When enabled, frame numbers are rendered onto each frame of the Blender template output — useful for editorial reference when working with a delivery spec that has a specific frame count.</p>
+            </div>
+
+            <!-- Generation History -->
+            <div class="wiki-section" id="generation-history">
+                <h2>Generation History</h2>
+                <p>The Generation History is a collapsible side panel available from any tab. It shows all previous generation outputs for the current session and provides drag-and-drop access to any result — the primary way to chain pipeline steps without manual file picking.</p>
+
+                <h3>Panel Contents</h3>
+                <ul>
+                    <li>Thumbnail grid of all generation results from the current session, most recent first</li>
+                    <li>Each thumbnail shows the output type (image, video, preprocessed map, etc.) and basic metadata on hover: seed, model, timestamp</li>
+                    <li>Video thumbnails play on hover at the global playback FPS</li>
+                </ul>
+
+                <h3>Drag and Drop</h3>
+                <p>Any history item can be dragged onto:</p>
+                <ul>
+                    <li>A tab's <strong>preview area</strong> — reloads all metadata from that result into the active tab's parameter cards, including model, prompt, seed, LoRA settings, and dimensions</li>
+                    <li>A <strong>Media Input</strong> component in any tab — inserts the file path directly as the input, without loading metadata</li>
+                </ul>
+                <p>This is the standard workflow for passing results between pipeline steps — generate in Image, drag to Layers for AOV extraction, drag from Layers to Export for EXR assembly.</p>
+
+                <h3>Playback Speed</h3>
+                <p>The global playback speed control (6–48 FPS) in the app header affects video thumbnail playback in the history panel. Set it to match your generation frame rate for accurate motion preview.</p>
+            </div>
+
+            <!-- Config Overview -->
+            <div class="wiki-section" id="config-overview">
+                <h2>Config Overview</h2>
+                <p>All FUK configuration lives in <code>fuk/config/</code> as plain JSON files. There are no environment variables, no hidden settings, and no GUI-only config — everything that affects generation behaviour is readable and editable in these files. Changes take effect on the next launch unless noted otherwise.</p>
+
+                <h3>File Map</h3>
+                <table class="wiki-table">
+                    <thead>
+                        <tr><th>File</th><th>Purpose</th><th>How Often You'll Edit It</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td><code>defaults.json</code></td><td>Global generation defaults — model paths, image/video parameters, project settings</td><td>Initial setup + ongoing tuning</td></tr>
+                        <tr><td><code>models.json</code></td><td>Model registry — which models are available in the UI and how to run them</td><td>When adding or removing models</td></tr>
+                        <tr><td><code>defaults_vram.json</code></td><td>GPU memory offloading strategy — which preset to use based on your VRAM</td><td>Once at setup, unless you change hardware</td></tr>
+                        <tr><td><code>defaults_loras.json</code></td><td>LoRA adapter registry — paths, target models, trigger words</td><td>When adding new LoRAs</td></tr>
+                        <tr><td><code>defaults_dataset.json</code></td><td>LoRA Dataset Builder — angle, lighting, and variation templates</td><td>When customising dataset generation</td></tr>
+                        <tr><td><code>defaults_spec_tool.json</code></td><td>Spec Tool defaults — aspect ratios, guide overlays, burn-in settings</td><td>Rarely; UI persists changes automatically</td></tr>
+                        <tr><td><code>tools/musubi-qwen.json</code></td><td>Image pipeline runner — CLI flags, VRAM profiles, arg mapping for musubi-tuner</td><td>Advanced: when tuning pipeline execution</td></tr>
+                        <tr><td><code>tools/musubi-wan.json</code></td><td>Video pipeline runner — same as above for Wan video generation</td><td>Advanced</td></tr>
+                        <tr><td><code>tools/depth-anything-v3.json</code></td><td>DA3 depth estimation — model variants and inference settings</td><td>Rarely</td></tr>
+                        <tr><td><code>tools/sam2.json</code></td><td>SAM2 segmentation — model variants and auto-mask thresholds</td><td>Rarely</td></tr>
+                    </tbody>
+                </table>
+
+                <h3>Editing Guidelines</h3>
+                <ul>
+                    <li>All files are UTF-8 JSON — standard JSON rules apply (no trailing commas, no comments)</li>
+                    <li>String paths can use <code>~</code> for home directory expansion</li>
+                    <li>FUK validates config on startup and will log a specific error for any missing or malformed key</li>
+                    <li>The UI persists some per-session overrides in <code>localStorage</code> — if a UI setting seems to ignore your config edit, clear the browser's local storage for the FUK origin</li>
+                    <li>Back up <code>defaults.json</code> and <code>models.json</code> before making large changes; both are easy to break in ways that prevent startup</li>
+                </ul>
+            </div>
+
+            <!-- defaults.json -->
+            <div class="wiki-section" id="config-defaults">
+                <h2>defaults.json</h2>
+                <p>The primary configuration file. Sets generation defaults for all pipelines, the model root path, aspect ratio presets, project management behaviour, and paths to external tools. Located at <code>fuk/config/defaults.json</code>.</p>
+
+                <h3>models_root</h3>
+                <p>Root directory where all downloaded AI models are stored. All paths in <code>models.json</code> are resolved relative to this.</p>
+                <pre><code>"models_root": "/home/brad/ai/models"</code></pre>
+                <p>Change this if your models live on an external drive or network share. The path must be absolute.</p>
+
+                <h3>aspect_ratios</h3>
+                <p>Array of aspect ratio presets available in the Image and Spec Tool panels. Each entry has a <code>label</code> displayed in the UI, a <code>value</code> used internally, and a <code>ratio</code> float used to calculate height from width.</p>
+                <pre><code>{ "label": "2.39:1 Anamorphic", "value": "2.39:1", "ratio": 0.418 }</code></pre>
+                <p>Add entries here to make custom ratios available in all dropdowns. The <code>ratio</code> field is height/width — for 16:9 that's <code>0.5625</code>.</p>
+
+                <h3>image</h3>
+                <p>Default values for every control in the Image Panel. These are the values the UI loads when no project state or localStorage override exists.</p>
+                <table class="wiki-table">
+                    <thead><tr><th>Key</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>model</code></td><td>string</td><td><code>"qwen_image"</code></td><td>Model key — must match an entry in models.json</td></tr>
+                        <tr><td><code>width</code></td><td>integer</td><td><code>1280</code></td><td>Output width in pixels; height is derived from aspectRatio</td></tr>
+                        <tr><td><code>aspectRatio</code></td><td>string</td><td><code>"2.39:1"</code></td><td>Must match a value in the aspect_ratios array</td></tr>
+                        <tr><td><code>steps</code></td><td>integer</td><td><code>20</code></td><td>Denoising steps</td></tr>
+                        <tr><td><code>stepsMode</code></td><td>string</td><td><code>"preset"</code></td><td><code>"preset"</code> or <code>"custom"</code></td></tr>
+                        <tr><td><code>guidance_scale</code></td><td>float</td><td><code>4.0</code></td><td>Prompt adherence; 1.0–10.0</td></tr>
+                        <tr><td><code>denoising_strength</code></td><td>float</td><td><code>1.0</code></td><td>1.0 = full generation; lower values are for img2img</td></tr>
+                        <tr><td><code>lora</code></td><td>string / null</td><td><code>null</code></td><td>Default LoRA key; null = none</td></tr>
+                        <tr><td><code>lora_multiplier</code></td><td>float</td><td><code>1.0</code></td><td>LoRA blend weight</td></tr>
+                        <tr><td><code>seed</code></td><td>integer / null</td><td><code>null</code></td><td>null = random on each run</td></tr>
+                        <tr><td><code>seedMode</code></td><td>string</td><td><code>"random"</code></td><td><code>"random"</code>, <code>"fixed"</code>, or <code>"increment"</code></td></tr>
+                        <tr><td><code>negative_prompt</code></td><td>string</td><td>(quality list)</td><td>Default negative prompt applied to every generation</td></tr>
+                        <tr><td><code>save_latent</code></td><td>boolean</td><td><code>true</code></td><td>Save latent representation alongside image output</td></tr>
+                    </tbody>
+                </table>
+
+                <h3>video</h3>
+                <p>Default values for the Video Panel. Key fields:</p>
+                <table class="wiki-table">
+                    <thead><tr><th>Key</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>task</code></td><td>string</td><td><code>"wan_i2v_a14b"</code></td><td>Active pipeline; must match a task in models.json</td></tr>
+                        <tr><td><code>video_length</code></td><td>integer</td><td><code>41</code></td><td>Frame count; must satisfy 4n+1 (5, 9, 13… 41…)</td></tr>
+                        <tr><td><code>scale_factor</code></td><td>float</td><td><code>1.0</code></td><td>Output resolution as fraction of input image (0.25–1.0)</td></tr>
+                        <tr><td><code>steps</code></td><td>integer</td><td><code>20</code></td><td>Denoising steps</td></tr>
+                        <tr><td><code>guidance_scale</code></td><td>float</td><td><code>5.0</code></td><td>Prompt adherence</td></tr>
+                        <tr><td><code>sigma_shift</code></td><td>float</td><td><code>5.0</code></td><td>Noise schedule shift; model-specific, leave at default unless you know the target value</td></tr>
+                        <tr><td><code>denoising_strength</code></td><td>float</td><td><code>1.0</code></td><td>Deviation from input image (img2vid modes)</td></tr>
+                    </tbody>
+                </table>
+
+                <h3>flux2</h3>
+                <p>Defaults used when a FLUX.2 model is active. FLUX uses lower CFG than Qwen models and needs more steps — the defaults here reflect that:</p>
+                <pre><code>"flux2": {
+    "width": 1024,
+    "steps": 30,
+    "cfg_scale": 1.0,
+    "embedded_guidance": 4.0
+}</code></pre>
+
+                <h3>export</h3>
+                <table class="wiki-table">
+                    <thead><tr><th>Key</th><th>Default</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>prefer_latent</code></td><td><code>true</code></td><td>Save latent vectors alongside outputs; enables faster post-processing passes</td></tr>
+                        <tr><td><code>exr_compression</code></td><td><code>"ZIP"</code></td><td>EXR compression codec; ZIP, PIZ, RLE, NONE</td></tr>
+                        <tr><td><code>exr_precision</code></td><td><code>"float32"</code></td><td>Bit depth for EXR export; float32 or float16</td></tr>
+                    </tbody>
+                </table>
+
+                <h3>project</h3>
+                <table class="wiki-table">
+                    <thead><tr><th>Key</th><th>Default</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>shot_label</code></td><td><code>"shot"</code></td><td>Prefix used when auto-naming new shots</td></tr>
+                        <tr><td><code>versioning</code></td><td><code>"DATE"</code></td><td><code>"DATE"</code> for date-based version IDs; <code>"NUMERIC"</code> for sequential integers</td></tr>
+                        <tr><td><code>autosave_interval</code></td><td><code>30</code></td><td>Seconds between automatic project saves</td></tr>
+                        <tr><td><code>cache_cleanup_days</code></td><td><code>7</code></td><td>Age in days at which cache files are deleted on startup</td></tr>
+                    </tbody>
+                </table>
+
+                <h3>tools</h3>
+                <pre><code>"tools": {
+    "blender": "/usr/bin/blender",
+    "blender_template": "/path/to/template.blend"
+}</code></pre>
+                <p>Path to the Blender executable and a default <code>.blend</code> template file used by the Spec Tool's "Save Blender Template" action. Update <code>blender</code> if Blender is installed in a non-standard location.</p>
+            </div>
+
+            <!-- models.json -->
+            <div class="wiki-section" id="config-models">
+                <h2>models.json</h2>
+                <p>The model registry. Defines every AI model FUK knows about — what pipeline runs it, what files it needs, what parameters it accepts, and what features it supports. Located at <code>fuk/config/models.json</code>.</p>
+                <p>Only models listed here appear in the UI. Removing an entry hides the model without deleting any files. Adding an entry makes a model available — but you must have the model files downloaded first.</p>
+
+                <div class="wiki-warning">
+                    <p>Each model is typically 15–30GB. Review this file before running <code>download_models.sh</code> and remove entries for models you don't need. The download script fetches everything listed.</p>
+                </div>
+
+                <h3>Model Entry Structure</h3>
+                <p>Each top-level key is a model ID (e.g. <code>"qwen_image"</code>). Its value is an object with these fields:</p>
+                <table class="wiki-table">
+                    <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>model_id</code></td><td>string</td><td>Hugging Face model ID used for downloading (e.g. <code>"Qwen/Qwen-Image"</code>)</td></tr>
+                        <tr><td><code>pipeline</code></td><td>string</td><td>Which FUK pipeline handles this model: <code>qwen</code>, <code>wan</code>, <code>flux2</code></td></tr>
+                        <tr><td><code>category</code></td><td>string</td><td><code>image</code> or <code>video</code> — determines which tab the model appears in</td></tr>
+                        <tr><td><code>description</code></td><td>string</td><td>Human-readable label shown in the UI dropdown</td></tr>
+                        <tr><td><code>aliases</code></td><td>array</td><td>Alternate names accepted on the CLI</td></tr>
+                        <tr><td><code>supports</code></td><td>array</td><td>Feature flags: <code>negative_prompt</code>, <code>edit_image</code>, <code>controlnet</code>, <code>eligen</code>, etc. — controls which UI cards appear</td></tr>
+                        <tr><td><code>components</code></td><td>array</td><td>Glob patterns for the safetensors files this model requires; FUK searches <code>models_root</code> for matches</td></tr>
+                        <tr><td><code>parameter_map</code></td><td>object</td><td>Maps FUK's generic param names to the model-specific CLI arg names</td></tr>
+                        <tr><td><code>tokenizer</code></td><td>string</td><td>Path or HF ID of the text encoder tokenizer</td></tr>
+                        <tr><td><code>lora</code></td><td>object / null</td><td>LoRA adapter spec: model_id, file pattern, target layers, default alpha</td></tr>
+                        <tr><td><code>pipeline_kwargs</code></td><td>object</td><td>Model-specific flags passed directly to the pipeline at load time</td></tr>
+                    </tbody>
+                </table>
+
+                <h3>Active Models</h3>
+                <table class="wiki-table">
+                    <thead><tr><th>Key</th><th>Type</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>qwen_image</code></td><td>Image</td><td>Base Qwen text-to-image</td></tr>
+                        <tr><td><code>qwen_image_2512</code></td><td>Image</td><td>Improved Qwen variant</td></tr>
+                        <tr><td><code>qwen_image_edit_2511</code></td><td>Image</td><td>Multi-image editing and img2img</td></tr>
+                        <tr><td><code>qwen_image_control_union</code></td><td>Image</td><td>ControlNet-style structural conditioning</td></tr>
+                        <tr><td><code>qwen_eligen</code></td><td>Image</td><td>Regional composition control via EliGen</td></tr>
+                        <tr><td><code>flux2_dev</code></td><td>Image</td><td>FLUX.2-dev multi-image editing</td></tr>
+                        <tr><td><code>wan_i2v_a14b</code></td><td>Video</td><td>Wan 2.2 image-to-video (A14B)</td></tr>
+                        <tr><td><code>wan_vace_a14b</code></td><td>Video</td><td>VACE-controlled video with reference image</td></tr>
+                        <tr><td><code>wan_inp_a14b</code></td><td>Video</td><td>First + last frame video inpainting</td></tr>
+                    </tbody>
+                </table>
+
+                <h3>Deferred Models</h3>
+                <p>Models that have been tested but are not active by default live under the <code>_deferred</code> key. They won't be downloaded or shown in the UI. To activate one, move its entry out of <code>_deferred</code> and into the top-level object, then download its files.</p>
+
+                <h3>Adding a New Model</h3>
+                <ol>
+                    <li>Download the model files to <code>models_root</code></li>
+                    <li>Add a new entry to <code>models.json</code> with the correct <code>pipeline</code>, <code>category</code>, and <code>components</code> glob patterns</li>
+                    <li>Set <code>supports</code> to the feature flags that apply — this controls which UI cards are shown for the model</li>
+                    <li>If the model uses different parameter names, add entries to <code>parameter_map</code></li>
+                    <li>Restart FUK — the model will appear in the appropriate tab's dropdown</li>
+                </ol>
+            </div>
+
+            <!-- defaults_vram.json -->
+            <div class="wiki-section" id="config-vram">
+                <h2>defaults_vram.json</h2>
+                <p>Controls how FUK manages GPU memory. When a model is too large to fit entirely in VRAM, FUK offloads unused tensors to system RAM or disk. This file defines the available offload strategies and which one is active. Located at <code>fuk/config/defaults_vram.json</code>.</p>
+
+                <h3>Choosing a Preset</h3>
+                <p>Set <code>vram.preset</code> to one of the four options:</p>
+                <table class="wiki-table">
+                    <thead><tr><th>Preset</th><th>Strategy</th><th>VRAM Required</th><th>Speed Impact</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>"none"</code></td><td>No offloading — full model in VRAM</td><td>48GB+</td><td>Fastest</td></tr>
+                        <tr><td><code>"low"</code></td><td>CPU offload in bfloat16</td><td>16–24GB</td><td>Minimal</td></tr>
+                        <tr><td><code>"medium"</code></td><td>CPU offload in float8</td><td>12–16GB</td><td>Moderate</td></tr>
+                        <tr><td><code>"high"</code></td><td>Disk offload</td><td>8GB</td><td>Significant — requires fast SSD</td></tr>
+                    </tbody>
+                </table>
+
+                <h3>Preset Details</h3>
+                <table class="wiki-table">
+                    <thead><tr><th>Key</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>offload_dtype</code></td><td>Precision used when tensors are moved to CPU/disk: <code>bfloat16</code>, <code>float8_e4m3fn</code>, or <code>disk</code></td></tr>
+                        <tr><td><code>offload_device</code></td><td><code>cpu</code> or <code>disk</code></td></tr>
+                        <tr><td><code>computation_dtype</code></td><td>Precision during GPU compute — keep at <code>bfloat16</code> unless you have a specific reason to change it</td></tr>
+                        <tr><td><code>buffer_gb</code></td><td>VRAM headroom reserved for activations; increase if you get OOM errors mid-generation</td></tr>
+                    </tbody>
+                </table>
+
+                <div class="wiki-note">
+                    <p>The <a href="#postprocess-panel">Postprocess Panel</a> and individual generation panels also expose a VRAM Management dropdown that overrides this preset per-session. The setting here is the default on fresh launch.</p>
+                </div>
+            </div>
+
+            <!-- defaults_loras.json -->
+            <div class="wiki-section" id="config-loras">
+                <h2>defaults_loras.json</h2>
+                <p>The LoRA adapter registry. Defines which LoRA files are available in the Image and Video panel dropdowns. Located at <code>fuk/config/defaults_loras.json</code>.</p>
+
+                <h3>Discovery</h3>
+                <p>FUK finds LoRA files in two ways:</p>
+                <ul>
+                    <li><strong>lora_dirs</strong> — array of directories to scan recursively for <code>.safetensors</code> files; any file found is automatically listed in the UI</li>
+                    <li><strong>lora_paths</strong> — array of explicit paths to individual LoRA files; use this for LoRAs that live outside the standard scan directories</li>
+                </ul>
+                <p>Files found by either method appear in the dropdown using their filename as the label. To give a LoRA a custom label, add it to the <code>loras</code> array instead (see below).</p>
+
+                <h3>loras Array</h3>
+                <p>For LoRAs that need specific configuration, add an entry here:</p>
+                <table class="wiki-table">
+                    <thead><tr><th>Field</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>name</code></td><td>Display name shown in the UI dropdown</td></tr>
+                        <tr><td><code>path</code></td><td>Absolute path to the <code>.safetensors</code> file</td></tr>
+                        <tr><td><code>model</code></td><td>Base model this LoRA targets — used to filter the dropdown per active model (e.g. <code>"qwen_image"</code>)</td></tr>
+                        <tr><td><code>default_strength</code></td><td>Initial multiplier value when this LoRA is selected; 0.0–2.0</td></tr>
+                        <tr><td><code>trigger_word</code></td><td>Optional keyword that activates the LoRA concept — shown as a hint in the UI, not automatically injected</td></tr>
+                        <tr><td><code>inject_text</code></td><td>Optional text automatically appended to the positive prompt whenever this LoRA is active</td></tr>
+                    </tbody>
+                </table>
+
+                <h3>Example Entry</h3>
+                <pre><code>{
+    "name": "Studio Lighting v2",
+    "path": "/home/brad/ai/models/loras/studio_lighting_v2.safetensors",
+    "model": "qwen_image",
+    "default_strength": 0.8,
+    "trigger_word": "studio_light",
+    "inject_text": "studio_light, professional lighting"
+}</code></pre>
+            </div>
+
+            <!-- defaults_dataset.json -->
+            <div class="wiki-section" id="config-dataset">
+                <h2>defaults_dataset.json</h2>
+                <p>Configuration for the <a href="#lora-dataset-builder">LoRA Dataset Builder</a>. Defines the angle, lighting, and context variation templates used when generating training datasets. Located at <code>fuk/config/defaults_dataset.json</code>.</p>
+                <p>This is the file to edit when you want to add or change the variations the Dataset Builder generates — for example, adding a custom camera angle or a lighting setup specific to your subject matter.</p>
+
+                <h3>Top-Level Generation Settings</h3>
+                <table class="wiki-table">
+                    <thead><tr><th>Key</th><th>Default</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>denoising_strength</code></td><td><code>1.0</code></td><td>Variation amount; 1.0 = full generation from prompt, lower values stay closer to a reference image</td></tr>
+                        <tr><td><code>seed</code></td><td>(integer)</td><td>Default seed when seed_strategy is <code>"fixed"</code></td></tr>
+                        <tr><td><code>seed_strategy</code></td><td><code>"fixed"</code></td><td><code>"fixed"</code> — all variations use the same seed for consistency; <code>"random"</code> — each variation gets its own seed</td></tr>
+                        <tr><td><code>cfg_scale</code></td><td><code>5</code></td><td>Guidance scale for dataset generations</td></tr>
+                        <tr><td><code>steps</code></td><td><code>28</code></td><td>Denoising steps; slightly higher than interactive default for dataset quality</td></tr>
+                    </tbody>
+                </table>
+
+                <h3>variation_prompts</h3>
+                <p>The core of this file. Three subject types — <code>character</code>, <code>object</code>, and <code>environment</code> — each with arrays of angle and lighting variation prompts.</p>
+
+                <h4>Character Angles (35+ presets)</h4>
+                <p>Covers the full range of shot types needed for a character LoRA: full body front/back/sides, 3/4 angles at 15° and 45°, medium shots, bust shots, closeups, extreme closeups, overhead, knee-level, over-shoulder, seated, and kneeling variations.</p>
+
+                <h4>Character Lighting (7 presets)</h4>
+                <table class="wiki-table">
+                    <thead><tr><th>Key</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>overcast</code></td><td>Soft diffuse, no shadows — good baseline lighting for character recognition</td></tr>
+                        <tr><td><code>hard_frontal</code></td><td>Direct on-axis spot — high contrast, shows facial structure clearly</td></tr>
+                        <tr><td><code>three_quarter_soft</code></td><td>Classic key + fill setup — the most natural-looking option</td></tr>
+                        <tr><td><code>overhead</code></td><td>Downward shadowless light</td></tr>
+                        <tr><td><code>under_light</code></td><td>Upward from below — creates strong under-eye shadows</td></tr>
+                        <tr><td><code>split</code></td><td>Hard split — half the face lit, half in shadow</td></tr>
+                        <tr><td><code>rim</code></td><td>Backlit edge light — silhouette with glowing outline</td></tr>
+                    </tbody>
+                </table>
+
+                <h4>Object Angles (30+ presets)</h4>
+                <p>Front, side profiles (90°), 45° rotations, high/low orbits, top-down, underside, and detail shots optimised for product-style LoRA datasets.</p>
+
+                <h4>Environment (Time, Weather, Season)</h4>
+                <p>Three variation axes for environment LoRAs: time of day (dawn, noon, sunset, night), weather (clear, overcast, rain, fog, snow), and season (spring, summer, autumn, winter).</p>
+
+                <h3>Adding Custom Variations</h3>
+                <p>Add a new key to any <code>angles</code> or <code>lighting</code> object with a prompt string as the value. It will appear as a selectable variation in the Dataset Builder's variation deselection list:</p>
+                <pre><code>"character": {
+    "angles": {
+        "my_custom_angle": "extreme low angle, shot from ground level looking up at full body"
+    },
+    "lighting": {
+        "candlelight": "warm candlelight, single small flame source below frame, heavy shadows"
+    }
+}</code></pre>
+            </div>
+
+            <!-- Tool Configs -->
+            <div class="wiki-section" id="config-tools">
+                <h2>Tool Configs</h2>
+                <p>Advanced configuration files in <code>fuk/config/tools/</code> that control how FUK invokes external pipeline runners. Most users won't need to edit these — they exist to let you tune pipeline execution if you're running non-standard hardware or adding a new model family.</p>
+
+                <h3>musubi-qwen.json</h3>
+                <p>Controls how FUK invokes the musubi-tuner Qwen image generation script (<code>qwen_image_generate_image.py</code>).</p>
+
+                <h4>performance</h4>
+                <table class="wiki-table">
+                    <thead><tr><th>Key</th><th>Default</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>fp8_scaled</code></td><td><code>true</code></td><td>Use 8-bit scaled precision — reduces VRAM usage with minimal quality impact</td></tr>
+                        <tr><td><code>vae_enable_tiling</code></td><td><code>true</code></td><td>Process the VAE in tiles rather than all at once — reduces peak VRAM at high resolutions</td></tr>
+                        <tr><td><code>blocks_to_swap_default</code></td><td><code>0</code></td><td>Number of transformer blocks to offload to CPU; increase if you get OOM on large images</td></tr>
+                    </tbody>
+                </table>
+
+                <h4>vram_profiles</h4>
+                <p>Automatic per-VRAM-tier configuration. Three profiles — 24GB, 16GB, 12GB — each set specific combinations of precision flags and block swapping. FUK selects the appropriate profile based on the detected GPU and the active <a href="#config-vram">VRAM preset</a>.</p>
+
+                <h4>arg_mapping</h4>
+                <p>Maps FUK's internal parameter names to the CLI argument names expected by musubi-tuner. Edit this if you're pointing FUK at a different version of the script that uses different argument names:</p>
+                <pre><code>"arg_mapping": {
+    "positive_prompt": "--prompt",
+    "guidance_scale": "--guidance_scale",
+    "lora_path": "--lora_weight"
+}</code></pre>
+
+                <h3>musubi-wan.json</h3>
+                <p>Controls Wan video generation (<code>wan_generate_video.py</code>). Same structure as musubi-qwen.json with video-specific additions.</p>
+
+                <h4>Video-specific performance flags</h4>
+                <table class="wiki-table">
+                    <thead><tr><th>Key</th><th>Default</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>vae_cache_cpu</code></td><td><code>true</code></td><td>Keep VAE decoder on CPU — frees VRAM for the diffusion model at the cost of decode speed</td></tr>
+                        <tr><td><code>cpu_noise</code></td><td><code>true</code></td><td>Generate initial noise on CPU — avoids GPU memory spike at the start of generation</td></tr>
+                        <tr><td><code>lazy_loading</code></td><td><code>true</code></td><td>Load model weights on demand rather than all at once at startup</td></tr>
+                        <tr><td><code>attn_mode</code></td><td><code>"torch"</code></td><td>Attention backend: <code>torch</code> (default), <code>flash</code> (faster if installed), <code>sdpa</code></td></tr>
+                    </tbody>
+                </table>
+
+                <h4>video_length_constraint</h4>
+                <p>Documents the 4n+1 frame count requirement for Wan models. The formula and a list of valid values are stored here so FUK can validate input and show helpful errors. Valid counts: 5, 9, 13, 17, 21, 25, 33, 41, 49, 57, 65, 81, 97.</p>
+
+                <h4>task_requirements</h4>
+                <p>Per-task definitions of required and optional inputs. For example, the <code>i2v</code> task requires <code>image_path</code>; the <code>flf2v</code> task requires both <code>image_path</code> and <code>end_image_path</code>. FUK uses this to show the correct input cards in the Video Panel and validate before submitting a generation job.</p>
+
+                <h3>depth-anything-v3.json</h3>
+                <p>Configuration for the Depth Anything V3 depth estimation model used in the Preprocess and Layers panels.</p>
+                <table class="wiki-table">
+                    <thead><tr><th>Model Key</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>da3_mono_large</code></td><td>Monocular single-image depth — best general-purpose option</td></tr>
+                        <tr><td><code>da3_metric_large</code></td><td>Metric depth in real-world meters — useful when absolute scale matters for compositing</td></tr>
+                        <tr><td><code>da3_large</code></td><td>Multi-view capable variant</td></tr>
+                        <tr><td><code>da3_giant</code></td><td>Largest and most accurate — slowest; useful for hero frames or difficult scenes</td></tr>
+                    </tbody>
+                </table>
+                <p>The <code>inference_defaults.process_res</code> key (default: 1280) sets the resolution at which depth estimation runs. Increasing it improves accuracy but raises VRAM usage and processing time.</p>
+
+                <h3>sam2.json</h3>
+                <p>Configuration for Segment Anything Model 2 (SAM2), used to generate Cryptomatte segmentation masks in the Layers Panel.</p>
+                <table class="wiki-table">
+                    <thead><tr><th>Model Key</th><th>Size</th><th>Notes</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>sam2.1_hiera_large</code></td><td>Large</td><td>Default — best quality</td></tr>
+                        <tr><td><code>sam2.1_hiera_base</code></td><td>Base+</td><td>Balanced</td></tr>
+                        <tr><td><code>sam2.1_hiera_small</code></td><td>Small</td><td>Fast, lower VRAM</td></tr>
+                        <tr><td><code>sam2.1_hiera_tiny</code></td><td>Tiny</td><td>Minimal VRAM</td></tr>
+                    </tbody>
+                </table>
+
+                <h4>auto_mask_generator thresholds</h4>
+                <table class="wiki-table">
+                    <thead><tr><th>Key</th><th>Default</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>points_per_side</code></td><td><code>32</code></td><td>Grid density for automatic mask proposals — higher values find more objects but are slower</td></tr>
+                        <tr><td><code>pred_iou_thresh</code></td><td><code>0.86</code></td><td>Minimum predicted mask quality score (0–1); increase to discard low-confidence masks</td></tr>
+                        <tr><td><code>stability_score_thresh</code></td><td><code>0.92</code></td><td>Mask stability threshold; increase to keep only well-defined, consistent masks</td></tr>
+                        <tr><td><code>min_mask_region_area</code></td><td><code>100</code></td><td>Minimum segment size in pixels; increase to filter out tiny noise segments</td></tr>
+                    </tbody>
+                </table>
             </div>
 
             <!-- Keyboard Shortcuts -->
@@ -444,8 +1389,12 @@
                         <tr><th>Shortcut</th><th>Action</th></tr>
                     </thead>
                     <tbody>
-                        <tr><td><kbd>[key]</kbd></td><td>[action]</td></tr>
-                        <tr><td><kbd>[key]</kbd></td><td>[action]</td></tr>
+                        <tr><td><kbd>Ctrl+Enter</kbd></td><td>Start generation</td></tr>
+                        <tr><td><kbd>Ctrl+Shift+Enter</kbd></td><td>Add to queue</td></tr>
+                        <tr><td><kbd>Esc</kbd></td><td>Cancel current generation</td></tr>
+                        <tr><td><kbd>Ctrl+H</kbd></td><td>Toggle Generation History panel</td></tr>
+                        <tr><td><kbd>Ctrl+,</kbd></td><td>Open settings</td></tr>
+                        <tr><td><kbd>Ctrl+/</kbd></td><td>Toggle sidebar</td></tr>
                     </tbody>
                 </table>
 
@@ -455,8 +1404,10 @@
                         <tr><th>Shortcut</th><th>Action</th></tr>
                     </thead>
                     <tbody>
-                        <tr><td><kbd>[key]</kbd></td><td>[action]</td></tr>
-                        <tr><td><kbd>[key]</kbd></td><td>[action]</td></tr>
+                        <tr><td><kbd>Ctrl+D</kbd></td><td>Duplicate current generation settings as a new entry</td></tr>
+                        <tr><td><kbd>Ctrl+R</kbd></td><td>Randomize seed</td></tr>
+                        <tr><td><kbd>Ctrl+L</kbd></td><td>Lock / unlock seed</td></tr>
+                        <tr><td><kbd>Ctrl+Up / Down</kbd></td><td>Increment / decrement steps by 5</td></tr>
                     </tbody>
                 </table>
 
@@ -466,8 +1417,10 @@
                         <tr><th>Shortcut</th><th>Action</th></tr>
                     </thead>
                     <tbody>
-                        <tr><td><kbd>[key]</kbd></td><td>[action]</td></tr>
-                        <tr><td><kbd>[key]</kbd></td><td>[action]</td></tr>
+                        <tr><td><kbd>Enter</kbd></td><td>Expand selected output to full view</td></tr>
+                        <tr><td><kbd>Ctrl+Q</kbd></td><td>Re-queue selected generation</td></tr>
+                        <tr><td><kbd>Delete</kbd></td><td>Delete selected version (with confirmation)</td></tr>
+                        <tr><td><kbd>Ctrl+Shift+F</kbd></td><td>Reveal selected output in file manager</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -475,54 +1428,58 @@
             <!-- File Locations -->
             <div class="wiki-section" id="file-locations">
                 <h2>File Locations</h2>
-                <p>FUK follows a consistent directory structure. Understanding where things live makes it easier to manage models, outputs, and configuration.</p>
+                <p>FUK follows a consistent directory structure. Model root and output root can be on separate drives — configure both in <code>config/defaults.json</code>.</p>
 
                 <h3>Directory Structure</h3>
                 <pre><code>FUK/
-├── [config directory]/
-│   └── [config files]
+├── config/
+│   ├── defaults.json       ← model root, output root, UI preferences
+│   ├── models.json         ← which models to load and their paths relative to model root
+│   └── templates.json      ← saved Spec Tool templates
 ├── models/
-│   ├── checkpoints/
-│   ├── controlnet/
-│   ├── loras/
-│   ├── upscalers/
-│   └── [other model types]/
+│   ├── checkpoints/        ← base model checkpoint files
+│   ├── controlnet/         ← ControlNet model files
+│   ├── loras/              ← LoRA weight files
+│   ├── upscalers/          ← Real-ESRGAN model files
+│   ├── film/               ← FILM interpolation model
+│   └── preprocessors/      ← depth, pose, edge detection model weights
 ├── outputs/
-│   └── [project name]/
-│       └── [shot name]/
+│   └── [project]/
+│       └── [shot]/
 │           └── [version]/
-│               ├── [image or video files]
-│               ├── [EXR files]
-│               └── [metadata sidecar]
-└── [other directories]</code></pre>
+│               ├── [image or frame sequence]
+│               ├── [preview MP4 for video]
+│               ├── [multi-layer EXR]
+│               └── meta.json   ← complete generation metadata sidecar
+├── lora_datasets/          ← LoRA Dataset Builder output
+└── logs/                   ← generation logs and error output</code></pre>
 
-                <h3>Key Paths</h3>
+                <h3>Key Config Paths</h3>
                 <table class="wiki-table">
                     <thead>
-                        <tr><th>Path</th><th>Contents</th></tr>
+                        <tr><th>File</th><th>Purpose</th></tr>
                     </thead>
                     <tbody>
-                        <tr><td><code>models/checkpoints/</code></td><td>Base model checkpoint files</td></tr>
-                        <tr><td><code>models/controlnet/</code></td><td>ControlNet model files</td></tr>
-                        <tr><td><code>models/loras/</code></td><td>LoRA weight files</td></tr>
-                        <tr><td><code>models/upscalers/</code></td><td>Real-ESRGAN model files</td></tr>
-                        <tr><td><code>outputs/</code></td><td>All generated images, video, and EXR organized by project</td></tr>
-                        <tr><td><code>[config path]</code></td><td>Application configuration and preferences</td></tr>
-                        <tr><td><code>[logs path]</code></td><td>Generation logs and error output</td></tr>
+                        <tr><td><code>config/defaults.json</code></td><td>Sets model root directory, output root directory, default generation parameters, and UI preferences</td></tr>
+                        <tr><td><code>config/models.json</code></td><td>Lists models to make available in the interface — remove entries to hide models, edit paths if your model directory layout differs</td></tr>
+                        <tr><td><code>config/templates.json</code></td><td>Saved Spec Tool templates; safe to copy between machines</td></tr>
                     </tbody>
                 </table>
 
                 <h3>Model Files by Type</h3>
                 <table class="wiki-table">
                     <thead>
-                        <tr><th>Model Type</th><th>Expected Path</th><th>Format</th></tr>
+                        <tr><th>Model Type</th><th>Expected Path (relative to model root)</th><th>Format</th></tr>
                     </thead>
                     <tbody>
-                        <tr><td>Base Checkpoint</td><td><code>models/checkpoints/[name].safetensors</code></td><td>.safetensors</td></tr>
-                        <tr><td>ControlNet</td><td><code>models/controlnet/[name].safetensors</code></td><td>.safetensors</td></tr>
-                        <tr><td>LoRA</td><td><code>models/loras/[name].safetensors</code></td><td>.safetensors</td></tr>
-                        <tr><td>Real-ESRGAN</td><td><code>models/upscalers/[name].pth</code></td><td>.pth</td></tr>
-                        <tr><td>FILM</td><td><code>models/[film path]</code></td><td>[format]</td></tr>
+                        <tr><td>Base Checkpoint</td><td><code>checkpoints/[name].safetensors</code></td><td>.safetensors</td></tr>
+                        <tr><td>ControlNet</td><td><code>controlnet/[name].safetensors</code></td><td>.safetensors</td></tr>
+                        <tr><td>LoRA</td><td><code>loras/[name].safetensors</code></td><td>.safetensors</td></tr>
+                        <tr><td>Real-ESRGAN</td><td><code>upscalers/[name].pth</code></td><td>.pth</td></tr>
+                        <tr><td>FILM</td><td><code>film/film_net_fp16.pt</code></td><td>.pt</td></tr>
+                        <tr><td>MiDaS / DA3 (Depth)</td><td><code>preprocessors/depth/[model].pt</code></td><td>.pt</td></tr>
+                        <tr><td>OpenPose</td><td><code>preprocessors/openpose/[weights]</code></td><td>.pth / .caffemodel</td></tr>
+                        <tr><td>SAM2 (Cryptomatte)</td><td><code>preprocessors/sam2/[model].pt</code></td><td>.pt</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -530,7 +1487,7 @@
             <!-- Metadata -->
             <div class="wiki-section" id="metadata">
                 <h2>Metadata & Repeatability</h2>
-                <p>Every generation in FUK captures a complete record of the parameters used. This metadata is stored alongside the output files and is accessible through the History Panel — enabling exact reproduction and meaningful collaboration.</p>
+                <p>Every generation in FUK captures a complete record of the parameters used. This metadata is written to a <code>meta.json</code> sidecar file alongside the output and is accessible by dropping the output onto any tab's preview area. A generation is fully reproducible from its sidecar alone, on any machine with the same model files.</p>
 
                 <h3>Captured Metadata</h3>
                 <table class="wiki-table">
@@ -538,22 +1495,25 @@
                         <tr><th>Field</th><th>Description</th></tr>
                     </thead>
                     <tbody>
-                        <tr><td>Seed</td><td>Exact seed used — fixed seeds produce identical results</td></tr>
-                        <tr><td>Model</td><td>Checkpoint filename and hash</td></tr>
-                        <tr><td>LoRA(s)</td><td>Any LoRA files used with their weights</td></tr>
-                        <tr><td>Prompt</td><td>Full positive and negative prompts</td></tr>
-                        <tr><td>Parameters</td><td>Steps, CFG scale, sampler, resolution, etc.</td></tr>
-                        <tr><td>Preprocessors</td><td>Any preprocessors used with their settings</td></tr>
-                        <tr><td>Timestamp</td><td>Date and time of generation</td></tr>
-                        <tr><td>[Other fields]</td><td>[description]</td></tr>
+                        <tr><td>Seed</td><td>Exact seed used — fixed seeds with identical parameters produce identical results</td></tr>
+                        <tr><td>Model</td><td>Checkpoint filename and SHA256 hash — hash confirms you're using the same file, not just the same name</td></tr>
+                        <tr><td>LoRA(s)</td><td>LoRA filenames, hashes, and per-LoRA blend weights</td></tr>
+                        <tr><td>Prompt</td><td>Full positive and negative prompts, exactly as submitted</td></tr>
+                        <tr><td>Parameters</td><td>Steps, CFG scale, sampler, scheduler, resolution</td></tr>
+                        <tr><td>ControlNet</td><td>Any ControlNet models used, their preprocessor, weight, guidance range, and input image hash</td></tr>
+                        <tr><td>EliGen Zones</td><td>Zone mask paths, per-zone prompts, and weights if regional conditioning was used</td></tr>
+                        <tr><td>Pipeline</td><td>Which generation pipeline was used (base, controlnet, eligen, img2img, i2v, fun_control)</td></tr>
+                        <tr><td>FUK Version</td><td>Application version string</td></tr>
+                        <tr><td>Timestamp</td><td>ISO 8601 date and time of generation</td></tr>
+                        <tr><td>Generation Time</td><td>Wall-clock time for the generation in seconds</td></tr>
                     </tbody>
                 </table>
 
-                <h3>Re-queuing Generations</h3>
-                <p>Any historical generation can be re-queued from the History Panel with identical parameters. Combined with a fixed seed, this enables exact result reproduction across sessions or machines with the same model files.</p>
-
                 <h3>Metadata Format</h3>
-                <p>[Description of metadata file format — JSON sidecar, embedded in EXR, etc. — to be documented]</p>
+                <p>Sidecar files are standard JSON, saved as <code>meta.json</code> in the version directory. They are human-readable and can be parsed by any standard JSON library. No database or index is required — the History panel reads sidecar files directly from disk.</p>
+
+                <h3>Portability</h3>
+                <p>Because metadata is stored as sidecar files alongside outputs rather than in a central database, output directories are fully portable. Copy a version directory to another machine and FUK will recognize it on first launch. If a model file referenced in the sidecar is missing or has a different hash, FUK will warn before re-queuing.</p>
             </div>
 
         </main>
@@ -566,13 +1526,34 @@
     </footer>
 
     <script>
+        // Accordion: open one group, close all others
+        function openGroup(btn) {
+            document.querySelectorAll('.sidebar-category').forEach(b => {
+                if (b === btn) return;
+                b.setAttribute('aria-expanded', 'false');
+                b.nextElementSibling.hidden = true;
+            });
+            const isOpen = btn.getAttribute('aria-expanded') === 'true';
+            btn.setAttribute('aria-expanded', String(!isOpen));
+            btn.nextElementSibling.hidden = isOpen;
+        }
+
+        document.querySelectorAll('.sidebar-category').forEach(btn => {
+            btn.addEventListener('click', () => openGroup(btn));
+        });
+
         // Active sidebar link tracking via IntersectionObserver
         const observer = new IntersectionObserver((entries) => {
             entries.forEach(entry => {
                 if (entry.isIntersecting) {
                     document.querySelectorAll('.sidebar-link').forEach(l => l.classList.remove('active'));
                     const link = document.querySelector(`.sidebar-link[href="#${entry.target.id}"]`);
-                    if (link) link.classList.add('active');
+                    if (link) {
+                        link.classList.add('active');
+                        // Auto-open the group containing the active link
+                        const group = link.closest('.sidebar-group');
+                        if (group) openGroup(group.querySelector('.sidebar-category'));
+                    }
                 }
             });
         }, { rootMargin: '-10% 0px -75% 0px', threshold: 0 });

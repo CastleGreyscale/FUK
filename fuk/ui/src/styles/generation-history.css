@@ -1210,3 +1210,23 @@
   width: 0.7rem;
   height: 0.7rem;
 }
+
+.gallery-badge--subtype {
+  font-size: 0.5rem;
+  padding: 0.125rem 0.25rem;
+  border-radius: 0.125rem;
+  color: white;
+  margin-left: 0.25rem;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.gallery-badge--frames {
+  background: #6366f1;
+  color: white;
+}
+
+.gallery-section-label--top {
+  margin-top: 1rem;
+}
+}

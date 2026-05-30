@@ -522,7 +522,6 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
         onDragOver={(e) => { e.preventDefault(); setMetaDragOver(true); }}
         onDragLeave={() => setMetaDragOver(false)}
         onDrop={handleMetaDrop}
-        style={{ position: 'relative' }}
       >
       {/* [LAYER STACK DISABLED]
       {modelSupports(formData.model, 'edit_image') && (
@@ -742,10 +741,9 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                       disabled={generating}
                     />
                   </div>
-                  <div className="fuk-input-inline fuk-mt-2" style={{ gap: '0.5rem' }}>
+                  <div className="fuk-input-inline fuk-mt-2">
                     <button
-                      className="fuk-btn fuk-btn-secondary"
-                      style={{ flex: 1 }}
+                      className="fuk-btn fuk-btn-secondary fuk-btn-full"
                       disabled={generating}
                       onClick={async () => {
                         try {
@@ -764,8 +762,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                       Browse Folder
                     </button>
                     <button
-                      className="fuk-btn fuk-btn-secondary"
-                      style={{ flex: 1 }}
+                      className="fuk-btn fuk-btn-secondary fuk-btn-full"
                       disabled={generating}
                       onClick={async () => {
                         try {
@@ -793,14 +790,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                 
                 {formData.eligen_source && (
                   <div className="fuk-form-group-compact fuk-mt-2">
-                    <div style={{ 
-                      padding: '0.5rem 0.75rem',
-                      background: 'rgba(255,255,255,0.03)',
-                      borderRadius: '4px',
-                      fontSize: '0.8rem',
-                      color: 'var(--fuk-text-secondary)',
-                      wordBreak: 'break-all',
-                    }}>
+                    <div className="fuk-eligen-path-display">
                       {formData.eligen_source}
                     </div>
                     <label className="fuk-label">EliGen Strength</label>
@@ -862,19 +852,18 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
             </div>
             
             <div className="fuk-form-group-compact">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                <label className="fuk-label" style={{ marginBottom: 0 }}>LoRA</label>
+              <div className="lora-header">
+                <label className="fuk-label">LoRA</label>
                 <button
                   type="button"
+                  className="lora-add-btn"
                   onClick={() => setFormData({...formData, loras: [...effectiveLoras, { key: '', multiplier: 1.0 }]})}
-                  style={{ fontSize: '11px', padding: '2px 8px', cursor: 'pointer', background: 'transparent', border: '1px solid var(--border)', borderRadius: '4px', color: 'var(--text-muted)', lineHeight: 1.4 }}
                 >+ Add</button>
               </div>
               {effectiveLoras.map((entry, idx) => (
-                <div key={idx} style={{ display: 'flex', gap: '6px', alignItems: 'center', width: '100%', marginBottom: idx < effectiveLoras.length - 1 ? 4 : 0, opacity: entry.bypass ? 0.45 : 1 }}>
+                <div key={idx} className={`lora-row${entry.bypass ? ' lora-row--bypassed' : ''}`}>
                   <select
-                    className="fuk-select"
-                    style={{ flex: '1 1 0', minWidth: 0 }}
+                    className="fuk-select lora-row-select"
                     value={entry.key || ''}
                     onChange={(e) => {
                       const updated = effectiveLoras.map((l, i) => i === idx ? { ...l, key: e.target.value } : l);
@@ -890,8 +879,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                   </select>
                   <input
                     type="number"
-                    className="fuk-input"
-                    style={{ width: '64px', flexShrink: 0 }}
+                    className="fuk-input lora-row-multiplier"
                     value={entry.multiplier}
                     onChange={(e) => {
                       const updated = effectiveLoras.map((l, i) => i === idx ? { ...l, multiplier: parseFloat(e.target.value) } : l);
@@ -904,16 +892,16 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                   <button
                     type="button"
                     title={entry.bypass ? 'Enable LoRA' : 'Bypass LoRA'}
+                    className={`lora-row-btn${entry.bypass ? ' lora-row-btn--active' : ''}`}
                     onClick={() => {
                       const updated = effectiveLoras.map((l, i) => i === idx ? { ...l, bypass: !l.bypass } : l);
                       setFormData({...formData, loras: updated, lora: null, lora_multiplier: 1.0});
                     }}
-                    style={{ padding: '4px 7px', cursor: 'pointer', background: entry.bypass ? 'var(--border)' : 'transparent', border: '1px solid var(--border)', borderRadius: '4px', color: 'var(--text-muted)', flexShrink: 0, lineHeight: 1 }}
                   >⊘</button>
                   <button
                     type="button"
+                    className="lora-row-btn"
                     onClick={() => setFormData({...formData, loras: effectiveLoras.filter((_, i) => i !== idx), lora: null, lora_multiplier: 1.0})}
-                    style={{ padding: '4px 7px', cursor: 'pointer', background: 'transparent', border: '1px solid var(--border)', borderRadius: '4px', color: 'var(--text-muted)', flexShrink: 0, lineHeight: 1 }}
                   >×</button>
                 </div>
               ))}
@@ -1047,7 +1035,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
             
             <div className="fuk-form-group-compact">
               <textarea
-                className="fuk-textarea"
+                className="fuk-textarea fuk-textarea--auto"
                 value={formData.prompt}
                 onChange={(e) => {
                   setFormData({...formData, prompt: e.target.value});
@@ -1056,14 +1044,13 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                 onInput={handleTextareaResize}
                 placeholder="A cinematic still of..."
                 rows={4}
-                style={{ resize: 'none', overflow: 'hidden' }}
               />
             </div>
             
             <div className="fuk-form-group-compact">
               <label className="fuk-label">Negative Prompt</label>
               <textarea
-                className="fuk-textarea"
+                className="fuk-textarea fuk-textarea--auto"
                 value={formData.negative_prompt}
                 onChange={(e) => {
                   setFormData({...formData, negative_prompt: e.target.value});
@@ -1072,7 +1059,6 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                 onInput={handleTextareaResize}
                 placeholder="blurry, low quality..."
                 rows={4}
-                style={{ resize: 'none', overflow: 'hidden' }}
               />
             </div>
           </div>
@@ -1131,33 +1117,25 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                   <>
                     <div className="fuk-form-group-compact">
                       <label className="fuk-label">Source Image</label>
-                      <div style={{ fontSize: '0.95rem', fontVariantNumeric: 'tabular-nums' }}>
+                      <div className="fuk-dims-display">
                         {sourceImageDims.w} × {sourceImageDims.h}px
                       </div>
                     </div>
 
                     {(!isAligned16(sourceImageDims.w) || !isAligned16(sourceImageDims.h)) && !dimsDismissed ? (
-                      <div className="fuk-warning-block" style={{
-                        marginTop: '0.75rem',
-                        padding: '0.6rem 0.75rem',
-                        background: 'rgba(255, 160, 50, 0.08)',
-                        border: '1px solid rgba(255, 160, 50, 0.35)',
-                        borderRadius: '4px',
-                        fontSize: '0.8rem',
-                      }}>
-                        <div style={{ color: 'var(--fuk-warning, #ffa032)', fontWeight: 600, marginBottom: '0.3rem' }}>
+                      <div className="fuk-warning-block">
+                        <div className="fuk-warning-title">
                           Dimensions not multiples of 16
                         </div>
-                        <div style={{ color: 'var(--fuk-text-secondary)', marginBottom: '0.5rem' }}>
+                        <div className="fuk-warning-body">
                           May cause generation errors. Nearest aligned size:&nbsp;
-                          <strong style={{ color: 'var(--fuk-text)' }}>
+                          <strong>
                             {roundUp16(sourceImageDims.w)} × {roundUp16(sourceImageDims.h)}px
                           </strong>
                         </div>
-                        <div style={{ display: 'flex', gap: '0.4rem' }}>
+                        <div className="fuk-warning-actions">
                           <button
                             className="fuk-btn fuk-btn-secondary"
-                            style={{ flex: 1, fontSize: '0.8rem', padding: '0.3rem 0.5rem' }}
                             onClick={handleApplyAlign16}
                             disabled={alignLoading || generating}
                           >
@@ -1165,7 +1143,6 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                           </button>
                           <button
                             className="fuk-btn fuk-btn-secondary"
-                            style={{ fontSize: '0.8rem', padding: '0.3rem 0.6rem' }}
                             onClick={() => setDimsDismissed(true)}
                           >
                             Ignore
@@ -1173,7 +1150,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                         </div>
                       </div>
                     ) : !dimsDismissed ? (
-                      <p className="fuk-help-text fuk-mt-1" style={{ color: 'var(--fuk-success, #4caf50)' }}>
+                      <p className="fuk-help-text fuk-mt-1 fuk-text-success">
                         Dimensions are 16px-aligned
                       </p>
                     ) : null}

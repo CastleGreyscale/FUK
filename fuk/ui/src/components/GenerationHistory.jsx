@@ -159,16 +159,10 @@ function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned, onHov
     };
     
     return (
-      <span style={{
-        fontSize: '0.5rem',
-        padding: '0.125rem 0.25rem',
-        borderRadius: '0.125rem',
-        background: colors[generation.subtype] || '#6b7280',
-        color: 'white',
-        marginLeft: '0.25rem',
-        textTransform: 'uppercase',
-        fontWeight: 600,
-      }}>
+      <span
+        className="gallery-badge--subtype"
+        style={{ background: colors[generation.subtype] || '#6b7280' }}
+      >
         {generation.subtype}
       </span>
     );
@@ -179,15 +173,7 @@ function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned, onHov
     if (!isSequence || !generation.frameCount) return null;
     
     return (
-      <span style={{
-        fontSize: '0.5rem',
-        padding: '0.125rem 0.25rem',
-        borderRadius: '0.125rem',
-        background: '#6366f1',
-        color: 'white',
-        marginLeft: '0.25rem',
-        fontWeight: 600,
-      }}>
+      <span className="gallery-badge--subtype gallery-badge--frames">
         {generation.frameCount}f
       </span>
     );
@@ -536,12 +522,12 @@ function GalleryLargeView({ generation, generations, isPinned, vote, onTogglePin
             {generation.type}
           </span>
           {generation.subtype && (
-            <span className="gallery-badge" style={{ background: typeColors[generation.subtype] || '#6b7280' }}>
+            <span className="gallery-badge gallery-badge--frames" style={{ background: typeColors[generation.subtype] || '#6b7280' }}>
               {generation.subtype}
             </span>
           )}
           {generation.isSequence && generation.frameCount && (
-            <span className="gallery-badge" style={{ background: '#6366f1' }}>
+            <span className="gallery-badge gallery-badge--frames">
               {generation.frameCount}f
             </span>
           )}
@@ -779,7 +765,7 @@ function FullscreenGallery({ generations, pinnedIds, votes, onTogglePin, onVote,
             </div>
           )}
           {unpinnedGens.length > 0 && pinnedGens.length > 0 && (
-            <div className="gallery-section-label" style={{ marginTop: '1rem' }}>Recent</div>
+            <div className="gallery-section-label gallery-section-label--top">Recent</div>
           )}
           <div className="gallery-grid" style={{ '--thumb-w': `${zoom}px` }}>
             {unpinnedGens.map(g => (

@@ -15,8 +15,6 @@ const toLabel = key => key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCas
 // Helpers
 // ============================================================================
 
-const lbl = { fontSize: '0.68rem', color: 'var(--text-muted)', marginBottom: '0.2rem', display: 'block' };
-const card = { padding: '0.6rem 0.75rem' };
 
 function variationImageUrl(path) {
   if (!path) return null;
@@ -160,75 +158,52 @@ function SetupPhase({ config, onStart }) {
   const loras = config?.models?.loras || [];
 
   return (
-    <div style={{ display: 'flex', gap: '1.25rem', padding: '1rem 1.25rem', height: '100%', boxSizing: 'border-box', overflowY: 'auto' }}>
+    <div className="dataset-setup">
 
       {/* Left column */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', width: '340px', flexShrink: 0 }}>
+      <div className="dataset-setup-col">
 
         {/* Subject */}
-        <div className="fuk-card" style={card}>
-          <span style={lbl}>Subject Name</span>
+        <div className="fuk-card dataset-card">
+          <span className="dataset-label">Subject Name</span>
           <input
             className="fuk-input"
             placeholder="e.g. john_doe"
             value={subjectName}
             onChange={e => setSubjectName(e.target.value)}
-            style={{ width: '100%', marginBottom: '0.5rem' }}
           />
-          <span style={lbl}>Subject Type</span>
-          <select
-            className="fuk-select"
-            value={subjectType}
-            onChange={e => setSubjectType(e.target.value)}
-            style={{ width: '100%' }}
-          >
+          <span className="dataset-label">Subject Type</span>
+          <select className="fuk-select" value={subjectType} onChange={e => setSubjectType(e.target.value)}>
             <option value="character">Character</option>
             <option value="object">Object</option>
             <option value="environment">Environment</option>
           </select>
         </div>
 
-        {/* Source images — also a drop target for history items */}
+        {/* Source images */}
         <div
-          className="fuk-card"
-          style={{
-            ...card,
-            outline: sourceDragOver ? '2px solid var(--accent-color, #a855f7)' : '2px solid transparent',
-            transition: 'outline 0.1s',
-            position: 'relative',
-          }}
+          className={`fuk-card dataset-card dataset-source-card ${sourceDragOver ? 'dataset-source-card--dragover' : ''}`}
           onDragOver={e => { e.preventDefault(); setSourceDragOver(true); }}
           onDragLeave={() => setSourceDragOver(false)}
           onDrop={handleSourceDrop}
         >
-          <span style={lbl}>Source Images</span>
-          <ImageUploader
-            images={sources}
-            onImagesChange={setSources}
-          />
+          <span className="dataset-label">Source Images</span>
+          <ImageUploader images={sources} onImagesChange={setSources} />
           {sourceDragOver && (
-            <div style={{
-              position: 'absolute', inset: 0, borderRadius: '4px',
-              background: 'var(--accent-color, #a855f7)18',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              pointerEvents: 'none',
-            }}>
-              <span style={{ fontSize: '0.8rem', color: 'var(--accent-color, #a855f7)', fontWeight: 600 }}>
-                Drop to add source
-              </span>
+            <div className="dataset-drag-overlay">
+              <span>Drop to add source</span>
             </div>
           )}
         </div>
 
         {/* Generation params */}
-        <div className="fuk-card" style={card}>
-          <span style={lbl}>Seed Strategy</span>
-          <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.5rem' }}>
+        <div className="fuk-card dataset-card">
+          <span className="dataset-label">Seed Strategy</span>
+          <div className="dataset-seed-row">
             {['fixed', 'random'].map(s => (
               <button
                 key={s}
                 className={`fuk-btn ${seedStrategy === s ? 'fuk-btn-primary' : 'fuk-btn-secondary'}`}
-                style={{ flex: 1, fontSize: '0.78rem', padding: '0.25rem 0' }}
                 onClick={() => setSeedStrategy(s)}
               >
                 {s.charAt(0).toUpperCase() + s.slice(1)}
@@ -238,35 +213,34 @@ function SetupPhase({ config, onStart }) {
 
           {seedStrategy === 'fixed' && (
             <>
-              <span style={lbl}>Seed</span>
+              <span className="dataset-label">Seed</span>
               <input
                 type="number"
                 className="fuk-input"
                 value={seed}
                 onChange={e => setSeed(parseInt(e.target.value) || 0)}
-                style={{ width: '100%', marginBottom: '0.5rem' }}
               />
             </>
           )}
 
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
-            <div style={{ flex: 1 }}>
-              <span style={lbl}>Steps</span>
+          <div className="dataset-params-row">
+            <div className="dataset-params-col">
+              <span className="dataset-label">Steps</span>
               <input type="number" className="fuk-input" value={steps} min={1} max={100}
-                onChange={e => setSteps(parseInt(e.target.value) || 28)} style={{ width: '100%' }} />
+                onChange={e => setSteps(parseInt(e.target.value) || 28)} />
             </div>
-            <div style={{ flex: 1 }}>
-              <span style={lbl}>CFG</span>
+            <div className="dataset-params-col">
+              <span className="dataset-label">CFG</span>
               <input type="number" className="fuk-input" value={cfg} min={1} max={20} step={0.5}
-                onChange={e => setCfg(parseFloat(e.target.value) || 5)} style={{ width: '100%' }} />
+                onChange={e => setCfg(parseFloat(e.target.value) || 5)} />
             </div>
           </div>
         </div>
 
         {/* Optional LoRA */}
-        <div className="fuk-card" style={card}>
-          <span style={lbl}>Style LoRA (optional)</span>
-          <select className="fuk-select" value={lora} onChange={e => setLora(e.target.value)} style={{ width: '100%', marginBottom: '0.5rem' }}>
+        <div className="fuk-card dataset-card">
+          <span className="dataset-label">Style LoRA (optional)</span>
+          <select className="fuk-select" value={lora} onChange={e => setLora(e.target.value)}>
             <option value="">None</option>
             {loras.map((l, i) => {
               const key = typeof l === 'string' ? l : l.key || i;
@@ -276,21 +250,21 @@ function SetupPhase({ config, onStart }) {
           </select>
           {lora && (
             <>
-              <span style={lbl}>LoRA Alpha — {loraAlpha.toFixed(1)}</span>
+              <span className="dataset-label">LoRA Alpha — {loraAlpha.toFixed(1)}</span>
               <input type="range" min={0} max={2} step={0.1} value={loraAlpha}
-                onChange={e => setLoraAlpha(parseFloat(e.target.value))} style={{ width: '100%' }} />
+                onChange={e => setLoraAlpha(parseFloat(e.target.value))} />
             </>
           )}
         </div>
       </div>
 
       {/* Right column: pack selection + action */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', flex: 1, minWidth: 0 }}>
+      <div className="dataset-setup-right">
 
-        <div className="fuk-card" style={{ ...card, flex: 1 }}>
-          <span style={lbl}>Variation Packs</span>
+        <div className="fuk-card dataset-card dataset-packs-card">
+          <span className="dataset-label">Variation Packs</span>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          <div className="dataset-packs-list">
             {Object.entries(currentPacks).map(([packKey, packMeta]) => {
               const on = !!packs[subjectType]?.[packKey];
               const expanded = !!expandedPacks[packKey];
@@ -298,48 +272,27 @@ function SetupPhase({ config, onStart }) {
               const desel = deselectedVars[subjectType]?.[packKey] ?? {};
               const enabledCount = packVars.filter(v => !desel[v.id]).length;
               return (
-                <div key={packKey} style={{
-                  background: on ? 'var(--accent-color, #a855f7)22' : 'var(--bg-tertiary, #1e1e1e)',
-                  borderRadius: '4px',
-                  border: `1px solid ${on ? 'var(--accent-color, #a855f7)' : 'var(--border-color)'}`,
-                  transition: 'all 0.1s',
-                  overflow: 'hidden',
-                }}>
-                  <div style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    padding: '0.45rem 0.6rem',
-                    cursor: 'pointer',
-                  }}
-                    onClick={() => togglePack(subjectType, packKey)}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      <input
-                        type="checkbox"
-                        checked={on}
-                        onChange={() => {}}
-                        onClick={e => e.stopPropagation()}
-                      />
-                      <span style={{ fontSize: '0.84rem' }}>{packMeta.label}</span>
+                <div key={packKey} className={`dataset-pack-item ${on ? 'dataset-pack-item--active' : ''}`}>
+                  <div className="dataset-pack-header" onClick={() => togglePack(subjectType, packKey)}>
+                    <div className="dataset-pack-header-left">
+                      <input type="checkbox" checked={on} onChange={() => {}} onClick={e => e.stopPropagation()} />
+                      <span className="dataset-pack-name">{packMeta.label}</span>
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <div className="dataset-pack-header-right">
                       {on && (
-                        <span style={{ fontSize: '0.7rem', color: enabledCount < packMeta.count ? 'var(--accent-color, #a855f7)' : 'var(--text-muted)' }}>
+                        <span className={`dataset-pack-count ${enabledCount < packMeta.count ? 'dataset-pack-count--partial' : ''}`}>
                           {enabledCount}/{packMeta.count}
                         </span>
                       )}
                       {!on && (
-                        <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                        <span className="dataset-pack-count">
                           {packMeta.count} var{packMeta.count !== 1 ? 's' : ''}
                         </span>
                       )}
                       {on && packVars.length > 0 && (
                         <button
+                          className="dataset-pack-expand-btn"
                           onClick={e => { e.stopPropagation(); setExpandedPacks(prev => ({ ...prev, [packKey]: !prev[packKey] })); }}
-                          style={{
-                            background: 'none', border: 'none', cursor: 'pointer',
-                            color: 'var(--text-muted)', fontSize: '0.7rem', padding: '0 0.15rem',
-                            lineHeight: 1,
-                          }}
                           title={expanded ? 'Collapse' : 'Expand to filter variations'}
                         >
                           {expanded ? '▲' : '▼'}
@@ -349,33 +302,18 @@ function SetupPhase({ config, onStart }) {
                   </div>
 
                   {on && expanded && packVars.length > 0 && (
-                    <div style={{
-                      borderTop: '1px solid var(--border-color)',
-                      padding: '0.4rem 0.6rem',
-                      maxHeight: '180px',
-                      overflowY: 'auto',
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
-                      gap: '0.15rem 0.5rem',
-                    }}>
+                    <div className="dataset-pack-vars">
                       {packVars.map(v => {
                         const checked = !desel[v.id];
                         return (
-                          <label key={v.id} style={{
-                            display: 'flex', alignItems: 'center', gap: '0.3rem',
-                            fontSize: '0.7rem', cursor: 'pointer', padding: '0.1rem 0',
-                            color: checked ? 'var(--text-secondary)' : 'var(--text-muted)',
-                            opacity: checked ? 1 : 0.5,
-                          }}>
+                          <label key={v.id} className={`dataset-var-label ${!checked ? 'dataset-var-label--deselected' : ''}`}>
                             <input
                               type="checkbox"
+                              className="dataset-var-checkbox"
                               checked={checked}
                               onChange={() => toggleVar(packKey, v.id)}
-                              style={{ accentColor: 'var(--accent-color, #a855f7)', flexShrink: 0 }}
                             />
-                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {v.label}
-                            </span>
+                            <span>{v.label}</span>
                           </label>
                         );
                       })}
@@ -387,7 +325,7 @@ function SetupPhase({ config, onStart }) {
           </div>
 
           {totalVariations > 0 && (
-            <div style={{ marginTop: '0.75rem', fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+            <div className="dataset-var-count">
               {sources.length > 1
                 ? `${totalVariations} variation${totalVariations !== 1 ? 's' : ''} × ${sources.length} sources = ${totalGenerations} images`
                 : `${totalVariations} variation${totalVariations !== 1 ? 's' : ''} selected`
@@ -396,17 +334,12 @@ function SetupPhase({ config, onStart }) {
           )}
         </div>
 
-        {error && (
-          <div style={{ color: 'var(--error-color, #ef4444)', fontSize: '0.8rem', padding: '0.4rem 0.6rem', background: '#ef444422', borderRadius: '4px' }}>
-            {error}
-          </div>
-        )}
+        {error && <div className="dataset-error">{error}</div>}
 
         <button
-          className="fuk-btn fuk-btn-primary"
+          className="fuk-btn fuk-btn-primary dataset-start-btn"
           onClick={handleStart}
           disabled={!canStart || starting}
-          style={{ width: '100%', padding: '0.6rem', fontSize: '0.9rem' }}
         >
           {starting ? 'Starting…' : `Generate Dataset — ${totalGenerations} image${totalGenerations !== 1 ? 's' : ''}`}
         </button>
@@ -458,11 +391,7 @@ function RunningPhase({ jobId, onComplete }) {
   }, [jobId]);
 
   if (!state) {
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)' }}>
-        Connecting to job stream…
-      </div>
-    );
+    return <div className="dataset-connecting">Connecting to job stream…</div>;
   }
 
   const done = state.variations?.filter(v => v.status === 'completed').length ?? 0;
@@ -471,12 +400,12 @@ function RunningPhase({ jobId, onComplete }) {
   const pct = Math.round((state.progress ?? 0) * 100);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', padding: '1rem 1.25rem', height: '100%', boxSizing: 'border-box', overflow: 'hidden' }}>
+    <div className="dataset-running">
 
       {/* Status bar */}
-      <div className="fuk-card" style={{ padding: '0.6rem 0.75rem', flexShrink: 0 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
-          <span style={{ fontSize: '0.85rem' }}>
+      <div className="fuk-card dataset-status-card">
+        <div className="dataset-status-header">
+          <span className="dataset-status-label">
             {state.status === 'running' && state.current_label
               ? `Generating ${(state.current_idx ?? 0) + 1} of ${total} — ${state.current_label}`
               : state.status === 'complete'  ? 'Complete'
@@ -485,44 +414,40 @@ function RunningPhase({ jobId, onComplete }) {
               : 'Starting…'
             }
           </span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <span style={{ fontFamily: 'monospace', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+          <div className="dataset-status-right">
+            <span className="dataset-status-count">
               {done}/{total}{failed > 0 ? ` · ${failed} failed` : ''}
             </span>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+            <label className="dataset-thumb-size-label">
               <span>Size</span>
               <input
                 type="range" min={80} max={280} step={20}
                 value={thumbSize}
                 onChange={e => setThumbSize(Number(e.target.value))}
-                style={{ width: '70px', accentColor: 'var(--accent-color, #a855f7)' }}
               />
-              <span style={{ fontFamily: 'monospace', width: '2.5rem' }}>{thumbSize}px</span>
+              <span className="dataset-thumb-size-value">{thumbSize}px</span>
             </label>
             {state.status === 'running' && (
               <button
-                className="fuk-btn fuk-btn-secondary"
+                className="fuk-btn fuk-btn-secondary dataset-cancel-btn"
                 onClick={handleCancel}
                 disabled={cancelling}
-                style={{ fontSize: '0.72rem', padding: '0.15rem 0.5rem' }}
               >
                 {cancelling ? 'Cancelling…' : 'Cancel'}
               </button>
             )}
           </div>
         </div>
-        <div style={{ height: '4px', background: 'var(--bg-tertiary, #333)', borderRadius: '2px', overflow: 'hidden' }}>
-          <div style={{
-            height: '100%',
-            width: `${pct}%`,
-            background: state.status === 'failed' ? 'var(--error-color, #ef4444)' : 'var(--accent-color, #a855f7)',
-            transition: 'width 0.4s ease',
-          }} />
+        <div className="dataset-progress-track">
+          <div
+            className={`dataset-progress-fill ${state.status === 'failed' ? 'dataset-progress-fill--failed' : ''}`}
+            style={{ width: `${pct}%` }}
+          />
         </div>
       </div>
 
       {/* Thumbnail grid */}
-      <div style={{ flex: 1, overflowY: 'auto' }}>
+      <div className="dataset-thumb-grid-wrap">
         <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${thumbSize}px, 1fr))`, gap: '0.5rem' }}>
           {(state.variations ?? []).map(v => (
             <VariationThumbnail key={v.id} variation={v} jobId={jobId} />
@@ -548,40 +473,21 @@ function VariationThumbnail({ variation, jobId }) {
       .catch(() => {});
   }, [variation.status, variation.id, jobId]);
 
-  const statusColor = {
-    pending:   'var(--text-muted)',
-    running:   'var(--accent-color, #a855f7)',
-    completed: 'var(--success-color, #22c55e)',
-    failed:    'var(--error-color, #ef4444)',
-  }[variation.status] ?? 'var(--text-muted)';
+  const status = variation.status;
 
   return (
-    <div style={{
-      background: 'var(--bg-secondary)',
-      borderRadius: '4px',
-      overflow: 'hidden',
-      border: '1px solid var(--border-color)',
-    }}>
-      <div style={{ aspectRatio: '1', background: 'var(--bg-tertiary, #1a1a1a)', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
+    <div className="dataset-thumb">
+      <div className="dataset-thumb-img-area">
         {imgUrl ? (
-          <img src={imgUrl} alt={variation.label} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          <img src={imgUrl} alt={variation.label} />
         ) : (
-          <div style={{ width: '20px', height: '20px', borderRadius: '50%', border: `2px solid ${statusColor}`, opacity: 0.5 }} />
+          <div className="dataset-thumb-pending" />
         )}
-        {variation.status === 'running' && (
-          <div style={{
-            position: 'absolute', inset: 0,
-            border: '2px solid var(--accent-color, #a855f7)',
-            borderRadius: '4px',
-            animation: 'pulse 1.5s ease-in-out infinite',
-          }} />
-        )}
+        {status === 'running' && <div className="dataset-thumb-running-ring" />}
       </div>
-      <div style={{ padding: '0.2rem 0.35rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-        <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: statusColor, flexShrink: 0 }} />
-        <span style={{ fontSize: '0.62rem', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {variation.label}
-        </span>
+      <div className="dataset-thumb-footer">
+        <div className={`dataset-thumb-dot dataset-thumb-dot--${status}`} />
+        <span className="dataset-thumb-label">{variation.label}</span>
       </div>
     </div>
   );
@@ -692,92 +598,63 @@ function CurationPhase({ jobId }) {
   };
 
   if (!job) {
-    return <div style={{ padding: '2rem', color: 'var(--text-muted)', textAlign: 'center' }}>Loading…</div>;
+    return <div className="dataset-loading">Loading…</div>;
   }
 
   const approvedCount = job.approved_count ?? 0;
   const completedVariations = job.variations?.filter(v => v.status === 'completed' || v.status === 'running' || v.status === 'failed') ?? [];
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+    <div className="dataset-curation">
 
       {/* Header */}
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '0.6rem 1.25rem',
-        borderBottom: '1px solid var(--border-color)',
-        flexShrink: 0,
-        gap: '1rem',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.75rem' }}>
+      <div className="dataset-curation-header">
+        <div className="dataset-curation-title">
           <span className="fuk-label">{job.subject_name}</span>
-          <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{job.subject_type}</span>
-          <span style={{ fontSize: '0.72rem', color: 'var(--success-color, #22c55e)' }}>
-            {approvedCount} approved
-          </span>
+          <span className="dataset-curation-type">{job.subject_type}</span>
+          <span className="dataset-curation-approved-count">{approvedCount} approved</span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+        <div className="dataset-curation-actions">
           <button
-            className="fuk-btn fuk-btn-secondary"
+            className="fuk-btn fuk-btn-secondary dataset-curation-approve-all-btn"
             onClick={() => handleApproveAll(true)}
-            style={{ fontSize: '0.72rem', padding: '0.15rem 0.5rem', color: 'var(--success-color, #22c55e)', flexShrink: 0 }}
             title="Approve all completed images"
           >
             Approve All
           </button>
           <button
-            className="fuk-btn fuk-btn-secondary"
+            className="fuk-btn fuk-btn-secondary dataset-curation-reject-all-btn"
             onClick={() => handleApproveAll(false)}
-            style={{ fontSize: '0.72rem', padding: '0.15rem 0.5rem', color: 'var(--error-color, #ef4444)', flexShrink: 0 }}
             title="Reject all completed images"
           >
             Reject All
           </button>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+          <label className="dataset-thumb-size-label">
             <span>Size</span>
             <input
               type="range" min={100} max={320} step={20}
               value={thumbSize}
               onChange={e => setThumbSize(Number(e.target.value))}
-              style={{ width: '70px', accentColor: 'var(--accent-color, #a855f7)' }}
             />
-            <span style={{ fontFamily: 'monospace', width: '2.5rem' }}>{thumbSize}px</span>
+            <span className="dataset-thumb-size-value">{thumbSize}px</span>
           </label>
           {exportResult && (
-            <span style={{
-              fontSize: '0.72rem', fontFamily: 'monospace',
-              color: exportResult.ok ? 'var(--success-color, #22c55e)' : 'var(--error-color, #ef4444)',
-              overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '280px', whiteSpace: 'nowrap',
-            }}>
+            <span className={`dataset-export-result ${exportResult.ok ? 'dataset-export-result--ok' : 'dataset-export-result--error'}`}>
               {exportResult.ok ? `✓ ${exportResult.exported} → ${exportResult.path}` : `✗ ${exportResult.error}`}
             </span>
           )}
-          {/* Directory picker */}
           <div
-            className="fuk-input"
+            className={`fuk-input dataset-export-dir ${exportDir ? 'dataset-export-dir--set' : 'dataset-export-dir--empty'}`}
             onClick={handleBrowseExportDir}
             title="Click to choose export folder (defaults to job's approved/ subfolder)"
-            style={{
-              fontSize: '0.72rem', cursor: 'pointer', maxWidth: '200px',
-              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-              color: exportDir ? 'var(--text-primary)' : 'var(--text-muted)',
-              userSelect: 'none',
-            }}
           >
             {exportDir || 'Default: approved/'}
           </div>
+          <button className="fuk-btn fuk-btn-secondary dataset-browse-btn" onClick={handleBrowseExportDir}>Browse</button>
           <button
-            className="fuk-btn fuk-btn-secondary"
-            onClick={handleBrowseExportDir}
-            style={{ fontSize: '0.72rem', padding: '0.15rem 0.5rem', flexShrink: 0 }}
-          >
-            Browse
-          </button>
-          <button
-            className="fuk-btn fuk-btn-primary"
+            className="fuk-btn fuk-btn-primary dataset-export-btn"
             onClick={handleExport}
             disabled={approvedCount === 0 || exporting}
-            style={{ fontSize: '0.8rem', flexShrink: 0 }}
           >
             {exporting ? 'Exporting…' : `Export (${approvedCount})`}
           </button>
@@ -785,11 +662,9 @@ function CurationPhase({ jobId }) {
       </div>
 
       {/* Grid */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '0.75rem 1.25rem' }}>
+      <div className="dataset-curation-grid-wrap">
         {completedVariations.length === 0 ? (
-          <div style={{ color: 'var(--text-muted)', textAlign: 'center', paddingTop: '3rem', fontSize: '0.85rem' }}>
-            No completed variations to review.
-          </div>
+          <div className="dataset-curation-empty">No completed variations to review.</div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${thumbSize}px, 1fr))`, gap: '0.75rem' }}>
             {completedVariations.map(v => (
@@ -808,87 +683,53 @@ function CurationCard({ variation, onApprove, onRerun, isRerunning }) {
   const isFailed = variation.status === 'failed';
   const isRunning = variation.status === 'running' || isRerunning;
 
-  const borderColor =
-    isRunning          ? 'var(--accent-color, #a855f7)' :
-    isFailed           ? 'var(--error-color, #ef4444)' :
-    approved === true  ? 'var(--success-color, #22c55e)' :
-    approved === false ? 'var(--error-color, #ef4444)' :
-    'var(--border-color)';
+  const borderState = isRunning ? 'running' : isFailed ? 'failed' : approved === true ? 'approved' : approved === false ? 'rejected' : '';
 
   return (
-    <div style={{
-      background: 'var(--bg-secondary)',
-      borderRadius: '6px',
-      overflow: 'hidden',
-      border: `2px solid ${borderColor}`,
-      display: 'flex', flexDirection: 'column',
-      transition: 'border-color 0.2s',
-    }}>
-      <div style={{ aspectRatio: '1', background: 'var(--bg-tertiary, #1a1a1a)', overflow: 'hidden', position: 'relative' }}>
+    <div className={`dataset-curation-card ${borderState ? `dataset-curation-card--${borderState}` : ''}`}>
+      <div className="dataset-card-media">
         {imgUrl && !isRunning ? (
-          <img src={imgUrl} alt={variation.label}
-            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+          <img src={imgUrl} alt={variation.label} />
         ) : (
-          <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '0.4rem' }}>
+          <div className="dataset-card-placeholder">
             {isRunning ? (
               <>
-                {imgUrl && <img src={imgUrl} alt={variation.label} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', opacity: 0.3 }} />}
-                <div style={{ width: '20px', height: '20px', borderRadius: '50%', border: '2px solid var(--accent-color, #a855f7)', animation: 'pulse 1.5s ease-in-out infinite', position: 'relative' }} />
-                <span style={{ fontSize: '0.62rem', color: 'var(--accent-color, #a855f7)', position: 'relative' }}>Regenerating…</span>
+                {imgUrl && <img src={imgUrl} alt={variation.label} className="dataset-card-rerunning-bg" />}
+                <div className="dataset-card-spinner" />
+                <span className="dataset-card-rerunning-label">Regenerating…</span>
               </>
             ) : (
-              <span style={{ fontSize: '0.7rem', color: isFailed ? 'var(--error-color, #ef4444)' : 'var(--text-muted)' }}>
+              <span className={`dataset-card-empty-label ${isFailed ? 'dataset-card-empty-label--failed' : ''}`}>
                 {isFailed ? 'Failed' : 'No image'}
               </span>
             )}
           </div>
         )}
       </div>
-      <div style={{ padding: '0.35rem 0.5rem' }}>
-        <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginBottom: '0.35rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {variation.label}
-        </div>
-        <div style={{ display: 'flex', gap: '0.3rem' }}>
+      <div className="dataset-card-footer">
+        <div className="dataset-card-label">{variation.label}</div>
+        <div className="dataset-card-actions">
           <button
+            className={`dataset-vote-btn ${approved === true ? 'dataset-vote-btn--approved' : ''}`}
             onClick={() => onApprove(variation.id, true)}
             title="Approve"
             disabled={isRunning || isFailed}
-            style={{
-              flex: 1, padding: '0.3rem', border: 'none', borderRadius: '3px', cursor: isRunning || isFailed ? 'default' : 'pointer',
-              background: approved === true ? 'var(--success-color, #22c55e)' : 'var(--bg-tertiary, #333)',
-              color: approved === true ? '#fff' : 'var(--text-muted)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              transition: 'all 0.1s', opacity: isRunning || isFailed ? 0.4 : 1,
-            }}
           >
-            <ThumbsUp style={{ width: '0.9rem', height: '0.9rem' }} />
+            <ThumbsUp />
           </button>
           <button
+            className={`dataset-vote-btn ${approved === false ? 'dataset-vote-btn--rejected' : ''}`}
             onClick={() => onApprove(variation.id, false)}
             title="Reject"
             disabled={isRunning || isFailed}
-            style={{
-              flex: 1, padding: '0.3rem', border: 'none', borderRadius: '3px', cursor: isRunning || isFailed ? 'default' : 'pointer',
-              background: approved === false ? 'var(--error-color, #ef4444)' : 'var(--bg-tertiary, #333)',
-              color: approved === false ? '#fff' : 'var(--text-muted)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              transition: 'all 0.1s', opacity: isRunning || isFailed ? 0.4 : 1,
-            }}
           >
-            <ThumbsDown style={{ width: '0.9rem', height: '0.9rem' }} />
+            <ThumbsDown />
           </button>
           <button
+            className="dataset-rerun-btn"
             onClick={() => onRerun(variation.id)}
             title="Rerun this generation"
             disabled={isRunning}
-            style={{
-              padding: '0.3rem 0.45rem', border: 'none', borderRadius: '3px', cursor: isRunning ? 'default' : 'pointer',
-              background: 'var(--bg-tertiary, #333)',
-              color: 'var(--text-muted)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              transition: 'all 0.1s', opacity: isRunning ? 0.4 : 1,
-              fontSize: '0.75rem',
-            }}
           >
             ↺
           </button>
@@ -921,40 +762,28 @@ export default function LoraDatasetBuilder({ config }) {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+    <div className="dataset-layout">
 
       {/* Phase indicator */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: '0', padding: '0.4rem 1.25rem',
-        borderBottom: '1px solid var(--border-color)',
-        background: 'var(--bg-secondary)',
-        flexShrink: 0,
-      }}>
+      <div className="dataset-phase-bar">
         {['setup', 'running', 'curation'].map((p, i) => {
           const labels = ['Setup', 'Generating', 'Curation'];
           const active = phase === p;
           const done = ['setup', 'running', 'curation'].indexOf(phase) > i;
           return (
-            <div key={p} style={{ display: 'flex', alignItems: 'center' }}>
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: '0.35rem',
-                padding: '0.2rem 0.5rem',
-                fontSize: '0.75rem',
-                color: active ? 'var(--accent-color, #a855f7)' : done ? 'var(--success-color, #22c55e)' : 'var(--text-muted)',
-                fontWeight: active ? '600' : '400',
-              }}>
-                {done && <CheckCircle style={{ width: '0.75rem', height: '0.75rem' }} />}
+            <div key={p} className="dataset-phase-item">
+              <div className={`dataset-phase-label ${active ? 'dataset-phase-label--active' : ''} ${done ? 'dataset-phase-label--done' : ''}`}>
+                {done && <CheckCircle />}
                 {labels[i]}
               </div>
-              {i < 2 && <span style={{ color: 'var(--border-color)', margin: '0 0.1rem' }}>›</span>}
+              {i < 2 && <span className="dataset-phase-separator">›</span>}
             </div>
           );
         })}
         {phase !== 'setup' && (
           <button
-            className="fuk-btn fuk-btn-secondary"
+            className="fuk-btn fuk-btn-secondary dataset-phase-reset"
             onClick={handleReset}
-            style={{ marginLeft: 'auto', fontSize: '0.72rem', padding: '0.15rem 0.5rem' }}
           >
             New Dataset
           </button>
@@ -962,7 +791,7 @@ export default function LoraDatasetBuilder({ config }) {
       </div>
 
       {/* Phase content */}
-      <div style={{ flex: 1, overflow: 'hidden' }}>
+      <div className="dataset-content">
         {phase === 'setup'    && <SetupPhase   config={config} onStart={handleStart} />}
         {phase === 'running'  && <RunningPhase jobId={jobId}   onComplete={handleComplete} />}
         {phase === 'curation' && <CurationPhase jobId={jobId} />}

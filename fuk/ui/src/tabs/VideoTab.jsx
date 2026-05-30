@@ -554,7 +554,6 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
         onDragOver={(e) => { e.preventDefault(); setMetaDragOver(true); }}
         onDragLeave={() => setMetaDragOver(false)}
         onDrop={handleMetaDrop}
-        style={{ position: 'relative' }}
       >
         <div className="fuk-preview-single">
           {/* droppedPreview takes priority — shows reference gen while settings are loaded */}
@@ -784,10 +783,9 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
             
             <div className="fuk-form-group-compact">
               <label className="fuk-label">LoRA</label>
-              <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+              <div className={`lora-simple-row${formData.lora_bypass ? ' lora-simple-row--bypassed' : ''}`}>
                 <select
-                  className="fuk-select"
-                  style={{ flex: '1 1 0', minWidth: 0, opacity: formData.lora_bypass ? 0.45 : 1 }}
+                  className="fuk-select lora-simple-row-select"
                   value={formData.lora || ''}
                   onChange={(e) => setFormData({...formData, lora: e.target.value || null})}
                 >
@@ -802,8 +800,8 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
                   <button
                     type="button"
                     title={formData.lora_bypass ? 'Enable LoRA' : 'Bypass LoRA'}
+                    className={`lora-row-btn${formData.lora_bypass ? ' lora-row-btn--active' : ''}`}
                     onClick={() => setFormData({...formData, lora_bypass: !formData.lora_bypass})}
-                    style={{ padding: '4px 7px', cursor: 'pointer', background: formData.lora_bypass ? 'var(--border)' : 'transparent', border: '1px solid var(--border)', borderRadius: '4px', color: 'var(--text-muted)', flexShrink: 0, lineHeight: 1 }}
                   >⊘</button>
                 )}
               </div>
@@ -879,7 +877,7 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
                   <span className="fuk-label-description">
                     Source: {sourceVideoInfo.frame_count} frames @ {sourceVideoInfo.fps.toFixed(1)}fps
                   </span>
-                  <label className="fuk-checkbox-option" style={{ marginLeft: 'auto' }}>
+                  <label className="fuk-checkbox-option fuk-label--push-right">
                     <input
                       type="checkbox"
                       className="fuk-checkbox"
@@ -915,7 +913,7 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
               {/* Trim — visible when source video detected, caps inherited frame count */}
               {sourceVideoInfo && (
                 <div className="fuk-input-inline fuk-mt-2">
-                  <label className="fuk-label" style={{ whiteSpace: 'nowrap', marginBottom: 0 }}>Trim to</label>
+                  <label className="fuk-label fuk-label--nowrap">Trim to</label>
                   <input
                     type="number"
                     className="fuk-input fuk-input--w-80"
@@ -1122,7 +1120,7 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
             
             <div className="fuk-form-group-compact">
               <textarea
-                className="fuk-textarea"
+                className="fuk-textarea fuk-textarea--auto"
                 value={formData.prompt}
                 onChange={(e) => {
                   setFormData({...formData, prompt: e.target.value});
@@ -1131,14 +1129,13 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
                 onInput={handleTextareaResize}
                 placeholder="A cinematic video of..."
                 rows={4}
-                style={{ resize: 'none', overflow: 'hidden' }}
               />
             </div>
             
             <div className="fuk-form-group-compact">
               <label className="fuk-label">Negative Prompt</label>
               <textarea
-                className="fuk-textarea"
+                className="fuk-textarea fuk-textarea--auto"
                 value={formData.negative_prompt}
                 onChange={(e) => {
                   setFormData({...formData, negative_prompt: e.target.value});
@@ -1147,7 +1144,6 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
                 onInput={handleTextareaResize}
                 placeholder="blurry, low quality..."
                 rows={4}
-                style={{ resize: 'none', overflow: 'hidden' }}
               />
             </div>
           </div>

@@ -88,10 +88,9 @@ export default function ImageUploader({ images, onImagesChange, disabled, id: pr
   return (
     <div className="fuk-image-uploader">
       {/* Click Zone */}
-      <div 
+      <div
         className={`fuk-dropzone ${disabled ? 'fuk-dropzone--disabled' : ''}`}
         onClick={handleBrowse}
-        style={{ cursor: disabled ? 'not-allowed' : 'pointer' }}
       >
         <div className="fuk-dropzone-content">
           {loading ? (
@@ -129,7 +128,6 @@ export default function ImageUploader({ images, onImagesChange, disabled, id: pr
               <img
                 src={buildImageUrl(path)}
                 alt={`Image ${index + 1}`}
-                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
               />
               <button
                 onClick={(e) => {
@@ -139,7 +137,7 @@ export default function ImageUploader({ images, onImagesChange, disabled, id: pr
                 className="fuk-thumbnail-remove"
                 title="Remove image"
               >
-                <X style={{ width: '0.75rem', height: '0.75rem' }} />
+                <X />
               </button>
             </div>
           ))}

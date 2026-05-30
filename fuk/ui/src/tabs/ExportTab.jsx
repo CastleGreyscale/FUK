@@ -650,9 +650,9 @@ const {
                   />
                   <div>
                     <span className="fuk-label">Bracketed Latent</span>
-                    <span className="fuk-help-text fuk-help-text--sm" style={{ display: 'block' }}>
+                    <p className="fuk-help-text fuk-help-text--sm">
                       Fuse 0.85× / 1.0× / 1.15× decodes for extended dynamic range
-                    </span>
+                    </p>
                   </div>
                 </label>
 
@@ -666,9 +666,9 @@ const {
                   />
                   <div>
                     <span className="fuk-label">Noise Bracketed Latent</span>
-                    <span className="fuk-help-text fuk-help-text--sm" style={{ display: 'block' }}>
+                    <p className="fuk-help-text fuk-help-text--sm">
                       Fuse σ=0 / 0.025 / 0.05 noise-perturbed decodes for softer shadow detail
-                    </span>
+                    </p>
                   </div>
                 </label>
             </div>

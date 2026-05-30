@@ -146,7 +146,6 @@ export default function SeedControl({
           <input
             type="number"
             className="fuk-input"
-            style={{ flex: 1 }}
             value={typeof displaySeed === 'number' ? displaySeed : ''}
             onChange={(e) => {
               const val = e.target.value ? parseInt(e.target.value) : null;
@@ -165,7 +164,7 @@ export default function SeedControl({
               disabled={disabled}
               title="Generate random seed"
             >
-              <Dice style={{ width: '1rem', height: '1rem' }} />
+              <Dice />
             </button>
           )}
           
@@ -183,10 +182,7 @@ export default function SeedControl({
             disabled={disabled || currentSeedValue === null}
             title={currentSeedSaved ? 'Remove from favorites' : 'Save to favorites'}
           >
-            <Star 
-              filled={currentSeedSaved} 
-              style={{ width: '1rem', height: '1rem' }} 
-            />
+            <Star filled={currentSeedSaved} />
           </button>
         </div>
       </div>

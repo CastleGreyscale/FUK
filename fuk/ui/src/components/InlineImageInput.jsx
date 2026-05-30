@@ -136,7 +136,7 @@ export default function InlineImageInput({
               }
             }}
             disabled={disabled || uploading}
-            style={{ display: 'none' }}
+            className="fuk-file-input-hidden"
             id={inputId}
           />
           <label 

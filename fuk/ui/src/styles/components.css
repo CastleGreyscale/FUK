@@ -117,6 +117,42 @@
   gap: var(--spacing-sm);
 }
 
+.fuk-btn-compact {
+  padding: 0.35rem 0.65rem;
+}
+
+.fuk-btn-compact svg {
+  width: var(--icon-md);
+  height: var(--icon-md);
+}
+
+.fuk-btn-cancel {
+  padding-left: var(--spacing-xl);
+  padding-right: var(--spacing-xl);
+}
+
+/* ============================================================================
+ * BATCH COUNTER
+ * ========================================================================== */
+
+.fuk-batch-counter {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.fuk-batch-multiplier {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  user-select: none;
+}
+
+.fuk-batch-input {
+  width: 3.5rem;
+  text-align: center;
+  padding: 0.35rem 0.4rem;
+}
+
 /* ============================================================================
  * BADGES
  * ========================================================================== */

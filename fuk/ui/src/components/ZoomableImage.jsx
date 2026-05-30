@@ -13,18 +13,19 @@
 
 import { useState, useRef, useCallback } from 'react';
 
-export default function ZoomableImage({ 
-  src, 
-  alt = '', 
+export default function ZoomableImage({
+  src,
+  alt = '',
   className = '',
-  minZoom = 2,
+  minZoom = 1,
   maxZoom = 6,
-  defaultZoom = 3,
+  defaultZoom = 1,
 }) {
   const [isHovering, setIsHovering] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(defaultZoom);
   const [origin, setOrigin] = useState({ x: 50, y: 50 });
   const [lockedSize, setLockedSize] = useState(null);
+  const [naturalSize, setNaturalSize] = useState(null);
   const containerRef = useRef(null);
   const imageRef = useRef(null);
 
@@ -47,10 +48,8 @@ export default function ZoomableImage({
   const handleMouseEnter = useCallback(() => {
     const img = imageRef.current;
     if (img) {
-      setLockedSize({
-        width: img.offsetWidth,
-        height: img.offsetHeight,
-      });
+      setLockedSize({ width: img.offsetWidth, height: img.offsetHeight });
+      setNaturalSize({ width: img.naturalWidth, height: img.naturalHeight });
     }
     setIsHovering(true);
   }, []);
@@ -59,6 +58,7 @@ export default function ZoomableImage({
   const handleMouseLeave = useCallback(() => {
     setIsHovering(false);
     setLockedSize(null);
+    setNaturalSize(null);
     setOrigin({ x: 50, y: 50 });
   }, []);
 
@@ -78,12 +78,18 @@ export default function ZoomableImage({
     height: lockedSize.height,
   } : {};
 
+  // Scale factor to show image at 1:1 native pixels within the locked container.
+  // zoomLevel 1 = native resolution, 2 = 2× native, etc.
+  const nativeScale = (lockedSize && naturalSize)
+    ? Math.max(naturalSize.width / lockedSize.width, naturalSize.height / lockedSize.height)
+    : 1;
+
   // Image style: normal sizing, or transformed when zooming
   const imageStyle = isHovering ? {
     width: '100%',
     height: '100%',
     objectFit: 'contain',
-    transform: `scale(${zoomLevel})`,
+    transform: `scale(${zoomLevel * nativeScale})`,
     transformOrigin: `${origin.x}% ${origin.y}%`,
   } : {};
 

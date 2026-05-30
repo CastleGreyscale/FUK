@@ -105,13 +105,8 @@ export default function App() {
     return (
       <div className="fuk-loading">
         <div className="fuk-loading-content">
-          <Loader2 
-            className="animate-spin" 
-            style={{ width: '3rem', height: '3rem', margin: '0 auto 1rem', color: '#a855f7' }} 
-          />
-          <p style={{ fontSize: '0.875rem', color: '#9ca3af' }}>
-            Loading FUK Generation Pipeline...
-          </p>
+          <Loader2 className="animate-spin" />
+          <p>Loading FUK Generation Pipeline...</p>
         </div>
       </div>
     );
@@ -122,17 +117,13 @@ export default function App() {
     return (
       <div className="fuk-error">
         <div className="fuk-error-content">
-          <AlertCircle style={{ width: '3rem', height: '3rem', margin: '0 auto 1rem', color: '#ef4444' }} />
+          <AlertCircle />
           <h2 className="fuk-error-title">Cannot Connect to Server</h2>
           <p className="fuk-error-message">
             Make sure the backend server is running on port 8000.
           </p>
           <pre className="fuk-error-code">python fuk_web_server.py</pre>
-          <button 
-            onClick={loadConfig}
-            className="fuk-btn fuk-btn-secondary"
-            style={{ marginTop: '1rem' }}
-          >
+          <button onClick={loadConfig} className="fuk-btn fuk-btn-secondary">
             Retry
           </button>
         </div>
@@ -185,9 +176,9 @@ export default function App() {
             </div>
             
             {/* Playback FPS Control - Right Side */}
-            <div className="fuk-playback-control" style={{ marginLeft: 'auto' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ width: '60px', fontFamily: 'monospace' }}>FPS: {playbackFPS}</span>
+            <div className="fuk-playback-control">
+              <label>
+                <span className="fuk-playback-fps">FPS: {playbackFPS}</span>
                 <input
                   type="range"
                   min="6"
@@ -195,7 +186,6 @@ export default function App() {
                   step="6"
                   value={playbackFPS}
                   onChange={(e) => setPlaybackFPS(parseInt(e.target.value))}
-                  style={{ width: '100px' }}
                 />
               </label>
             </div>

@@ -88,10 +88,9 @@
                       disabled={generating}
                     />
                   </div>
-                  <div className="fuk-input-inline fuk-mt-2" style={{ gap: '0.5rem' }}>
+                  <div className="fuk-input-inline fuk-mt-2">
                     <button
-                      className="fuk-btn fuk-btn-secondary"
-                      style={{ flex: 1 }}
+                      className="fuk-btn fuk-btn-secondary fuk-btn-full"
                       disabled={generating}
                       onClick={async () => {
                         try {
@@ -110,8 +109,7 @@
                       Browse Folder
                     </button>
                     <button
-                      className="fuk-btn fuk-btn-secondary"
-                      style={{ flex: 1 }}
+                      className="fuk-btn fuk-btn-secondary fuk-btn-full"
                       disabled={generating}
                       onClick={async () => {
                         try {
@@ -139,14 +137,7 @@
                 
                 {formData.eligen_source && (
                   <div className="fuk-form-group-compact fuk-mt-2">
-                    <div style={{ 
-                      padding: '0.5rem 0.75rem',
-                      background: 'rgba(255,255,255,0.03)',
-                      borderRadius: '4px',
-                      fontSize: '0.8rem',
-                      color: 'var(--fuk-text-secondary)',
-                      wordBreak: 'break-all',
-                    }}>
+                    <div className="fuk-eligen-path-display">
                       {formData.eligen_source}
                     </div>
                   </div>
