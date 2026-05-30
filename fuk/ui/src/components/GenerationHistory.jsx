@@ -476,7 +476,7 @@ function GalleryLargeView({ generation, generations, isPinned, vote, onTogglePin
         >‹</button>
 
         {video
-          ? <video key={preview} src={preview} controls muted loop playsInline />
+          ? <video key={preview} src={preview} controls autoPlay muted loop playsInline />
           : <ZoomableImage key={preview} src={preview} alt={generation.name || generation.id} defaultZoom={2} />
         }
 
