@@ -8,6 +8,7 @@
 !fuk
 !fuk/**
 !fuk/fuk/config/**
+
 !fuk/fuk/core/**
 !fuk/fuk/ui/**
 !fuk/fuk/utils/**
@@ -19,9 +20,12 @@
 !start.sh
 !download_models.sh
 
-
-
-
+# FUK Web
+!web/
+!web/*.html
+!web/css/
+!web/css/**
+web/README.md
 
 # Exclude sensitive/cache data
 fuk/core/old/

@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    <!-- Primary Meta Tags -->
+    <title>FUK - Framework for Unified Kreation | Professional AI Rendering Pipeline</title>
+    <meta name="title" content="FUK - Framework for Unified Kreation | Professional AI Rendering Pipeline">
+    <meta name="description" content="Local-first AI rendering pipeline for VFX professionals. Generate images, videos, and technical outputs with proper project organization and EXR workflows.">
+    <meta name="keywords" content="AI rendering, VFX pipeline, image generation, video generation, EXR workflow, depth maps, cryptomatte, local AI, professional AI tools">
+    <meta name="author" content="Brad Larson">
+    <meta name="robots" content="index, follow">
+    
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://fuk-ai.io/">
+    <meta property="og:title" content="FUK - Professional AI Rendering Pipeline">
+    <meta property="og:description" content="Local-first AI rendering pipeline built for VFX professionals. Your hardware. Your workflow. Your control.">
+    <meta property="og:image" content="https://fuk-ai.io/images/og_img.jpg">
+    
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image">
+    <meta property="twitter:url" content="https://fuk-ai.io/">
+    <meta property="twitter:title" content="FUK - Professional AI Rendering Pipeline">
+    <meta property="twitter:description" content="Local-first AI rendering pipeline built for VFX professionals. Your hardware. Your workflow. Your control.">
+    <meta property="twitter:image" content="https://fuk-ai.io/images/og_img.jpg">
+    
+    <!-- Structured Data -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "FUK - Framework for Unified Kreation",
+      "applicationCategory": "MultimediaApplication",
+      "operatingSystem": "Linux, Windows",
+      "description": "Local-first AI rendering pipeline for professional VFX workflows with native EXR support and proper project organization.",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      }
+    }
+    </script>
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="./css/styles.css">
+    
+</head>
+<body>
+    <!-- Header -->
+    <header>
+        <div class="header-content">
+            <div class="logo-section">
+                <img class="logo-image" src="./images/fuk_sm.svg">
+                <span class="logo-text">Framework for Unified Kreation</span>
+            </div>
+            <nav class="main-nav">
+                <a href="./wiki.html" class="nav-link">Wiki</a>
+            </nav>
+            <nav class="social-links">
+                <a href="https://github.com/CastleGreyscale/FUK" target="_blank" rel="noopener" aria-label="GitHub">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+                </a>
+                <a href="https://bradwalter.substack.com/" target="_blank" rel="noopener" aria-label="Substack">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M22.539 8.242H1.46V5.406h21.08v2.836zM1.46 10.812V24L12 18.11 22.54 24V10.812H1.46zM22.54 0H1.46v2.836h21.08V0z"/></svg>
+                </a>
+                <a href="https://vimeo.com/user/1771911/folder/27993210" target="_blank" rel="noopener" aria-label="Vimeo">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M23.977 6.416c-.105 2.338-1.739 5.543-4.894 9.609-3.268 4.247-6.026 6.37-8.29 6.37-1.409 0-2.578-1.294-3.553-3.881L5.322 11.4C4.603 8.816 3.834 7.522 3.01 7.522c-.179 0-.806.378-1.881 1.132L0 7.197a315.065 315.065 0 003.501-3.128C5.08 2.701 6.266 1.984 7.055 1.91c1.867-.18 3.016 1.1 3.447 3.838.465 2.953.789 4.789.971 5.507.539 2.45 1.131 3.674 1.776 3.674.502 0 1.256-.796 2.265-2.385 1.004-1.589 1.54-2.797 1.612-3.628.144-1.371-.395-2.061-1.614-2.061-.574 0-1.167.121-1.777.391 1.186-3.868 3.434-5.757 6.762-5.637 2.473.06 3.628 1.664 3.493 4.797l-.013.01z"/></svg>
+                </a>
+                <a href="mailto:hello@fuk-ai.io" aria-label="Email">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>
+                </a>
+            </nav>
+        </div>
+    </header>
+
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="hero-content">
+            <div class="video-container">
+                <iframe src="https://player.vimeo.com/video/1158844337?autoplay=1&loop=1&muted=1"
+                        frameborder="0" 
+                        allow="autoplay; fullscreen; picture-in-picture" 
+                        allowfullscreen>
+                </iframe>
+            </div>
+            <p class="hero-tagline">Local-first rendering pipeline for professional AI generation</p>
+            <a href="https://github.com/CastleGreyscale/FUK" class="hero-cta">View on GitHub</a>
+        </div>
+    </section>
+
+<section id="status">
+    <div class="wip-banner">
+        <img src="images/under-construction90s-90s.webp">
+        <div class="wip-text">
+            <p>FUK is in active development. Core functionality is working and the app is stable, but AOV outputs need refinement, and it needs beta testing.</p>
+            <p>Contributions, testers, and suggestions are highly appreciated.</p>
+            <p class="status-note">Currently focusing on: Improving AOV quality, quality of life improvements, localized data collection, speed and optimization. Before moving on to big features planned for later.</p>
+        </div>
+    </div>
+</section>
+
+    <!-- Mission Section -->
+    <section id="mission">
+        <h2>Built for Production</h2>
+        <p class="mission-statement">
+            Professional AI generation tools shouldn't force you to work around them. 
+            FUK integrates into your existing workflows with proper project organization, 
+            native lossless EXR support, and stable infrastructure that doesn't break with every update.
+        </p>
+        <p>Your hardware. Your models. Your data. No mandatory cloud services. No compromises.</p>
+    </section>
+
+    <!-- System Requirements Section -->
+    <section id="requirements">
+        <h2>System Requirements</h2>
+        <p>What you'll need to run FUK effectively on your local hardware.</p>
+        
+        <div class="requirements-grid">
+            <div class="requirement-item">
+                <h4>Storage Space</h4>
+                <ul>
+                    <li>Base Install: ~15GB</li>
+                    <li>Models: ~500GB (depending on selection)</li>
+                </ul>
+            </div>
+            
+            <div class="requirement-item">
+                <h4>Hardware (Tested On)</h4>
+                <ul>
+                    <li>NVIDIA RTX 4090 (24GB VRAM)</li>
+                    <li>AMD Threadripper</li>
+                    <li>256GB RAM</li>
+                    <li>M2 SSDs</li>
+                </ul>
+            </div>
+            
+            <div class="requirement-item">
+                <h4>Operating Systems</h4>
+                <ul>
+                    <li>Linux: Primary platform (Ubuntu 22.04+)</li>
+                    <li>Windows: WSL2 recommended</li>
+                </ul>
+            </div>
+            
+            <div class="requirement-item">
+                <h4>Dependencies</h4>
+                <ul>
+                    <li>Python 3.10+</li>
+                    <li>CUDA 11.8+ (for NVIDIA)</li>
+                    <li>FFmpeg for video processing</li>
+                    <li>See GitHub for complete list</li>
+                </ul>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section id="features">
+        <h2>Core Functionality</h2>
+        <div class="features-grid">
+            <div class="feature-card">
+                <h3>Professional Generation</h3>
+                <p>Image and video generation with proper project/shot/version organization. Industry-standard hierarchies that integrate with existing pipelines.</p>
+            </div>
+            <div class="feature-card">
+                <h3>Technical Outputs</h3>
+                <p>Depth maps, normal passes, cryptomattes. Multi-layer 32-bit EXR export ready for professional applications.</p>
+            </div>
+            <div class="feature-card">
+                <h3>Controlled Workflows</h3>
+                <p>Preprocessor integration for OpenPose, depth, edge detection and regional conditioning via masked zones. Generate with precision using external image inputs.</p>
+            </div>
+            <div class="feature-card">
+                <h3>Post-Processing</h3>
+                <p>Upscaling via Real-ESRGAN and frame interpolation via FILM. Professional quality enhancement for generated content.</p>
+            </div>
+            <div class="feature-card">
+                <h3>Local Control</h3>
+                <p>Runs entirely on your hardware. No telemetry, no cloud requirements, no surprise authentication. Your data stays yours.</p>
+            </div>
+            <div class="feature-card">
+                <h3>Stable Infrastructure</h3>
+                <p>Built on stable APIs without fragile dependencies. Tools that work today will work tomorrow without breaking your pipeline.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Roadmap Section -->
+    <section id="roadmap">
+        <h2>Roadmap</h2>
+        <p class="roadmap-intro">Active development with a clear direction. No hype, just what's actually being worked on.</p>
+
+        <div class="roadmap-columns">
+            <div class="roadmap-column">
+                <div class="roadmap-column-header now">Now</div>
+                <ul class="roadmap-list">
+                    <li>AOV quality improvements</li>
+                    <li>Bit-depth improvements</li>
+                    <li>Quality of life improvements</li>
+                    <li>Localized data collection</li>
+                    <li>Speed &amp; optimization</li>
+                </ul>
+            </div>
+            <div class="roadmap-column">
+                <div class="roadmap-column-header next">Next</div>
+                <ul class="roadmap-list">
+                    <li>Scene creator</li>
+                    <li>DaVinci Resolve integration</li>
+                    <li>Blender integration</li>
+                </ul>
+            </div>
+            <div class="roadmap-column">
+                <div class="roadmap-column-header later">Later</div>
+                <ul class="roadmap-list">
+                    <li>Latent space transformers</li>
+                    <li>Multi-Camera Processing</li>
+                </ul>
+            </div>
+        </div>
+    </section>
+
+    <!-- Video Gallery Section -->
+    <section id="videos">
+        <h2>Videos</h2>
+        <p>Tutorials, feature updates, and demonstrations of FUK in action</p>
+        
+        <div class="video-gallery">
+            <div class="video-tabs">
+                <button class="tab-button active" data-tab="overview">Overview</button>
+                <button class="tab-button" data-tab="demos">Demos</button>
+                <button class="tab-button" data-tab="tutorials">Tutorials</button>
+                <button class="tab-button" data-tab="updates">Feature Updates</button>
+            </div>
+            <!-- Overview Tab -->
+            <div id="overview" class="tab-content active">
+                <div class="video-grid">
+                    <div class="video-item">
+                        <div class="video-container">
+                            <iframe src="https://player.vimeo.com/video/1172140090?" 
+                                    frameborder="0" 
+                                    allow="autoplay; fullscreen; picture-in-picture" 
+                                    allowfullscreen>
+                            </iframe>
+                        </div>
+                        <div class="video-info">
+                            <h4>Brief Overview of Capabilities</h4>
+                            <p>Preprocessors, Image Gen, Video Gen, Upscaling, Interpolation, AOVs, and Linear 32-bit EXRs</p>
+                        </div>
+                    </div>
+                    <div class="video-item">
+                        <div class="video-container">
+                            <iframe src="https://player.vimeo.com/video/1172520376?"
+                                    frameborder="0" 
+                                    allow="autoplay; fullscreen; picture-in-picture" 
+                                    allowfullscreen>
+                            </iframe>
+                        </div>
+                        <div class="video-info">
+                            <h4>What makes FUK different.</h4>
+                            <p>Local first, your data, your project structure and assets the way you want them. Extensive metadata for repeatability and collaboration.</p>
+                        </div>
+                    </div>
+                    
+                    <!-- Add more demo videos here -->
+                    
+                </div>
+            </div>
+
+            <!-- Demos Tab -->
+            <div id="demos" class="tab-content">
+                
+                <div class="video-grid">
+                    <div class="video-item">
+                        <div class="video-container">
+                            <iframe src="https://player.vimeo.com/video/1159690804?" 
+                                    frameborder="0" 
+                                    allow="autoplay; fullscreen; picture-in-picture" 
+                                    allowfullscreen>
+                            </iframe>
+                        </div>
+                        <div class="video-info">
+                            <h4>Complete Workflow Demo</h4>
+                            <p>Generation to multi-layer EXR export in professional workflows</p>
+                        </div>
+                    </div>
+
+                    <div class="video-item">
+                        <div class="video-container">
+                            <iframe src="https://player.vimeo.com/video/1179182521?" 
+                                    frameborder="0" 
+                                    allow="autoplay; fullscreen; picture-in-picture" 
+                                    allowfullscreen>
+                            </iframe>
+                        </div>
+                        <div class="video-info">
+                            <h4>EliGen Demo</h4>
+                            <p>EliGen integration brings regional conditioning directly into your generation pipeline. Define compositional zones, assign independent parameters, and stop fighting for control over where things land in frame.</p>
+                        </div>
+                    </div>
+
+                    <div class="video-item">
+                        <div class="video-container">
+                            <iframe src="https://player.vimeo.com/video/1192861920?" 
+                                    frameborder="0" 
+                                    allow="autoplay; fullscreen; picture-in-picture" 
+                                    allowfullscreen>
+                            </iframe>
+                        </div>
+                        <div class="video-info">
+                            <h4>LoRA Dataset Builder</h4>
+                            <p>Automated system for dataset creation for LoRA development. Add images and select a content type preset and it does the rest.</p>
+                        </div>
+                    </div>
+                    
+                    <!-- Add more demo videos here -->
+                    
+                </div>
+            </div>
+            
+            <!-- Tutorials Tab -->
+            <div id="tutorials" class="tab-content">
+                <div class="video-grid">
+                    <div class="video-item">
+                        <div class="video-container">
+                            <iframe src="https://player.vimeo.com/video/1178465939?"
+                                    frameborder="0" 
+                                    allow="autoplay; fullscreen; picture-in-picture" 
+                                    allowfullscreen>
+                            </iframe>
+                        </div>
+                        <div class="video-info">
+                            <h4>History Panel Overview.</h4>
+                            <p>An overview of the history panel which serves as the main hub for FUK and has many features.</p>
+                        </div>
+                    </div>
+                    <div class="video-item">
+                        <div class="video-container">
+                            <iframe src="https://player.vimeo.com/video/1180312087?"
+                                    frameborder="0" 
+                                    allow="autoplay; fullscreen; picture-in-picture" 
+                                    allowfullscreen>
+                            </iframe>
+                        </div>
+                        <div class="video-info">
+                            <h4>Template Generator Walkthrough</h4>
+                            <p>With great control comes great responsibility. In this case its about specs. AI specs are a bit funky so I built a template maker to keep the process simple. </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Updates Tab -->
+            <div id="updates" class="tab-content">
+                <div class="video-grid">
+                    <div class="video-item">
+                        <div class="video-container">
+                            <!-- Placeholder - replace with actual update video -->
+                            <div style="padding: 4rem; text-align: center; background: var(--bg-secondary);">
+                                <p style="color: var(--text-secondary);">Feature updates coming soon...</p>
+                                <p style="font-size: 0.9rem; color: var(--text-secondary); margin-top: 1rem;">Subscribe to updates to be notified</p>
+                            </div>
+                        </div>
+                        <div class="video-info">
+                            <h4>Latest Features</h4>
+                            <p>New capabilities and improvements (Coming Soon)</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Newsletter Section -->
+    <section id="newsletter">
+        <div class="newsletter">
+            <h3>Stay Updated</h3>
+            <p>Follow the links below to get notified about releases, updates, and technical deep-dives</p>
+            <div class="follow-links">
+                <a href="https://github.com/CastleGreyscale/FUK" target="_blank" rel="noopener" aria-label="GitHub">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+                </a>
+                <a href="https://bradwalter.substack.com/" target="_blank" rel="noopener" aria-label="Substack">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M22.539 8.242H1.46V5.406h21.08v2.836zM1.46 10.812V24L12 18.11 22.54 24V10.812H1.46zM22.54 0H1.46v2.836h21.08V0z"/></svg>
+                </a>
+                <a href="https://vimeo.com/user/1771911/folder/27993210" target="_blank" rel="noopener" aria-label="Vimeo">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M23.977 6.416c-.105 2.338-1.739 5.543-4.894 9.609-3.268 4.247-6.026 6.37-8.29 6.37-1.409 0-2.578-1.294-3.553-3.881L5.322 11.4C4.603 8.816 3.834 7.522 3.01 7.522c-.179 0-.806.378-1.881 1.132L0 7.197a315.065 315.065 0 003.501-3.128C5.08 2.701 6.266 1.984 7.055 1.91c1.867-.18 3.016 1.1 3.447 3.838.465 2.953.789 4.789.971 5.507.539 2.45 1.131 3.674 1.776 3.674.502 0 1.256-.796 2.265-2.385 1.004-1.589 1.54-2.797 1.612-3.628.144-1.371-.395-2.061-1.614-2.061-.574 0-1.167.121-1.777.391 1.186-3.868 3.434-5.757 6.762-5.637 2.473.06 3.628 1.664 3.493 4.797l-.013.01z"/></svg>
+                </a>
+                <a href="https://www.linkedin.com/company/framework-for-unified-kreation" target="_blank" rel="noopener" aria-label="LinkedIn">
+                    <svg width="24" height="24" viewBox="0 0 24 24"><path fill="currentColor" d="M21,21H17V14.25C17,13.19 15.81,12.31 14.75,12.31C13.69,12.31 13,13.19 13,14.25V21H9V9H13V11C13.66,9.93 15.36,9.24 16.5,9.24C19,9.24 21,11.28 21,13.75V21M7,21H3V9H7V21M5,3A2,2 0 0,1 7,5A2,2 0 0,1 5,7A2,2 0 0,1 3,5A2,2 0 0,1 5,3Z" /></svg>
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer>
+        <p>&copy; 2026 FUK - Framework for Unified Kreation. Open source under MIT License.</p>
+        <p>Get FUKed. Render locally.</p>
+    </footer>
+
+    <!-- Tab Switching Script -->
+    <script>
+        // Simple tab switching functionality
+        document.querySelectorAll('.tab-button').forEach(button => {
+            button.addEventListener('click', () => {
+                // Remove active class from all buttons and contents
+                document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+                
+                // Add active class to clicked button and corresponding content
+                button.classList.add('active');
+                const tabId = button.getAttribute('data-tab');
+                document.getElementById(tabId).classList.add('active');
+            });
+        });
+    </script>
+</body>
+</html>
