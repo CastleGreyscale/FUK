@@ -149,7 +149,11 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
         });
       }
     } else {
-      setLocalFormData(newData);
+      if (newData.model !== currentData.model) {
+        setLocalFormData({ ...newData, control_image_paths: [], eligen_source: '' });
+      } else {
+        setLocalFormData(newData);
+      }
     }
   }, [project?.isProjectLoaded, project?.updateTabState, setLocalFormData]);
 
@@ -340,7 +344,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
         : null,
       exponential_shift_mu: formData.exponential_shift_mu,
       eligen_source: formData.eligen_source || null,
-      eligen_alpha: formData.eligen_source ? (formData.eligen_alpha ?? 1.0) : null,  // ← ADD
+      eligen_alpha: (formData.eligen_source || modelSupports(formData.model, 'context_image')) ? (formData.eligen_alpha ?? 1.0) : null,
       lora: null,
       lora_multiplier: 1.0,
       loras: effectiveLoras,
