@@ -327,8 +327,8 @@
   width: 100%;
 }
 
-.fuk-slider::-webkit-slider-track,
-.fuk-range::-webkit-slider-track {
+.fuk-slider::-webkit-slider-runnable-track,
+.fuk-range::-webkit-slider-runnable-track {
   background: linear-gradient(
     to right,
     var(--color-accent) var(--fill, 0%),
@@ -346,7 +346,7 @@
   border-radius: var(--radius-full);
   height: var(--spacing-lg);
   width: var(--spacing-lg);
-  margin-top: -0.3125rem;
+  margin-top: -0.375rem;
   border: var(--border-width-thick) solid var(--input-bg);
 }
 

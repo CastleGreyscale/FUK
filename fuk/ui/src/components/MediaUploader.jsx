@@ -278,35 +278,96 @@ export default function MediaUploader({
     callOnChange(normalizedMedia.filter((_, i) => i !== index));
   };
 
+  const hasItems = normalizedMedia.length > 0;
+
   return (
     <div className="fuk-media-uploader">
-      {/* Drop Zone - Click opens native browse, drag accepts history items */}
-      <div 
-        className={`fuk-dropzone ${dragOver ? 'fuk-dropzone--dragover' : ''} ${disabled ? 'fuk-dropzone--disabled' : ''}`}
-        onDrop={handleDrop}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onClick={handleBrowse}
-      >
-        <div className="fuk-dropzone-content">
-          {loading ? (
-            <>
+      {/* Inline row: compact dropzone + thumbnails */}
+      <div className="fuk-media-row">
+        {/* Drop Zone */}
+        <div
+          className={`fuk-dropzone ${hasItems ? 'fuk-dropzone--compact' : ''} ${dragOver ? 'fuk-dropzone--dragover' : ''} ${disabled ? 'fuk-dropzone--disabled' : ''}`}
+          onDrop={handleDrop}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onClick={handleBrowse}
+          title={hasItems ? label : undefined}
+        >
+          <div className="fuk-dropzone-content">
+            {loading ? (
               <div className="fuk-dropzone-spinner" />
-              <span className="fuk-dropzone-text">Loading...</span>
-            </>
-          ) : (
-            <>
+            ) : hasItems ? (
               <FolderOpen className="fuk-dropzone-icon" />
-              <span className="fuk-dropzone-text">{label}</span>
-              <span className="fuk-dropzone-hint">
-                {normalizedMedia.length > 0 
-                  ? `${normalizedMedia.length} item${normalizedMedia.length !== 1 ? 's' : ''} selected`
-                  : 'Click to browse or drag from history'
-                }
-              </span>
-            </>
-          )}
+            ) : (
+              <>
+                <FolderOpen className="fuk-dropzone-icon" />
+                <span className="fuk-dropzone-text">{label}</span>
+                <span className="fuk-dropzone-hint">Click to browse or drag from history</span>
+              </>
+            )}
+          </div>
         </div>
+
+        {/* Thumbnails inline */}
+        {normalizedMedia.map((item, index) => {
+          const Icon = getMediaIcon(item.mediaType);
+          const isVideo = item.mediaType === 'video';
+          const isSequence = item.mediaType === 'sequence';
+
+          return (
+            <div
+              key={index}
+              className={`fuk-media-thumb ${dragOverIndex === index ? 'fuk-media-thumb--replace' : ''}`}
+              onDrop={(e) => handleThumbDrop(e, index)}
+              onDragOver={(e) => { e.preventDefault(); setDragOverIndex(index); }}
+              onDragLeave={() => setDragOverIndex(null)}
+              title={item.displayName}
+            >
+              {dragOverIndex === index && (
+                <div className="fuk-media-thumb-replace-overlay">
+                  <span>Replace</span>
+                </div>
+              )}
+              <div className="fuk-media-thumb-preview">
+                {isVideo ? (
+                  <video
+                    src={buildMediaUrl(item.path)}
+                    className="fuk-media-thumb-video"
+                    muted
+                    preload="metadata"
+                  />
+                ) : isSequence ? (
+                  <div className="fuk-media-thumb-sequence">
+                    <Layers className="fuk-media-thumb-sequence-icon" />
+                    <span className="fuk-media-thumb-sequence-info">
+                      {item.frameCount || '?'} frames
+                    </span>
+                  </div>
+                ) : (
+                  <img
+                    src={buildMediaUrl(item.path)}
+                    alt={item.displayName}
+                    className="fuk-media-thumb-img"
+                  />
+                )}
+                <div className={`fuk-media-thumb-badge fuk-media-thumb-badge--${item.mediaType}`}>
+                  <Icon className="fuk-media-thumb-badge-icon" />
+                </div>
+              </div>
+
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleRemove(index);
+                }}
+                className="fuk-media-thumb-remove"
+                title={`Remove ${item.displayName}`}
+              >
+                <X className="fuk-media-thumb-remove-icon" />
+              </button>
+            </div>
+          );
+        })}
       </div>
 
       {/* Error message */}
@@ -314,78 +375,6 @@ export default function MediaUploader({
         <div className="fuk-upload-error">
           <span>{error}</span>
           <button onClick={() => setError(null)} className="fuk-upload-error-dismiss">×</button>
-        </div>
-      )}
-
-      {/* Media Grid */}
-      {normalizedMedia.length > 0 && (
-        <div className="fuk-media-grid">
-          {normalizedMedia.map((item, index) => {
-            const Icon = getMediaIcon(item.mediaType);
-            const isVideo = item.mediaType === 'video';
-            const isSequence = item.mediaType === 'sequence';
-            
-            return (
-              <div 
-                key={index} 
-                className={`fuk-media-thumb ${dragOverIndex === index ? 'fuk-media-thumb--replace' : ''}`}
-                onDrop={(e) => handleThumbDrop(e, index)}
-                onDragOver={(e) => { e.preventDefault(); setDragOverIndex(index); }}
-                onDragLeave={() => setDragOverIndex(null)}
-              >
-                {dragOverIndex === index && (
-                  <div className="fuk-media-thumb-replace-overlay">
-                    <span>Replace</span>
-                  </div>
-                )}
-                <div className="fuk-media-thumb-preview">
-                  {isVideo ? (
-                    <video
-                      src={buildMediaUrl(item.path)}
-                      className="fuk-media-thumb-video"
-                      muted
-                      preload="metadata"
-                    />
-                  ) : isSequence ? (
-                    <div className="fuk-media-thumb-sequence">
-                      <Layers className="fuk-media-thumb-sequence-icon" />
-                      <span className="fuk-media-thumb-sequence-info">
-                        {item.frameCount || '?'} frames
-                      </span>
-                    </div>
-                  ) : (
-                    <img
-                      src={buildMediaUrl(item.path)}
-                      alt={item.displayName}
-                      className="fuk-media-thumb-img"
-                    />
-                  )}
-                  
-                  {/* Type badge */}
-                  <div className={`fuk-media-thumb-badge fuk-media-thumb-badge--${item.mediaType}`}>
-                    <Icon className="fuk-media-thumb-badge-icon" />
-                  </div>
-                </div>
-                
-                <div className="fuk-media-thumb-info">
-                  <span className="fuk-media-thumb-name" title={item.displayName}>
-                    {item.displayName}
-                  </span>
-                </div>
-                
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleRemove(index);
-                  }}
-                  className="fuk-media-thumb-remove"
-                  title="Remove"
-                >
-                  <X className="fuk-media-thumb-remove-icon" />
-                </button>
-              </div>
-            );
-          })}
         </div>
       )}
     </div>
