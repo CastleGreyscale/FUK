@@ -15,6 +15,29 @@
   margin-bottom: var(--spacing-md);
 }
 
+/* Inline two / three column form group rows */
+.fuk-form-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--spacing-sm);
+}
+
+.fuk-form-trio {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: var(--spacing-sm);
+}
+
+/* Info icon inside a label — signals hover tooltip via title attr */
+.fuk-label-info {
+  width: 0.65rem;
+  height: 0.65rem;
+  opacity: 0.35;
+  vertical-align: middle;
+  margin-left: 0.15rem;
+  flex-shrink: 0;
+}
+
 .fuk-form-section {
   margin-top: var(--spacing-md);
 }

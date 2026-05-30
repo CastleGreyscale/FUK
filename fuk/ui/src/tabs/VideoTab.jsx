@@ -12,7 +12,7 @@
  */
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Film, CheckCircle, AlertCircle } from '../../src/components/Icons';
+import { Film, CheckCircle, AlertCircle, Info } from '../../src/components/Icons';
 import MediaUploader from '../components/MediaUploader.jsx';
 import SeedControl from '../components/SeedControl';
 import GenerationModal from '../components/GenerationModal';
@@ -927,21 +927,6 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
                 </div>
               )}
               </div>
-              <div className="fuk-form-group-compact">
-              <label className="fuk-label">VRAM Management</label>
-              <select
-                className="fuk-select"
-                value={formData.vram_preset || 'low'}
-                onChange={(e) => setFormData({...formData, vram_preset: e.target.value})}
-              >
-                {(config?.models?.vram_presets || []).map(preset => (
-                  <option key={preset.key} value={preset.key} title={preset.description}>
-                    {preset.label}
-                  </option>
-                ))}
-              </select>
-            
-            </div>
           </div>
 
           {/* Generation Parameters Card */}
@@ -993,103 +978,103 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
               </div>
             </div>
             
-            <div className="fuk-form-group-compact">
-              <label className="fuk-label">Guidance Scale</label>
-              <input
-                type="number"
-                className="fuk-input"
-                value={formData.guidance_scale}
-                onChange={(e) => setFormData({...formData, guidance_scale: parseFloat(e.target.value)})}
-                step={0.5}
-                min={1}
-                max={15}
-              />
+            <div className="fuk-form-trio">
+              <div className="fuk-form-group-compact">
+                <label className="fuk-label">Guidance Scale</label>
+                <input
+                  type="number"
+                  className="fuk-input"
+                  value={formData.guidance_scale}
+                  onChange={(e) => setFormData({...formData, guidance_scale: parseFloat(e.target.value)})}
+                  step={0.5}
+                  min={1}
+                  max={15}
+                />
+              </div>
+              <div className="fuk-form-group-compact">
+                <label className="fuk-label" title="Controls sampling timestep distribution. Default: 5.0">
+                  Sigma Shift <Info className="fuk-label-info" />
+                </label>
+                <input
+                  type="number"
+                  className="fuk-input"
+                  value={formData.sigma_shift}
+                  onChange={(e) => setFormData({...formData, sigma_shift: parseFloat(e.target.value)})}
+                  step={0.5}
+                  min={1}
+                  max={10}
+                />
+              </div>
+              <div className="fuk-form-group-compact">
+                <label className="fuk-label" title="Controls motion intensity. Higher = more movement. Leave blank for auto.">
+                  Amplitude <Info className="fuk-label-info" />
+                </label>
+                <input
+                  type="number"
+                  className="fuk-input"
+                  value={formData.motion_bucket_id ?? ''}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    motion_bucket_id: e.target.value ? parseFloat(e.target.value) : null
+                  })}
+                  placeholder="auto"
+                  step={5}
+                  min={0}
+                  max={200}
+                />
+              </div>
             </div>
-            
-            <div className="fuk-form-group-compact">
-              <label className="fuk-label">
-                Sigma Shift
-                <span className="fuk-help-text-inline"> (timestep control)</span>
-              </label>
-              <input
-                type="number"
-                className="fuk-input"
-                value={formData.sigma_shift}
-                onChange={(e) => setFormData({...formData, sigma_shift: parseFloat(e.target.value)})}
-                step={0.5}
-                min={1}
-                max={10}
-              />
-              <p className="fuk-help-text fuk-mt-1">
-                Controls sampling timestep distribution. Default: 5.0
-              </p>
-            </div>
-            
-            <div className="fuk-form-group-compact">
-              <label className="fuk-label">
-                Motion Amplitude
-                <span className="fuk-help-text-inline"> (auto if blank)</span>
-              </label>
-              <input
-                type="number"
-                className="fuk-input"
-                value={formData.motion_bucket_id ?? ''}
-                onChange={(e) => setFormData({
-                  ...formData, 
-                  motion_bucket_id: e.target.value ? parseFloat(e.target.value) : null
-                })}
-                placeholder="auto"
-                step={5}
-                min={0}
-                max={200}
-              />
-              <p className="fuk-help-text fuk-mt-1">
-                Controls motion intensity. Higher = more movement. Leave blank for auto.
-              </p>
-            </div>
-            
-            <div className="fuk-form-group-compact">
-              <label className="fuk-label">
-                Sliding Window Size
-                <span className="fuk-help-text-inline"> (blank = disabled)</span>
-              </label>
-              <input
-                type="number"
-                className="fuk-input"
-                value={formData.sliding_window_size ?? ''}
-                onChange={(e) => setFormData({
-                  ...formData,
-                  sliding_window_size: e.target.value ? parseInt(e.target.value) : null
-                })}
-                placeholder="disabled"
-                step={1}
-                min={1}
-              />
-              <p className="fuk-help-text fuk-mt-1">
-                Number of frames per sliding window chunk. Leave blank to disable.
-              </p>
+
+            <div className="fuk-form-pair">
+              <div className="fuk-form-group-compact">
+                <label className="fuk-label" title="Number of frames per sliding window chunk. Leave blank to disable.">
+                  Window Size <Info className="fuk-label-info" />
+                </label>
+                <input
+                  type="number"
+                  className="fuk-input"
+                  value={formData.sliding_window_size ?? ''}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    sliding_window_size: e.target.value ? parseInt(e.target.value) : null
+                  })}
+                  placeholder="disabled"
+                  step={1}
+                  min={1}
+                />
+              </div>
+              <div className="fuk-form-group-compact">
+                <label className="fuk-label" title="Step size between sliding windows. Leave blank to disable.">
+                  Window Stride <Info className="fuk-label-info" />
+                </label>
+                <input
+                  type="number"
+                  className="fuk-input"
+                  value={formData.sliding_window_stride ?? ''}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    sliding_window_stride: e.target.value ? parseInt(e.target.value) : null
+                  })}
+                  placeholder="disabled"
+                  step={1}
+                  min={1}
+                />
+              </div>
             </div>
 
             <div className="fuk-form-group-compact">
-              <label className="fuk-label">
-                Sliding Window Stride
-                <span className="fuk-help-text-inline"> (blank = disabled)</span>
-              </label>
-              <input
-                type="number"
-                className="fuk-input"
-                value={formData.sliding_window_stride ?? ''}
-                onChange={(e) => setFormData({
-                  ...formData,
-                  sliding_window_stride: e.target.value ? parseInt(e.target.value) : null
-                })}
-                placeholder="disabled"
-                step={1}
-                min={1}
-              />
-              <p className="fuk-help-text fuk-mt-1">
-                Step size between sliding windows. Leave blank to disable.
-              </p>
+              <label className="fuk-label">VRAM Management</label>
+              <select
+                className="fuk-select"
+                value={formData.vram_preset || 'low'}
+                onChange={(e) => setFormData({...formData, vram_preset: e.target.value})}
+              >
+                {(config?.models?.vram_presets || []).map(preset => (
+                  <option key={preset.key} value={preset.key} title={preset.description}>
+                    {preset.label}
+                  </option>
+                ))}
+              </select>
             </div>
 
           </div>
