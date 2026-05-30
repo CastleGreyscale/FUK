@@ -640,13 +640,14 @@ const {
                 </select>
               </div>
 
-              <label className="fuk-checkbox-group compact-form-row">
+              <label className="fuk-checkbox-group" style={{alignItems: 'flex-start'}}>
                   <input
                     type="checkbox"
                     className="fuk-checkbox"
                     checked={settings.bracketedLatent}
                     onChange={(e) => updateSettings({ bracketedLatent: e.target.checked })}
                     disabled={exporting}
+                    style={{marginTop: '0.1rem'}}
                   />
                   <div>
                     <span className="fuk-label">Bracketed Latent</span>
@@ -656,13 +657,14 @@ const {
                   </div>
                 </label>
 
-              <label className="fuk-checkbox-group compact-form-row">
+              <label className="fuk-checkbox-group" style={{alignItems: 'flex-start'}}>
                   <input
                     type="checkbox"
                     className="fuk-checkbox"
                     checked={settings.noiseBracketedLatent}
                     onChange={(e) => updateSettings({ noiseBracketedLatent: e.target.checked })}
                     disabled={exporting}
+                    style={{marginTop: '0.1rem'}}
                   />
                   <div>
                     <span className="fuk-label">Noise Bracketed Latent</span>

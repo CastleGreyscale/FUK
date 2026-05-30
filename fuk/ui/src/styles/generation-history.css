@@ -682,7 +682,11 @@
   width: 140px;
   height: 3px;
   border-radius: 2px;
-  background: var(--color-border);
+  background: linear-gradient(
+    to right,
+    var(--color-accent) var(--fill, 0%),
+    var(--color-border) var(--fill, 0%)
+  );
   outline: none;
   cursor: pointer;
 }

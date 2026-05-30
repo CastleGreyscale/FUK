@@ -722,7 +722,7 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
                     <div className="fuk-input-inline">
                       <input
                         type="range"
-                        className="fuk-input fuk-input--flex-2"
+                        className="fuk-slider fuk-input--flex-2"
                         value={formData.denoising_strength ?? 1.0}
                         onChange={(e) => setFormData({...formData, denoising_strength: parseFloat(e.target.value)})}
                         min={0}
@@ -813,7 +813,7 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
                 <div className="fuk-input-inline">
                   <input
                     type="range"
-                    className="fuk-input fuk-input--flex-2"
+                    className="fuk-slider fuk-input--flex-2"
                     value={formData.lora_multiplier}
                     onChange={(e) => setFormData({...formData, lora_multiplier: parseFloat(e.target.value)})}
                     min={0}

@@ -44,7 +44,7 @@
                     <div className="fuk-input-inline">
                       <input
                         type="range"
-                        className="fuk-input fuk-input--flex-2"
+                        className="fuk-slider fuk-input--flex-2"
                         value={formData.edit_strength || 0.85}
                         onChange={(e) => setFormData({...formData, edit_strength: parseFloat(e.target.value)})}
                         min={0}

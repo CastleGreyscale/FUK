@@ -322,7 +322,7 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
             <div className="fuk-input-inline">
               <input
                 type="range"
-                className="fuk-input fuk-input--flex-2"
+                className="fuk-slider fuk-input--flex-2"
                 value={currentSettings.low_threshold}
                 onChange={(e) => setCurrentSettings({ low_threshold: parseInt(e.target.value) })}
                 min={0}
@@ -345,7 +345,7 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
             <div className="fuk-input-inline">
               <input
                 type="range"
-                className="fuk-input fuk-input--flex-2"
+                className="fuk-slider fuk-input--flex-2"
                 value={currentSettings.high_threshold}
                 onChange={(e) => setCurrentSettings({ high_threshold: parseInt(e.target.value) })}
                 min={0}
@@ -470,7 +470,7 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
             <div className="fuk-input-inline">
               <input
                 type="range"
-                className="fuk-input fuk-input--flex-2"
+                className="fuk-slider fuk-input--flex-2"
                 value={currentSettings.depth_range_min ?? 0}
                 onChange={(e) => {
                   const val = parseFloat(e.target.value);
@@ -503,7 +503,7 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
             <div className="fuk-input-inline">
               <input
                 type="range"
-                className="fuk-input fuk-input--flex-2"
+                className="fuk-slider fuk-input--flex-2"
                 value={currentSettings.depth_range_max ?? 1}
                 onChange={(e) => {
                   const val = parseFloat(e.target.value);

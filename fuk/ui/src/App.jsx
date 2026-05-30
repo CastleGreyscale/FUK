@@ -181,6 +181,7 @@ export default function App() {
                 <span className="fuk-playback-fps">FPS: {playbackFPS}</span>
                 <input
                   type="range"
+                  className="fuk-slider"
                   min="6"
                   max="48"
                   step="6"

@@ -535,7 +535,7 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
                 <div className="fuk-input-inline">
                   <input
                     type="range"
-                    className="fuk-input fuk-input--flex-2"
+                    className="fuk-slider fuk-input--flex-2"
                     value={settings.depthRangeMin ?? 0}
                     onChange={(e) => {
                       const val = parseFloat(e.target.value);
@@ -570,7 +570,7 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
                 <div className="fuk-input-inline">
                   <input
                     type="range"
-                    className="fuk-input fuk-input--flex-2"
+                    className="fuk-slider fuk-input--flex-2"
                     value={settings.depthRangeMax ?? 1}
                     onChange={(e) => {
                       const val = parseFloat(e.target.value);

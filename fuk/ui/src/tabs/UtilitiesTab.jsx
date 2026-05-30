@@ -411,7 +411,7 @@ function SpecTool({ config }) {
         {/* Burn-in */}
         <div className="fuk-card spec-tool-card spec-tool-card--row">
           <label className="spec-tool-burn-in-label">
-            <input type="checkbox" checked={burnIn} onChange={e => setBurnIn(e.target.checked)} />
+            <input type="checkbox" className="fuk-checkbox" checked={burnIn} onChange={e => setBurnIn(e.target.checked)} />
             Burn-in frame count
           </label>
         </div>
@@ -422,7 +422,7 @@ function SpecTool({ config }) {
           <div className="spec-tool-checklist">
             {COMPOSITION_GUIDES.map(g => (
               <label key={g.key}>
-                <input type="checkbox" checked={guides[g.key]} onChange={() => toggleGuide(g.key)} />
+                <input type="checkbox" className="fuk-checkbox" checked={guides[g.key]} onChange={() => toggleGuide(g.key)} />
                 {g.label}
               </label>
             ))}
@@ -449,8 +449,7 @@ function SpecTool({ config }) {
             Opacity: {bgAlpha}%
             {bgAlpha < 100 && <span className="spec-tool-opacity-accent">transparent PNG</span>}
           </span>
-          <input type="range" min="0" max="100" value={bgAlpha} onChange={e => setBgAlpha(Number(e.target.value))}
- />
+          <input type="range" className="fuk-slider" min="0" max="100" value={bgAlpha} onChange={e => setBgAlpha(Number(e.target.value))} />
         </div>
 
         {/* Download PNG — full width */}

@@ -251,7 +251,7 @@ function SetupPhase({ config, onStart }) {
           {lora && (
             <>
               <span className="dataset-label">LoRA Alpha — {loraAlpha.toFixed(1)}</span>
-              <input type="range" min={0} max={2} step={0.1} value={loraAlpha}
+              <input type="range" className="fuk-slider" min={0} max={2} step={0.1} value={loraAlpha}
                 onChange={e => setLoraAlpha(parseFloat(e.target.value))} />
             </>
           )}
@@ -275,7 +275,7 @@ function SetupPhase({ config, onStart }) {
                 <div key={packKey} className={`dataset-pack-item ${on ? 'dataset-pack-item--active' : ''}`}>
                   <div className="dataset-pack-header" onClick={() => togglePack(subjectType, packKey)}>
                     <div className="dataset-pack-header-left">
-                      <input type="checkbox" checked={on} onChange={() => {}} onClick={e => e.stopPropagation()} />
+                      <input type="checkbox" className="fuk-checkbox" checked={on} onChange={() => {}} onClick={e => e.stopPropagation()} />
                       <span className="dataset-pack-name">{packMeta.label}</span>
                     </div>
                     <div className="dataset-pack-header-right">
@@ -309,7 +309,7 @@ function SetupPhase({ config, onStart }) {
                           <label key={v.id} className={`dataset-var-label ${!checked ? 'dataset-var-label--deselected' : ''}`}>
                             <input
                               type="checkbox"
-                              className="dataset-var-checkbox"
+                              className="fuk-checkbox dataset-var-checkbox"
                               checked={checked}
                               onChange={() => toggleVar(packKey, v.id)}
                             />
@@ -421,7 +421,7 @@ function RunningPhase({ jobId, onComplete }) {
             <label className="dataset-thumb-size-label">
               <span>Size</span>
               <input
-                type="range" min={80} max={280} step={20}
+                type="range" className="fuk-slider" min={80} max={280} step={20}
                 value={thumbSize}
                 onChange={e => setThumbSize(Number(e.target.value))}
               />
@@ -632,7 +632,7 @@ function CurationPhase({ jobId }) {
           <label className="dataset-thumb-size-label">
             <span>Size</span>
             <input
-              type="range" min={100} max={320} step={20}
+              type="range" className="fuk-slider" min={100} max={320} step={20}
               value={thumbSize}
               onChange={e => setThumbSize(Number(e.target.value))}
             />

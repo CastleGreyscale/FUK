@@ -277,17 +277,34 @@
 }
 
 .fuk-checkbox {
+  appearance: none;
+  -webkit-appearance: none;
   width: 1.25rem;
   height: 1.25rem;
   background-color: var(--input-bg);
   border: var(--border-width) solid var(--input-border);
   border-radius: var(--radius-sm);
   cursor: pointer;
+  position: relative;
+  flex-shrink: 0;
+  transition: all var(--transition-base);
 }
 
 .fuk-checkbox:checked {
   background-color: var(--color-accent);
   border-color: var(--color-accent);
+}
+
+.fuk-checkbox:checked::after {
+  content: '';
+  position: absolute;
+  top: 45%;
+  left: 50%;
+  transform: translate(-50%, -50%) rotate(45deg);
+  width: 0.3rem;
+  height: 0.55rem;
+  border-right: 2px solid #fff;
+  border-bottom: 2px solid #fff;
 }
 
 .fuk-checkbox-label {
@@ -312,7 +329,11 @@
 
 .fuk-slider::-webkit-slider-track,
 .fuk-range::-webkit-slider-track {
-  background-color: var(--color-border);
+  background: linear-gradient(
+    to right,
+    var(--color-accent) var(--fill, 0%),
+    var(--color-border) var(--fill, 0%)
+  );
   border-radius: var(--radius-full);
   height: var(--spacing-xs);
 }
@@ -332,6 +353,13 @@
 .fuk-slider::-moz-range-track,
 .fuk-range::-moz-range-track {
   background-color: var(--color-border);
+  border-radius: var(--radius-full);
+  height: var(--spacing-xs);
+}
+
+.fuk-slider::-moz-range-progress,
+.fuk-range::-moz-range-progress {
+  background-color: var(--color-accent);
   border-radius: var(--radius-full);
   height: var(--spacing-xs);
 }
@@ -428,7 +456,7 @@
 }
 
 .compact-form-row > select,
-.compact-form-row > input {
+.compact-form-row > input:not([type="checkbox"]) {
   flex: 1;
 }
 
