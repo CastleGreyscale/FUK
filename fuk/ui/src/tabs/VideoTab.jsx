@@ -275,40 +275,22 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
       .then(r => r.ok ? r.json() : Promise.reject())
       .then(info => {
         setSourceVideoInfo(info);
-        if (formData.frame_inherit !== false) {
-          const base = roundUpToValid4n1(info.frame_count);
-          const frames = formData.trim_frames
-            ? roundToValid4n1(Math.min(base, formData.trim_frames))
-            : base;
-          setFrameInput(String(frames));
-          setFormData(prev => ({ ...prev, video_length: frames }));
-        }
+        const base = roundUpToValid4n1(info.frame_count);
+        const frames = formData.trim_frames
+          ? roundToValid4n1(Math.min(base, formData.trim_frames))
+          : base;
+        setFrameInput(String(frames));
+        setFormData(prev => ({ ...prev, video_length: frames }));
       })
       .catch(() => setSourceVideoInfo(null));
   }, [formData.control_path]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Re-apply inheritance when frame_inherit is toggled on
-  const handleFrameInheritToggle = (enabled) => {
-    setFormData(prev => {
-      const newData = { ...prev, frame_inherit: enabled };
-      if (enabled && sourceVideoInfo) {
-        const base = roundUpToValid4n1(sourceVideoInfo.frame_count);
-        const frames = prev.trim_frames
-          ? roundToValid4n1(Math.min(base, prev.trim_frames))
-          : base;
-        setFrameInput(String(frames));
-        return { ...newData, video_length: frames };
-      }
-      return newData;
-    });
-  };
-
-  // Re-apply inherited frame count when trim value changes
+  // Update frame count when trim changes — always derives from source when a control video is loaded
   const handleTrimChange = (value) => {
     const trimVal = value ? parseInt(value) : null;
     setFormData(prev => {
       const newData = { ...prev, trim_frames: trimVal };
-      if (prev.frame_inherit !== false && sourceVideoInfo) {
+      if (sourceVideoInfo) {
         const base = roundUpToValid4n1(sourceVideoInfo.frame_count);
         const frames = trimVal
           ? roundToValid4n1(Math.min(base, trimVal))
@@ -790,97 +772,78 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
               </select>
             </div>
             
-            {/* Resolution + Frames inline */}
-            <div className="fuk-form-pair">
-              <div className="fuk-form-group-compact">
-                <label className="fuk-label">
-                  Resolution
-                  {formData.source_width && (
-                    <span className="fuk-label-description">
-                      (from {formData.source_width}×{formData.source_height})
-                    </span>
-                  )}
-                </label>
-                <select
-                  className="fuk-select"
-                  value={formData.scale_factor}
-                  onChange={(e) => handleScaleChange(parseFloat(e.target.value))}
-                >
-                  {SCALE_FACTORS.map(sf => (
-                    <option key={sf.value} value={sf.value}>{sf.label}</option>
-                  ))}
-                </select>
-                <p className="fuk-help-text fuk-mt-1">
-                  → {formData.width || '---'} × {formData.height || '---'}
-                </p>
-                {!formData.source_width && (
-                  <p className="fuk-help-text fuk-help-text--warning">
-                    <AlertCircle className="fuk-icon--sm" />
-                    Upload a start image to auto-detect dimensions
-                  </p>
-                )}
-              </div>
-
-              <div className="fuk-form-group-compact">
-                <label className="fuk-label">
-                  Frames
-                  <span className="fuk-label-description">(must be 4n+1)</span>
-                </label>
-
-                {sourceVideoInfo && (
-                  <div className="fuk-input-inline fuk-mb-2">
-                    <span className="fuk-label-description">
-                      Source: {sourceVideoInfo.frame_count} frames @ {sourceVideoInfo.fps.toFixed(1)}fps
-                    </span>
-                    <label className="fuk-checkbox-option fuk-label--push-right">
-                      <input
-                        type="checkbox"
-                        className="fuk-checkbox"
-                        checked={formData.frame_inherit !== false}
-                        onChange={(e) => handleFrameInheritToggle(e.target.checked)}
-                      />
-                      <span>Inherit</span>
-                    </label>
-                  </div>
-                )}
-
-                <div className="fuk-input-inline">
-                  <input
-                    type="number"
-                    className={`fuk-input ${!currentFrameValid ? 'fuk-input--warning' : ''}`}
-                    value={frameInput}
-                    onChange={(e) => handleFrameInputChange(e.target.value)}
-                    onBlur={handleFrameInputBlur}
-                    min={5}
-                    max={241}
-                    step={4}
-                  />
-                  <span className="fuk-input-result">
-                    ≈ {getFrameDuration(formData.video_length)} @ 24fps
+            <div className="fuk-form-group-compact">
+              <label className="fuk-label">
+                Resolution
+                {formData.source_width && (
+                  <span className="fuk-label-description">
+                    (from {formData.source_width}×{formData.source_height})
                   </span>
-                </div>
-                {!currentFrameValid && (
-                  <p className="fuk-help-text fuk-help-text--info">
-                    Will round to {validFrameCount} frames ({getFrameDuration(validFrameCount)})
-                  </p>
                 )}
+              </label>
+              <select
+                className="fuk-select"
+                value={formData.scale_factor}
+                onChange={(e) => handleScaleChange(parseFloat(e.target.value))}
+              >
+                {SCALE_FACTORS.map(sf => (
+                  <option key={sf.value} value={sf.value}>{sf.label}</option>
+                ))}
+              </select>
+              <p className="fuk-help-text fuk-mt-1">
+                → {formData.width || '---'} × {formData.height || '---'}
+              </p>
+              {!formData.source_width && (
+                <p className="fuk-help-text fuk-help-text--warning">
+                  <AlertCircle className="fuk-icon--sm" />
+                  Upload a start image to auto-detect dimensions
+                </p>
+              )}
+            </div>
 
+            <div className="fuk-form-group-compact">
+              <label className="fuk-label">
+                Frames
+                <span className="fuk-label-description">(must be 4n+1)</span>
                 {sourceVideoInfo && (
-                  <div className="fuk-input-inline fuk-mt-2">
+                  <span className="fuk-label-description">
+                    · Source: {sourceVideoInfo.frame_count} @ {sourceVideoInfo.fps.toFixed(1)}fps
+                  </span>
+                )}
+              </label>
+
+              <div className="fuk-input-inline">
+                <input
+                  type="number"
+                  className={`fuk-input fuk-input--w-80 ${!currentFrameValid ? 'fuk-input--warning' : ''}`}
+                  value={frameInput}
+                  onChange={(e) => handleFrameInputChange(e.target.value)}
+                  onBlur={handleFrameInputBlur}
+                  min={5}
+                  max={241}
+                  step={4}
+                />
+                <span className="fuk-input-result">≈ {getFrameDuration(formData.video_length)} @ 24fps</span>
+                {sourceVideoInfo && (
+                  <>
                     <label className="fuk-label fuk-label--nowrap">Trim to</label>
                     <input
                       type="number"
                       className="fuk-input fuk-input--w-80"
                       value={formData.trim_frames ?? ''}
                       onChange={(e) => handleTrimChange(e.target.value)}
-                      placeholder="no limit"
+                      placeholder="∞"
                       min={5}
                       step={4}
                     />
-                    <span className="fuk-input-result">frames max</span>
-                  </div>
+                  </>
                 )}
               </div>
+              {!currentFrameValid && (
+                <p className="fuk-help-text fuk-help-text--info">
+                  Will round to {validFrameCount} frames ({getFrameDuration(validFrameCount)})
+                </p>
+              )}
             </div>
 
             <div className="fuk-form-group-compact">
@@ -989,7 +952,7 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
               </div>
             </div>
             
-            <div className="fuk-form-trio">
+            <div className="fuk-form-pair">
               <div className="fuk-form-group-compact">
                 <label className="fuk-label">Guidance Scale</label>
                 <input

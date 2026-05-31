@@ -26,6 +26,7 @@ import {
   API_URL,
 } from '../../src/utils/constants';
 import Footer from '../components/Footer';
+import PromptPanel from '../components/PromptPanel';
 
 export default function ImageTab({ config, activeTab, setActiveTab, project }) {
   // Get defaults from backend config
@@ -156,13 +157,6 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
       }
     }
   }, [project?.isProjectLoaded, project?.updateTabState, setLocalFormData]);
-
-  // Auto-resize textarea handler
-  const handleTextareaResize = useCallback((e) => {
-    const textarea = e.target;
-    textarea.style.height = 'auto';
-    textarea.style.height = textarea.scrollHeight + 'px';
-  }, []);
 
   // Generation state
   const {
@@ -594,6 +588,13 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
             <span>Load Settings</span>
           </div>
         )}
+
+        <PromptPanel
+          prompt={formData.prompt}
+          negativePrompt={formData.negative_prompt}
+          onChange={(key, value) => setFormData(prev => ({ ...prev, [key]: value }))}
+          disabled={generating}
+        />
       </div>
 
       {/* Settings Area */}
@@ -1027,40 +1028,6 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
               onSelectSavedSeed={(seed) => setFormData({...formData, seed})}
               disabled={generating}
             />
-          </div>
-
-          {/* Prompt Card */}
-          <div className="fuk-card">
-            <h3 className="fuk-card-title fuk-mb-3">Prompt</h3>
-            
-            <div className="fuk-form-group-compact">
-              <textarea
-                className="fuk-textarea fuk-textarea--auto"
-                value={formData.prompt}
-                onChange={(e) => {
-                  setFormData({...formData, prompt: e.target.value});
-                  handleTextareaResize(e);
-                }}
-                onInput={handleTextareaResize}
-                placeholder="A cinematic still of..."
-                rows={4}
-              />
-            </div>
-            
-            <div className="fuk-form-group-compact">
-              <label className="fuk-label">Negative Prompt</label>
-              <textarea
-                className="fuk-textarea fuk-textarea--auto"
-                value={formData.negative_prompt}
-                onChange={(e) => {
-                  setFormData({...formData, negative_prompt: e.target.value});
-                  handleTextareaResize(e);
-                }}
-                onInput={handleTextareaResize}
-                placeholder="blurry, low quality..."
-                rows={4}
-              />
-            </div>
           </div>
 
           {/* Dimensions Card */}
