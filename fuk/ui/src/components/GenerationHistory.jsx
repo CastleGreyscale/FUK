@@ -589,8 +589,8 @@ function FullscreenGallery({ generations, pinnedIds, votes, onTogglePin, onVote,
   useEffect(() => {
     const handle = e => {
       if (e.key === 'Escape') { onClose(); return; }
-      if (e.key === '+' || e.key === '=') { setZoom(z => Math.min(z + 20, 320)); return; }
-      if (e.key === '-')                   { setZoom(z => Math.max(z - 20, 80));  return; }
+      if ((e.key === '+' || e.key === '=') && e.code !== 'NumpadAdd')      { setZoom(z => Math.min(z + 20, 320)); return; }
+      if (e.key === '-'                    && e.code !== 'NumpadSubtract') { setZoom(z => Math.max(z - 20, 80));  return; }
       if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
         setSelected(prev => {
           if (!prev) return generations[0] || null;
