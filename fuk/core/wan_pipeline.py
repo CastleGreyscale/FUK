@@ -6,7 +6,7 @@ Handles all Wan-family video generation:
   - wan_vace_fun_a14b (VACE control video + reference)
   - (future Wan variants go here)
 
-Wan-specific features: sigma_shift, sliding window, motion_bucket_id,
+Wan-specific features: sigma_shift, sliding window,
 VACE video data loading, tiled inference, dual-DiT boundary switching.
 """
 
@@ -84,8 +84,6 @@ class WanPipelineRunner(PipelineRunner):
         # Wan-specific params
         sigma_shift = (kwargs.get("sigma_shift") if kwargs.get("sigma_shift") is not None
                        else defaults.get("sigma_shift", 5.0))
-        motion_bucket_id = (kwargs.get("motion_bucket_id") if "motion_bucket_id" in kwargs
-                            else defaults.get("motion_bucket_id"))
         sliding_window_size = (kwargs.get("sliding_window_size") if kwargs.get("sliding_window_size") is not None
                                else defaults.get("sliding_window_size"))
         sliding_window_stride = (kwargs.get("sliding_window_stride") if kwargs.get("sliding_window_stride") is not None
@@ -102,7 +100,6 @@ class WanPipelineRunner(PipelineRunner):
             "denoising_strength": denoise,
             "seed": seed,
             "sigma_shift": sigma_shift,
-            "motion_bucket_id": motion_bucket_id,
             "input_image": image_path,
             "control_path": control_path,
             "pipeline_kwargs": pipe_defaults if pipe_defaults else None,
@@ -139,8 +136,6 @@ class WanPipelineRunner(PipelineRunner):
             pipe_kwargs["sliding_window_size"] = sliding_window_size
         if sliding_window_stride is not None:
             pipe_kwargs["sliding_window_stride"] = sliding_window_stride
-        if motion_bucket_id is not None:
-            pipe_kwargs["motion_bucket_id"] = motion_bucket_id
 
         # Negative prompt
         if "negative_prompt" in supports and negative_prompt:

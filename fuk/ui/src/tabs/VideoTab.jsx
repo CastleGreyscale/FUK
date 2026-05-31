@@ -82,7 +82,6 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
     stepsMode: videoDefaults.stepsMode ?? 'preset',
     guidance_scale: videoDefaults.guidance_scale ?? 5.0,
     sigma_shift: videoDefaults.sigma_shift ?? 5.0,
-    motion_bucket_id: videoDefaults.motion_bucket_id ?? null,
     sliding_window_size: videoDefaults.sliding_window_size ?? null,
     sliding_window_stride: videoDefaults.sliding_window_stride ?? null,
     denoising_strength: videoDefaults.denoising_strength ?? 1.0,
@@ -522,8 +521,7 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
         updates.loras = [{ key: meta.lora, multiplier: meta.lora_multiplier ?? 1.0 }];
       }
       if (meta.sigma_shift != null)        updates.sigma_shift         = meta.sigma_shift;
-      if (meta.motion_bucket_id != null)   updates.motion_bucket_id    = meta.motion_bucket_id;
-      if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoising_strength;
+if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoising_strength;
       if (meta.sliding_window_size != null)   updates.sliding_window_size   = meta.sliding_window_size;
       if (meta.sliding_window_stride != null) updates.sliding_window_stride = meta.sliding_window_stride;
       if (meta.seed != null) {
@@ -1016,24 +1014,6 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
                   step={0.5}
                   min={1}
                   max={10}
-                />
-              </div>
-              <div className="fuk-form-group-compact">
-                <label className="fuk-label" title="Controls motion intensity. Higher = more movement. Leave blank for auto.">
-                  Amplitude <Info className="fuk-label-info" />
-                </label>
-                <input
-                  type="number"
-                  className="fuk-input"
-                  value={formData.motion_bucket_id ?? ''}
-                  onChange={(e) => setFormData({
-                    ...formData,
-                    motion_bucket_id: e.target.value ? parseFloat(e.target.value) : null
-                  })}
-                  placeholder="auto"
-                  step={5}
-                  min={0}
-                  max={200}
                 />
               </div>
             </div>
