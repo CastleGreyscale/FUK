@@ -16,6 +16,17 @@ export default function PromptPanel({ prompt, negativePrompt, onChange, disabled
   useAutoResize(promptRef, prompt);
   useAutoResize(negRef, negativePrompt);
 
+  useEffect(() => {
+    const focusPrompt = () => promptRef.current?.focus();
+    const focusNeg = () => negRef.current?.focus();
+    window.addEventListener('fuk-shortcut-focus-prompt', focusPrompt);
+    window.addEventListener('fuk-shortcut-focus-neg-prompt', focusNeg);
+    return () => {
+      window.removeEventListener('fuk-shortcut-focus-prompt', focusPrompt);
+      window.removeEventListener('fuk-shortcut-focus-neg-prompt', focusNeg);
+    };
+  }, []);
+
   const handleResize = useCallback((e) => {
     const el = e.target;
     el.style.height = 'auto';

@@ -381,6 +381,37 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
     }
   };
 
+  // Keyboard shortcut event listeners (dispatched by useKeyboardShortcuts in App)
+  const generateRef = useRef(handleGenerate);
+  const cancelRef = useRef(cancel);
+  const seedModeRef = useRef(formData.seedMode);
+  useEffect(() => { generateRef.current = handleGenerate; }, [handleGenerate]);
+  useEffect(() => { cancelRef.current = cancel; }, [cancel]);
+  useEffect(() => { seedModeRef.current = formData.seedMode; }, [formData.seedMode]);
+
+  useEffect(() => {
+    const onGenerate = () => generateRef.current();
+    const onCancel = () => cancelRef.current();
+    const onSeedMode = (e) => {
+      const mode = e.detail;
+      if (mode === 'cycle') {
+        const cycle = [SEED_MODES.RANDOM, SEED_MODES.FIXED, SEED_MODES.INCREMENT];
+        const next = cycle[(cycle.indexOf(seedModeRef.current) + 1) % cycle.length];
+        setFormData(prev => ({ ...prev, seedMode: next }));
+      } else {
+        setFormData(prev => ({ ...prev, seedMode: mode }));
+      }
+    };
+    window.addEventListener('fuk-shortcut-generate', onGenerate);
+    window.addEventListener('fuk-shortcut-cancel', onCancel);
+    window.addEventListener('fuk-shortcut-seed-mode', onSeedMode);
+    return () => {
+      window.removeEventListener('fuk-shortcut-generate', onGenerate);
+      window.removeEventListener('fuk-shortcut-cancel', onCancel);
+      window.removeEventListener('fuk-shortcut-seed-mode', onSeedMode);
+    };
+  }, [setFormData]);
+
   const handleImagesChange = (paths) => {
     setFormData(prev => ({ ...prev, control_image_paths: paths }));
   };

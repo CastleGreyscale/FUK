@@ -16,6 +16,7 @@ import { fetchConfig } from './utils/api';
 import { useProject } from './hooks/useProject';
 import { GenerationHistory } from './components';
 import { useActiveTab } from './hooks/useActiveTab';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 
 export default function App() {
   const project = useProject();
@@ -23,7 +24,17 @@ export default function App() {
   const [config, setConfig] = useState(null);
   const [status, setStatus] = useState('loading');
   const [historyCollapsed, setHistoryCollapsed] = useState(false);
+  const [historyFullscreen, setHistoryFullscreen] = useState(false);
   const [playbackFPS, setPlaybackFPS] = useState(24); // Video playback FPS (6-48)
+
+  useKeyboardShortcuts({
+    activeTab,
+    setActiveTab,
+    historyCollapsed,
+    setHistoryCollapsed,
+    historyFullscreen,
+    setHistoryFullscreen,
+  });
   
   // Convert FPS to playback rate (assuming 24fps source)
   const playbackSpeed = playbackFPS / 24;
@@ -218,10 +229,12 @@ export default function App() {
         {renderTab()}
 
       </main>
-              <GenerationHistory 
+              <GenerationHistory
           project={project}
           collapsed={historyCollapsed}
           onToggle={() => setHistoryCollapsed(!historyCollapsed)}
+          galleryOpen={historyFullscreen}
+          onGalleryOpenChange={setHistoryFullscreen}
           playbackSpeed={playbackSpeed}
         />
     </div>

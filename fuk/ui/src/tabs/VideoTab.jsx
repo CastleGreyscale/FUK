@@ -441,6 +441,62 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
     }
   };
 
+  // Keyboard shortcut event listeners (dispatched by useKeyboardShortcuts in App)
+  const generateRef = useRef(handleGenerate);
+  const cancelRef = useRef(cancel);
+  const seedModeRef = useRef(formData.seedMode);
+  useEffect(() => { generateRef.current = handleGenerate; }, [handleGenerate]);
+  useEffect(() => { cancelRef.current = cancel; }, [cancel]);
+  useEffect(() => { seedModeRef.current = formData.seedMode; }, [formData.seedMode]);
+
+  useEffect(() => {
+    const onGenerate = () => generateRef.current();
+    const onCancel = () => cancelRef.current();
+    const onSeedMode = (e) => {
+      const mode = e.detail;
+      if (mode === 'cycle') {
+        const cycle = [SEED_MODES.RANDOM, SEED_MODES.FIXED, SEED_MODES.INCREMENT];
+        const next = cycle[(cycle.indexOf(seedModeRef.current) + 1) % cycle.length];
+        setFormData(prev => ({ ...prev, seedMode: next }));
+      } else {
+        setFormData(prev => ({ ...prev, seedMode: mode }));
+      }
+    };
+    const onPlayPause = () => {
+      const v = videoRef.current;
+      if (!v) return;
+      v.paused ? v.play() : v.pause();
+    };
+    const onStepForward = () => {
+      const v = videoRef.current;
+      if (!v) return;
+      v.pause();
+      const fps = 24;
+      v.currentTime = Math.min(v.duration, v.currentTime + 1 / fps);
+    };
+    const onStepBack = () => {
+      const v = videoRef.current;
+      if (!v) return;
+      v.pause();
+      const fps = 24;
+      v.currentTime = Math.max(0, v.currentTime - 1 / fps);
+    };
+    window.addEventListener('fuk-shortcut-generate', onGenerate);
+    window.addEventListener('fuk-shortcut-cancel', onCancel);
+    window.addEventListener('fuk-shortcut-seed-mode', onSeedMode);
+    window.addEventListener('fuk-shortcut-video-play-pause', onPlayPause);
+    window.addEventListener('fuk-shortcut-video-step-forward', onStepForward);
+    window.addEventListener('fuk-shortcut-video-step-back', onStepBack);
+    return () => {
+      window.removeEventListener('fuk-shortcut-generate', onGenerate);
+      window.removeEventListener('fuk-shortcut-cancel', onCancel);
+      window.removeEventListener('fuk-shortcut-seed-mode', onSeedMode);
+      window.removeEventListener('fuk-shortcut-video-play-pause', onPlayPause);
+      window.removeEventListener('fuk-shortcut-video-step-forward', onStepForward);
+      window.removeEventListener('fuk-shortcut-video-step-back', onStepBack);
+    };
+  }, [setFormData]);
+
   const handleStartImageChange = (paths) => {
     setFormData(prev => ({ ...prev, image_path: paths[0] || null }));
   };

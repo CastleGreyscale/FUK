@@ -1382,45 +1382,68 @@
             <!-- Keyboard Shortcuts -->
             <div class="wiki-section" id="shortcuts">
                 <h2>Keyboard Shortcuts</h2>
+                <p>Shortcuts are blocked when an input, textarea, or select element is focused, except where noted. IME composition (CJK input) is always ignored.</p>
 
                 <h3>Global</h3>
                 <table class="wiki-table">
                     <thead>
-                        <tr><th>Shortcut</th><th>Action</th></tr>
+                        <tr><th>Shortcut</th><th>Action</th><th>Notes</th></tr>
                     </thead>
                     <tbody>
-                        <tr><td><kbd>Ctrl+Enter</kbd></td><td>Start generation</td></tr>
-                        <tr><td><kbd>Ctrl+Shift+Enter</kbd></td><td>Add to queue</td></tr>
-                        <tr><td><kbd>Esc</kbd></td><td>Cancel current generation</td></tr>
-                        <tr><td><kbd>Ctrl+H</kbd></td><td>Toggle Generation History panel</td></tr>
-                        <tr><td><kbd>Ctrl+,</kbd></td><td>Open settings</td></tr>
-                        <tr><td><kbd>Ctrl+/</kbd></td><td>Toggle sidebar</td></tr>
-                    </tbody>
-                </table>
-
-                <h3>Generation Panel</h3>
-                <table class="wiki-table">
-                    <thead>
-                        <tr><th>Shortcut</th><th>Action</th></tr>
-                    </thead>
-                    <tbody>
-                        <tr><td><kbd>Ctrl+D</kbd></td><td>Duplicate current generation settings as a new entry</td></tr>
-                        <tr><td><kbd>Ctrl+R</kbd></td><td>Randomize seed</td></tr>
-                        <tr><td><kbd>Ctrl+L</kbd></td><td>Lock / unlock seed</td></tr>
-                        <tr><td><kbd>Ctrl+Up / Down</kbd></td><td>Increment / decrement steps by 5</td></tr>
+                        <tr><td><kbd>Shift+G</kbd></td><td>Generate</td><td>Works inside inputs — shift modifier makes it intentional</td></tr>
+                        <tr><td><kbd>Esc</kbd></td><td>Blur focused prompt field, or cancel generation</td><td>If a prompt textarea is focused, blurs it first; otherwise cancels</td></tr>
+                        <tr><td><kbd>1</kbd></td><td>Switch to Utilities tab</td><td></td></tr>
+                        <tr><td><kbd>2</kbd></td><td>Switch to Pre-Processors tab</td><td></td></tr>
+                        <tr><td><kbd>3</kbd></td><td>Switch to Image tab</td><td></td></tr>
+                        <tr><td><kbd>4</kbd></td><td>Switch to Video tab</td><td></td></tr>
+                        <tr><td><kbd>5</kbd></td><td>Switch to Post-Processors tab</td><td></td></tr>
+                        <tr><td><kbd>6</kbd></td><td>Switch to Layers tab</td><td></td></tr>
+                        <tr><td><kbd>7</kbd></td><td>Switch to Export tab</td><td></td></tr>
+                        <tr><td><kbd>↑</kbd> / <kbd>↓</kbd></td><td>Adjust focused number input</td><td>Native browser step behaviour</td></tr>
+                        <tr><td><kbd>Shift+↑</kbd> / <kbd>Shift+↓</kbd></td><td>Adjust focused number input ×10</td><td>Custom handler on number inputs</td></tr>
                     </tbody>
                 </table>
 
                 <h3>History Panel</h3>
                 <table class="wiki-table">
                     <thead>
-                        <tr><th>Shortcut</th><th>Action</th></tr>
+                        <tr><th>Shortcut</th><th>Action</th><th>Notes</th></tr>
                     </thead>
                     <tbody>
-                        <tr><td><kbd>Enter</kbd></td><td>Expand selected output to full view</td></tr>
-                        <tr><td><kbd>Ctrl+Q</kbd></td><td>Re-queue selected generation</td></tr>
-                        <tr><td><kbd>Delete</kbd></td><td>Delete selected version (with confirmation)</td></tr>
-                        <tr><td><kbd>Ctrl+Shift+F</kbd></td><td>Reveal selected output in file manager</td></tr>
+                        <tr><td><kbd>H</kbd></td><td>Cycle history panel</td><td>Closed → compact strip → fullscreen gallery → closed</td></tr>
+                        <tr><td><kbd>Shift+Delete</kbd></td><td>Delete selected item(s) — no confirmation</td><td>Only fires when history panel is open; works on multi-selection in fullscreen gallery</td></tr>
+                        <tr><td><kbd>Numpad +</kbd></td><td>Upvote selected item</td><td>Votes on current selection in fullscreen gallery</td></tr>
+                        <tr><td><kbd>Numpad -</kbd></td><td>Downvote selected item</td><td>Votes on current selection in fullscreen gallery</td></tr>
+                        <tr><td><kbd>←</kbd> / <kbd>→</kbd></td><td>Navigate previous / next item</td><td>Fullscreen gallery only</td></tr>
+                        <tr><td><kbd>+</kbd> / <kbd>-</kbd></td><td>Zoom thumbnails in / out</td><td>Fullscreen gallery only</td></tr>
+                        <tr><td><kbd>Shift+Click</kbd></td><td>Range-select multiple items</td><td>Fullscreen gallery only</td></tr>
+                    </tbody>
+                </table>
+
+                <h3>Image &amp; Video Tabs</h3>
+                <table class="wiki-table">
+                    <thead>
+                        <tr><th>Shortcut</th><th>Action</th><th>Notes</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td><kbd>P</kbd></td><td>Focus prompt field</td><td></td></tr>
+                        <tr><td><kbd>Shift+P</kbd></td><td>Focus negative prompt field</td><td></td></tr>
+                        <tr><td><kbd>S</kbd></td><td>Cycle seed mode</td><td>Random → Fixed → Increment → Random</td></tr>
+                        <tr><td><kbd>Shift+R</kbd></td><td>Set seed mode → Random</td><td></td></tr>
+                        <tr><td><kbd>Shift+F</kbd></td><td>Set seed mode → Fixed</td><td></td></tr>
+                        <tr><td><kbd>Shift+I</kbd></td><td>Set seed mode → Increment</td><td></td></tr>
+                    </tbody>
+                </table>
+
+                <h3>Video Tab Only</h3>
+                <table class="wiki-table">
+                    <thead>
+                        <tr><th>Shortcut</th><th>Action</th><th>Notes</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td><kbd>Space</kbd></td><td>Play / Pause</td><td>Prevented from scrolling the page</td></tr>
+                        <tr><td><kbd>→</kbd></td><td>Advance one frame</td><td>Seeks by 1/24s; pauses first</td></tr>
+                        <tr><td><kbd>←</kbd></td><td>Go back one frame</td><td>Seeks by 1/24s; pauses first</td></tr>
                     </tbody>
                 </table>
             </div>

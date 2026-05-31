@@ -604,6 +604,53 @@ function FullscreenGallery({ generations, pinnedIds, votes, onTogglePin, onVote,
     return () => window.removeEventListener('keydown', handle);
   }, [onClose, generations]);
 
+  // Shortcut events for vote/delete while gallery is open
+  const selectedRef = useRef(selected);
+  const multiSelectedRef = useRef(multiSelected);
+  const onVoteRef = useRef(onVote);
+  const onDeleteRef = useRef(onDelete);
+  const generationsRef = useRef(generations);
+  useEffect(() => { selectedRef.current = selected; }, [selected]);
+  useEffect(() => { multiSelectedRef.current = multiSelected; }, [multiSelected]);
+  useEffect(() => { onVoteRef.current = onVote; }, [onVote]);
+  useEffect(() => { onDeleteRef.current = onDelete; }, [onDelete]);
+  useEffect(() => { generationsRef.current = generations; }, [generations]);
+
+  useEffect(() => {
+    const onVoteEvent = async (e) => {
+      const value = e.detail === 'up' ? 1 : -1;
+      const multi = multiSelectedRef.current;
+      const gens = generationsRef.current;
+      const vote = onVoteRef.current;
+      if (multi.size > 1) {
+        for (const id of multi) {
+          const gen = gens.find(g => g.id === id);
+          if (gen) await vote(gen, value);
+        }
+      } else if (selectedRef.current) {
+        await vote(selectedRef.current, value);
+      }
+    };
+    const onDeleteEvent = async () => {
+      const multi = multiSelectedRef.current;
+      const gens = generationsRef.current;
+      const del = onDeleteRef.current;
+      const targets = multi.size > 1
+        ? [...multi].map(id => gens.find(g => g.id === id)).filter(Boolean)
+        : selectedRef.current ? [selectedRef.current] : [];
+      const deletedIds = new Set(targets.map(g => g.id));
+      for (const gen of targets) await del(gen);
+      setMultiSelected(prev => { const n = new Set(prev); deletedIds.forEach(id => n.delete(id)); return n; });
+      setSelected(s => (s && deletedIds.has(s.id)) ? null : s);
+    };
+    window.addEventListener('fuk-history-vote', onVoteEvent);
+    window.addEventListener('fuk-history-delete-selected', onDeleteEvent);
+    return () => {
+      window.removeEventListener('fuk-history-vote', onVoteEvent);
+      window.removeEventListener('fuk-history-delete-selected', onDeleteEvent);
+    };
+  }, []);
+
   // Draggable divider
   const handleDividerMouseDown = (e) => {
     e.preventDefault();
@@ -801,7 +848,7 @@ function FullscreenGallery({ generations, pinnedIds, votes, onTogglePin, onVote,
 
 // ─── main component ───────────────────────────────────────────────────────────
 
-export default function GenerationHistory({ project, collapsed, onToggle, playbackSpeed }) {
+export default function GenerationHistory({ project, collapsed, onToggle, galleryOpen, onGalleryOpenChange, playbackSpeed }) {
   const [generations, setGenerations] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -810,23 +857,7 @@ export default function GenerationHistory({ project, collapsed, onToggle, playba
   const [hasMore, setHasMore] = useState({ image: false, video: false });
   // votes: { [generation.id]: 1 | -1 | 0 }
   const [votes, setVotes] = useState({});
-  const [galleryOpen, setGalleryOpen] = useState(false);
-
-  // H key: close gallery if open, otherwise toggle docked panel
-  useEffect(() => {
-    const handle = (e) => {
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
-      if (e.key === 'h' || e.key === 'H') {
-        if (galleryOpen) {
-          setGalleryOpen(false);
-        } else {
-          onToggle();
-        }
-      }
-    };
-    window.addEventListener('keydown', handle);
-    return () => window.removeEventListener('keydown', handle);
-  }, [galleryOpen, onToggle]);
+  const setGalleryOpen = onGalleryOpenChange ?? (() => {});
 
   // Video playback speed refs
   const hoverVideoRef = useVideoPlayback(playbackSpeed);
