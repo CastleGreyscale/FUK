@@ -401,6 +401,7 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
       image_path: formData.image_path ? formData.image_path.replace(/^\/outputs\//, '') : null,
       end_image_path: formData.end_image_path ? formData.end_image_path.replace(/^\/outputs\//, '') : null,
       control_path: formData.control_path ? formData.control_path.replace(/^\/outputs\//, '') : null,
+      denoising_strength: 1.0,
       lora: null,
       lora_multiplier: 1.0,
       lora_bypass: undefined,
@@ -762,35 +763,6 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
                   </div>
                 )}
                 
-                {/* Denoising Strength - only when input image present */}
-                {formData.image_path && (
-                  <div className="fuk-form-group-compact fuk-mt-4">
-                    <label className="fuk-label">Denoising Strength</label>
-                    <div className="fuk-input-inline">
-                      <input
-                        type="range"
-                        className="fuk-slider fuk-input--flex-2"
-                        value={formData.denoising_strength ?? 1.0}
-                        onChange={(e) => setFormData({...formData, denoising_strength: parseFloat(e.target.value)})}
-                        min={0}
-                        max={1}
-                        step={0.05}
-                      />
-                      <input
-                        type="number"
-                        className="fuk-input fuk-input--w-80"
-                        value={formData.denoising_strength ?? 1.0}
-                        onChange={(e) => setFormData({...formData, denoising_strength: parseFloat(e.target.value)})}
-                        step={0.05}
-                        min={0}
-                        max={1}
-                      />
-                    </div>
-                    <p className="fuk-help-text fuk-mt-1">
-                      0.0 = similar to input, 1.0 = maximum variation from input
-                    </p>
-                  </div>
-                )}
               </>
             ) : (
               <div className="fuk-empty-state">

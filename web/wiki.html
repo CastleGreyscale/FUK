@@ -268,6 +268,7 @@
                         <tr><td>Width / Height</td><td>Output resolution in pixels</td><td>Use the <a href="#spec-tool">Spec Tool</a> for spec-compliant resolutions; dimensions snap to 16px alignment</td></tr>
                         <tr><td>Steps</td><td>Denoising steps — higher step counts increase quality and generation time</td><td>20–40 is typical; presets available</td></tr>
                         <tr><td>Guidance Scale</td><td>Prompt adherence. Higher values follow the prompt more strictly but can reduce image quality</td><td>Range 1.0–10.0; 6–8 is a common starting point</td></tr>
+                        <tr><td>Detail Bias</td><td>Skips a slice of the high-noise composition phase and spends that compute on detail bands instead — yields grittier, more textured output</td><td>Range 0.85–1.00; default 0.90. See <a href="#detail-bias">Detail Bias</a></td></tr>
                         <tr><td>Seed</td><td>Randomness seed. A fixed seed with identical parameters produces identical output</td><td>See <a href="#seed-control">Seed Control</a></td></tr>
                         <tr><td>Sampler</td><td>Denoising schedule algorithm — affects quality/speed tradeoff and output character</td><td>—</td></tr>
                         <tr><td>Prompt</td><td>Text description of desired output</td><td>—</td></tr>
@@ -276,6 +277,11 @@
                         <tr><td>VRAM Management</td><td>Controls model offloading strategy when VRAM is limited</td><td>Higher offload = slower generation but lower VRAM floor</td></tr>
                     </tbody>
                 </table>
+
+                <h3 id="detail-bias">Detail Bias</h3>
+                <p>The sampler runs a denoising schedule from high noise (sigma ≈ 1.0, where global composition is decided) down to clean (sigma ≈ 0, where fine texture and edges form). At <strong>Detail Bias 1.0</strong> the full schedule runs. Below 1.0, the high-noise front is truncated and the same step count is repacked into a smaller, lower-noise window — so a larger share of compute lands in the texture-forming band.</p>
+                <p>The result is grittier surfaces, more visible micro-detail, and slightly less of the "diffusion smoothness" sheen. Composition becomes more conservative (the model has less room to wander globally), which makes this knob pair naturally with reference images and ControlNet conditioning where you didn't want global drift anyway.</p>
+                <p>The slider is clamped to <strong>0.85–1.00</strong>; values below 0.85 strip too much of the composition phase and produce broken output. Try 0.85–0.90 for noticeable grit, 0.95 for a subtle bump.</p>
 
                 <h3>Image Input & ControlNet</h3>
                 <p>Edit and context models accept one or more reference images as conditioning input. Load a reference image via the <a href="#media-input">Media Input</a> component, select a preprocessor to extract a conditioning signal, and set the edit strength. See <a href="#preprocessors">Preprocessors</a> for available preprocessing modes.</p>

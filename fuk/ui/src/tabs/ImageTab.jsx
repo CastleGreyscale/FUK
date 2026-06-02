@@ -70,6 +70,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
     lastUsedSeed: imageDefaults.lastUsedSeed ?? null,
     output_format: imageDefaults.output_format ?? 'png',
     edit_strength: imageDefaults.edit_strength ?? 0.85,
+    detail_bias: imageDefaults.detail_bias ?? 0.9,
     exponential_shift_mu: imageDefaults.exponential_shift_mu ?? null,
     control_image_paths: imageDefaults.control_image_paths ?? [],
     eligen_source: imageDefaults.eligen_source ?? '',
@@ -333,8 +334,8 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
       control_image_path: formData.control_image_paths.length > 0 
         ? formData.control_image_paths[0] 
         : null,
-      denoising_strength: formData.control_image_paths.length > 0 
-        ? formData.edit_strength 
+      denoising_strength: formData.detail_bias != null && formData.detail_bias < 1.0
+        ? formData.detail_bias
         : null,
       exponential_shift_mu: formData.exponential_shift_mu,
       eligen_source: formData.eligen_source || null,
@@ -444,7 +445,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
       if (meta.model)                     updates.model                 = resolveModelKey(meta.model);
       if (meta.guidance_scale != null)    updates.guidance_scale        = meta.guidance_scale;
       if (meta.infer_steps != null)       updates.steps                 = meta.infer_steps;
-      if (meta.denoising_strength != null) updates.edit_strength        = meta.denoising_strength;
+      if (meta.denoising_strength != null) updates.detail_bias          = meta.denoising_strength;
       if (meta.exponential_shift_mu != null) updates.exponential_shift_mu = meta.exponential_shift_mu;
       // Prefer full loras array; fall back to legacy single lora field
       if (meta.loras?.length > 0) {
@@ -696,36 +697,6 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                     onDirectorySelected={(dir) => project?.updateLastState?.({ lastUploadDir: dir })}
                   />
                 </div>
-                
-                {formData.control_image_paths.length > 0 && modelSupports(formData.model, 'edit_image') && (
-                  <div className="fuk-form-group-compact fuk-mt-4">
-                    <label className="fuk-label">Edit Strength</label>
-                    <div className="fuk-input-inline">
-                      <input
-                        type="range"
-                        className="fuk-slider fuk-input--flex-2"
-                        value={formData.edit_strength || 0.85}
-                        onChange={(e) => setFormData({...formData, edit_strength: parseFloat(e.target.value)})}
-                        min={0}
-                        max={1}
-                        step={0.05}
-                      />
-                      <input
-                        type="number"
-                        className="fuk-input fuk-input--w-80"
-                        value={formData.edit_strength || 0.85}
-                        onChange={(e) => setFormData({...formData, edit_strength: parseFloat(e.target.value)})}
-                        step={0.05}
-                        min={0}
-                        max={1}
-                      />
-                    </div>
-                    <p className="fuk-help-text fuk-mt-1">
-                      Controls how much the control images influence generation. 
-                      1.0 = full strength, 0.0 = minimal influence.
-                    </p>
-                  </div>
-                )}
                 
                 {modelSupports(formData.model, 'context_image') && (
                   <div className="fuk-form-group-compact fuk-mt-4">
@@ -1002,6 +973,30 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
               />
             </div>
             
+            <div className="fuk-form-group-compact">
+              <label className="fuk-label">Detail Bias</label>
+              <div className="fuk-input-inline">
+                <input
+                  type="range"
+                  className="fuk-slider fuk-input--flex-2"
+                  value={formData.detail_bias ?? 0.9}
+                  onChange={(e) => setFormData({...formData, detail_bias: parseFloat(e.target.value)})}
+                  min={0.85}
+                  max={1}
+                  step={0.01}
+                />
+                <input
+                  type="number"
+                  className="fuk-input fuk-input--w-80"
+                  value={formData.detail_bias ?? 0.9}
+                  onChange={(e) => setFormData({...formData, detail_bias: parseFloat(e.target.value)})}
+                  step={0.01}
+                  min={0.85}
+                  max={1}
+                />
+              </div>
+            </div>
+
             <div className="fuk-form-group-compact">
               <label className="fuk-label">
                 Exponential Shift Mu

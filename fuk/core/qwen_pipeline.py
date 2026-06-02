@@ -23,6 +23,27 @@ from typing import Optional, Dict, Any, List, Union
 from pipeline_base import PipelineRunner, _log
 
 
+# --- Patch DiffSynth's input-image embedder for "Detail Bias" -------------
+# When input_image is None (pure t2i, qwen-edit, qwen-control all hit this
+# branch since they route inputs through edit_image / context_image), the
+# vendor code returns raw noise regardless of denoising_strength. The
+# scheduler, meanwhile, builds a truncated sigma schedule starting at
+# sigmas[0] < 1. Scaling the noise by sigmas[0] makes the starting latent
+# consistent with the schedule — equivalent to ComfyUI's KSampler behavior
+# on an empty latent. At denoising_strength=1.0 this is a no-op (sigmas[0]=1.0).
+from diffsynth.pipelines.qwen_image import QwenImageUnit_InputImageEmbedder as _QwenInputEmbedder
+
+_qwen_input_embedder_original = _QwenInputEmbedder.process
+
+def _qwen_input_embedder_patched(self, pipe, input_image, noise, tiled, tile_size, tile_stride):
+    if input_image is None:
+        sigma_start = pipe.scheduler.sigmas[0]
+        return {"latents": noise * sigma_start, "input_latents": None}
+    return _qwen_input_embedder_original(self, pipe, input_image, noise, tiled, tile_size, tile_stride)
+
+_QwenInputEmbedder.process = _qwen_input_embedder_patched
+
+
 class QwenPipelineRunner(PipelineRunner):
     """
     Runner for all Qwen image generation pipelines.
