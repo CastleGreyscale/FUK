@@ -1233,3 +1233,146 @@
 .gallery-section-label--top {
   margin-top: 1rem;
 }
+
+/* ============================================================================
+ * CONFORM HD (two-pass VACE conform of an i2v proxy at source resolution)
+ * ========================================================================== */
+
+.gen-history-conform-hd-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.gen-history-conform-hd {
+  background: transparent;
+  border: none;
+  padding: 0.2rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  transition: all var(--transition-base);
+  color: var(--color-text-muted);
+}
+
+.gen-history-conform-hd svg {
+  width: 0.6rem;
+  height: 0.6rem;
+}
+
+.gen-history-conform-hd:hover {
+  color: #6366f1;
+}
+
+.gen-history-conform-hd:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.gen-history-conform-hd.large {
+  font-size: 0.65rem;
+  padding: 0.3rem 0.5rem;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-hover);
+}
+
+.gen-history-conform-hd.large svg {
+  width: 0.7rem;
+  height: 0.7rem;
+}
+
+.gen-history-conform-hd-popover {
+  /* position/left/top are set inline by JS via getBoundingClientRect so the
+   * popover escapes ancestor `overflow: hidden` and stacking contexts. */
+  z-index: 10001;
+  width: 14rem;
+  padding: 0.55rem 0.65rem;
+  background: var(--color-surface);
+  border: var(--border-width) solid var(--color-surface-hover);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.conform-hd-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.conform-hd-close {
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 0.1rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.conform-hd-close svg {
+  width: 0.6rem;
+  height: 0.6rem;
+}
+
+.conform-hd-close:hover {
+  color: var(--color-text-primary);
+}
+
+.conform-hd-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.65rem;
+  color: var(--color-text-muted);
+}
+
+.conform-hd-value {
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary);
+}
+
+.gen-history-conform-hd-popover input[type="range"] {
+  width: 100%;
+  accent-color: #6366f1;
+}
+
+.conform-hd-hint {
+  font-size: 0.55rem;
+  color: var(--color-text-muted);
+  line-height: 1.25;
+}
+
+.conform-hd-error {
+  font-size: 0.6rem;
+  color: var(--color-error-500);
+}
+
+.conform-hd-run {
+  padding: 0.3rem 0.5rem;
+  background: #6366f1;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: white;
+  font-size: 0.65rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-base);
+}
+
+.conform-hd-run:hover:not(:disabled) {
+  background: #4f46e5;
+}
+
+.conform-hd-run:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

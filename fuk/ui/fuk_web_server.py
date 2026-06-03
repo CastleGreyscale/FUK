@@ -67,8 +67,10 @@ from project_endpoints import (
     save_generation_metadata,
     get_cache_root,
     get_default_cache_root,
+    get_project_cache_dir,
     cleanup_failed_generation
 )
+from hd_proxy_endpoints import setup_hd_proxy_routes
 
 
 # ============================================================================
@@ -631,6 +633,7 @@ class VideoGenerationRequest(BaseModel):
     image_path: Optional[str] = None
     end_image_path: Optional[str] = None
     control_path: Optional[str] = None
+    input_video_path: Optional[str] = None  # init-video for HD-proxy conform
     lora: Optional[str] = None
     lora_multiplier: float = 1.0
     export_exr: bool = False
@@ -1143,11 +1146,13 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
         image_path_abs = resolve_input_path(request.image_path)
         end_image_path_abs = resolve_input_path(request.end_image_path)
         control_path_abs = resolve_input_path(request.control_path)
-        
+        input_video_path_abs = resolve_input_path(request.input_video_path)
+
         log.paths("Resolved paths", {
             "image_path": f"{request.image_path} -> {image_path_abs}",
             "end_image_path": f"{request.end_image_path} -> {end_image_path_abs}",
             "control_path": f"{request.control_path} -> {control_path_abs}",
+            "input_video_path": f"{request.input_video_path} -> {input_video_path_abs}",
         })
         
         # Copy control inputs for reference
@@ -1184,6 +1189,7 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
             image_path=image_path_abs,
             end_image_path=end_image_path_abs,
             control_path=control_path_abs,
+            input_video_path=input_video_path_abs,
             lora=request.lora,
             lora_multiplier=request.lora_multiplier,
             progress_callback=progress_cb,
@@ -3479,8 +3485,19 @@ setup_video_routes(
     NormalsMethod=NormalsMethod,
     SAMModel=SAMModel,
     log=log,
-    clear_vram=clear_vram,                              
-    cleanup_failed_generation=cleanup_failed_generation 
+    clear_vram=clear_vram,
+    cleanup_failed_generation=cleanup_failed_generation
+)
+
+# HD Proxy conform — VACE re-render of an i2v proxy at source-still resolution
+setup_hd_proxy_routes(
+    app,
+    get_cache_root=get_cache_root,
+    get_project_cache_dir=get_project_cache_dir,
+    active_generations=active_generations,
+    video_request_cls=VideoGenerationRequest,
+    run_video_generation=run_video_generation,
+    log=log,
 )
 
 # ============================================================================

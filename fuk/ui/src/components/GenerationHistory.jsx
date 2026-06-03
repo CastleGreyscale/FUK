@@ -8,6 +8,7 @@ import { Film, Camera, Clock, Trash2, RefreshCw, ChevronDown, ChevronRight, Enha
 import { buildImageUrl, API_URL } from '../utils/constants';
 import { useVideoPlayback } from '../hooks/useVideoPlayback';
 import ZoomableImage from './ZoomableImage';
+import ConformHDButton from './ConformHDButton';
 
 
 
@@ -309,6 +310,7 @@ function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned, onHov
           <PinIcon />
         </button>
         <div className="gen-history-actions-bar-right">
+          <ConformHDButton generation={generation} variant="compact" />
           <button
             className={`gen-history-vote up ${vote === 1 ? 'active' : ''}`}
             onClick={(e) => { e.stopPropagation(); onVote(generation, vote === 1 ? 0 : 1); }}
@@ -324,7 +326,7 @@ function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned, onHov
             <ThumbsDown />
           </button>
           {onDelete && (
-            <button 
+            <button
               className="gen-history-delete"
               onClick={(e) => { e.stopPropagation(); onDelete(generation); }}
               title="Delete generation"
@@ -556,6 +558,7 @@ function GalleryLargeView({ generation, generations, isPinned, vote, onTogglePin
             className={`gen-history-vote down ${vote === -1 ? 'active' : ''}`}
             onClick={() => onVote(generation, vote === -1 ? 0 : -1)}
           ><ThumbsDown />Bad</button>
+          <ConformHDButton generation={generation} variant="large" />
           <button
             className="gen-history-delete"
             onClick={() => onDelete(generation)}

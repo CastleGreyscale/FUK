@@ -3,7 +3,7 @@ Wan Pipeline Runner for FUK
 
 Handles all Wan-family video generation:
   - wan_i2v_a14b (dual DiT image-to-video)
-  - wan_vace_fun_a14b (VACE control video + reference)
+  - wan_vace_a14b (VACE control video + reference)
   - (future Wan variants go here)
 
 Wan-specific features: sigma_shift, sliding window,
@@ -47,6 +47,11 @@ class WanPipelineRunner(PipelineRunner):
         image_path: Optional[Path] = None,
         end_image_path: Optional[Path] = None,
         control_path: Optional[Path] = None,
+        # Optional init-video (for the HD-proxy conform path). When present,
+        # the pipeline VAE-encodes the video and the scheduler adds noise at
+        # a level set by `denoising_strength`, so generation denoises *from*
+        # the proxy rather than from pure noise. Pass alongside control_path.
+        input_video_path: Optional[Path] = None,
         # LoRA
         lora: Optional[str] = None,
         lora_multiplier: float = 1.0,
@@ -152,6 +157,19 @@ class WanPipelineRunner(PipelineRunner):
 
         mapped_inputs = self.map_inputs(model_type, semantic_inputs, width, height)
         pipe_kwargs.update(mapped_inputs)
+
+        # Init-video latent path (HD-proxy conform). Materialize the proxy
+        # video to a list of PIL frames at target spatial dimensions; the
+        # downstream pipeline VAE-encodes and partial-noises per
+        # denoising_strength.
+        if input_video_path:
+            init_vd = self._load_video_data(input_video_path, height, width)
+            if init_vd is not None:
+                frames = [init_vd[i] for i in range(min(len(init_vd), num_frames))]
+                pipe_kwargs["input_video"] = frames
+                _log(self.log_prefix, f"  Init video: {len(frames)} frames @ {width}x{height}")
+            else:
+                _log(self.log_prefix, f"  Failed to load input_video_path: {input_video_path}", "warning")
 
         # Tiled inference
         if "tiled" in supports and "tiled" not in pipe_defaults:
