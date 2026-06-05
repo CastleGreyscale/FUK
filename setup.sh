@@ -581,16 +581,13 @@ echo "    ✓ fuk/config/defaults.json.template"
 
 cat > fuk/config/defaults_loras.json.template << 'EOL'
 {
-  "lora_dirs": [
-    "/path/to/your/models/loras"
-  ],
-
-  "lora_paths": [],
+  "defined_loras_path": "/path/to/your/models/loras",
+  "scanned_loras_path": "/path/to/your/models/loras",
 
   "loras": [
     {
       "name": "example_lora",
-      "path": "/path/to/your/models/loras/example.safetensors",
+      "path": "example.safetensors",
       "model": "qwen_image",
       "default_strength": 1.0,
       "trigger_word": "",
@@ -928,7 +925,7 @@ echo ""
 echo "1. IMPORTANT: Edit your configuration files:"
 echo "   fuk/config/models.json             — set your models_root path"
 echo "   fuk/config/defaults.json           — set models_root, aspect_ratios, image/video defaults"
-echo "   fuk/config/defaults_loras.json     — set lora_dirs, lora_paths, and define loras"
+echo "   fuk/config/defaults_loras.json     — set defined_loras_path, scanned_loras_path, and define loras"
 echo "   fuk/config/defaults_vram.json      — set VRAM offload preset"
 echo "   fuk/config/defaults_spec_tool.json — spec tool defaults"
 echo "   fuk/config/defaults_dataset.json   — dataset generation defaults"

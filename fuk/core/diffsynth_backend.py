@@ -256,29 +256,54 @@ class DiffSynthBackend:
     # ------------------------------------------------------------------
 
     def _scan_lora_dirs(self):
-        """Scan configured directories for .safetensors LoRA files."""
-        lora_dirs = self.defaults_config.get("lora_dirs", [])
+        """Build LoRA registry from scanned dir + curated defined entries."""
         self._lora_registry = {}
-        for dir_path in lora_dirs:
-            d = Path(dir_path).expanduser()
-            if not d.exists():
-                _log("BACKEND", f"LoRA dir not found: {d}", "warning")
+
+        # Scanned: every .safetensors under scanned_loras_path (no model filter)
+        scanned_path = self.defaults_config.get("scanned_loras_path")
+        if scanned_path:
+            d = Path(scanned_path).expanduser()
+            if d.exists():
+                for f in sorted(d.rglob("*.safetensors")):
+                    rel = f.relative_to(d)
+                    key = f"{rel.parent}/{f.stem}" if len(rel.parts) > 1 else f.stem
+                    self._lora_registry[key] = {
+                        "path": str(f),
+                        "name": f.stem,
+                        "key": key,
+                        "size_mb": round(f.stat().st_size / (1024 * 1024), 1),
+                    }
+            else:
+                _log("BACKEND", f"Scanned LoRA dir not found: {d}", "warning")
+
+        # Defined: curated entries from defaults_loras.json (carry model + metadata)
+        defined_base = self.defaults_config.get("defined_loras_path")
+        defined_base = Path(defined_base).expanduser() if defined_base else None
+        for entry in self.defaults_config.get("loras", []):
+            raw_path = entry.get("path")
+            if not raw_path:
                 continue
-            for f in sorted(d.rglob("*.safetensors")):
-                # Key: parent_dir/stem for uniqueness (e.g. "qwen/my_style")
-                rel = f.relative_to(d)
-                if len(rel.parts) > 1:
-                    key = f"{rel.parent}/{f.stem}"
-                else:
-                    key = f.stem
-                self._lora_registry[key] = {
-                    "path": str(f),
-                    "name": f.stem,
-                    "key": key,
-                    "size_mb": round(f.stat().st_size / (1024 * 1024), 1),
-                }
-        if lora_dirs:
-            _log("BACKEND", f"Scanned {len(lora_dirs)} LoRA dir(s) → {len(self._lora_registry)} file(s)")
+            p = Path(raw_path).expanduser()
+            if not p.is_absolute() and defined_base is not None:
+                p = defined_base / p
+            if not p.exists():
+                _log("BACKEND", f"Defined LoRA not found: {p}", "warning")
+                continue
+            name = entry.get("name") or p.stem
+            model = entry.get("model")
+            key = f"{model}/{name}" if model else name
+            self._lora_registry[key] = {
+                "path": str(p),
+                "name": name,
+                "key": key,
+                "size_mb": round(p.stat().st_size / (1024 * 1024), 1),
+                "model": model,
+                "default_strength": entry.get("default_strength"),
+                "trigger_word": entry.get("trigger_word"),
+                "inject_text": entry.get("inject_text"),
+            }
+
+        _log("BACKEND", f"LoRA registry built → {len(self._lora_registry)} entries")
 
     def get_available_loras(self) -> list:
         """Return list of discovered LoRA files for the config endpoint."""

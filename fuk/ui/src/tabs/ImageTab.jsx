@@ -869,12 +869,18 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                     className="fuk-select lora-row-select"
                     value={entry.key || ''}
                     onChange={(e) => {
-                      const updated = effectiveLoras.map((l, i) => i === idx ? { ...l, key: e.target.value } : l);
+                      const selected = config?.models?.loras?.find(l => (typeof l === 'string' ? l : l.key) === e.target.value);
+                      const strength = (selected && typeof selected !== 'string' && selected.default_strength != null)
+                        ? selected.default_strength
+                        : entry.multiplier;
+                      const updated = effectiveLoras.map((l, i) => i === idx ? { ...l, key: e.target.value, multiplier: strength } : l);
                       setFormData({...formData, loras: updated, lora: null, lora_multiplier: 1.0});
                     }}
                   >
                     <option value="">None</option>
-                    {config?.models?.loras?.map((lora, i) => (
+                    {config?.models?.loras
+                      ?.filter(l => typeof l === 'string' || !l.model || l.model === formData.model)
+                      .map((lora, i) => (
                       <option key={typeof lora === 'string' ? lora : lora.key || i} value={typeof lora === 'string' ? lora : lora.key}>
                         {typeof lora === 'string' ? lora : (lora.name || lora.description || lora.key) + (lora.size_mb ? ` (${lora.size_mb}MB)` : '')}
                       </option>
