@@ -97,6 +97,7 @@
                         <a href="#layers-panel" class="sidebar-link">Layers Panel</a>
                         <a href="#export-panel" class="sidebar-link">Export Panel</a>
                         <a href="#spec-tool" class="sidebar-link">Spec Tool</a>
+                        <a href="#describe-tag" class="sidebar-link">Describe &amp; Tag</a>
                         <a href="#generation-history" class="sidebar-link">Generation History</a>
                     </div>
                 </div>
@@ -965,6 +966,91 @@
 
                 <h3>Burn In</h3>
                 <p>When enabled, frame numbers are rendered onto each frame of the Blender template output — useful for editorial reference when working with a delivery spec that has a specific frame count.</p>
+            </div>
+
+            <!-- Describe & Tag -->
+            <div class="wiki-section" id="describe-tag">
+                <h2>Describe &amp; Tag</h2>
+                <p>The Describe &amp; Tag tool lives in the Utilities tab. It is the first slice of FUK's LLM integration: a vision-language model (Ollama-hosted) writes a cinematographer-style description of any image or short video clip, and lets you save fragments of that description as named prompt-shorthand tags for reuse later in the pipeline.</p>
+
+                <h3>Requirements</h3>
+                <ul>
+                    <li><strong>Ollama</strong> running locally (default <code>http://localhost:11434</code>). FUK does not spawn or manage it — start <code>ollama serve</code> separately</li>
+                    <li>The configured vision model pulled: <code>ollama pull qwen3-vl:8b</code> (≈6 GB on disk, ≈6–7 GB VRAM at runtime)</li>
+                    <li>The health indicator at the top of the tool reports green when both conditions are met</li>
+                </ul>
+
+                <div class="wiki-note">
+                    <p>Override the model with <code>FUK_LLM_MODEL</code> and the host with <code>OLLAMA_HOST</code> environment variables. Every request uses <code>keep_alive: 0</code> so the LLM is evicted from VRAM immediately after each call, leaving room for the generation pipeline.</p>
+                </div>
+
+                <h3>Describe an Image</h3>
+                <ol>
+                    <li>Click the drop zone to open a native file dialog and pick any image</li>
+                    <li>Click <strong>Describe Image</strong> — the image is downscaled to 1024px JPEG and sent to the model</li>
+                    <li>The result lands in an editable textarea so you can refine wording before tagging</li>
+                </ol>
+
+                <h3>Describe a Video</h3>
+                <p>The same tool handles short video clips. Selecting a video file (<code>.mp4 .mov .webm .mkv .avi .m4v</code>) switches the preview to a playable video and the run button to <strong>Describe Video</strong>.</p>
+                <ul>
+                    <li>Six frames are sampled evenly across the clip at 512px each and sent as a single multi-frame request</li>
+                    <li>A video-specific system prompt asks the model to treat the frames as one continuous shot and describe camera movement and how the action evolves — not the frames in isolation</li>
+                    <li>The response includes the number of frames used, and the timeout extends to 120 s for the multi-frame call</li>
+                </ul>
+
+                <h3>Prompt Tags</h3>
+                <p>Tags are reusable shorthand for chunks of prompt text. They live in <code>fuk/ui/data/prompt_tags.json</code> and persist across sessions. Future prompt-construction and storyboard features will expand tag names back into their full value when assembling prompts.</p>
+
+                <h4>Saving a Tag from a Description</h4>
+                <ol>
+                    <li>Highlight any span of text in the description textarea (for example, the sentence describing the subject)</li>
+                    <li>Click <strong>Tag selection</strong> — the highlighted text drops into the tag form's <em>Value</em> field</li>
+                    <li>Give it a short name (e.g. <code>fat man</code>), pick a category, click <strong>Save Tag</strong></li>
+                </ol>
+                <p>The <strong>Tag all</strong> button uses the full description as the value instead. Tags can also be created manually by typing name and value directly.</p>
+
+                <h4>Tag Fields</h4>
+                <ul>
+                    <li><strong>Name</strong> — 1–64 characters, letters/digits/space/underscore/hyphen. Stored lowercase, must be unique</li>
+                    <li><strong>Category</strong> — picked from the preset list (see below); optional, can be left as <em>uncategorized</em></li>
+                    <li><strong>Value</strong> — up to 4000 characters of free text</li>
+                </ul>
+
+                <h4>Categories</h4>
+                <p>Categories keep the tag list organized once it grows. The starter set:</p>
+                <ul>
+                    <li><strong>composition</strong> — framing, shot type</li>
+                    <li><strong>subject</strong> — character/object descriptions</li>
+                    <li><strong>lighting</strong> — key, fill, mood, time of day</li>
+                    <li><strong>camera</strong> — angle, lens, movement</li>
+                    <li><strong>color</strong> — palette, grading</li>
+                    <li><strong>style</strong> — film stock, era, art direction</li>
+                    <li><strong>atmosphere</strong> — weather, ambient feel</li>
+                    <li><strong>setting</strong> — location, environment</li>
+                </ul>
+                <p>The category list is user-editable at <code>fuk/ui/data/prompt_tag_categories.json</code>. The file is auto-seeded on first run; add, rename, or remove entries and reload the tab to refresh. Tags assigned to a category that you later remove will be flagged on save until you reassign them.</p>
+
+                <h4>Managing Tags</h4>
+                <p>The tag list at the bottom of the panel supports:</p>
+                <ul>
+                    <li><strong>Category filter</strong> — dropdown with live counts per category and an <em>uncategorized</em> bucket</li>
+                    <li><strong>Text filter</strong> — matches against name, category, and value</li>
+                    <li><strong>Edit</strong> — loads a tag into the form for in-place changes</li>
+                    <li><strong>Delete</strong> — trash-can icon with a confirmation prompt</li>
+                </ul>
+
+                <h3>API Endpoints</h3>
+                <p>Exposed under <code>/api</code> for use by future features and external tooling:</p>
+                <ul>
+                    <li><code>GET /api/llm/health</code> — Ollama reachability and whether the configured model is pulled</li>
+                    <li><code>POST /api/llm/describe</code> — body <code>{ image_path }</code>, dispatches image or video by extension, returns <code>{ description, kind, frames_used? }</code></li>
+                    <li><code>GET /api/tags</code> — list all tags, sorted by category then name</li>
+                    <li><code>POST /api/tags</code> — create <code>{ name, value, category? }</code></li>
+                    <li><code>PUT /api/tags/{id}</code> — update</li>
+                    <li><code>DELETE /api/tags/{id}</code> — remove</li>
+                    <li><code>GET /api/tags/categories</code> — the current category list</li>
+                </ul>
             </div>
 
             <!-- Generation History -->
