@@ -71,6 +71,7 @@ from project_endpoints import (
     cleanup_failed_generation
 )
 from hd_proxy_endpoints import setup_hd_proxy_routes
+from llm_endpoints import setup_llm_routes
 
 
 # ============================================================================
@@ -3488,6 +3489,9 @@ setup_video_routes(
     clear_vram=clear_vram,
     cleanup_failed_generation=cleanup_failed_generation
 )
+
+# LLM / Ollama routes (image describe; prompt construction later)
+setup_llm_routes(app, resolve_input_path=resolve_input_path, log=log)
 
 # HD Proxy conform — VACE re-render of an i2v proxy at source-still resolution
 setup_hd_proxy_routes(

@@ -7,6 +7,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import Footer from '../components/Footer';
 import LoraDatasetBuilder from './LoraDatasetBuilder';
+import ImageDescribeTool from './ImageDescribeTool';
 
 // ============================================================================
 // Helpers
@@ -537,6 +538,7 @@ function SpecTool({ config }) {
 const SUB_TABS = [
   { key: 'spec', label: 'Spec Tool' },
   { key: 'lora', label: 'LoRA Dataset Builder' },
+  { key: 'describe', label: 'Describe & Tag' },
 ];
 
 export default function UtilitiesTab({ activeTab, setActiveTab, config }) {
@@ -564,6 +566,7 @@ export default function UtilitiesTab({ activeTab, setActiveTab, config }) {
       <div className="utilities-subtab-content">
         {subTab === 'spec' && <SpecTool config={config} />}
         {subTab === 'lora' && <LoraDatasetBuilder config={config} />}
+        {subTab === 'describe' && <ImageDescribeTool />}
       </div>
 
       {/* Footer */}
