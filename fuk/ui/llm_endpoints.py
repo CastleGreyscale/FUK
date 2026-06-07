@@ -465,6 +465,16 @@ class CompileRequest(BaseModel):
     text: str
     model: Optional[str] = None
     active_loras: Optional[List[str]] = None
+    # Style chips assembled via the slot picker. Each entry is either a
+    # `#marker` (resolved against the same vocabulary as inline expansion)
+    # or a literal phrase (caption-derived tokens have no marker). They
+    # are joined into one trailing "Style: …" sentence so the compiled
+    # prompt retains a disciplined structure even without the LLM path.
+    style_chips: Optional[List[str]] = None
+    style_label: Optional[str] = "Style"
+
+
+_SENTENCE_END_RE = re.compile(r"[.!?]['\")\]]*\s*$")
 
 
 def _compile_prompt(
@@ -472,8 +482,10 @@ def _compile_prompt(
     config_dir: Path,
     model: Optional[str],
     active_loras: Optional[List[str]],
+    style_chips: Optional[List[str]] = None,
+    style_label: str = "Style",
 ) -> dict:
-    """Expand #markers in `text` against tag + LoRA token vocabularies."""
+    """Expand #markers in `text` and append a structured style sentence."""
     family = _model_family(model)
     expandable: List[dict] = []
     expandable.extend(_tag_tokens())
@@ -499,7 +511,48 @@ def _compile_prompt(
         unknown_markers.append(marker)
         return marker
 
-    compiled = _MARKER_SCAN_RE.sub(_replace, text or "")
+    compiled_main = _MARKER_SCAN_RE.sub(_replace, text or "").strip()
+
+    # Resolve style chips through the same vocabulary. A chip is either a
+    # marker (`#noir`) or a raw phrase (caption tokens have no marker).
+    style_parts: List[str] = []
+    seen_style: set = set()
+    for raw in (style_chips or []):
+        chip = (raw or "").strip()
+        if not chip:
+            continue
+        if chip.startswith("#"):
+            exp = marker_to_expansion.get(chip)
+            if exp is None:
+                unknown_markers.append(chip)
+                continue
+            expanded_markers.append(chip)
+            piece = exp.strip()
+        else:
+            piece = chip
+        # De-dupe case-insensitively so two LoRAs with the same inject text
+        # don't double up in the style sentence.
+        key = piece.lower()
+        if not piece or key in seen_style:
+            continue
+        seen_style.add(key)
+        style_parts.append(piece)
+
+    label = (style_label or "Style").strip() or "Style"
+    style_sentence = ""
+    if style_parts:
+        style_sentence = f"{label}: " + ", ".join(style_parts) + "."
+
+    if compiled_main and style_sentence:
+        # Make sure main ends in sentence-end punctuation before tacking
+        # the Style: sentence on.
+        if not _SENTENCE_END_RE.search(compiled_main):
+            compiled_main = compiled_main + "."
+        compiled = f"{compiled_main} {style_sentence}"
+    elif style_sentence:
+        compiled = style_sentence
+    else:
+        compiled = compiled_main
 
     # Trigger words for the active LoRAs that didn't make it into the text.
     # We surface this so the UI can flag "you have LoRA X enabled but didn't
@@ -512,6 +565,7 @@ def _compile_prompt(
         "expanded_markers": expanded_markers,
         "unknown_markers": sorted(set(unknown_markers)),
         "missing_lora_triggers": missing_triggers,
+        "style_sentence": style_sentence,
     }
 
 
@@ -714,4 +768,6 @@ def setup_llm_routes(app, *, resolve_input_path: Callable[[str], Path], log, con
             config_dir=cfg_dir,
             model=req.model,
             active_loras=req.active_loras,
+            style_chips=req.style_chips,
+            style_label=req.style_label or "Style",
         )

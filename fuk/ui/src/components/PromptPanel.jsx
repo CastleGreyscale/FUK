@@ -54,16 +54,32 @@ export default function PromptPanel({
   const activeLoraKey = activeLoraKeys.join(',');
 
   const [tokens, setTokens] = useState([]);
+  const [categories, setCategories] = useState([]);
   const [autocomplete, setAutocomplete] = useState(null); // { query, selected, anchor: 'prompt' | 'neg' }
   const [compiling, setCompiling] = useState(false);
   const [compileError, setCompileError] = useState(null);
+  const [slotsOpen, setSlotsOpen] = useState(false);
+  const [slotCategory, setSlotCategory] = useState(null); // null = grid view, string = drilled-in
+  // Style chips: slot-picker insertions accumulate here and bake into a
+  // trailing "Style: …" sentence on Compile. Inline `#` autocomplete still
+  // writes to the textarea so the user can place markers explicitly mid-sentence.
+  const [styleChips, setStyleChips] = useState([]);
+  const lastCaretRef = useRef(null); // remembers caret in the prompt textarea for slot inserts
 
   // Fetch tokens whenever the prompt context changes.
   useEffect(() => {
     let cancelled = false;
     fetchPromptTokens({ model, activeLoras: activeLoraKeys })
-      .then(data => { if (!cancelled) setTokens(data?.tokens || []); })
-      .catch(() => { if (!cancelled) setTokens([]); });
+      .then(data => {
+        if (cancelled) return;
+        setTokens(data?.tokens || []);
+        setCategories(data?.categories || []);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setTokens([]);
+        setCategories([]);
+      });
     return () => { cancelled = true; };
   }, [model, activeLoraKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -112,9 +128,11 @@ export default function PromptPanel({
     onChange('prompt', e.target.value);
     handleResize(e);
     detectAutocomplete(e.target, 'prompt');
+    lastCaretRef.current = e.target.selectionStart ?? null;
   };
 
   const handlePromptSelect = (e) => {
+    lastCaretRef.current = e.target.selectionStart ?? null;
     // Keep dropdown in sync with caret moves (arrow keys without typing).
     if (autocomplete?.anchor === 'prompt') {
       detectAutocomplete(e.target, 'prompt');
@@ -180,7 +198,8 @@ export default function PromptPanel({
   };
 
   const handleCompile = async () => {
-    if (!prompt || compiling) return;
+    if (compiling) return;
+    if (!prompt && styleChips.length === 0) return;
     setCompileError(null);
     setCompiling(true);
     try {
@@ -188,6 +207,7 @@ export default function PromptPanel({
         text: prompt,
         model,
         activeLoras: activeLoraKeys,
+        styleChips: styleChips.map(c => c.chip),
       });
       if (res?.compiled != null) {
         onChange('prompt', res.compiled);
@@ -195,6 +215,8 @@ export default function PromptPanel({
       if (res?.unknown_markers?.length) {
         setCompileError(`Unknown markers: ${res.unknown_markers.join(', ')}`);
       }
+      // Bake-in succeeded — chips have been folded into the textarea.
+      setStyleChips([]);
     } catch (err) {
       setCompileError(err.message || 'Compile failed');
     } finally {
@@ -203,21 +225,83 @@ export default function PromptPanel({
   };
 
   const hasMarkers = useMemo(() => /(^|\s)#[A-Za-z0-9]/.test(prompt || ''), [prompt]);
+  const canCompile = hasMarkers || styleChips.length > 0;
+
+  // Group tokens by category for the slot picker. The category list comes
+  // from prompt_tag_categories.json so the user can edit / extend it from
+  // disk; anything outside that list (including tokens with no category)
+  // collects into an "other" bucket at the end.
+  const tokensByCategory = useMemo(() => {
+    const groups = new Map();
+    const ordered = [...categories, 'other'];
+    ordered.forEach(c => groups.set(c, []));
+    for (const t of tokens) {
+      const c = t.category && groups.has(t.category) ? t.category : 'other';
+      groups.get(c).push(t);
+    }
+    return ordered.map(c => ({ category: c, items: groups.get(c) || [] }));
+  }, [tokens, categories]);
+
+  // Slot-picker insertions become style chips, not inline edits — so the
+  // textarea stays the user's subject/action description and Compile can
+  // append a structured "Style: …" sentence built from these chips.
+  const addStyleChip = useCallback((token) => {
+    const chipText = token.marker || token.name || token.expansion;
+    if (!chipText) return;
+    setStyleChips(prev => {
+      // Dedupe by id when available, otherwise by chip text.
+      const key = token.id || chipText;
+      if (prev.some(c => (c.id || c.chip) === key)) return prev;
+      return [...prev, {
+        id: token.id,
+        source: token.source,
+        name: token.name,
+        chip: chipText,           // what we send to the backend
+        expansion: token.expansion,
+        category: token.category,
+      }];
+    });
+  }, []);
+
+  const removeStyleChip = useCallback((idx) => {
+    setStyleChips(prev => prev.filter((_, i) => i !== idx));
+  }, []);
 
   return (
     <div className="prompt-panel">
       <div className="prompt-panel-header">
         <span className="prompt-panel-title">Prompt</span>
-        <button
-          type="button"
-          className="prompt-panel-compile"
-          onClick={handleCompile}
-          disabled={disabled || compiling || !hasMarkers}
-          title={hasMarkers ? 'Expand #markers using tags and LoRA triggers' : 'No #markers to expand'}
-        >
-          {compiling ? '…' : 'Compile'}
-        </button>
+        <div className="prompt-panel-header-actions">
+          <button
+            type="button"
+            className={`prompt-panel-headerbtn ${slotsOpen ? 'prompt-panel-headerbtn--active' : ''}`}
+            onClick={() => { setSlotsOpen(o => !o); setSlotCategory(null); }}
+            disabled={disabled}
+            title="Browse tags, LoRA triggers and caption phrases by category"
+          >
+            Slots
+          </button>
+          <button
+            type="button"
+            className="prompt-panel-headerbtn"
+            onClick={handleCompile}
+            disabled={disabled || compiling || !canCompile}
+            title={canCompile ? 'Expand #markers and append style chips' : 'Add #markers or style chips to compile'}
+          >
+            {compiling ? '…' : 'Compile'}
+          </button>
+        </div>
       </div>
+      {slotsOpen && (
+        <SlotPicker
+          groups={tokensByCategory}
+          category={slotCategory}
+          onPickCategory={setSlotCategory}
+          onBack={() => setSlotCategory(null)}
+          onInsert={addStyleChip}
+          activeChipIds={new Set(styleChips.map(c => c.id).filter(Boolean))}
+        />
+      )}
       <div className="prompt-panel-body">
         <div className="prompt-panel-field">
           <textarea
@@ -241,6 +325,9 @@ export default function PromptPanel({
             />
           )}
         </div>
+        {styleChips.length > 0 && (
+          <StyleChipTray chips={styleChips} onRemove={removeStyleChip} onClear={() => setStyleChips([])} />
+        )}
         {compileError && (
           <div className="prompt-panel-warning">{compileError}</div>
         )}
@@ -284,5 +371,95 @@ function TokenDropdown({ tokens, selected, onPick, onHover }) {
         );
       })}
     </ul>
+  );
+}
+
+function StyleChipTray({ chips, onRemove, onClear }) {
+  return (
+    <div className="prompt-style-tray">
+      <div className="prompt-style-tray-header">
+        <span className="prompt-style-tray-label">Style</span>
+        <button type="button" className="prompt-style-tray-clear" onClick={onClear} title="Remove all style chips">
+          clear
+        </button>
+      </div>
+      <ul className="prompt-style-tray-chips">
+        {chips.map((c, idx) => (
+          <li key={c.id || `${c.source}:${c.chip}:${idx}`} className="prompt-style-chip" title={c.expansion || c.chip}>
+            <span className="prompt-style-chip-name">{c.name || c.chip}</span>
+            <button
+              type="button"
+              className="prompt-style-chip-x"
+              onClick={() => onRemove(idx)}
+              aria-label={`Remove ${c.name || c.chip}`}
+            >
+              ×
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function SlotPicker({ groups, category, onPickCategory, onBack, onInsert, activeChipIds }) {
+  // Grid view: chips per category showing how many tokens are available.
+  if (!category) {
+    const nonEmpty = groups.filter(g => g.items.length > 0);
+    if (nonEmpty.length === 0) {
+      return (
+        <div className="prompt-slot-empty">
+          No tokens yet. Add tags or activate a LoRA with caption phrases.
+        </div>
+      );
+    }
+    return (
+      <div className="prompt-slot-grid">
+        {nonEmpty.map(g => (
+          <button
+            key={g.category}
+            type="button"
+            className="prompt-slot-chip"
+            onClick={() => onPickCategory(g.category)}
+          >
+            <span className="prompt-slot-chip-label">{g.category}</span>
+            <span className="prompt-slot-chip-count">{g.items.length}</span>
+          </button>
+        ))}
+      </div>
+    );
+  }
+
+  // Drilled-in view: token list for one category.
+  const group = groups.find(g => g.category === category);
+  const items = group?.items || [];
+  return (
+    <div className="prompt-slot-list">
+      <div className="prompt-slot-list-header">
+        <button type="button" className="prompt-slot-back" onClick={onBack}>← {category}</button>
+        <span className="prompt-slot-list-count">{items.length}</span>
+      </div>
+      <ul className="prompt-slot-items">
+        {items.map(t => {
+          const badge = SOURCE_BADGE[t.source] || SOURCE_BADGE.tag;
+          const isActive = activeChipIds?.has(t.id);
+          return (
+            <li
+              key={t.id || `${t.source}:${t.name}`}
+              className={`prompt-slot-item ${isActive ? 'prompt-slot-item--active' : ''}`}
+              onMouseDown={(e) => { e.preventDefault(); if (!isActive) onInsert(t); }}
+              title={isActive ? 'Already in style' : 'Add to style'}
+            >
+              <span className={`prompt-token-badge ${badge.className}`}>{badge.label}</span>
+              <span className="prompt-token-name">{t.marker || t.name}</span>
+              {isActive && <span className="prompt-slot-item-check">✓</span>}
+              {t.expansion && t.expansion !== t.name && (
+                <span className="prompt-token-expansion">{t.expansion}</span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }

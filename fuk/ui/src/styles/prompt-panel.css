@@ -26,7 +26,13 @@
   border-bottom: 1px solid var(--color-border);
 }
 
-.prompt-panel-compile {
+.prompt-panel-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.prompt-panel-headerbtn {
   font-size: 0.6rem;
   font-weight: 600;
   text-transform: uppercase;
@@ -39,12 +45,16 @@
   cursor: pointer;
   transition: background 120ms ease, opacity 120ms ease;
 }
-.prompt-panel-compile:hover:not(:disabled) {
+.prompt-panel-headerbtn:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.06);
 }
-.prompt-panel-compile:disabled {
+.prompt-panel-headerbtn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+.prompt-panel-headerbtn--active {
+  background: rgba(120, 160, 220, 0.16);
+  border-color: var(--color-primary-400);
 }
 
 .prompt-panel-title {
@@ -169,4 +179,221 @@
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
+}
+
+/* ============================================================================
+ * SLOT PICKER — category grid + drill-in token list
+ * ========================================================================== */
+
+.prompt-slot-empty {
+  font-size: 0.65rem;
+  color: var(--color-text-muted);
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--color-border);
+  line-height: 1.4;
+}
+
+.prompt-slot-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.3rem;
+  padding: 0.5rem 0.625rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.prompt-slot-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.65rem;
+  border-radius: var(--radius-sm, 4px);
+  border: 1px solid var(--color-border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--color-text);
+  cursor: pointer;
+  text-transform: capitalize;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.prompt-slot-chip:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: var(--color-primary-400);
+}
+
+.prompt-slot-chip-label {
+  letter-spacing: 0.02em;
+}
+
+.prompt-slot-chip-count {
+  font-size: 0.55rem;
+  color: var(--color-text-muted);
+  background: rgba(255, 255, 255, 0.06);
+  padding: 0.05rem 0.35rem;
+  border-radius: 999px;
+}
+
+.prompt-slot-list {
+  border-bottom: 1px solid var(--color-border);
+  max-height: 220px;
+  display: flex;
+  flex-direction: column;
+}
+
+.prompt-slot-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.35rem 0.625rem;
+  border-bottom: 1px solid var(--color-border);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.prompt-slot-back {
+  font-size: 0.65rem;
+  background: transparent;
+  border: none;
+  color: var(--color-primary-400);
+  cursor: pointer;
+  padding: 0;
+  text-transform: capitalize;
+  letter-spacing: 0.02em;
+}
+.prompt-slot-back:hover {
+  text-decoration: underline;
+}
+
+.prompt-slot-list-count {
+  font-size: 0.55rem;
+  color: var(--color-text-muted);
+}
+
+.prompt-slot-items {
+  list-style: none;
+  padding: 0.25rem;
+  margin: 0;
+  overflow-y: auto;
+}
+
+.prompt-slot-item {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: baseline;
+  gap: 0.4rem;
+  padding: 0.3rem 0.4rem;
+  border-radius: var(--radius-sm, 4px);
+  cursor: pointer;
+  font-size: 0.7rem;
+}
+.prompt-slot-item:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+.prompt-slot-item .prompt-token-expansion {
+  grid-column: 1 / -1;
+}
+.prompt-slot-item--active {
+  opacity: 0.55;
+  cursor: default;
+}
+.prompt-slot-item--active:hover {
+  background: transparent;
+}
+.prompt-slot-item-check {
+  color: var(--color-primary-400);
+  font-weight: 600;
+  font-size: 0.65rem;
+  justify-self: end;
+}
+
+/* ============================================================================
+ * STYLE CHIP TRAY — slot picks accumulate here; Compile folds them into the
+ * textarea as a trailing "Style: …" sentence and clears the tray.
+ * ========================================================================== */
+
+.prompt-style-tray {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.4rem 0.45rem;
+  background: rgba(120, 160, 220, 0.06);
+  border: 1px solid rgba(120, 160, 220, 0.22);
+  border-radius: var(--radius-sm, 4px);
+}
+
+.prompt-style-tray-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.prompt-style-tray-label {
+  font-size: 0.58rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-primary-400);
+}
+
+.prompt-style-tray-clear {
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  font-size: 0.58rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  padding: 0;
+}
+.prompt-style-tray-clear:hover {
+  color: var(--color-text);
+}
+
+.prompt-style-tray-chips {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.prompt-style-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.15rem 0.35rem 0.15rem 0.45rem;
+  background: rgba(120, 160, 220, 0.18);
+  border: 1px solid rgba(120, 160, 220, 0.35);
+  border-radius: 999px;
+  font-size: 0.62rem;
+  color: var(--color-text);
+  max-width: 100%;
+}
+
+.prompt-style-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+}
+
+.prompt-style-chip-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 0.85rem;
+  line-height: 1;
+  padding: 0;
+  border-radius: 50%;
+}
+.prompt-style-chip-x:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--color-text);
 }

@@ -10,7 +10,7 @@ export async function fetchPromptTokens({ model, activeLoras } = {}) {
   return res.json();
 }
 
-export async function compilePrompt({ text, model, activeLoras }) {
+export async function compilePrompt({ text, model, activeLoras, styleChips, styleLabel }) {
   const res = await fetch(`${API_URL}/prompt/compile`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -18,6 +18,8 @@ export async function compilePrompt({ text, model, activeLoras }) {
       text: text ?? '',
       model: model || null,
       active_loras: activeLoras || [],
+      style_chips: styleChips || [],
+      style_label: styleLabel || 'Style',
     }),
   });
   if (!res.ok) {
