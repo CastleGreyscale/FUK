@@ -3491,7 +3491,7 @@ setup_video_routes(
 )
 
 # LLM / Ollama routes (image describe; prompt construction later)
-setup_llm_routes(app, resolve_input_path=resolve_input_path, log=log)
+setup_llm_routes(app, resolve_input_path=resolve_input_path, log=log, config_dir=CONFIG_DIR)
 
 # HD Proxy conform — VACE re-render of an i2v proxy at source-still resolution
 setup_hd_proxy_routes(

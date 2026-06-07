@@ -20,8 +20,31 @@
 .prompt-panel-header {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
   padding: 0.4rem 0.75rem;
   border-bottom: 1px solid var(--color-border);
+}
+
+.prompt-panel-compile {
+  font-size: 0.6rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0.2rem 0.55rem;
+  border-radius: var(--radius-sm, 4px);
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-primary-400);
+  cursor: pointer;
+  transition: background 120ms ease, opacity 120ms ease;
+}
+.prompt-panel-compile:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+}
+.prompt-panel-compile:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .prompt-panel-title {
@@ -51,4 +74,99 @@
   color: var(--color-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
+}
+
+.prompt-panel-field {
+  position: relative;
+}
+
+.prompt-panel-warning {
+  font-size: 0.65rem;
+  color: var(--color-warning, #d8a05a);
+  background: rgba(216, 160, 90, 0.08);
+  padding: 0.3rem 0.45rem;
+  border-radius: var(--radius-sm, 4px);
+  line-height: 1.35;
+}
+
+/* Autocomplete dropdown — anchored at the bottom of the prompt textarea
+ * since the panel itself floats at the bottom-right of the preview area
+ * and rendering above would clip behind the panel header.
+ */
+.prompt-token-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: 0.25rem;
+  max-height: 240px;
+  overflow-y: auto;
+  background: rgba(16, 20, 28, 0.97);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md, 6px);
+  list-style: none;
+  padding: 0.25rem;
+  margin-block-start: 0.25rem;
+  margin-block-end: 0;
+  z-index: 20;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.prompt-token-item {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: baseline;
+  gap: 0.4rem;
+  padding: 0.3rem 0.4rem;
+  border-radius: var(--radius-sm, 4px);
+  cursor: pointer;
+  font-size: 0.7rem;
+}
+.prompt-token-item--selected,
+.prompt-token-item:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.prompt-token-badge {
+  font-size: 0.55rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0.1rem 0.35rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+.prompt-token-badge--lora {
+  color: var(--color-primary-400);
+  background: rgba(120, 160, 220, 0.16);
+}
+.prompt-token-badge--caption {
+  color: #c2b07a;
+  background: rgba(194, 176, 122, 0.12);
+}
+
+.prompt-token-name {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.prompt-token-category {
+  font-size: 0.58rem;
+  color: var(--color-text-muted);
+  text-transform: lowercase;
+}
+
+.prompt-token-expansion {
+  grid-column: 1 / -1;
+  color: var(--color-text-muted);
+  font-size: 0.62rem;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }

@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Callable, List, Optional
 
 import requests
-from fastapi import HTTPException
+from fastapi import HTTPException, Query
 from PIL import Image
 from pydantic import BaseModel
 
@@ -234,8 +234,291 @@ def _ollama_health() -> dict:
     }
 
 
-def setup_llm_routes(app, *, resolve_input_path: Callable[[str], Path], log):
-    """Register /api/llm/* endpoints."""
+# ---------------------------------------------------------------------------
+# Prompt token unification — tags + LoRA triggers + caption-analysis phrases
+# all surface through a single /api/prompt/tokens endpoint so the frontend
+# autocomplete and slot picker only need to know one shape.
+# ---------------------------------------------------------------------------
+
+CAPTIONS_DIR = Path(__file__).parent / "data" / "lora_captions"
+
+# Markers must be safe in a prompt textarea. Underscores, digits, hyphen.
+_MARKER_CHAR_RE = re.compile(r"[^A-Za-z0-9_\-]+")
+_MARKER_SCAN_RE = re.compile(r"#([A-Za-z0-9][A-Za-z0-9_\-]*)")
+
+# Min share of captions a phrase must appear in to be surfaced as a token.
+CAPTION_MIN_DOC_SHARE = 0.05
+CAPTION_TOP_N = 30  # per LoRA, taken from bigrams+trigrams pool
+
+# Small keyword map for auto-categorizing caption phrases. Cheap but covers
+# the obvious cases; anything that doesn't match falls into "uncategorized".
+_CAPTION_CATEGORY_KEYWORDS = [
+    ("lighting",    ("light", "lit", "shadow", "key", "backlit", "rim", "glow", "silhouette")),
+    ("camera",      ("lens", "frame", "framing", "angle", "shot", "focus", "dof", "depth of field", "telephoto", "wide-angle", "close-up")),
+    ("composition", ("composition", "centered", "rule of thirds", "negative space", "symmetr")),
+    ("color",       ("color", "colour", "palette", "tone", "hue", "saturation", "muted", "warm", "cool")),
+    ("style",       ("cinematic", "aesthetic", "grain", "film", "noir", "style", "stylized", "vintage", "retro", "nostalgic")),
+    ("atmosphere",  ("mood", "atmosphere", "ambience", "ambient", "haze", "fog", "smoke")),
+    ("setting",     ("interior", "exterior", "scene", "backdrop", "environment", "urban", "rural")),
+    ("subject",     ("subject", "figure", "person", "character", "portrait")),
+]
+
+
+def _name_to_marker(name: str) -> str:
+    """Slug a token name into a `#marker` form."""
+    slug = _MARKER_CHAR_RE.sub("_", name.strip()).strip("_")
+    return f"#{slug}" if slug else ""
+
+
+def _model_family(model: Optional[str]) -> Optional[str]:
+    """qwen_image -> qwen, wan_2_2 -> wan, etc. None passes through."""
+    if not model:
+        return None
+    return str(model).split("_", 1)[0].lower()
+
+
+def _categorize_caption_phrase(phrase: str) -> Optional[str]:
+    p = phrase.lower()
+    for cat, kws in _CAPTION_CATEGORY_KEYWORDS:
+        if any(kw in p for kw in kws):
+            return cat
+    return None
+
+
+def _load_loras_config(config_dir: Path) -> List[dict]:
+    """Read defaults_loras.json -> list of lora dicts. Empty list if missing."""
+    path = config_dir / "defaults_loras.json"
+    if not path.exists():
+        return []
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        loras = data.get("loras", [])
+        return loras if isinstance(loras, list) else []
+    except Exception:
+        return []
+
+
+def _tag_tokens() -> List[dict]:
+    """Render saved prompt tags into the unified token shape."""
+    out = []
+    for t in _load_tags():
+        name = t.get("name", "").strip()
+        value = t.get("value", "").strip()
+        if not name or not value:
+            continue
+        marker = _name_to_marker(name)
+        if not marker:
+            continue
+        out.append({
+            "id": f"tag:{t.get('id') or name}",
+            "source": "tag",
+            "name": name,
+            "marker": marker,
+            "expansion": value,
+            "category": t.get("category"),
+        })
+    return out
+
+
+def _lora_tokens(config_dir: Path, model_family: Optional[str]) -> List[dict]:
+    """Synthesize tokens from defaults_loras.json trigger words.
+
+    The same trigger often appears across multiple model variants (e.g. an
+    Italian_Horror LoRA shipped for both qwen_image and qwen_image_2512).
+    They collapse to one token here so the dropdown doesn't repeat itself —
+    the resolved entry just records that more than one variant exists.
+    """
+    by_marker: dict[str, dict] = {}
+    for entry in _load_loras_config(config_dir):
+        trigger = (entry.get("trigger_word") or "").strip()
+        inject = (entry.get("inject_text") or "").strip()
+        if not trigger or not inject:
+            continue
+        entry_model = entry.get("model") or ""
+        if model_family and _model_family(entry_model) != model_family:
+            continue
+        marker = _name_to_marker(trigger)
+        if not marker:
+            continue
+        lora_name = entry.get("name") or trigger
+        lora_key = f"{entry_model}/{lora_name}" if entry_model else lora_name
+        existing = by_marker.get(marker)
+        if existing:
+            existing.setdefault("lora_keys", []).append(lora_key)
+            continue
+        by_marker[marker] = {
+            "id": f"lora:{trigger}",
+            "source": "lora",
+            "name": trigger,
+            "marker": marker,
+            "expansion": inject,
+            "category": "style",
+            "lora": lora_name,
+            "lora_key": lora_key,
+            "lora_keys": [lora_key],
+            "model": entry_model or None,
+            "default_strength": entry.get("default_strength"),
+        }
+    return list(by_marker.values())
+
+
+def _read_caption_analysis(path: Path) -> Optional[dict]:
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _caption_tokens_for_lora(analysis: dict) -> List[dict]:
+    """Extract top bigrams/trigrams as tokens, filtered by doc_freq share."""
+    captions_total = int(analysis.get("captions_total") or 0)
+    trigger = (analysis.get("trigger_word") or "").strip()
+    if captions_total <= 0 or not trigger:
+        return []
+
+    # Pool bigrams + trigrams; rank by doc_freq descending.
+    pool = []
+    for src in ("bigrams", "trigrams"):
+        for item in analysis.get(src) or []:
+            term = (item.get("term") or "").strip()
+            doc_freq = int(item.get("doc_freq") or 0)
+            if not term or doc_freq <= 0:
+                continue
+            share = doc_freq / captions_total
+            if share < CAPTION_MIN_DOC_SHARE:
+                continue
+            pool.append((term, doc_freq, share, item.get("count") or doc_freq))
+
+    pool.sort(key=lambda x: x[1], reverse=True)
+    pool = pool[:CAPTION_TOP_N]
+
+    out = []
+    for term, doc_freq, share, count in pool:
+        out.append({
+            "id": f"caption:{trigger}:{term}",
+            "source": "caption",
+            "name": term,
+            # Caption phrases are already short natural language — insert
+            # them as raw text rather than a marker. The frontend treats
+            # marker=null as "paste expansion directly, no compile step."
+            "marker": None,
+            "expansion": term,
+            "category": _categorize_caption_phrase(term),
+            "lora_trigger": trigger,
+            "score": round(share, 3),
+            "count": count,
+        })
+    return out
+
+
+def _caption_tokens(active_lora_triggers: set) -> List[dict]:
+    """Load caption analyses, filter to active LoRA trigger words."""
+    if not CAPTIONS_DIR.exists() or not active_lora_triggers:
+        return []
+    out = []
+    for path in sorted(CAPTIONS_DIR.glob("*.json")):
+        analysis = _read_caption_analysis(path)
+        if not analysis:
+            continue
+        trigger = (analysis.get("trigger_word") or "").strip()
+        if trigger and trigger in active_lora_triggers:
+            out.extend(_caption_tokens_for_lora(analysis))
+    return out
+
+
+def _resolve_active_lora_triggers(
+    config_dir: Path,
+    active_loras: List[str],
+) -> set:
+    """Map active LoRA identifiers (name, key, or trigger) to their triggers.
+
+    Anything that doesn't resolve via defaults_loras.json falls through as
+    its raw form — that lets a caption analysis file work even when its LoRA
+    isn't registered yet, which is common during LoRA-builder iteration.
+    """
+    if not active_loras:
+        return set()
+    cfg = _load_loras_config(config_dir)
+    requested = {s.strip() for s in active_loras if s and s.strip()}
+    triggers = set()
+    matched = set()
+    for entry in cfg:
+        trigger = (entry.get("trigger_word") or "").strip()
+        if not trigger:
+            continue
+        name = entry.get("name") or ""
+        model = entry.get("model") or ""
+        composite = f"{model}/{name}" if model else name
+        for r in requested:
+            if r in (name, composite, trigger):
+                triggers.add(trigger)
+                matched.add(r)
+    # Anything the user passed that didn't match a registered LoRA still
+    # gets a shot at lining up with a caption analysis file by trigger word.
+    triggers.update(requested - matched)
+    return triggers
+
+
+class CompileRequest(BaseModel):
+    text: str
+    model: Optional[str] = None
+    active_loras: Optional[List[str]] = None
+
+
+def _compile_prompt(
+    text: str,
+    config_dir: Path,
+    model: Optional[str],
+    active_loras: Optional[List[str]],
+) -> dict:
+    """Expand #markers in `text` against tag + LoRA token vocabularies."""
+    family = _model_family(model)
+    expandable: List[dict] = []
+    expandable.extend(_tag_tokens())
+    expandable.extend(_lora_tokens(config_dir, family))
+
+    # Marker collisions: first match wins by source order (tags then LoRAs).
+    # Author-defined tags take precedence over the auto-generated LoRA shorthand
+    # so a user can override a trigger expansion without renaming anything.
+    marker_to_expansion = {}
+    for tok in expandable:
+        m = tok.get("marker")
+        if m and m not in marker_to_expansion:
+            marker_to_expansion[m] = tok["expansion"]
+
+    expanded_markers: List[str] = []
+    unknown_markers: List[str] = []
+
+    def _replace(match: re.Match) -> str:
+        marker = match.group(0)  # includes leading #
+        if marker in marker_to_expansion:
+            expanded_markers.append(marker)
+            return marker_to_expansion[marker]
+        unknown_markers.append(marker)
+        return marker
+
+    compiled = _MARKER_SCAN_RE.sub(_replace, text or "")
+
+    # Trigger words for the active LoRAs that didn't make it into the text.
+    # We surface this so the UI can flag "you have LoRA X enabled but didn't
+    # reference its trigger" — no auto-injection.
+    triggers = _resolve_active_lora_triggers(config_dir, active_loras or [])
+    missing_triggers = sorted(t for t in triggers if t.lower() not in compiled.lower())
+
+    return {
+        "compiled": compiled,
+        "expanded_markers": expanded_markers,
+        "unknown_markers": sorted(set(unknown_markers)),
+        "missing_lora_triggers": missing_triggers,
+    }
+
+
+def setup_llm_routes(app, *, resolve_input_path: Callable[[str], Path], log, config_dir: Optional[Path] = None):
+    """Register /api/llm/* and /api/prompt/* endpoints."""
+    # Fall back to fuk/config relative to this module if not provided.
+    cfg_dir = config_dir or (Path(__file__).resolve().parent.parent / "config")
 
     @app.get("/api/llm/health")
     async def llm_health():
@@ -391,3 +674,44 @@ def setup_llm_routes(app, *, resolve_input_path: Callable[[str], Path], log):
             raise HTTPException(status_code=404, detail="Tag not found")
         _save_tags(new_tags)
         return {"success": True}
+
+    # -----------------------------------------------------------------------
+    # Unified prompt tokens — tags + LoRA triggers + caption phrases
+    # -----------------------------------------------------------------------
+
+    @app.get("/api/prompt/tokens")
+    async def list_prompt_tokens(
+        model: Optional[str] = Query(None, description="Model id, e.g. qwen_image; used to filter LoRA tokens by family"),
+        active_loras: Optional[str] = Query(None, description="Comma-separated LoRA keys/names/triggers currently enabled"),
+    ):
+        family = _model_family(model)
+        active_list = [s for s in (active_loras or "").split(",") if s.strip()]
+        active_triggers = _resolve_active_lora_triggers(cfg_dir, active_list)
+
+        tokens: List[dict] = []
+        tokens.extend(_tag_tokens())
+
+        lora_toks = _lora_tokens(cfg_dir, family)
+        # Mark which LoRA tokens correspond to currently-active LoRAs so the
+        # UI can highlight or auto-include them.
+        for t in lora_toks:
+            t["active"] = t.get("name") in active_triggers
+        tokens.extend(lora_toks)
+
+        tokens.extend(_caption_tokens(active_triggers))
+
+        return {
+            "tokens": tokens,
+            "categories": _load_categories(),
+            "model_family": family,
+            "active_lora_triggers": sorted(active_triggers),
+        }
+
+    @app.post("/api/prompt/compile")
+    async def compile_prompt(req: CompileRequest):
+        return _compile_prompt(
+            text=req.text,
+            config_dir=cfg_dir,
+            model=req.model,
+            active_loras=req.active_loras,
+        )

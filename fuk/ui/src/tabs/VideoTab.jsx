@@ -693,6 +693,8 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
           negativePrompt={formData.negative_prompt}
           onChange={(key, value) => setFormData(prev => ({ ...prev, [key]: value }))}
           disabled={generating}
+          model={formData.model}
+          loras={effectiveLoras}
         />
       </div>
 

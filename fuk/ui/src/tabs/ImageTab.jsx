@@ -626,6 +626,8 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
           negativePrompt={formData.negative_prompt}
           onChange={(key, value) => setFormData(prev => ({ ...prev, [key]: value }))}
           disabled={generating}
+          model={formData.model}
+          loras={effectiveLoras}
         />
       </div>
 
