@@ -10,6 +10,26 @@ export async function fetchPromptTokens({ model, activeLoras } = {}) {
   return res.json();
 }
 
+export async function expandPrompt({ text, model, activeLoras, styleChips, mode, intent }) {
+  const res = await fetch(`${API_URL}/prompt/expand`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      text: text ?? '',
+      model: model || null,
+      active_loras: activeLoras || [],
+      style_chips: styleChips || [],
+      mode: mode || 'image',
+      intent: intent || null,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || `Expand failed: ${res.statusText}`);
+  }
+  return res.json();
+}
+
 export async function compilePrompt({ text, model, activeLoras, styleChips, styleLabel }) {
   const res = await fetch(`${API_URL}/prompt/compile`, {
     method: 'POST',

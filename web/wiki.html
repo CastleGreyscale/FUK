@@ -97,6 +97,7 @@
                         <a href="#layers-panel" class="sidebar-link">Layers Panel</a>
                         <a href="#export-panel" class="sidebar-link">Export Panel</a>
                         <a href="#spec-tool" class="sidebar-link">Spec Tool</a>
+                        <a href="#prompt-panel" class="sidebar-link">Prompt Panel</a>
                         <a href="#describe-tag" class="sidebar-link">Describe &amp; Tag</a>
                         <a href="#generation-history" class="sidebar-link">Generation History</a>
                     </div>
@@ -966,6 +967,69 @@
 
                 <h3>Burn In</h3>
                 <p>When enabled, frame numbers are rendered onto each frame of the Blender template output — useful for editorial reference when working with a delivery spec that has a specific frame count.</p>
+            </div>
+
+            <!-- Prompt Panel -->
+            <div class="wiki-section" id="prompt-panel">
+                <h2>Prompt Panel</h2>
+                <p>The Prompt Panel is the floating control in every Image and Video tab where you author the positive and negative prompt. It is more than a textarea: it unifies your saved <strong>prompt tags</strong>, the <strong>trigger words of installed LoRAs</strong>, and <strong>caption analyses</strong> exported from the LoRA builder into a single shorthand vocabulary. From that vocabulary you have three ways to build a prompt — fast inline shorthand, structured slot picks, or an LLM refinement — and they all share the same source of truth.</p>
+
+                <h3>The Three Modes</h3>
+                <ul>
+                    <li><strong>Inline shorthand (<code>#</code> autocomplete)</strong> — type <code>#</code> in the prompt textarea and a dropdown of matching tokens appears above the field. Selecting one inserts a marker (e.g. <code>#noir</code>) at the caret. Markers stay in the text as you write — they're expanded later on Compile or Expand.</li>
+                    <li><strong>Slot picker</strong> — toggle <strong>Slots</strong> in the header to open a category grid of available tokens. Drilling into a category lists every token in it; clicking one drops it into the <strong>Style</strong> chip tray below the prompt rather than into the textarea inline. This keeps subject/action language in the main field and accumulates style intent separately so Compile can produce a disciplined two-paragraph prompt.</li>
+                    <li><strong>LLM refine (Expand)</strong> — sends your current draft plus style chips plus the same vocabulary to <code>qwen3-vl:8b</code> and asks it to refine the text into a cinematographer-grade prompt. The model is instructed to use vocabulary phrases verbatim and preserve your existing intent rather than rewrite from scratch.</li>
+                </ul>
+
+                <h3>The Vocabulary</h3>
+                <p>Every dropdown and slot list draws from one combined token list. Source badges identify where each came from:</p>
+                <ul>
+                    <li><strong>tag</strong> — your saved entries from the Describe &amp; Tag tool. Edit them at <code>fuk/ui/data/prompt_tags.json</code> or via the Describe &amp; Tag UI.</li>
+                    <li><strong>lora</strong> — synthesized from <code>fuk/config/defaults_loras.json</code>. Each entry's <code>trigger_word</code> becomes a marker, and its <code>inject_text</code> becomes the expansion. The list is filtered by the current model's family (a Qwen tab won't see Wan-only LoRAs).</li>
+                    <li><strong>phrase</strong> — top bigrams and trigrams imported from caption analyses dropped in <code>fuk/ui/data/lora_captions/</code> by the standalone LoRA builder. These only appear when the matching LoRA is active in the model panel. They have no marker — they insert as raw text since they're already short natural-language phrases.</li>
+                </ul>
+
+                <h3>Compile (Deterministic)</h3>
+                <p>Compile expands every <code>#marker</code> in the textarea against the vocabulary, then appends a trailing <code>Style: …</code> sentence built from the chip tray. The result is written back to the textarea and the chip tray clears. No LLM is involved.</p>
+                <ul>
+                    <li>If the textarea already ends in <code>.</code> <code>!</code> or <code>?</code> the punctuation isn't doubled.</li>
+                    <li>A blank line separates the main paragraph from the <code>Style:</code> sentence so the textarea reads as two paragraphs.</li>
+                    <li>Unknown markers (no matching tag or LoRA) stay in place and surface as a warning under the textarea.</li>
+                    <li>If an active LoRA's trigger word never appears in the prompt, the response includes <code>missing_lora_triggers</code> — the UI doesn't auto-inject anything, but it's there so a future check could surface it.</li>
+                </ul>
+
+                <h3>Expand (LLM)</h3>
+                <p>Expand runs the same Compile step internally to produce a concrete draft, then sends that draft along with the vocabulary list to <code>qwen3-vl:8b</code>. The system prompt instructs the model to:</p>
+                <ul>
+                    <li>Refine the draft rather than rewrite it</li>
+                    <li>Use vocabulary phrases verbatim where they apply</li>
+                    <li>Preserve the <code>Style:</code> sentence as authoritative</li>
+                    <li>Add motion language for Video tabs; suppress it for Image tabs</li>
+                    <li>Return JSON: <code>{ positive, negative, notes? }</code></li>
+                </ul>
+                <p>On success the textarea is replaced with the model's positive prompt, the negative prompt is updated only if the model provided one, the chip tray clears, and any <code>notes</code> appear as a dismissible note under the warning row. Requires Ollama running and <code>qwen3-vl:8b</code> pulled — see Describe &amp; Tag for setup. Every request uses <code>keep_alive: 0</code> so the LLM is evicted from VRAM immediately and the generation pipeline gets it back.</p>
+
+                <h3>Style Chips</h3>
+                <p>The chip tray appears below the prompt textarea whenever slot picks accumulate. Each chip shows the token's display name; hover for its expansion. Click the <code>×</code> on a chip to remove it, or <code>clear</code> on the tray header to drop them all. Chips persist visually until Compile or Expand bakes them into the textarea — at which point the tray clears.</p>
+                <p>Chips don't persist across shot switches in v1; they live only in panel state. Storyboard-level prompt injection (apply a style sentence to every shot in a sequence) is planned as part of the storyboard system.</p>
+
+                <h3>Disabling States</h3>
+                <ul>
+                    <li><strong>Compile</strong> is enabled when the prompt contains at least one <code>#marker</code> or there is at least one style chip.</li>
+                    <li><strong>Expand</strong> is enabled when the prompt has any non-empty text or at least one style chip.</li>
+                    <li>Both buttons are disabled while a generation is running on the host tab.</li>
+                </ul>
+
+                <h3>Tag Marker Format</h3>
+                <p>Markers are lowercased, slug-safe versions of the token name: spaces become <code>_</code>, and only letters/digits/underscore/hyphen are allowed in the body. A tag named <em>Low Key</em> becomes <code>#low_key</code>. LoRA markers come straight from each entry's <code>trigger_word</code> field, so however you spell the trigger in <code>defaults_loras.json</code> is the marker you type.</p>
+                <p>Marker collisions resolve in this order, first match wins: tags, then LoRA triggers. That means a user-authored tag of the same name overrides the auto-generated LoRA shorthand — useful when you want to swap a LoRA's default <code>inject_text</code> for your own phrasing without touching the LoRA config.</p>
+
+                <h3>API Endpoints</h3>
+                <ul>
+                    <li><code>GET /api/prompt/tokens?model=…&amp;active_loras=…</code> — unified token feed: tags + family-filtered LoRA triggers + caption phrases (only for active LoRAs). Returns <code>{ tokens, categories, model_family, active_lora_triggers }</code>.</li>
+                    <li><code>POST /api/prompt/compile</code> — deterministic expansion. Body <code>{ text, model?, active_loras?, style_chips?, style_label? }</code>, returns <code>{ compiled, expanded_markers, unknown_markers, missing_lora_triggers, style_sentence }</code>.</li>
+                    <li><code>POST /api/prompt/expand</code> — LLM refinement. Body <code>{ text, model?, active_loras?, style_chips?, mode, intent? }</code>, returns <code>{ positive, negative, notes?, model, mode }</code>.</li>
+                </ul>
             </div>
 
             <!-- Describe & Tag -->

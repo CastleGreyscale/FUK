@@ -691,10 +691,15 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
         <PromptPanel
           prompt={formData.prompt}
           negativePrompt={formData.negative_prompt}
-          onChange={(key, value) => setFormData(prev => ({ ...prev, [key]: value }))}
+          onChange={(keyOrPatch, value) => setFormData(prev => (
+            typeof keyOrPatch === 'object' && keyOrPatch !== null
+              ? { ...prev, ...keyOrPatch }
+              : { ...prev, [keyOrPatch]: value }
+          ))}
           disabled={generating}
           model={formData.model}
           loras={effectiveLoras}
+          mode="video"
         />
       </div>
 

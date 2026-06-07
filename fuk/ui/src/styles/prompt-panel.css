@@ -4,9 +4,12 @@
 
 .prompt-panel {
   position: absolute;
-  bottom: 1rem;
-  right: 1rem;
-  width: 300px;
+  bottom: 2.5rem;
+  right: 1.5rem;
+  width: 380px;
+  /* Don't grow past the preview area; the slot picker and token dropdown
+   * scroll internally rather than pushing the panel itself off-screen. */
+  max-height: calc(100% - 5rem);
   background: rgba(10, 14, 22, 0.88);
   backdrop-filter: blur(14px);
   border: 1px solid var(--color-border);
@@ -99,27 +102,52 @@
   line-height: 1.35;
 }
 
-/* Autocomplete dropdown — anchored at the bottom of the prompt textarea
- * since the panel itself floats at the bottom-right of the preview area
- * and rendering above would clip behind the panel header.
- */
+.prompt-panel-note {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.4rem;
+  font-size: 0.65rem;
+  color: var(--color-text-muted);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 0.3rem 0.45rem;
+  border-radius: var(--radius-sm, 4px);
+  line-height: 1.35;
+  border-left: 2px solid var(--color-primary-400);
+}
+
+.prompt-panel-note-dismiss {
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 0.85rem;
+  line-height: 1;
+  padding: 0 0.1rem;
+  margin-top: -0.1rem;
+}
+.prompt-panel-note-dismiss:hover {
+  color: var(--color-text);
+}
+
+/* Autocomplete dropdown — rendered ABOVE the textarea. The panel floats
+ * near the bottom of the preview area, so opening downward would clip the
+ * list off-screen as it fills with tags and triggers. */
 .prompt-token-dropdown {
   position: absolute;
-  top: 100%;
+  bottom: 100%;
   left: 0;
   right: 0;
-  margin-top: 0.25rem;
-  max-height: 240px;
+  max-height: 260px;
   overflow-y: auto;
   background: rgba(16, 20, 28, 0.97);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md, 6px);
   list-style: none;
   padding: 0.25rem;
-  margin-block-start: 0.25rem;
-  margin-block-end: 0;
+  margin: 0 0 0.25rem 0;
   z-index: 20;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.5);
 }
 
 .prompt-token-item {

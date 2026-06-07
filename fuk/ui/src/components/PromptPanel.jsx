@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { compilePrompt, fetchPromptTokens } from '../utils/promptApi';
+import { compilePrompt, expandPrompt, fetchPromptTokens } from '../utils/promptApi';
 
 function useAutoResize(ref, value) {
   useEffect(() => {
@@ -39,6 +39,7 @@ export default function PromptPanel({
   disabled,
   model,
   loras,
+  mode = 'image',
 }) {
   const promptRef = useRef(null);
   const negRef = useRef(null);
@@ -58,6 +59,8 @@ export default function PromptPanel({
   const [autocomplete, setAutocomplete] = useState(null); // { query, selected, anchor: 'prompt' | 'neg' }
   const [compiling, setCompiling] = useState(false);
   const [compileError, setCompileError] = useState(null);
+  const [expanding, setExpanding] = useState(false);
+  const [expandNotes, setExpandNotes] = useState(null);
   const [slotsOpen, setSlotsOpen] = useState(false);
   const [slotCategory, setSlotCategory] = useState(null); // null = grid view, string = drilled-in
   // Style chips: slot-picker insertions accumulate here and bake into a
@@ -224,8 +227,47 @@ export default function PromptPanel({
     }
   };
 
+  const handleExpand = async () => {
+    if (expanding) return;
+    if (!prompt && styleChips.length === 0) return;
+    setCompileError(null);
+    setExpandNotes(null);
+    setExpanding(true);
+    try {
+      const res = await expandPrompt({
+        text: prompt,
+        model,
+        activeLoras: activeLoraKeys,
+        styleChips: styleChips.map(c => c.chip),
+        mode,
+      });
+      // Build a single patch so the parent's setFormData applies both
+      // updates in one shot. The tabs' setFormData snapshots formData from
+      // a ref, not React state, so back-to-back onChange calls in the same
+      // tick would otherwise overwrite each other.
+      const patch = {};
+      if (res?.positive) patch.prompt = res.positive;
+      // Only overwrite negative if the LLM provided something substantive —
+      // the author may have hand-tuned the negative and we don't want an
+      // empty string from the model wiping it out.
+      if (res?.negative) patch.negative_prompt = res.negative;
+      if (Object.keys(patch).length > 0) {
+        onChange(patch);
+      }
+      if (res?.notes) {
+        setExpandNotes(res.notes);
+      }
+      setStyleChips([]);
+    } catch (err) {
+      setCompileError(err.message || 'Expand failed');
+    } finally {
+      setExpanding(false);
+    }
+  };
+
   const hasMarkers = useMemo(() => /(^|\s)#[A-Za-z0-9]/.test(prompt || ''), [prompt]);
   const canCompile = hasMarkers || styleChips.length > 0;
+  const canExpand = (prompt && prompt.trim().length > 0) || styleChips.length > 0;
 
   // Group tokens by category for the slot picker. The category list comes
   // from prompt_tag_categories.json so the user can edit / extend it from
@@ -284,9 +326,20 @@ export default function PromptPanel({
           <button
             type="button"
             className="prompt-panel-headerbtn"
+            onClick={handleExpand}
+            disabled={disabled || expanding || !canExpand}
+            title={canExpand
+              ? 'LLM refines the draft, integrating style chips and LoRA vocabulary'
+              : 'Write something to expand'}
+          >
+            {expanding ? '…' : 'Expand'}
+          </button>
+          <button
+            type="button"
+            className="prompt-panel-headerbtn"
             onClick={handleCompile}
             disabled={disabled || compiling || !canCompile}
-            title={canCompile ? 'Expand #markers and append style chips' : 'Add #markers or style chips to compile'}
+            title={canCompile ? 'Deterministic: expand #markers and append style chips' : 'Add #markers or style chips to compile'}
           >
             {compiling ? '…' : 'Compile'}
           </button>
@@ -330,6 +383,17 @@ export default function PromptPanel({
         )}
         {compileError && (
           <div className="prompt-panel-warning">{compileError}</div>
+        )}
+        {expandNotes && (
+          <div className="prompt-panel-note">
+            <span>{expandNotes}</span>
+            <button
+              type="button"
+              className="prompt-panel-note-dismiss"
+              onClick={() => setExpandNotes(null)}
+              aria-label="Dismiss note"
+            >×</button>
+          </div>
         )}
         <label className="prompt-panel-neg-label">Negative</label>
         <textarea

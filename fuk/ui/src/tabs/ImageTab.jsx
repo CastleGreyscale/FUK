@@ -624,10 +624,19 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
         <PromptPanel
           prompt={formData.prompt}
           negativePrompt={formData.negative_prompt}
-          onChange={(key, value) => setFormData(prev => ({ ...prev, [key]: value }))}
+          onChange={(keyOrPatch, value) => setFormData(prev => (
+            // Accept either a `(key, value)` pair or a `{ key1, key2 }` patch
+            // so callers can update multiple fields atomically — the tab's
+            // setFormData reads from a ref, so two sequential calls in the
+            // same tick would otherwise stomp each other.
+            typeof keyOrPatch === 'object' && keyOrPatch !== null
+              ? { ...prev, ...keyOrPatch }
+              : { ...prev, [keyOrPatch]: value }
+          ))}
           disabled={generating}
           model={formData.model}
           loras={effectiveLoras}
+          mode="image"
         />
       </div>
 

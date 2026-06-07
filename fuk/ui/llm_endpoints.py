@@ -62,6 +62,40 @@ DESCRIBE_VIDEO_SYSTEM = (
     "3-5 sentences. No preamble."
 )
 
+EXPAND_SYSTEM_BASE = (
+    "You are a prompt engineer for an AI media generation pipeline used in "
+    "professional VFX and animation production. Your job is to refine the "
+    "author's working draft into a clean, directive, generation-ready prompt "
+    "while preserving their intent and any specific named phrases.\n\n"
+    "Rules:\n"
+    "- Treat the input as the author's draft. Refine and integrate; do not "
+    "rewrite from scratch.\n"
+    "- Write as a visual description, not an instruction. Subject, action, "
+    "framing, lighting, mood, style. Concrete language. No filler.\n"
+    "- Preserve the existing 'Style: ...' sentence if present — the listed "
+    "phrases are authoritative style intent. Integrate them naturally rather "
+    "than reworording them.\n"
+    "- Use vocabulary phrases verbatim where they apply. Prefer them over "
+    "inventing new style claims.\n"
+    "- Negative prompt: technical failure modes relevant to the shot. No vague "
+    "catch-alls.\n"
+    "{mode_rule}\n"
+    "- Output JSON only. No preamble, no markdown fences.\n\n"
+    "Output schema:\n"
+    "{{\"positive\": \"...\", \"negative\": \"...\", \"notes\": \"...\"}}\n\n"
+    "The \"notes\" field is optional — use it only if there's a meaningful "
+    "caveat or suggestion the author should know about."
+)
+
+EXPAND_MODE_RULE_IMAGE = (
+    "- This is a still-image prompt. Do not describe motion or temporal action."
+)
+EXPAND_MODE_RULE_VIDEO = (
+    "- This is a video prompt. Include motion description: subject action, "
+    "camera move (push, pull, pan, tilt, handheld, static). Keep action "
+    "language grounded and physically plausible."
+)
+
 
 class DescribeRequest(BaseModel):
     image_path: str
@@ -545,10 +579,11 @@ def _compile_prompt(
 
     if compiled_main and style_sentence:
         # Make sure main ends in sentence-end punctuation before tacking
-        # the Style: sentence on.
+        # the Style: sentence on. A blank line between the two reads as
+        # a paragraph break in the textarea and keeps things scannable.
         if not _SENTENCE_END_RE.search(compiled_main):
             compiled_main = compiled_main + "."
-        compiled = f"{compiled_main} {style_sentence}"
+        compiled = f"{compiled_main}\n\n{style_sentence}"
     elif style_sentence:
         compiled = style_sentence
     else:
@@ -566,6 +601,124 @@ def _compile_prompt(
         "unknown_markers": sorted(set(unknown_markers)),
         "missing_lora_triggers": missing_triggers,
         "style_sentence": style_sentence,
+    }
+
+
+class ExpandRequest(BaseModel):
+    text: str
+    model: Optional[str] = None
+    active_loras: Optional[List[str]] = None
+    style_chips: Optional[List[str]] = None
+    mode: Optional[str] = "image"   # "image" | "video"
+    intent: Optional[str] = None    # optional free-text steer; appended to the user message
+
+
+def _vocabulary_list(config_dir: Path, model_family: Optional[str], char_budget: int = 4000) -> str:
+    """Render a compact vocabulary list for the LLM to consume verbatim.
+
+    Format: [source:category] name: "expansion"
+    Truncated to keep the system message bounded — most prompts won't need
+    more than a few dozen entries.
+    """
+    lines: List[str] = []
+    total = 0
+
+    def _add(prefix: str, name: str, expansion: str) -> bool:
+        nonlocal total
+        line = f'{prefix} {name}: "{expansion}"'
+        if total + len(line) + 1 > char_budget:
+            return False
+        lines.append(line)
+        total += len(line) + 1
+        return True
+
+    for t in _tag_tokens():
+        cat = t.get("category") or "tag"
+        if not _add(f"[tag:{cat}]", t["name"], t["expansion"]):
+            break
+
+    for t in _lora_tokens(config_dir, model_family):
+        if not _add("[lora]", t["name"], t["expansion"]):
+            break
+
+    return "\n".join(lines)
+
+
+def _build_expand_messages(
+    text: str,
+    config_dir: Path,
+    mode: str,
+    model: Optional[str],
+    active_loras: Optional[List[str]],
+    style_chips: Optional[List[str]],
+    intent: Optional[str],
+) -> List[dict]:
+    """Compose the chat messages for /api/prompt/expand."""
+    mode_norm = (mode or "image").lower()
+    mode_rule = EXPAND_MODE_RULE_VIDEO if mode_norm == "video" else EXPAND_MODE_RULE_IMAGE
+    system = EXPAND_SYSTEM_BASE.format(mode_rule=mode_rule)
+
+    vocab = _vocabulary_list(config_dir, _model_family(model))
+    if vocab:
+        system = f"{system}\n\nVocabulary:\n{vocab}"
+
+    # Pre-resolve the draft the same way Compile would so the LLM sees the
+    # author's intent in concrete form (markers expanded, style chips folded
+    # into a Style: sentence). This gives the model the strongest possible
+    # signal about what the author actually means.
+    pre = _compile_prompt(
+        text=text,
+        config_dir=config_dir,
+        model=model,
+        active_loras=active_loras,
+        style_chips=style_chips,
+    )
+    draft = pre["compiled"]
+
+    triggers = sorted(_resolve_active_lora_triggers(config_dir, active_loras or []))
+
+    user_parts = []
+    if intent and intent.strip():
+        user_parts.append(f"Intent: {intent.strip()}")
+    user_parts.append("Draft:\n" + (draft or "(empty)"))
+    if triggers:
+        user_parts.append("Active LoRA triggers: " + ", ".join(triggers))
+    user_parts.append(f"Mode: {mode_norm}")
+    user_parts.append("/no_think")
+
+    return [
+        {"role": "system", "content": system},
+        {"role": "user", "content": "\n\n".join(user_parts)},
+    ]
+
+
+def _parse_expand_response(content: str) -> dict:
+    """Extract JSON {positive, negative?, notes?} from the LLM raw output."""
+    raw = (content or "").strip()
+    if "<think>" in raw:
+        raw = raw.split("</think>")[-1].strip()
+    # Strip a code fence if the model returned one despite instructions.
+    fence = re.match(r"^```(?:json)?\s*(.*?)\s*```$", raw, re.DOTALL)
+    if fence:
+        raw = fence.group(1).strip()
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        # Try to locate the first JSON object in the response.
+        start = raw.find("{")
+        end = raw.rfind("}")
+        if start >= 0 and end > start:
+            try:
+                data = json.loads(raw[start:end + 1])
+            except json.JSONDecodeError:
+                return {"positive": raw, "negative": "", "notes": "Model did not return valid JSON; raw text used."}
+        else:
+            return {"positive": raw, "negative": "", "notes": "Model did not return valid JSON; raw text used."}
+
+    return {
+        "positive": str(data.get("positive") or "").strip(),
+        "negative": str(data.get("negative") or "").strip(),
+        "notes": str(data.get("notes") or "").strip() or None,
     }
 
 
@@ -771,3 +924,63 @@ def setup_llm_routes(app, *, resolve_input_path: Callable[[str], Path], log, con
             style_chips=req.style_chips,
             style_label=req.style_label or "Style",
         )
+
+    @app.post("/api/prompt/expand")
+    async def expand_prompt(req: ExpandRequest):
+        if not (req.text or "").strip() and not (req.style_chips or []) and not (req.intent or "").strip():
+            raise HTTPException(status_code=400, detail="Nothing to expand — provide text, style chips, or intent.")
+
+        messages = _build_expand_messages(
+            text=req.text,
+            config_dir=cfg_dir,
+            mode=req.mode or "image",
+            model=req.model,
+            active_loras=req.active_loras,
+            style_chips=req.style_chips,
+            intent=req.intent,
+        )
+
+        payload = {
+            "model": LLM_MODEL,
+            "messages": messages,
+            "stream": False,
+            "keep_alive": 0,
+            "options": {"temperature": 0.7},
+            "think": False,
+        }
+
+        try:
+            r = requests.post(
+                f"{OLLAMA_HOST}/api/chat",
+                json=payload,
+                timeout=REQUEST_TIMEOUT,
+            )
+        except requests.Timeout:
+            raise HTTPException(status_code=504, detail="LLM request timed out")
+        except requests.ConnectionError:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Ollama unavailable at {OLLAMA_HOST}. Is `ollama serve` running?",
+            )
+
+        if r.status_code == 404:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Model {LLM_MODEL} not pulled. Run: ollama pull {LLM_MODEL}",
+            )
+        if not r.ok:
+            raise HTTPException(status_code=r.status_code, detail=f"Ollama error: {r.text[:300]}")
+
+        data = r.json()
+        content = (data.get("message") or {}).get("content", "")
+        parsed = _parse_expand_response(content)
+        if not parsed["positive"]:
+            raise HTTPException(status_code=502, detail="LLM returned empty positive prompt")
+
+        log.info("LLM", f"expand ({req.mode}): -> {len(parsed['positive'])} chars positive")
+
+        return {
+            **parsed,
+            "model": LLM_MODEL,
+            "mode": req.mode or "image",
+        }
