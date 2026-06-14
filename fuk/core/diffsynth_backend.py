@@ -291,7 +291,8 @@ class DiffSynthBackend:
                 continue
             name = entry.get("name") or p.stem
             model = entry.get("model")
-            key = f"{model}/{name}" if model else name
+            model_key = model[0] if isinstance(model, list) else model
+            key = f"{model_key}/{name}" if model_key else name
             self._lora_registry[key] = {
                 "path": str(p),
                 "name": name,

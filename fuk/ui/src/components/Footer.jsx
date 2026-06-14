@@ -6,7 +6,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import TabButton from './TabButton';
 import ProgressBar from './ProgressBar';
-import { Camera, Film, Pipeline, Enhance, Save, FukMonogram, Loader2, X, Layers, Wrench, Trash2, RefreshCw } from './Icons';
+import { Camera, Film, Pipeline, Enhance, Save, FukMonogram, Loader2, X, Layers, Wrench, Trash2, RefreshCw, SequenceIcon } from './Icons';
 
 export default function Footer({
   activeTab,
@@ -92,6 +92,7 @@ export default function Footer({
       <div className="fuk-footer-center">
         <div className="fuk-tabs">
           <TabButton active={activeTab === 'utilities'} onClick={() => setActiveTab('utilities')} icon={<Wrench />} label="Utilities" />
+          <TabButton active={activeTab === 'storyboard'} onClick={() => setActiveTab('storyboard')} icon={<SequenceIcon />} label="Storyboard" />
           <TabButton active={activeTab === 'preprocess'} onClick={() => setActiveTab('preprocess')} icon={<Pipeline />} label="Pre-Processors" />
           <TabButton active={activeTab === 'image'} onClick={() => setActiveTab('image')} icon={<Camera />} label="Image" />
           <TabButton active={activeTab === 'video'} onClick={() => setActiveTab('video')} icon={<Film />} label="Video" />

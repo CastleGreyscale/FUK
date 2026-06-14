@@ -509,6 +509,72 @@ class CompileRequest(BaseModel):
 
 
 _SENTENCE_END_RE = re.compile(r"[.!?]['\")\]]*\s*$")
+_MOOD_LABEL = "Mood"
+
+
+def _storyboard_context() -> tuple[List[dict], str]:
+    """Lazy-load storyboard project-tag tokens and mood for the active project.
+
+    Imported lazily so this module stays usable in test contexts where the
+    project folder isn't set. Failures are silent — the storyboard is optional.
+    """
+    try:
+        import storyboard_manager as sm
+        from project_endpoints import get_project_folder
+        folder = get_project_folder()
+        if not folder:
+            return [], ""
+        manifest = sm.load_manifest(folder)
+        return sm.tag_tokens(manifest), sm.get_mood(manifest)
+    except Exception:
+        return [], ""
+
+
+def _storyboard_active_loras() -> List[str]:
+    """Project-wide active LoRAs from the storyboard manifest.
+
+    These are unioned with whatever the caller passes so the storyboard's
+    LoRA picker activates caption autocomplete across the storyboard tab
+    AND adds context on the per-shot Image/Video panels.
+    """
+    try:
+        import storyboard_manager as sm
+        from project_endpoints import get_project_folder
+        folder = get_project_folder()
+        if not folder:
+            return []
+        manifest = sm.load_manifest(folder)
+        return sm.get_active_loras(manifest)
+    except Exception:
+        return []
+
+
+def _vocabulary_map(config_dir: Path, model_family: Optional[str]) -> dict:
+    """Build the `marker -> expansion` map used by compile and resolve.
+
+    Precedence (first one to claim a marker wins):
+      1. Storyboard tags — project-local, live with the manifest.
+      2. Workspace tags (prompt_tags.json) — shared across projects.
+      3. LoRA triggers (defaults_loras.json) — auto-generated shorthand.
+
+    Project tags shadow workspace tags by design — the user opted into the
+    project, so their named entities override generic shorthand.
+    """
+    sb_tag_tokens, _ = _storyboard_context()
+    marker_to_expansion: dict[str, str] = {}
+    for tok in sb_tag_tokens:
+        m = tok.get("marker")
+        if m and m not in marker_to_expansion:
+            marker_to_expansion[m] = tok["expansion"]
+    for tok in _tag_tokens():
+        m = tok.get("marker")
+        if m and m not in marker_to_expansion:
+            marker_to_expansion[m] = tok["expansion"]
+    for tok in _lora_tokens(config_dir, model_family):
+        m = tok.get("marker")
+        if m and m not in marker_to_expansion:
+            marker_to_expansion[m] = tok["expansion"]
+    return marker_to_expansion
 
 
 def _compile_prompt(
@@ -519,36 +585,23 @@ def _compile_prompt(
     style_chips: Optional[List[str]] = None,
     style_label: str = "Style",
 ) -> dict:
-    """Expand #markers in `text` and append a structured style sentence."""
+    """Drain style chips into a trailing "Style: …" sentence.
+
+    Inline `#markers` in `text` are NOT expanded here — they stay raw and are
+    resolved at generation time (see `_resolve_prompt`). This keeps subjects
+    like `#sarah` live: editing the global description changes every shot's
+    output without rewriting the prompt textareas.
+    """
     family = _model_family(model)
-    expandable: List[dict] = []
-    expandable.extend(_tag_tokens())
-    expandable.extend(_lora_tokens(config_dir, family))
+    marker_to_expansion = _vocabulary_map(config_dir, family)
 
-    # Marker collisions: first match wins by source order (tags then LoRAs).
-    # Author-defined tags take precedence over the auto-generated LoRA shorthand
-    # so a user can override a trigger expansion without renaming anything.
-    marker_to_expansion = {}
-    for tok in expandable:
-        m = tok.get("marker")
-        if m and m not in marker_to_expansion:
-            marker_to_expansion[m] = tok["expansion"]
-
-    expanded_markers: List[str] = []
+    expanded_markers: List[str] = []   # only chips that were resolved
     unknown_markers: List[str] = []
 
-    def _replace(match: re.Match) -> str:
-        marker = match.group(0)  # includes leading #
-        if marker in marker_to_expansion:
-            expanded_markers.append(marker)
-            return marker_to_expansion[marker]
-        unknown_markers.append(marker)
-        return marker
+    compiled_main = (text or "").strip()
 
-    compiled_main = _MARKER_SCAN_RE.sub(_replace, text or "").strip()
-
-    # Resolve style chips through the same vocabulary. A chip is either a
-    # marker (`#noir`) or a raw phrase (caption tokens have no marker).
+    # Style chips: a chip is either a marker (`#noir`) or a raw phrase.
+    # Marker chips resolve through the same vocabulary as inline markers.
     style_parts: List[str] = []
     seen_style: set = set()
     for raw in (style_chips or []):
@@ -578,9 +631,6 @@ def _compile_prompt(
         style_sentence = f"{label}: " + ", ".join(style_parts) + "."
 
     if compiled_main and style_sentence:
-        # Make sure main ends in sentence-end punctuation before tacking
-        # the Style: sentence on. A blank line between the two reads as
-        # a paragraph break in the textarea and keeps things scannable.
         if not _SENTENCE_END_RE.search(compiled_main):
             compiled_main = compiled_main + "."
         compiled = f"{compiled_main}\n\n{style_sentence}"
@@ -601,6 +651,62 @@ def _compile_prompt(
         "unknown_markers": sorted(set(unknown_markers)),
         "missing_lora_triggers": missing_triggers,
         "style_sentence": style_sentence,
+    }
+
+
+class ResolveRequest(BaseModel):
+    text: str
+    model: Optional[str] = None
+    active_loras: Optional[List[str]] = None
+    apply_mood: Optional[bool] = True
+
+
+def _resolve_prompt(
+    text: str,
+    config_dir: Path,
+    model: Optional[str],
+    active_loras: Optional[List[str]],
+    apply_mood: bool = True,
+) -> dict:
+    """Expand `#markers` and (optionally) append the storyboard's mood sentence.
+
+    Called server-side just before generation. The result is what's actually
+    sent to the model. Returns the resolved text plus enough provenance for
+    metadata capture.
+    """
+    family = _model_family(model)
+    marker_to_expansion = _vocabulary_map(config_dir, family)
+
+    expanded_markers: List[str] = []
+    unknown_markers: List[str] = []
+
+    def _replace(match: re.Match) -> str:
+        marker = match.group(0)
+        if marker in marker_to_expansion:
+            expanded_markers.append(marker)
+            return marker_to_expansion[marker]
+        unknown_markers.append(marker)
+        return marker
+
+    resolved = _MARKER_SCAN_RE.sub(_replace, text or "").strip()
+
+    _, mood = _storyboard_context()
+    mood_applied = ""
+    if apply_mood and mood:
+        mood_sentence = f"{_MOOD_LABEL}: {mood.rstrip('.')}."
+        # Only append if the mood isn't already present verbatim — author may
+        # have written it explicitly in the prompt and we shouldn't double up.
+        if mood.lower() not in resolved.lower():
+            if resolved and not _SENTENCE_END_RE.search(resolved):
+                resolved = resolved + "."
+            resolved = f"{resolved}\n\n{mood_sentence}" if resolved else mood_sentence
+            mood_applied = mood
+
+    return {
+        "resolved": resolved,
+        "expanded_markers": expanded_markers,
+        "unknown_markers": sorted(set(unknown_markers)),
+        "mood_applied": mood_applied,
     }
 
 
@@ -662,10 +768,11 @@ def _build_expand_messages(
     if vocab:
         system = f"{system}\n\nVocabulary:\n{vocab}"
 
-    # Pre-resolve the draft the same way Compile would so the LLM sees the
-    # author's intent in concrete form (markers expanded, style chips folded
-    # into a Style: sentence). This gives the model the strongest possible
-    # signal about what the author actually means.
+    # Pre-resolve the draft so the LLM sees the author's intent in concrete
+    # form. Two passes: Compile drains style chips into a "Style:" sentence,
+    # then Resolve expands `#markers` against the live vocabulary (globals +
+    # tags + LoRA triggers). Mood is *not* applied here — it's appended at
+    # generation time, and the LLM shouldn't try to refine it.
     pre = _compile_prompt(
         text=text,
         config_dir=config_dir,
@@ -673,7 +780,14 @@ def _build_expand_messages(
         active_loras=active_loras,
         style_chips=style_chips,
     )
-    draft = pre["compiled"]
+    resolved = _resolve_prompt(
+        text=pre["compiled"],
+        config_dir=config_dir,
+        model=model,
+        active_loras=active_loras,
+        apply_mood=False,
+    )
+    draft = resolved["resolved"]
 
     triggers = sorted(_resolve_active_lora_triggers(config_dir, active_loras or []))
 
@@ -893,10 +1007,24 @@ def setup_llm_routes(app, *, resolve_input_path: Callable[[str], Path], log, con
     ):
         family = _model_family(model)
         active_list = [s for s in (active_loras or "").split(",") if s.strip()]
+        # Union the storyboard's project-wide LoRA picks. Preserves caller
+        # order first, then appends any storyboard additions.
+        sb_loras = _storyboard_active_loras()
+        seen = {s for s in active_list}
+        for s in sb_loras:
+            if s and s not in seen:
+                active_list.append(s)
+                seen.add(s)
         active_triggers = _resolve_active_lora_triggers(cfg_dir, active_list)
 
+        # Project tags shadow workspace tags on marker collision; emit them
+        # first so the autocomplete surfaces the project version.
+        sb_tag_toks, mood = _storyboard_context()
+
         tokens: List[dict] = []
-        tokens.extend(_tag_tokens())
+        seen_markers = {t.get("marker") for t in sb_tag_toks if t.get("marker")}
+        tokens.extend(sb_tag_toks)
+        tokens.extend(t for t in _tag_tokens() if t.get("marker") not in seen_markers)
 
         lora_toks = _lora_tokens(cfg_dir, family)
         # Mark which LoRA tokens correspond to currently-active LoRAs so the
@@ -907,11 +1035,23 @@ def setup_llm_routes(app, *, resolve_input_path: Callable[[str], Path], log, con
 
         tokens.extend(_caption_tokens(active_triggers))
 
+        categories = _load_categories()
+        # Surface any category the storyboard tags use (character, prop, etc.)
+        # even if the workspace category list doesn't include it — otherwise
+        # the slot picker would dump them all into "other".
+        extra = [
+            c for c in dict.fromkeys(t.get("category") for t in sb_tag_toks if t.get("category"))
+            if c not in categories
+        ]
+        if extra:
+            categories = [*extra, *categories]
+
         return {
             "tokens": tokens,
-            "categories": _load_categories(),
+            "categories": categories,
             "model_family": family,
             "active_lora_triggers": sorted(active_triggers),
+            "mood": mood,
         }
 
     @app.post("/api/prompt/compile")
@@ -923,6 +1063,19 @@ def setup_llm_routes(app, *, resolve_input_path: Callable[[str], Path], log, con
             active_loras=req.active_loras,
             style_chips=req.style_chips,
             style_label=req.style_label or "Style",
+        )
+
+    @app.post("/api/prompt/resolve")
+    async def resolve_prompt(req: ResolveRequest):
+        """Resolve `#markers` and append the storyboard mood. Called by the
+        generation pipeline (server-side) and exposed as an endpoint so the
+        frontend can preview the final string before submit."""
+        return _resolve_prompt(
+            text=req.text,
+            config_dir=cfg_dir,
+            model=req.model,
+            active_loras=req.active_loras,
+            apply_mood=bool(req.apply_mood) if req.apply_mood is not None else True,
         )
 
     @app.post("/api/prompt/expand")

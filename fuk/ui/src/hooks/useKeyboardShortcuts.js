@@ -8,12 +8,13 @@ const dispatch = (name, detail) =>
 // Tab order matches footer bar left-to-right
 const TAB_KEYS = {
   '1': 'utilities',
-  '2': 'preprocess',
-  '3': 'image',
-  '4': 'video',
-  '5': 'postprocess',
-  '6': 'layers',
-  '7': 'export',
+  '2': 'storyboard',
+  '3': 'preprocess',
+  '4': 'image',
+  '5': 'video',
+  '6': 'postprocess',
+  '7': 'layers',
+  '8': 'export',
 };
 
 export function useKeyboardShortcuts({

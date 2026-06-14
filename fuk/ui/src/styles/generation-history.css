@@ -411,7 +411,8 @@
 
 .gen-history-pin,
 .gen-history-delete,
-.gen-history-vote {
+.gen-history-vote,
+.gen-history-pin-storyboard {
   background: transparent;
   border: none;
   padding: 0.2rem;
@@ -426,9 +427,18 @@
 
 .gen-history-pin svg,
 .gen-history-delete svg,
-.gen-history-vote svg {
+.gen-history-vote svg,
+.gen-history-pin-storyboard svg {
   width: 0.6rem;
   height: 0.6rem;
+}
+
+.gen-history-pin-storyboard:hover:not(:disabled) {
+  color: #b9d4ff;
+}
+.gen-history-pin-storyboard:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 .gen-history-pin:hover {

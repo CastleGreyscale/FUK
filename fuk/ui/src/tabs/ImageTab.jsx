@@ -890,7 +890,11 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                   >
                     <option value="">None</option>
                     {config?.models?.loras
-                      ?.filter(l => typeof l === 'string' || !l.model || l.model === formData.model)
+                      ?.filter(l => {
+                        if (typeof l === 'string' || !l.model) return true;
+                        const models = Array.isArray(l.model) ? l.model : [l.model];
+                        return models.includes(formData.model);
+                      })
                       .map((lora, i) => (
                       <option key={typeof lora === 'string' ? lora : lora.key || i} value={typeof lora === 'string' ? lora : lora.key}>
                         {typeof lora === 'string' ? lora : (lora.name || lora.description || lora.key) + (lora.size_mb ? ` (${lora.size_mb}MB)` : '')}

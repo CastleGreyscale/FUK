@@ -62,16 +62,33 @@ export function getNextSequentialVersion(existingVersions) {
 }
 
 /**
- * Parse a project filename into components
- * Format: projectname_shot##_version.json
+ * Parse a project filename into components.
+ *
+ * Format: projectname_shot{id}_version.json
+ *
+ * Shot id is alphanumeric + hyphens (`01`, `01a`, `intro`, `Main-2`). No
+ * underscores in shot ids — they're the field separator. Old purely-numeric
+ * ids parse identically since digits are valid characters.
  */
+const SHOT_ID_RE_SOURCE = '[A-Za-z0-9][A-Za-z0-9-]*';
+export const SHOT_ID_PATTERN = new RegExp(`^${SHOT_ID_RE_SOURCE}$`);
+
+export function isValidShotId(id) {
+  return typeof id === 'string' && SHOT_ID_PATTERN.test(id);
+}
+
 export function parseProjectFilename(filename) {
-  // Remove .json extension
   const base = filename.replace(/\.json$/, '');
-  
-  // Try to match pattern: anything_shot##_version
-  const match = base.match(/^(.+)_shot(\d+)_(.+)$/i);
-  
+
+  // Project-level manifests (storyboard, etc.) follow `{project}_storyboard.json`
+  // and similar — never shot files. The backend already filters these out of
+  // the list endpoint; this guard is belt-and-suspenders so a stale cache or
+  // direct call never mis-parses them as shots.
+  if (/_storyboard$/i.test(base)) return null;
+
+  // Greedy `.+` finds the LAST `_shot…_…` triple, which is what we want
+  // when project names themselves contain underscores.
+  const match = base.match(new RegExp(`^(.+)_shot(${SHOT_ID_RE_SOURCE})_(.+)$`, 'i'));
   if (match) {
     return {
       projectName: match[1],
@@ -80,8 +97,9 @@ export function parseProjectFilename(filename) {
       filename: filename,
     };
   }
-  
-  // Fallback: try simpler patterns
+
+  // Fallback: any `_` split — assume a default shot id so legacy files
+  // without the `_shot…` segment still load.
   const simpleMatch = base.match(/^(.+)_(.+)$/);
   if (simpleMatch) {
     return {
@@ -91,16 +109,16 @@ export function parseProjectFilename(filename) {
       filename: filename,
     };
   }
-  
+
   return null;
 }
 
 /**
- * Generate a project filename from components
+ * Generate a project filename from components. Shot id is written verbatim —
+ * no zero-padding, so `1` stays `shot1` and `intro` stays `shotintro`.
  */
 export function generateProjectFilename(projectName, shotNumber, version) {
-  const shot = String(shotNumber).padStart(2, '0');
-  return `${projectName}_shot${shot}_${version}.json`;
+  return `${projectName}_shot${shotNumber}_${version}.json`;
 }
 
 /**

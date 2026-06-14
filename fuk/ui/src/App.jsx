@@ -12,6 +12,7 @@ import PostprocessTab from './tabs/PostprocessTab';
 import LayersTab from './tabs/LayersTab';
 import ExportTab from './tabs/ExportTab';
 import UtilitiesTab from './tabs/UtilitiesTab';
+import StoryboardTab from './tabs/StoryboardTab';
 import { fetchConfig } from './utils/api';
 import { useProject } from './hooks/useProject';
 import { GenerationHistory } from './components';
@@ -78,16 +79,6 @@ export default function App() {
       console.log('âœ“ Project saved');
     } catch (err) {
       alert(`Failed to save: ${err.message}`);
-    }
-  }, [project]);
-
-  // Handle version up
-  const handleVersionUp = useCallback(async () => {
-    try {
-      const newFilename = await project.saveAsNewVersion();
-      console.log('âœ“ New version created:', newFilename);
-    } catch (err) {
-      alert(`Failed to create new version: ${err.message}`);
     }
   }, [project]);
 
@@ -167,6 +158,8 @@ export default function App() {
         return <ExportTab {...tabProps} />;
       case 'utilities':
         return <UtilitiesTab {...tabProps} />;
+      case 'storyboard':
+        return <StoryboardTab {...tabProps} />;
       default:
         return null;
     }
@@ -208,18 +201,16 @@ export default function App() {
       {/* Project Bar */}
       <ProjectBar
         projectFolder={project.projectFolder}
+        projectName={project.projectName}
         currentFileInfo={project.currentFileInfo}
         shots={project.shots}
-        currentShotVersions={project.currentShotVersions}
         hasUnsavedChanges={project.hasUnsavedChanges}
         isSaving={project.isSaving}
         isLoading={project.isLoading}
         hasFiles={project.projectFiles.length > 0}
         onBrowseFolder={handleBrowseFolder}
         onSwitchShot={project.switchShot}
-        onSwitchVersion={project.switchVersion}
         onSave={handleSave}
-        onVersionUp={handleVersionUp}
         onNewShot={handleNewShot}
         onNewProject={handleNewProject}
       />

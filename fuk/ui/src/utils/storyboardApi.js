@@ -31,29 +31,29 @@ export async function saveSpecs(specs) {
   return jsonOrThrow(res, 'Failed to save specs');
 }
 
-export async function createSubject(payload) {
-  const res = await fetch(`${API_URL}/storyboard/globals/subjects`, {
+export async function createStoryboardTag(payload) {
+  const res = await fetch(`${API_URL}/storyboard/globals/tags`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  return jsonOrThrow(res, 'Failed to create subject');
+  return jsonOrThrow(res, 'Failed to create tag');
 }
 
-export async function updateSubject(id, payload) {
-  const res = await fetch(`${API_URL}/storyboard/globals/subjects/${id}`, {
+export async function updateStoryboardTag(id, payload) {
+  const res = await fetch(`${API_URL}/storyboard/globals/tags/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  return jsonOrThrow(res, 'Failed to update subject');
+  return jsonOrThrow(res, 'Failed to update tag');
 }
 
-export async function deleteSubject(id) {
-  const res = await fetch(`${API_URL}/storyboard/globals/subjects/${id}`, {
+export async function deleteStoryboardTag(id) {
+  const res = await fetch(`${API_URL}/storyboard/globals/tags/${id}`, {
     method: 'DELETE',
   });
-  return jsonOrThrow(res, 'Failed to delete subject');
+  return jsonOrThrow(res, 'Failed to delete tag');
 }
 
 export async function saveMood(mood) {
@@ -63,6 +63,33 @@ export async function saveMood(mood) {
     body: JSON.stringify({ mood: mood || '' }),
   });
   return jsonOrThrow(res, 'Failed to save mood');
+}
+
+export async function saveGlobalImageSeed(seed) {
+  const res = await fetch(`${API_URL}/storyboard/globals/image_seed`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ seed: seed ?? null }),
+  });
+  return jsonOrThrow(res, 'Failed to save global image seed');
+}
+
+export async function saveGlobalVideoSeed(seed) {
+  const res = await fetch(`${API_URL}/storyboard/globals/video_seed`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ seed: seed ?? null }),
+  });
+  return jsonOrThrow(res, 'Failed to save global video seed');
+}
+
+export async function saveActiveLoras(loras) {
+  const res = await fetch(`${API_URL}/storyboard/globals/loras`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ loras: loras || [] }),
+  });
+  return jsonOrThrow(res, 'Failed to save active LoRAs');
 }
 
 export async function upsertPanel(shotId, patch) {
@@ -90,6 +117,15 @@ export async function reorderSequence(sequence) {
   return jsonOrThrow(res, 'Failed to reorder sequence');
 }
 
+export async function setPanelPreview(shotId, { kind, path }) {
+  const res = await fetch(`${API_URL}/storyboard/panels/${shotId}/preview`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ kind, path: path || null }),
+  });
+  return jsonOrThrow(res, 'Failed to set panel preview');
+}
+
 export async function sendPanelToImage(shotId) {
   const res = await fetch(`${API_URL}/storyboard/panels/${shotId}/send/image`, { method: 'POST' });
   return jsonOrThrow(res, 'Failed to send to Image tab');
@@ -98,6 +134,24 @@ export async function sendPanelToImage(shotId) {
 export async function sendPanelToVideo(shotId) {
   const res = await fetch(`${API_URL}/storyboard/panels/${shotId}/send/video`, { method: 'POST' });
   return jsonOrThrow(res, 'Failed to send to Video tab');
+}
+
+export async function snapshotStoryboard() {
+  const res = await fetch(`${API_URL}/storyboard/snapshot`, { method: 'POST' });
+  return jsonOrThrow(res, 'Failed to snapshot storyboard');
+}
+
+export async function fetchSnapshots() {
+  const res = await fetch(`${API_URL}/storyboard/snapshots`);
+  return jsonOrThrow(res, 'Failed to list snapshots');
+}
+
+export async function restoreSnapshot(filename) {
+  const res = await fetch(
+    `${API_URL}/storyboard/snapshots/${encodeURIComponent(filename)}/restore`,
+    { method: 'POST' },
+  );
+  return jsonOrThrow(res, 'Failed to restore snapshot');
 }
 
 export async function resolvePromptPreview({ text, model, activeLoras, applyMood }) {

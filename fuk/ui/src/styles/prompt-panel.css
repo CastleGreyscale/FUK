@@ -130,24 +130,18 @@
   color: var(--color-text);
 }
 
-/* Autocomplete dropdown — rendered ABOVE the textarea. The panel floats
- * near the bottom of the preview area, so opening downward would clip the
- * list off-screen as it fills with tags and triggers. */
+/* Autocomplete dropdown — positioned via JS in MarkerTextarea so it can
+ * flip up or down based on viewport space and escape ancestor scroll
+ * clipping. Only visual styling lives here. */
 .prompt-token-dropdown {
-  position: absolute;
-  bottom: 100%;
-  left: 0;
-  right: 0;
-  max-height: 260px;
   overflow-y: auto;
   background: rgba(16, 20, 28, 0.97);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md, 6px);
   list-style: none;
   padding: 0.25rem;
-  margin: 0 0 0.25rem 0;
-  z-index: 20;
-  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.5);
+  margin: 0;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
 }
 
 .prompt-token-item {
@@ -183,6 +177,17 @@
 .prompt-token-badge--caption {
   color: #c2b07a;
   background: rgba(194, 176, 122, 0.12);
+}
+.prompt-token-badge--global {
+  color: #d196ff;
+  background: rgba(209, 150, 255, 0.14);
+}
+
+/* Wrapper so the autocomplete dropdown can anchor relative to its textarea
+ * regardless of where MarkerTextarea is dropped in the tree. */
+.marker-textarea-wrapper {
+  position: relative;
+  display: block;
 }
 
 .prompt-token-name {

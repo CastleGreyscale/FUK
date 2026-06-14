@@ -9,24 +9,22 @@ import { Save, Loader2, CheckCircle, Folder, FilePlus, Plus, ChevronDown } from 
 
 export default function ProjectBar({
   projectFolder,
+  projectName,
   currentFileInfo,
   shots,
-  currentShotVersions,
   hasUnsavedChanges,
   isSaving,
   isLoading,
   hasFiles,
   onBrowseFolder,
   onSwitchShot,
-  onSwitchVersion,
   onSave,
-  onVersionUp,
   onNewShot,
   onNewProject,
 }) {
   const [showNewShotInput, setShowNewShotInput] = useState(false);
   const [newShotNumber, setNewShotNumber] = useState('');
-  const [showNewProjectDialog, setShowNewProjectDialog] = useState(!hasFiles);
+  const [showNewProjectDialog, setShowNewProjectDialog] = useState(!hasFiles && !projectName);
   const [newProjectName, setNewProjectName] = useState('');
 
   const handleNewShotSubmit = (e) => {
@@ -77,22 +75,56 @@ export default function ProjectBar({
     );
   }
 
-  // Folder set but no project files - show "New Project" prompt
+  // Folder set but no project files
   if (!hasFiles) {
+    const folderBtn = (
+      <button
+        className="fuk-project-folder-btn"
+        onClick={onBrowseFolder}
+        title={projectFolder}
+      >
+        <Folder className="fuk-icon--md" />
+        <span className="fuk-project-folder-name">{getFolderDisplayName()}</span>
+        <ChevronDown className="fuk-project-chevron" />
+      </button>
+    );
+
+    // Step 2: project name is set — show it and prompt for first shot id
+    if (projectName) {
+      return (
+        <div className="fuk-project-bar">
+          {folderBtn}
+          <span className="fuk-project-separator">/</span>
+          <span className="fuk-project-folder-name">{projectName}</span>
+          <span className="fuk-project-separator">/</span>
+          <div className="fuk-project-selector">
+            <label className="fuk-project-label">Shot</label>
+            <form onSubmit={handleNewShotSubmit} className="fuk-new-shot-form">
+              <input
+                type="text"
+                className="fuk-new-shot-input"
+                value={newShotNumber}
+                onChange={(e) => setNewShotNumber(e.target.value)}
+                placeholder="shot-id"
+                pattern="[A-Za-z0-9][A-Za-z0-9-]*"
+                title="Alphanumeric or hyphens; must start alphanumeric. No underscores or spaces."
+                maxLength={32}
+                autoFocus
+              />
+            </form>
+          </div>
+          <span className="fuk-project-hint fuk-project-hint--spaced">
+            Enter a shot ID and press Enter to create the first shot.
+          </span>
+        </div>
+      );
+    }
+
+    // Step 1: no project name — ask for one
     return (
       <div className="fuk-project-bar">
-        <button 
-          className="fuk-project-folder-btn"
-          onClick={onBrowseFolder}
-          title={projectFolder}
-        >
-          <Folder className="fuk-icon--md" />
-          <span className="fuk-project-folder-name">{getFolderDisplayName()}</span>
-          <ChevronDown className="fuk-project-chevron" />
-        </button>
-
+        {folderBtn}
         <span className="fuk-project-separator">/</span>
-
         {showNewProjectDialog ? (
           <form onSubmit={handleNewProjectSubmit} className="fuk-new-project-form">
             <input
@@ -104,10 +136,10 @@ export default function ProjectBar({
               autoFocus
             />
             <button type="submit" className="fuk-btn fuk-btn-save" disabled={!newProjectName}>
-              Create
+              Set Name
             </button>
-            <button 
-              type="button" 
+            <button
+              type="button"
               className="fuk-btn fuk-btn-secondary"
               onClick={() => setShowNewProjectDialog(false)}
             >
@@ -115,18 +147,19 @@ export default function ProjectBar({
             </button>
           </form>
         ) : (
-          <button 
-            className="fuk-btn fuk-btn-new-project"
-            onClick={() => setShowNewProjectDialog(true)}
-          >
-            <FilePlus className="fuk-icon--md" />
-            New Project File
-          </button>
+          <>
+            <button
+              className="fuk-btn fuk-btn-new-project"
+              onClick={() => setShowNewProjectDialog(true)}
+            >
+              <FilePlus className="fuk-icon--md" />
+              New Project
+            </button>
+            <span className="fuk-project-hint fuk-project-hint--spaced">
+              No project files found. Create one to get started.
+            </span>
+          </>
         )}
-
-        <span className="fuk-project-hint fuk-project-hint--spaced">
-          No project files found. Create one to get started.
-        </span>
       </div>
     );
   }
@@ -166,7 +199,7 @@ export default function ProjectBar({
             ) : (
               shots.map(shot => (
                 <option key={shot} value={shot}>
-                  {shot.padStart(2, '0')}
+                  {shot}
                 </option>
               ))
             )}
@@ -176,13 +209,14 @@ export default function ProjectBar({
           {showNewShotInput ? (
             <form onSubmit={handleNewShotSubmit} className="fuk-new-shot-form">
               <input
-                type="number"
+                type="text"
                 className="fuk-new-shot-input"
                 value={newShotNumber}
                 onChange={(e) => setNewShotNumber(e.target.value)}
-                placeholder="##"
-                min="1"
-                max="99"
+                placeholder="id"
+                pattern="[A-Za-z0-9][A-Za-z0-9-]*"
+                title="Alphanumeric or hyphens; must start alphanumeric. No underscores or spaces."
+                maxLength={32}
                 autoFocus
                 onBlur={() => {
                   if (!newShotNumber) setShowNewShotInput(false);
@@ -199,29 +233,6 @@ export default function ProjectBar({
             </button>
           )}
         </div>
-      </div>
-
-      <span className="fuk-project-separator">/</span>
-
-      {/* Version Selector */}
-      <div className="fuk-project-selector">
-        <label className="fuk-project-label">Version</label>
-        <select
-          className="fuk-project-select"
-          value={currentFileInfo?.version || ''}
-          onChange={(e) => onSwitchVersion(e.target.value)}
-          disabled={isLoading || currentShotVersions.length === 0}
-        >
-          {currentShotVersions.length === 0 ? (
-            <option value="">No versions</option>
-          ) : (
-            currentShotVersions.map(v => (
-              <option key={v.version} value={v.version}>
-                {v.version}
-              </option>
-            ))
-          )}
-        </select>
       </div>
 
       {/* Spacer */}
@@ -243,17 +254,6 @@ export default function ProjectBar({
           <span>Saved</span>
         </span>
       )}
-
-      {/* Version Up Button */}
-      <button
-        className="fuk-btn fuk-btn-version-up"
-        onClick={onVersionUp}
-        disabled={isLoading || !currentFileInfo}
-        title="Save as new version"
-      >
-        <Plus className="fuk-icon--md" />
-        Version Up
-      </button>
 
       {/* Save Button */}
       <button

@@ -1,36 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { compilePrompt, expandPrompt, fetchPromptTokens } from '../utils/promptApi';
-
-function useAutoResize(ref, value) {
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = el.scrollHeight + 'px';
-  }, [ref, value]);
-}
-
-// Match a `#` immediately before the caret followed by an in-progress word.
-// Anchored at end-of-string so we only see the active token, not earlier ones.
-const MARKER_TYPING_RE = /(?:^|[\s,;()])#([A-Za-z0-9_\-]*)$/;
-
-const SOURCE_BADGE = {
-  tag: { label: 'tag', className: 'prompt-token-badge--tag' },
-  lora: { label: 'lora', className: 'prompt-token-badge--lora' },
-  caption: { label: 'phrase', className: 'prompt-token-badge--caption' },
-};
-
-function scoreToken(token, query) {
-  if (!query) return 0;
-  const q = query.toLowerCase();
-  const name = (token.name || '').toLowerCase();
-  if (name === q) return 100;
-  if (name.startsWith(q)) return 80;
-  if (name.includes(q)) return 50;
-  const cat = (token.category || '').toLowerCase();
-  if (cat.startsWith(q)) return 30;
-  return -1;
-}
+import { compilePrompt, expandPrompt, fetchPromptTokens, PROMPT_TOKENS_CHANGED_EVENT } from '../utils/promptApi';
+import MarkerTextarea from './MarkerTextarea';
 
 export default function PromptPanel({
   prompt,
@@ -44,9 +14,6 @@ export default function PromptPanel({
   const promptRef = useRef(null);
   const negRef = useRef(null);
 
-  useAutoResize(promptRef, prompt);
-  useAutoResize(negRef, negativePrompt);
-
   // Stable, comparable representation of active LoRA keys for the deps array.
   const activeLoraKeys = useMemo(
     () => (loras || []).map(l => l?.key).filter(Boolean),
@@ -56,7 +23,6 @@ export default function PromptPanel({
 
   const [tokens, setTokens] = useState([]);
   const [categories, setCategories] = useState([]);
-  const [autocomplete, setAutocomplete] = useState(null); // { query, selected, anchor: 'prompt' | 'neg' }
   const [compiling, setCompiling] = useState(false);
   const [compileError, setCompileError] = useState(null);
   const [expanding, setExpanding] = useState(false);
@@ -64,12 +30,20 @@ export default function PromptPanel({
   const [slotsOpen, setSlotsOpen] = useState(false);
   const [slotCategory, setSlotCategory] = useState(null); // null = grid view, string = drilled-in
   // Style chips: slot-picker insertions accumulate here and bake into a
-  // trailing "Style: …" sentence on Compile. Inline `#` autocomplete still
-  // writes to the textarea so the user can place markers explicitly mid-sentence.
+  // trailing "Style: …" sentence on Compile. Inline `#` autocomplete writes
+  // markers directly to the textarea via MarkerTextarea.
   const [styleChips, setStyleChips] = useState([]);
-  const lastCaretRef = useRef(null); // remembers caret in the prompt textarea for slot inserts
 
-  // Fetch tokens whenever the prompt context changes.
+  // Tokens drive both the autocomplete (passed down to MarkerTextarea) and
+  // the slot picker / category groupings. One fetch shared across both.
+  // Refetches on the prompt-tokens-changed event so tag/subject CRUD
+  // elsewhere updates the Slot Picker without a reload.
+  const [refetchKey, setRefetchKey] = useState(0);
+  useEffect(() => {
+    const handler = () => setRefetchKey(k => k + 1);
+    window.addEventListener(PROMPT_TOKENS_CHANGED_EVENT, handler);
+    return () => window.removeEventListener(PROMPT_TOKENS_CHANGED_EVENT, handler);
+  }, []);
   useEffect(() => {
     let cancelled = false;
     fetchPromptTokens({ model, activeLoras: activeLoraKeys })
@@ -84,7 +58,7 @@ export default function PromptPanel({
         setCategories([]);
       });
     return () => { cancelled = true; };
-  }, [model, activeLoraKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [model, activeLoraKey, refetchKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const focusPrompt = () => promptRef.current?.focus();
@@ -96,109 +70,6 @@ export default function PromptPanel({
       window.removeEventListener('fuk-shortcut-focus-neg-prompt', focusNeg);
     };
   }, []);
-
-  const handleResize = useCallback((e) => {
-    const el = e.target;
-    el.style.height = 'auto';
-    el.style.height = el.scrollHeight + 'px';
-  }, []);
-
-  // Detect that the user is mid-typing a `#marker` and pop the dropdown.
-  const detectAutocomplete = useCallback((textarea, anchor) => {
-    const value = textarea.value;
-    const caret = textarea.selectionStart ?? value.length;
-    if (caret !== (textarea.selectionEnd ?? caret)) {
-      setAutocomplete(null);
-      return;
-    }
-    const upTo = value.slice(0, caret);
-    const m = MARKER_TYPING_RE.exec(upTo);
-    if (!m) {
-      setAutocomplete(null);
-      return;
-    }
-    setAutocomplete(prev => ({
-      query: m[1] || '',
-      selected: 0,
-      anchor,
-      // Caret offset of the `#` itself (so we know where to splice).
-      markerStart: caret - m[1].length - 1,
-      caret,
-    }));
-  }, []);
-
-  const handlePromptChange = (e) => {
-    onChange('prompt', e.target.value);
-    handleResize(e);
-    detectAutocomplete(e.target, 'prompt');
-    lastCaretRef.current = e.target.selectionStart ?? null;
-  };
-
-  const handlePromptSelect = (e) => {
-    lastCaretRef.current = e.target.selectionStart ?? null;
-    // Keep dropdown in sync with caret moves (arrow keys without typing).
-    if (autocomplete?.anchor === 'prompt') {
-      detectAutocomplete(e.target, 'prompt');
-    }
-  };
-
-  const filteredTokens = useMemo(() => {
-    if (!autocomplete) return [];
-    const q = autocomplete.query;
-    // Include only tokens that have a marker — caption phrases (marker=null)
-    // don't show up in the `#` flow. They surface elsewhere (slot picker, future).
-    const candidates = tokens.filter(t => t.marker);
-    if (!q) {
-      return candidates.slice(0, 30);
-    }
-    return candidates
-      .map(t => ({ t, score: scoreToken(t, q) }))
-      .filter(x => x.score >= 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 30)
-      .map(x => x.t);
-  }, [tokens, autocomplete]);
-
-  const insertToken = useCallback((token) => {
-    if (!autocomplete) return;
-    const targetRef = autocomplete.anchor === 'neg' ? negRef : promptRef;
-    const textarea = targetRef.current;
-    if (!textarea) return;
-    const field = autocomplete.anchor === 'neg' ? 'negative_prompt' : 'prompt';
-    const value = autocomplete.anchor === 'neg' ? negativePrompt : prompt;
-    const insert = token.marker; // tags + loras have markers
-    const before = value.slice(0, autocomplete.markerStart);
-    const after = value.slice(autocomplete.caret);
-    const next = `${before}${insert}${after.startsWith(' ') ? '' : ' '}${after}`;
-    onChange(field, next);
-    setAutocomplete(null);
-
-    // Restore caret just after the inserted marker (+1 if we added a space).
-    const newCaret = before.length + insert.length + (after.startsWith(' ') ? 0 : 1);
-    requestAnimationFrame(() => {
-      if (textarea) {
-        textarea.focus();
-        textarea.setSelectionRange(newCaret, newCaret);
-      }
-    });
-  }, [autocomplete, prompt, negativePrompt, onChange]);
-
-  const handleKeyDown = (e) => {
-    if (!autocomplete || filteredTokens.length === 0) return;
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      setAutocomplete(a => ({ ...a, selected: Math.min(a.selected + 1, filteredTokens.length - 1) }));
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      setAutocomplete(a => ({ ...a, selected: Math.max(a.selected - 1, 0) }));
-    } else if (e.key === 'Enter' || e.key === 'Tab') {
-      e.preventDefault();
-      insertToken(filteredTokens[autocomplete.selected]);
-    } else if (e.key === 'Escape') {
-      e.preventDefault();
-      setAutocomplete(null);
-    }
-  };
 
   const handleCompile = async () => {
     if (compiling) return;
@@ -265,8 +136,9 @@ export default function PromptPanel({
     }
   };
 
-  const hasMarkers = useMemo(() => /(^|\s)#[A-Za-z0-9]/.test(prompt || ''), [prompt]);
-  const canCompile = hasMarkers || styleChips.length > 0;
+  // `#markers` resolve at generation time (live globals + tags + LoRA triggers),
+  // so Compile only matters when there are style chips to drain into a sentence.
+  const canCompile = styleChips.length > 0;
   const canExpand = (prompt && prompt.trim().length > 0) || styleChips.length > 0;
 
   // Group tokens by category for the slot picker. The category list comes
@@ -339,7 +211,9 @@ export default function PromptPanel({
             className="prompt-panel-headerbtn"
             onClick={handleCompile}
             disabled={disabled || compiling || !canCompile}
-            title={canCompile ? 'Deterministic: expand #markers and append style chips' : 'Add #markers or style chips to compile'}
+            title={canCompile
+              ? 'Drain style chips into a trailing "Style:" sentence (#markers resolve at generation)'
+              : 'Add style chips to compile'}
           >
             {compiling ? '…' : 'Compile'}
           </button>
@@ -357,26 +231,16 @@ export default function PromptPanel({
       )}
       <div className="prompt-panel-body">
         <div className="prompt-panel-field">
-          <textarea
+          <MarkerTextarea
             ref={promptRef}
             className="fuk-textarea prompt-panel-textarea"
             value={prompt}
-            onChange={handlePromptChange}
-            onKeyDown={handleKeyDown}
-            onSelect={handlePromptSelect}
-            onBlur={() => setTimeout(() => setAutocomplete(null), 120)}
+            onChange={(next) => onChange('prompt', next)}
             placeholder="A cinematic video of... (type # for tags & LoRA triggers)"
             rows={3}
             disabled={disabled}
+            tokens={tokens}
           />
-          {autocomplete?.anchor === 'prompt' && filteredTokens.length > 0 && (
-            <TokenDropdown
-              tokens={filteredTokens}
-              selected={autocomplete.selected}
-              onPick={insertToken}
-              onHover={(idx) => setAutocomplete(a => ({ ...a, selected: idx }))}
-            />
-          )}
         </div>
         {styleChips.length > 0 && (
           <StyleChipTray chips={styleChips} onRemove={removeStyleChip} onClear={() => setStyleChips([])} />
@@ -396,47 +260,27 @@ export default function PromptPanel({
           </div>
         )}
         <label className="prompt-panel-neg-label">Negative</label>
-        <textarea
+        <MarkerTextarea
           ref={negRef}
           className="fuk-textarea prompt-panel-textarea"
           value={negativePrompt}
-          onChange={(e) => { onChange('negative_prompt', e.target.value); handleResize(e); }}
+          onChange={(next) => onChange('negative_prompt', next)}
           placeholder="blurry, low quality..."
           rows={2}
           disabled={disabled}
+          tokens={tokens}
         />
       </div>
     </div>
   );
 }
 
-function TokenDropdown({ tokens, selected, onPick, onHover }) {
-  return (
-    <ul className="prompt-token-dropdown" role="listbox">
-      {tokens.map((t, idx) => {
-        const badge = SOURCE_BADGE[t.source] || SOURCE_BADGE.tag;
-        const isSelected = idx === selected;
-        return (
-          <li
-            key={t.id || `${t.source}:${t.name}`}
-            role="option"
-            aria-selected={isSelected}
-            className={`prompt-token-item ${isSelected ? 'prompt-token-item--selected' : ''}`}
-            onMouseDown={(e) => { e.preventDefault(); onPick(t); }}
-            onMouseEnter={() => onHover(idx)}
-          >
-            <span className={`prompt-token-badge ${badge.className}`}>{badge.label}</span>
-            <span className="prompt-token-name">{t.marker || t.name}</span>
-            {t.category && (
-              <span className="prompt-token-category">{t.category}</span>
-            )}
-            <span className="prompt-token-expansion">{t.expansion}</span>
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
+const SOURCE_BADGE = {
+  global: { label: 'global', className: 'prompt-token-badge--global' },
+  tag: { label: 'tag', className: 'prompt-token-badge--tag' },
+  lora: { label: 'lora', className: 'prompt-token-badge--lora' },
+  caption: { label: 'phrase', className: 'prompt-token-badge--caption' },
+};
 
 function StyleChipTray({ chips, onRemove, onClear }) {
   return (

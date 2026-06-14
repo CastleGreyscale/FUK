@@ -18,6 +18,23 @@ from datetime import datetime, timedelta
 import subprocess
 import sys
 import os
+import re
+
+# Shot id: alphanumeric, hyphens allowed mid-string. No underscores (the
+# filename uses `_` as the field separator). 1-32 chars to keep paths sane.
+_SHOT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,31}$")
+
+# Project name follows the same shape — keeps the filename parseable.
+_PROJECT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+
+# A shot file follows `{project}_shot{id}_{version}.json`. Anything else
+# (storyboard manifest, future project-level json) must NOT be picked up by
+# the project file machinery — autosave would overwrite it with shot state.
+_SHOT_FILENAME_RE = re.compile(r"^.+_shot[A-Za-z0-9][A-Za-z0-9-]*_.+\.json$", re.IGNORECASE)
+
+
+def _is_shot_file(path: Path) -> bool:
+    return bool(_SHOT_FILENAME_RE.match(path.name))
 
 # Will be set by main server
 _project_folder = None
@@ -141,8 +158,14 @@ def ensure_project_loaded():
         print("[PROJECT] No project folder set, cannot auto-load", flush=True)
         return False
     
-    # Look for project files in the folder
-    project_files = sorted(_project_folder.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    # Look for project files in the folder. Only real shot files — the
+    # storyboard manifest and any other project-level json must not be
+    # loaded as shot state, or its content gets wiped by the next autosave.
+    project_files = sorted(
+        (p for p in _project_folder.glob("*.json") if _SHOT_FILENAME_RE.match(p.name)),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
     
     if project_files:
         # Load the most recent project file
@@ -536,21 +559,25 @@ async def get_current():
 
 @router.get("/list")
 async def list_files():
-    """List project files in current folder"""
+    """List project shot files in the current folder.
+
+    Only files matching `{project}_shot{id}_{version}.json` are returned —
+    project-level files like `{project}_storyboard.json` are intentionally
+    excluded so the frontend never tries to load them as shot state.
+    """
     if not _project_folder:
         return {"files": [], "folder": None}
-    
-    # Find all .json files
-    json_files = list(_project_folder.glob("*.json"))
-    
+
     files = []
-    for f in json_files:
+    for f in _project_folder.glob("*.json"):
+        if not _is_shot_file(f):
+            continue
         files.append({
             "name": f.name,
             "path": str(f),
             "modifiedAt": datetime.fromtimestamp(f.stat().st_mtime).isoformat()
         })
-    
+
     return {
         "files": sorted(files, key=lambda x: x["modifiedAt"], reverse=True),
         "folder": str(_project_folder)
@@ -620,14 +647,25 @@ async def create_new(data: dict = Body(...)):
     """Create a new project file"""
     if not _project_folder:
         raise HTTPException(status_code=400, detail="No project folder set")
-    
-    project_name = data.get("projectName", "untitled")
-    shot_number = data.get("shotNumber", "01")
-    
+
+    project_name = (data.get("projectName") or "untitled").strip()
+    shot_number = (data.get("shotNumber") or "01").strip()
+
+    if not _PROJECT_NAME_RE.match(project_name):
+        raise HTTPException(
+            status_code=400,
+            detail="Project name: 1-64 chars, alphanumeric/underscore/hyphen, must start alphanumeric.",
+        )
+    if not _SHOT_ID_RE.match(shot_number):
+        raise HTTPException(
+            status_code=400,
+            detail="Shot id: 1-32 chars, alphanumeric or hyphen, must start alphanumeric. No underscores (it's the filename separator).",
+        )
+
     # Generate version (YYMMDD format)
     now = datetime.now()
     version = now.strftime("%y%m%d")
-    
+
     # Build filename
     filename = f"{project_name}_shot{shot_number}_{version}.json"
     file_path = _project_folder / filename
@@ -1747,6 +1785,14 @@ def get_cache_root() -> Optional[Path]:
 def get_default_cache_root() -> Optional[Path]:
     """Get the default cache root (original location before any project was opened)"""
     return _default_cache_root
+
+def get_project_folder() -> Optional[Path]:
+    """Get the active project folder (for external use, e.g. storyboard manifest)."""
+    return _project_folder
+
+def get_project_state() -> Optional[Dict[str, Any]]:
+    """Get the currently loaded project (shot) state."""
+    return _project_state
 
 # ============================================================================
 # EXR Preview Helper

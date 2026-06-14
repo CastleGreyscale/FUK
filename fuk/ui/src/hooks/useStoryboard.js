@@ -11,13 +11,17 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   fetchManifest,
   saveSpecs,
-  createSubject as apiCreateSubject,
-  updateSubject as apiUpdateSubject,
-  deleteSubject as apiDeleteSubject,
+  createStoryboardTag as apiCreateTag,
+  updateStoryboardTag as apiUpdateTag,
+  deleteStoryboardTag as apiDeleteTag,
   saveMood as apiSaveMood,
+  saveGlobalImageSeed as apiSaveImageSeed,
+  saveGlobalVideoSeed as apiSaveVideoSeed,
+  saveActiveLoras as apiSaveActiveLoras,
   upsertPanel as apiUpsertPanel,
   deletePanel as apiDeletePanel,
   reorderSequence as apiReorderSequence,
+  setPanelPreview as apiSetPanelPreview,
 } from '../utils/storyboardApi';
 import { notifyPromptTokensChanged } from '../utils/promptApi';
 
@@ -47,10 +51,16 @@ export function useStoryboard(project) {
 
   // Reload when the active project file changes — globals stay alive across
   // shot switches but the panel grid wants to reflect whatever's on disk.
+  // Also reload when the storyboard is mutated from outside the tab (e.g.
+  // the History panel's "Pin to storyboard" button).
   useEffect(() => {
     const handler = () => refresh();
     window.addEventListener('fuk-project-changed', handler);
-    return () => window.removeEventListener('fuk-project-changed', handler);
+    window.addEventListener('fuk-storyboard-changed', handler);
+    return () => {
+      window.removeEventListener('fuk-project-changed', handler);
+      window.removeEventListener('fuk-storyboard-changed', handler);
+    };
   }, [refresh]);
 
   const updateSpecs = useCallback(async (specs) => {
@@ -58,33 +68,33 @@ export function useStoryboard(project) {
     setManifest(next);
   }, []);
 
-  const createSubject = useCallback(async (payload) => {
-    const entry = await apiCreateSubject(payload);
-    setManifest(m => m && ({ ...m, globals: { ...m.globals, subjects: [...(m.globals?.subjects || []), entry] } }));
+  const createTag = useCallback(async (payload) => {
+    const entry = await apiCreateTag(payload);
+    setManifest(m => m && ({ ...m, globals: { ...m.globals, tags: [...(m.globals?.tags || []), entry] } }));
     notifyPromptTokensChanged();
     return entry;
   }, []);
 
-  const updateSubject = useCallback(async (id, payload) => {
-    const entry = await apiUpdateSubject(id, payload);
+  const updateTag = useCallback(async (id, payload) => {
+    const entry = await apiUpdateTag(id, payload);
     setManifest(m => m && ({
       ...m,
       globals: {
         ...m.globals,
-        subjects: (m.globals?.subjects || []).map(s => s.id === id ? entry : s),
+        tags: (m.globals?.tags || []).map(t => t.id === id ? entry : t),
       },
     }));
     notifyPromptTokensChanged();
     return entry;
   }, []);
 
-  const deleteSubject = useCallback(async (id) => {
-    await apiDeleteSubject(id);
+  const deleteTag = useCallback(async (id) => {
+    await apiDeleteTag(id);
     setManifest(m => m && ({
       ...m,
       globals: {
         ...m.globals,
-        subjects: (m.globals?.subjects || []).filter(s => s.id !== id),
+        tags: (m.globals?.tags || []).filter(t => t.id !== id),
       },
     }));
     notifyPromptTokensChanged();
@@ -93,6 +103,26 @@ export function useStoryboard(project) {
   const updateMood = useCallback(async (mood) => {
     const { mood: cleaned } = await apiSaveMood(mood);
     setManifest(m => m && ({ ...m, globals: { ...m.globals, mood: cleaned } }));
+  }, []);
+
+  const updateImageSeed = useCallback(async (seed) => {
+    const { image_seed } = await apiSaveImageSeed(seed);
+    setManifest(m => m && ({ ...m, globals: { ...m.globals, image_seed } }));
+    return image_seed;
+  }, []);
+
+  const updateVideoSeed = useCallback(async (seed) => {
+    const { video_seed } = await apiSaveVideoSeed(seed);
+    setManifest(m => m && ({ ...m, globals: { ...m.globals, video_seed } }));
+    return video_seed;
+  }, []);
+
+  const updateActiveLoras = useCallback(async (loras) => {
+    const { active_loras } = await apiSaveActiveLoras(loras);
+    setManifest(m => m && ({ ...m, globals: { ...m.globals, active_loras } }));
+    // Caption tokens are gated on active LoRAs server-side, so this flips
+    // them on/off in every open MarkerTextarea instantly.
+    notifyPromptTokensChanged();
   }, []);
 
   const upsertPanel = useCallback(async (shotId, patch) => {
@@ -115,6 +145,15 @@ export function useStoryboard(project) {
     });
   }, []);
 
+  const setPanelPreview = useCallback(async (shotId, { kind, path }) => {
+    const entry = await apiSetPanelPreview(shotId, { kind, path });
+    setManifest(m => m && ({
+      ...m,
+      panels: { ...m.panels, [shotId]: entry },
+    }));
+    return entry;
+  }, []);
+
   const reorderSequence = useCallback(async (sequence) => {
     const { sequence: cleaned } = await apiReorderSequence(sequence);
     setManifest(m => m && ({ ...m, sequence: cleaned }));
@@ -126,12 +165,16 @@ export function useStoryboard(project) {
     error,
     refresh,
     updateSpecs,
-    createSubject,
-    updateSubject,
-    deleteSubject,
+    createTag,
+    updateTag,
+    deleteTag,
     updateMood,
+    updateImageSeed,
+    updateVideoSeed,
+    updateActiveLoras,
     upsertPanel,
     deletePanel,
     reorderSequence,
+    setPanelPreview,
   };
 }

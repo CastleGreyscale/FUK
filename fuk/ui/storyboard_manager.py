@@ -5,15 +5,16 @@ The storyboard manifest is a project-level file (`{projectname}_storyboard.json`
 that sits alongside the per-shot project files. It stores:
 
   - specs (TRT, aspect ratio, resolution)
-  - globals.subjects: named `#marker` references (characters, props, locations)
+  - globals.tags: project-local `#marker` shorthand (characters, props, etc.)
   - globals.mood: a single freeform sentence applied to every shot at generation
+  - globals.active_loras: project-wide active LoRA keys
   - sequence: ordered shot IDs
   - panels: per-shot metadata (imagery prompt, action prompt, duration, ...)
 
-Globals are *live*: editing a subject's description changes how `#sarah`
-resolves the next time any shot is generated. Markers are NOT expanded at
-"send to tab" time — the raw `#sarah is doing X` is what's saved to the shot
-file, and resolution happens server-side just before generation.
+Globals are *live*: editing a tag's value changes how `#sarah` resolves the
+next time any shot is generated. Markers are NOT expanded at "send to tab"
+time — the raw `#sarah is doing X` is what's saved to the shot file, and
+resolution happens server-side just before generation.
 """
 
 from __future__ import annotations
@@ -28,10 +29,9 @@ from typing import Any, Dict, List, Optional
 
 MANIFEST_VERSION = "1.0"
 
-# Mirror the marker rules used in llm_endpoints._name_to_marker so a subject's
-# `#marker` and a tag's `#marker` follow identical slugging.
+# Mirror the marker rules used in llm_endpoints._name_to_marker so project
+# tag markers slug identically to workspace tag markers.
 _MARKER_CHAR_RE = re.compile(r"[^A-Za-z0-9_\-]+")
-_SUBJECT_KINDS = ("character", "prop", "location", "other")
 
 # Same shape as project_endpoints._SHOT_ID_RE — shot ids are part of the
 # filename `{project}_shot{id}_{version}.json` so the regex MUST match.
@@ -93,8 +93,11 @@ def empty_manifest() -> Dict[str, Any]:
             "resolution": [1920, 1080],
         },
         "globals": {
-            "subjects": [],     # [{id, name, marker, description, kind}]
-            "mood": "",         # freeform style+environment sentence
+            "tags": [],           # [{id, name, marker, value, category, created, updated}]
+            "mood": "",           # freeform style+environment sentence
+            "active_loras": [],   # LoRA names whose triggers/captions surface in `#` autocomplete
+            "image_seed": None,   # uint32 seeded into a new shot's image tab on first send; null = no inheritance
+            "video_seed": None,   # uint32 seeded into a new shot's video tab on first send; null = no inheritance
         },
         "sequence": [],
         "panels": {},
@@ -150,15 +153,40 @@ def ensure_manifest(project_folder: Path) -> Dict[str, Any]:
 
 
 def _migrate(data: Dict[str, Any]) -> Dict[str, Any]:
-    """Forward-compat shim. Fill in any missing keys with empty defaults."""
+    """Forward-compat shim. Fill in missing keys; migrate legacy `subjects`
+    entries into `tags` so older manifests keep their `#markers`."""
     base = empty_manifest()
     out = {**base, **(data or {})}
     out["meta"] = {**base["meta"], **(data.get("meta") or {})}
     out["specs"] = {**base["specs"], **(data.get("specs") or {})}
     globals_in = data.get("globals") or {}
+    tags = list(globals_in.get("tags") or [])
+    # Legacy subjects → tags: description becomes value, kind becomes category.
+    # Skip any subject whose marker is already claimed by a real tag.
+    seen_markers = {t.get("marker") for t in tags if t.get("marker")}
+    for s in globals_in.get("subjects") or []:
+        marker = s.get("marker") or _slug_marker(s.get("name", ""))
+        name = (s.get("name") or "").strip()
+        value = (s.get("description") or "").strip()
+        if not marker or not name or not value or marker in seen_markers:
+            continue
+        seen_markers.add(marker)
+        ts = _now()
+        tags.append({
+            "id": s.get("id") or uuid.uuid4().hex,
+            "name": name,
+            "marker": marker,
+            "value": value,
+            "category": (s.get("kind") or "other").strip().lower() or "other",
+            "created": ts,
+            "updated": ts,
+        })
     out["globals"] = {
-        "subjects": list(globals_in.get("subjects") or []),
+        "tags": tags,
         "mood": str(globals_in.get("mood") or ""),
+        "active_loras": [str(x) for x in (globals_in.get("active_loras") or []) if str(x).strip()],
+        "image_seed": _coerce_seed(globals_in.get("image_seed")),
+        "video_seed": _coerce_seed(globals_in.get("video_seed")),
     }
     out["sequence"] = list(data.get("sequence") or [])
     out["panels"] = dict(data.get("panels") or {})
@@ -166,62 +194,126 @@ def _migrate(data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Globals: subjects (live `#marker` references)
+# Globals: project-local tags (mirror workspace tags but scoped to manifest)
 # ---------------------------------------------------------------------------
 
-def _normalize_subject_name(name: str) -> str:
+def _normalize_tag_name(name: str) -> str:
     return " ".join((name or "").strip().split()).lower()
 
 
-def validate_subject(payload: Dict[str, Any]) -> Dict[str, Any]:
-    name = _normalize_subject_name(payload.get("name", ""))
-    description = (payload.get("description") or "").strip()
-    kind = (payload.get("kind") or "character").strip().lower()
+def validate_tag(payload: Dict[str, Any]) -> Dict[str, Any]:
+    name = _normalize_tag_name(payload.get("name", ""))
+    value = (payload.get("value") or "").strip()
+    category = (payload.get("category") or "").strip() or None
     if not name:
-        raise ValueError("Subject name is required")
-    if not description:
-        raise ValueError("Subject description is required")
-    if kind not in _SUBJECT_KINDS:
-        raise ValueError(f"Unknown subject kind '{kind}'. Allowed: {', '.join(_SUBJECT_KINDS)}")
+        raise ValueError("Tag name is required")
+    if not value:
+        raise ValueError("Tag value is required")
     marker = _slug_marker(name)
     if not marker:
-        raise ValueError("Subject name cannot be slugged into a marker")
-    return {"name": name, "description": description, "kind": kind, "marker": marker}
+        raise ValueError("Tag name cannot be slugged into a marker")
+    return {"name": name, "value": value, "category": category, "marker": marker}
 
 
-def add_subject(manifest: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str, Any]:
-    clean = validate_subject(payload)
-    subjects = manifest["globals"].setdefault("subjects", [])
-    if any(s.get("marker") == clean["marker"] for s in subjects):
-        raise ValueError(f"Subject with marker {clean['marker']} already exists")
-    entry = {"id": uuid.uuid4().hex, **clean}
-    subjects.append(entry)
+def add_tag(manifest: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str, Any]:
+    clean = validate_tag(payload)
+    tags = manifest["globals"].setdefault("tags", [])
+    if any(t.get("marker") == clean["marker"] for t in tags):
+        raise ValueError(f"Tag with marker {clean['marker']} already exists")
+    now = _now()
+    entry = {"id": uuid.uuid4().hex, **clean, "created": now, "updated": now}
+    tags.append(entry)
     return entry
 
 
-def update_subject(manifest: Dict[str, Any], subject_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-    clean = validate_subject(payload)
-    subjects = manifest["globals"].setdefault("subjects", [])
-    for i, s in enumerate(subjects):
-        if s.get("id") == subject_id:
-            if any(o.get("marker") == clean["marker"] and o.get("id") != subject_id for o in subjects):
-                raise ValueError(f"Subject with marker {clean['marker']} already exists")
-            subjects[i] = {"id": subject_id, **clean}
-            return subjects[i]
-    raise KeyError(f"Subject {subject_id} not found")
+def update_tag(manifest: Dict[str, Any], tag_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    clean = validate_tag(payload)
+    tags = manifest["globals"].setdefault("tags", [])
+    for i, t in enumerate(tags):
+        if t.get("id") == tag_id:
+            if any(o.get("marker") == clean["marker"] and o.get("id") != tag_id for o in tags):
+                raise ValueError(f"Tag with marker {clean['marker']} already exists")
+            tags[i] = {
+                "id": tag_id,
+                **clean,
+                "created": t.get("created") or _now(),
+                "updated": _now(),
+            }
+            return tags[i]
+    raise KeyError(f"Tag {tag_id} not found")
 
 
-def remove_subject(manifest: Dict[str, Any], subject_id: str) -> bool:
-    subjects = manifest["globals"].setdefault("subjects", [])
-    before = len(subjects)
-    manifest["globals"]["subjects"] = [s for s in subjects if s.get("id") != subject_id]
-    return len(manifest["globals"]["subjects"]) < before
+def remove_tag(manifest: Dict[str, Any], tag_id: str) -> bool:
+    tags = manifest["globals"].setdefault("tags", [])
+    before = len(tags)
+    manifest["globals"]["tags"] = [t for t in tags if t.get("id") != tag_id]
+    return len(manifest["globals"]["tags"]) < before
+
+
+_SEED_MAX = 2**32 - 1
+
+
+def _coerce_seed(raw: Any) -> Optional[int]:
+    """Normalize a seed payload to uint32 or None. Empty string and null both clear."""
+    if raw is None or raw == "":
+        return None
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        raise ValueError("Seed must be an integer")
+    if n < 0 or n > _SEED_MAX:
+        raise ValueError(f"Seed must be in [0, {_SEED_MAX}]")
+    return n
+
+
+def set_image_seed(manifest: Dict[str, Any], seed: Any) -> Optional[int]:
+    cleaned = _coerce_seed(seed)
+    manifest["globals"]["image_seed"] = cleaned
+    return cleaned
+
+
+def set_video_seed(manifest: Dict[str, Any], seed: Any) -> Optional[int]:
+    cleaned = _coerce_seed(seed)
+    manifest["globals"]["video_seed"] = cleaned
+    return cleaned
+
+
+def get_image_seed(manifest: Optional[Dict[str, Any]]) -> Optional[int]:
+    if not manifest:
+        return None
+    return _coerce_seed(manifest.get("globals", {}).get("image_seed"))
+
+
+def get_video_seed(manifest: Optional[Dict[str, Any]]) -> Optional[int]:
+    if not manifest:
+        return None
+    return _coerce_seed(manifest.get("globals", {}).get("video_seed"))
 
 
 def set_mood(manifest: Dict[str, Any], mood: str) -> str:
     cleaned = (mood or "").strip()
     manifest["globals"]["mood"] = cleaned
     return cleaned
+
+
+def set_active_loras(manifest: Dict[str, Any], loras: List[str]) -> List[str]:
+    """Replace the active-LoRA list. Dedupes and preserves insertion order."""
+    seen = set()
+    cleaned: List[str] = []
+    for raw in loras or []:
+        v = str(raw or "").strip()
+        if not v or v in seen:
+            continue
+        seen.add(v)
+        cleaned.append(v)
+    manifest["globals"]["active_loras"] = cleaned
+    return cleaned
+
+
+def get_active_loras(manifest: Optional[Dict[str, Any]]) -> List[str]:
+    if not manifest:
+        return []
+    return list(manifest.get("globals", {}).get("active_loras") or [])
 
 
 # ---------------------------------------------------------------------------
@@ -236,6 +328,10 @@ def _default_panel(shot_id: str) -> Dict[str, Any]:
         "action_prompt": "",
         "duration_seconds": None,
         "notes": "",
+        "image_model": None,
+        "video_model": None,
+        "image_preview": None,
+        "video_preview": None,
     }
 
 
@@ -254,6 +350,28 @@ def upsert_panel(manifest: Dict[str, Any], shot_id: str, patch: Dict[str, Any]) 
     if shot_id not in sequence:
         sequence.append(shot_id)
     return merged
+
+
+_PREVIEW_KINDS = {"image", "video"}
+
+
+def set_panel_preview(
+    manifest: Dict[str, Any], shot_id: str, kind: str, path: Optional[str]
+) -> Dict[str, Any]:
+    """Pin a generated asset as the panel's image/video preview.
+
+    `path` is whatever the history API returns for a generation — relative to
+    the project folder. `None` clears the slot. Auto-creates the panel if the
+    user is pinning to a shot that only exists as a shot file (no panel yet).
+    """
+    if kind not in _PREVIEW_KINDS:
+        raise ValueError(f"kind must be one of {sorted(_PREVIEW_KINDS)}")
+    if not _SHOT_ID_RE.match(shot_id or ""):
+        raise ValueError("Invalid shot id")
+    field = "image_preview" if kind == "image" else "video_preview"
+    clean = (path or "").strip() or None
+    upsert_panel(manifest, shot_id, {field: clean})
+    return manifest["panels"][shot_id]
 
 
 def remove_panel(manifest: Dict[str, Any], shot_id: str) -> bool:
@@ -277,32 +395,33 @@ def reorder_sequence(manifest: Dict[str, Any], new_sequence: List[str]) -> List[
 
 
 # ---------------------------------------------------------------------------
-# Token surface — subjects rendered as prompt tokens for /api/prompt/tokens
+# Token surface — project tags rendered as prompt tokens for /api/prompt/tokens
 # ---------------------------------------------------------------------------
 
-def subject_tokens(manifest: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Render globals.subjects as unified prompt tokens.
+def tag_tokens(manifest: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Render globals.tags as unified prompt tokens.
 
-    These tokens take precedence over workspace tags on marker collision —
-    see llm_endpoints._collate_tokens.
+    Same shape as workspace tags but `source: "tag"` and the id is namespaced
+    `sbtag:` so the frontend can distinguish project-local from workspace tags
+    if it ever wants to. Precedence is set in llm_endpoints._vocabulary_map.
     """
     if not manifest:
         return []
     out: List[Dict[str, Any]] = []
-    for s in manifest.get("globals", {}).get("subjects", []) or []:
-        marker = s.get("marker") or _slug_marker(s.get("name", ""))
-        name = s.get("name", "").strip()
-        desc = (s.get("description") or "").strip()
-        if not marker or not name or not desc:
+    for t in manifest.get("globals", {}).get("tags", []) or []:
+        marker = t.get("marker") or _slug_marker(t.get("name", ""))
+        name = (t.get("name") or "").strip()
+        value = (t.get("value") or "").strip()
+        if not marker or not name or not value:
             continue
         out.append({
-            "id": f"global:{s.get('id') or marker}",
-            "source": "global",
+            "id": f"sbtag:{t.get('id') or marker}",
+            "source": "tag",
+            "scope": "storyboard",
             "name": name,
             "marker": marker,
-            "expansion": desc,
-            "category": "subject",
-            "kind": s.get("kind") or "character",
+            "expansion": value,
+            "category": t.get("category"),
         })
     return out
 
@@ -311,3 +430,91 @@ def get_mood(manifest: Optional[Dict[str, Any]]) -> str:
     if not manifest:
         return ""
     return (manifest.get("globals", {}).get("mood") or "").strip()
+
+
+# ---------------------------------------------------------------------------
+# Snapshots — dated copies of the manifest for storyboard versioning
+# ---------------------------------------------------------------------------
+
+def _snapshot_project_name(project_folder: Path) -> str:
+    """Best-effort project name for snapshot filenames."""
+    name = project_name_from_folder(project_folder)
+    if name:
+        return name
+    existing = find_manifest(project_folder)
+    if existing:
+        stem = existing.stem  # "{project}_storyboard"
+        return stem[: stem.rfind("_storyboard")] if "_storyboard" in stem else stem
+    return "untitled"
+
+
+def snapshot_manifest(project_folder: Path) -> str:
+    """Save a dated snapshot of the current manifest alongside the main file.
+
+    Snapshot files follow `{project}_storyboard_{YYMMDD}[a-z].json` so they
+    are never confused with the live manifest (which ends in `_storyboard.json`)
+    and are never picked up by the shot-file scanner.
+
+    Returns the snapshot filename.
+    """
+    m = load_manifest(project_folder) or empty_manifest()
+    project_name = _snapshot_project_name(project_folder)
+    date_str = datetime.now().strftime("%y%m%d")
+
+    base = f"{project_name}_storyboard_{date_str}"
+    filename = f"{base}.json"
+    path = project_folder / filename
+
+    if path.exists():
+        suffix = "a"
+        while (project_folder / f"{base}{suffix}.json").exists():
+            suffix = chr(ord(suffix) + 1)
+        filename = f"{base}{suffix}.json"
+        path = project_folder / filename
+
+    snapshot = {**m, "meta": {**m.get("meta", {}), "snapshot": True, "snapshotAt": _now()}}
+    with open(path, "w") as f:
+        json.dump(snapshot, f, indent=2)
+
+    return filename
+
+
+def list_snapshots(project_folder: Path) -> List[Dict[str, Any]]:
+    """List storyboard snapshot files in the folder, newest first."""
+    if not project_folder or not project_folder.exists():
+        return []
+    results = []
+    for p in project_folder.glob("*_storyboard_*.json"):
+        try:
+            results.append({
+                "filename": p.name,
+                "modifiedAt": datetime.fromtimestamp(p.stat().st_mtime).isoformat(),
+            })
+        except Exception:
+            pass
+    results.sort(key=lambda x: x["modifiedAt"], reverse=True)
+    return results
+
+
+def restore_snapshot(project_folder: Path, filename: str) -> Dict[str, Any]:
+    """Replace the live manifest with a snapshot.
+
+    Strips the snapshot metadata fields before writing so the restored file
+    looks like a normal manifest. Returns the restored manifest.
+    """
+    if not project_folder:
+        raise ValueError("No project folder set")
+    # Basic path-traversal guard
+    if any(c in filename for c in ("/", "\\", "..")):
+        raise ValueError("Invalid snapshot filename")
+    path = project_folder / filename
+    if not path.exists():
+        raise FileNotFoundError(f"Snapshot not found: {filename}")
+    with open(path) as f:
+        data = json.load(f)
+    m = _migrate(data)
+    # Drop the snapshot-only meta fields before writing as the live manifest
+    m["meta"].pop("snapshot", None)
+    m["meta"].pop("snapshotAt", None)
+    save_manifest(project_folder, m)
+    return m

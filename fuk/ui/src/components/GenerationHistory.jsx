@@ -9,6 +9,17 @@ import { buildImageUrl, API_URL } from '../utils/constants';
 import { useVideoPlayback } from '../hooks/useVideoPlayback';
 import ZoomableImage from './ZoomableImage';
 import ConformHDButton from './ConformHDButton';
+import { setPanelPreview } from '../utils/storyboardApi';
+
+// Pin-to-storyboard glyph: stacked thumbnails with an arrow.
+const StoryboardPinIcon = ({ className, style }) => (
+  <svg className={className} style={style} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="5" width="8" height="6" rx="1" />
+    <rect x="13" y="5" width="8" height="6" rx="1" />
+    <rect x="3" y="14" width="8" height="6" rx="1" />
+    <rect x="13" y="14" width="8" height="6" rx="1" />
+  </svg>
+);
 
 
 
@@ -80,7 +91,7 @@ function HoverPreview({ generation, position, videoRef }) {
 }
 
 // Draggable thumbnail component
-function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned, onHover, onHoverEnd, videoRefPlayback, vote, onVote }) {
+function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned, onHover, onHoverEnd, videoRefPlayback, vote, onVote, onSendToStoryboard, sendToStoryboardEnabled }) {
   const [imageError, setImageError] = useState(false);
   const videoRef = useRef(null);
   const isVideo = generation.type === 'video' || 
@@ -311,6 +322,18 @@ function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned, onHov
         </button>
         <div className="gen-history-actions-bar-right">
           <ConformHDButton generation={generation} variant="compact" />
+          {onSendToStoryboard && (
+            <button
+              className="gen-history-pin-storyboard"
+              onClick={(e) => { e.stopPropagation(); onSendToStoryboard(generation); }}
+              disabled={!sendToStoryboardEnabled}
+              title={sendToStoryboardEnabled
+                ? 'Pin as storyboard preview for the current shot'
+                : 'Open a shot to pin a storyboard preview'}
+            >
+              <StoryboardPinIcon />
+            </button>
+          )}
           <button
             className={`gen-history-vote up ${vote === 1 ? 'active' : ''}`}
             onClick={(e) => { e.stopPropagation(); onVote(generation, vote === 1 ? 0 : 1); }}
@@ -375,7 +398,7 @@ function processingType(g) {
 
 // ─── single gallery thumbnail ─────────────────────────────────────────────────
 
-function GalleryThumb({ generation, isPinned, isSelected, isMultiSelected, vote, onSelect, onTogglePin, onVote, onDelete }) {
+function GalleryThumb({ generation, isPinned, isSelected, isMultiSelected, vote, onSelect, onTogglePin, onVote, onDelete, onSendToStoryboard, sendToStoryboardEnabled }) {
   const [imgErr, setImgErr] = useState(false);
   const video   = isGenVideo(generation);
   const seq     = generation.isSequence;
@@ -431,6 +454,18 @@ function GalleryThumb({ generation, isPinned, isSelected, isMultiSelected, vote,
           title={isPinned ? 'Unpin' : 'Pin'}
         ><PinIcon /></button>
         <div className="gen-history-actions-bar-right">
+          {onSendToStoryboard && (
+            <button
+              className="gen-history-pin-storyboard"
+              onClick={e => { e.stopPropagation(); onSendToStoryboard(generation); }}
+              disabled={!sendToStoryboardEnabled}
+              title={sendToStoryboardEnabled
+                ? 'Pin as storyboard preview for the current shot'
+                : 'Open a shot to pin a storyboard preview'}
+            >
+              <StoryboardPinIcon />
+            </button>
+          )}
           <button
             className={`gen-history-vote up ${vote === 1 ? 'active' : ''}`}
             onClick={e => { e.stopPropagation(); onVote(generation, vote === 1 ? 0 : 1); }}
@@ -571,7 +606,7 @@ function GalleryLargeView({ generation, generations, isPinned, vote, onTogglePin
 
 // ─── fullscreen gallery overlay ───────────────────────────────────────────────
 
-function FullscreenGallery({ generations, pinnedIds, votes, onTogglePin, onVote, onDelete, onClose, hasMore, loading, onLoadMore, onLoadAll }) {
+function FullscreenGallery({ generations, pinnedIds, votes, onTogglePin, onVote, onDelete, onClose, hasMore, loading, onLoadMore, onLoadAll, onSendToStoryboard, sendToStoryboardEnabled }) {
   const [zoom, setZoom]               = useState(160);
   const [selected, setSelected]       = useState(generations[0] || null);
   const [previewPct, setPreviewPct]   = useState(55);
@@ -811,6 +846,8 @@ function FullscreenGallery({ generations, pinnedIds, votes, onTogglePin, onVote,
                   onTogglePin={onTogglePin}
                   onVote={onVote}
                   onDelete={handleDelete}
+                  onSendToStoryboard={onSendToStoryboard}
+                  sendToStoryboardEnabled={sendToStoryboardEnabled}
                 />
               ))}
             </div>
@@ -830,6 +867,8 @@ function FullscreenGallery({ generations, pinnedIds, votes, onTogglePin, onVote,
                 onTogglePin={onTogglePin}
                 onVote={onVote}
                 onDelete={handleDelete}
+                onSendToStoryboard={onSendToStoryboard}
+                sendToStoryboardEnabled={sendToStoryboardEnabled}
               />
             ))}
           </div>
@@ -1091,6 +1130,25 @@ export default function GenerationHistory({ project, collapsed, onToggle, galler
     await deleteGeneration(generation);
   };
 
+  // Pin a generation as the storyboard panel preview for the current shot.
+  // The panel kind (image vs video) is inferred from the generation type.
+  const currentShotId = project?.currentFileInfo?.shotNumber || null;
+  const handleSendToStoryboard = useCallback(async (generation) => {
+    if (!currentShotId) return;
+    const kind = isGenVideo(generation) ? 'video' : 'image';
+    const path = generation.path || generation.preview;
+    if (!path) return;
+    try {
+      await setPanelPreview(currentShotId, { kind, path });
+      // Let any mounted storyboard hook refresh its manifest.
+      window.dispatchEvent(new CustomEvent('fuk-storyboard-changed', {
+        detail: { shotId: currentShotId, kind, path },
+      }));
+    } catch (e) {
+      alert(`Failed to pin to storyboard: ${e.message}`);
+    }
+  }, [currentShotId]);
+
   // Count by type for header
   const counts = generations.reduce((acc, g) => {
     acc[g.type] = (acc[g.type] || 0) + 1;
@@ -1173,8 +1231,8 @@ export default function GenerationHistory({ project, collapsed, onToggle, galler
                 </div>
                 <div className="gen-history-grid">
                   {pinnedGenerations.map(gen => (
-                    <DraggableThumbnail 
-                      key={gen.id} 
+                    <DraggableThumbnail
+                      key={gen.id}
                       generation={gen}
                       onDelete={handleDelete}
                       onTogglePin={handleTogglePin}
@@ -1184,6 +1242,8 @@ export default function GenerationHistory({ project, collapsed, onToggle, galler
                       videoRefPlayback={thumbVideoRef}
                       vote={votes[gen.id] || 0}
                       onVote={handleVote}
+                      onSendToStoryboard={handleSendToStoryboard}
+                      sendToStoryboardEnabled={!!currentShotId}
                     />
                   ))}
                 </div>
@@ -1197,8 +1257,8 @@ export default function GenerationHistory({ project, collapsed, onToggle, galler
               )}
               <div className="gen-history-grid">
                 {unpinnedGenerations.map(gen => (
-                  <DraggableThumbnail 
-                    key={gen.id} 
+                  <DraggableThumbnail
+                    key={gen.id}
                     generation={gen}
                     onDelete={handleDelete}
                     onTogglePin={handleTogglePin}
@@ -1208,6 +1268,8 @@ export default function GenerationHistory({ project, collapsed, onToggle, galler
                     videoRefPlayback={thumbVideoRef}
                     vote={votes[gen.id] || 0}
                     onVote={handleVote}
+                    onSendToStoryboard={handleSendToStoryboard}
+                    sendToStoryboardEnabled={!!currentShotId}
                   />
                 ))}
               </div>
@@ -1255,6 +1317,8 @@ export default function GenerationHistory({ project, collapsed, onToggle, galler
           loading={loading}
           onLoadMore={handleLoadMore}
           onLoadAll={handleLoadAll}
+          onSendToStoryboard={handleSendToStoryboard}
+          sendToStoryboardEnabled={!!currentShotId}
         />
       )}
     </div>

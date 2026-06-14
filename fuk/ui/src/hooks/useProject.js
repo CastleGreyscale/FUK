@@ -35,6 +35,10 @@ export function useProject() {
 
   // Persist last loaded file (for restoring shot/version on reload)
   const [savedLastFile, setSavedLastFile] = useLocalStorage('fuk_last_file', null);
+
+  // Persist project name when no shot files exist yet
+  const [savedProjectName, setSavedProjectName] = useLocalStorage('fuk_project_name', null);
+  const [projectName, setProjectName] = useState(savedProjectName);
   const savedLastFileRef = useRef(savedLastFile);
   useEffect(() => { savedLastFileRef.current = savedLastFile; }, [savedLastFile]);
 
@@ -72,9 +76,12 @@ export function useProject() {
     return parseProjectFilename(currentFilename);
   }, [currentFilename]);
   
-  // Available shots
+  // Available shots — natural sort so `1, 2, 10` orders intuitively, and
+  // alphanumeric ids like `intro`, `alt-2` slot in alphabetically.
   const shots = useMemo(() => {
-    return Object.keys(organizedFiles).sort();
+    return Object.keys(organizedFiles).sort((a, b) =>
+      a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })
+    );
   }, [organizedFiles]);
   
   // Current shot's versions
@@ -157,6 +164,9 @@ export function useProject() {
       
       // Auto-load most recent file if available
       if (result.files && result.files.length > 0) {
+        // Clear any pending project name — real files are present
+        setProjectName(null);
+        setSavedProjectName(null);
         const organized = organizeProjectFiles(result.files);
         const fileNames = result.files.map(f => f.name);
         const lastFile = savedLastFileRef.current;
@@ -385,30 +395,35 @@ export function useProject() {
   }, [currentFileInfo, projectState, projectConfig, currentShotVersions, refreshProjectFiles]);
 
   /**
-   * Create new project file
+   * Register a project name — no shot file is created yet.
+   * The first shot is created explicitly via createNewShot().
    */
-  const createProject = useCallback(async (projectName, shotNumber = '01') => {
+  const createProject = useCallback(async (name) => {
+    setProjectName(name);
+    setSavedProjectName(name);
+  }, [setSavedProjectName]);
+
+  /**
+   * Create a shot file and refresh the shot list WITHOUT switching to it.
+   * Used by the storyboard tab so the active shot doesn't change.
+   */
+  const createShotFile = useCallback(async (shotId) => {
+    const name = currentFileInfo?.projectName || projectName;
+    if (!name) throw new Error('No project name set — open or name a project first');
     setIsLoading(true);
     setError(null);
-    
     try {
-      console.log('[Project] Creating new project:', projectName, 'shot', shotNumber);
-      const result = await createNewProject(projectName, shotNumber);
-      
-      // Refresh and load the new file
+      await createNewProject(name, shotId);
+      setProjectName(null);
+      setSavedProjectName(null);
       await refreshProjectFiles();
-      await loadProjectFile(result.filename);
-      
-      console.log('[Project] New project created:', result.filename);
-      return result.filename;
     } catch (err) {
-      console.error('[Project] Create failed:', err);
       setError(err.message);
       throw err;
     } finally {
       setIsLoading(false);
     }
-  }, [refreshProjectFiles, loadProjectFile]);
+  }, [currentFileInfo, projectName, refreshProjectFiles, setSavedProjectName]);
 
   /**
    * Switch to different shot
@@ -439,15 +454,31 @@ export function useProject() {
   }, [currentFileInfo, organizedFiles, loadProjectFile]);
 
   /**
-   * Create new shot
+   * Create a new shot file. Uses the current project name (from loaded file
+   * or the pending name set via createProject).
    */
-  const createNewShot = useCallback(async (shotNumber) => {
-    if (!currentFileInfo) {
-      throw new Error('No project loaded');
+  const createNewShot = useCallback(async (shotId) => {
+    const name = currentFileInfo?.projectName || projectName;
+    if (!name) throw new Error('No project name set');
+    setIsLoading(true);
+    setError(null);
+    try {
+      console.log('[Project] Creating shot:', name, shotId);
+      const result = await createNewProject(name, shotId);
+      setProjectName(null);
+      setSavedProjectName(null);
+      await refreshProjectFiles();
+      await loadProjectFile(result.filename);
+      console.log('[Project] Shot created:', result.filename);
+      return result.filename;
+    } catch (err) {
+      console.error('[Project] Shot create failed:', err);
+      setError(err.message);
+      throw err;
+    } finally {
+      setIsLoading(false);
     }
-    
-    await createProject(currentFileInfo.projectName, shotNumber);
-  }, [currentFileInfo, createProject]);
+  }, [currentFileInfo, projectName, refreshProjectFiles, loadProjectFile, setSavedProjectName]);
 
   /**
    * Update tab state (marks as dirty, triggers autosave)
@@ -583,6 +614,7 @@ export function useProject() {
   return {
     // State
     projectFolder,
+    projectName,
     projectFiles,
     organizedFiles,
     currentFilename,
@@ -611,6 +643,7 @@ export function useProject() {
     switchShot,
     switchVersion,
     createNewShot,
+    createShotFile,
     createProject,
     updateTabState,
     updateLastState,

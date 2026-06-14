@@ -71,7 +71,8 @@ from project_endpoints import (
     cleanup_failed_generation
 )
 from hd_proxy_endpoints import setup_hd_proxy_routes
-from llm_endpoints import setup_llm_routes
+from llm_endpoints import setup_llm_routes, _resolve_prompt as resolve_prompt_for_generation
+from storyboard_endpoints import setup_storyboard_routes
 
 
 # ============================================================================
@@ -835,19 +836,68 @@ async def restart_server():
 # Image Generation
 # ============================================================================
 
+def _gen_active_lora_list(request) -> List[str]:
+    """Collect LoRA identifiers from a generation request for marker resolution.
+
+    The resolver uses these to filter LoRA-token expansions to the active set
+    and to flag missing triggers. Accepts both legacy single `lora` and the
+    multi-LoRA `loras` list (image only).
+    """
+    out: List[str] = []
+    single = getattr(request, "lora", None)
+    if single:
+        out.append(single)
+    multi = getattr(request, "loras", None) or []
+    for entry in multi:
+        name = (entry or {}).get("name") if isinstance(entry, dict) else None
+        if name:
+            out.append(name)
+    return out
+
+
+def _resolve_request_prompt(request) -> tuple[str, str, dict]:
+    """Resolve `request.prompt` against the live vocabulary + mood.
+
+    Returns (resolved_prompt, source_prompt, provenance_dict). The provenance
+    is what we hand to save_generation_metadata so the generation history
+    captures both the author's draft and what the model actually saw.
+    """
+    source = request.prompt or ""
+    res = resolve_prompt_for_generation(
+        text=source,
+        config_dir=CONFIG_DIR,
+        model=getattr(request, "model", None) or getattr(request, "task", None),
+        active_loras=_gen_active_lora_list(request),
+        apply_mood=True,
+    )
+    return res["resolved"], source, {
+        "expanded_markers": res["expanded_markers"],
+        "unknown_markers": res["unknown_markers"],
+        "mood_applied": res["mood_applied"],
+    }
+
+
 async def run_image_generation(generation_id: str, request: ImageGenerationRequest):
     """Background task for image generation"""
-    
+
     # Start log capture for this generation
     set_current_generation(generation_id)
     capture = _OutputCapture()
     capture.start()
-    
+
     try:
         log.header("IMAGE GENERATION")
         log.info("ImageGen", f"Generation ID: {generation_id}")
+
+        # Resolve `#markers` + append storyboard mood. The resolved string is
+        # what the model sees; the raw draft is preserved in metadata so the
+        # author can audit what each marker stood for at generation time.
+        prompt, prompt_source, prompt_provenance = _resolve_request_prompt(request)
+        if prompt_provenance["expanded_markers"] or prompt_provenance["mood_applied"]:
+            log.info("ImageGen", f"Resolved markers: {prompt_provenance['expanded_markers']}; mood: {bool(prompt_provenance['mood_applied'])}")
+
         log.params("Parameters", {
-            "prompt": request.prompt[:60] + "..." if len(request.prompt) > 60 else request.prompt,
+            "prompt": prompt[:60] + "..." if len(prompt) > 60 else prompt,
             "model": request.model,
             "size": f"{request.width}x{request.height}",
             "steps": request.steps,
@@ -975,7 +1025,7 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
         result = await asyncio.to_thread(
             generation_backend.run,
             "image",
-            prompt=request.prompt,
+            prompt=prompt,
             output_path=paths["generated_png"],
             model=request.model,
             width=request.width,
@@ -1016,10 +1066,12 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
             outputs["exr"] = get_project_relative_url(paths["generated_exr"])
             log.info("ImageGen", f"EXR saved: {paths['generated_exr']}")
         
-        # Save metadata
+        # Save metadata. `prompt` is the resolved string (true model input);
+        # `prompt_source` preserves the raw draft with `#markers` so the
+        # history view can show provenance and re-resolve if globals changed.
         save_generation_metadata(
             gen_dir=gen_dir,
-            prompt=request.prompt,
+            prompt=prompt,
             model=request.model,
             seed=result.get("seed_used") or request.seed or 0,
             image_size=(request.width, request.height),
@@ -1034,6 +1086,10 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
             exponential_shift_mu=request.exponential_shift_mu,
             eligen_source=str(eligen_source_abs) if eligen_source_abs else None,
             eligen_alpha=request.eligen_alpha,
+            prompt_source=prompt_source,
+            prompt_expanded_markers=prompt_provenance["expanded_markers"],
+            prompt_unknown_markers=prompt_provenance["unknown_markers"],
+            mood_applied=prompt_provenance["mood_applied"],
         )
         
         # Mark complete
@@ -1121,6 +1177,12 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
         log.header("VIDEO GENERATION")
         log.info("VideoGen", f"Generation ID: {generation_id}")
 
+        # Resolve `#markers` + append storyboard mood before any backend call.
+        prompt, prompt_source, prompt_provenance = _resolve_request_prompt(request)
+        if prompt_provenance["expanded_markers"] or prompt_provenance["mood_applied"]:
+            log.info("VideoGen", f"Resolved markers: {prompt_provenance['expanded_markers']}; mood: {bool(prompt_provenance['mood_applied'])}")
+
+
         # Force Python GC before starting so previous generation's objects are
         # collected and their GPU memory released before we measure baseline.
         import gc as _gc
@@ -1177,7 +1239,7 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
         result = await asyncio.to_thread(
             generation_backend.run,
             "video",
-            prompt=request.prompt,
+            prompt=prompt,
             output_path=paths["generated_mp4"],
             task=request.task,
             width=request.width,
@@ -1241,10 +1303,12 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
 
             outputs["exr_sequence"] = get_project_relative_url(exr_dir)
         
-        # Save metadata
+        # Save metadata. `prompt` is the resolved string; `prompt_source` is
+        # the raw draft so the history view can show provenance and audit
+        # what each marker stood for at generation time.
         save_generation_metadata(
             gen_dir=gen_dir,
-            prompt=request.prompt,
+            prompt=prompt,
             model=request.task,
             seed=result.get("seed_used") or request.seed or 0,
             image_size=(request.width, request.height),
@@ -1261,6 +1325,10 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
             denoising_strength=request.denoising_strength,
             sliding_window_size=request.sliding_window_size,
             sliding_window_stride=request.sliding_window_stride,
+            prompt_source=prompt_source,
+            prompt_expanded_markers=prompt_provenance["expanded_markers"],
+            prompt_unknown_markers=prompt_provenance["unknown_markers"],
+            mood_applied=prompt_provenance["mood_applied"],
         )
         
         # Mark complete
@@ -3492,6 +3560,9 @@ setup_video_routes(
 
 # LLM / Ollama routes (image describe; prompt construction later)
 setup_llm_routes(app, resolve_input_path=resolve_input_path, log=log, config_dir=CONFIG_DIR)
+
+# Storyboard manifest routes (project-level shot list + live globals)
+setup_storyboard_routes(app)
 
 # HD Proxy conform — VACE re-render of an i2v proxy at source-still resolution
 setup_hd_proxy_routes(

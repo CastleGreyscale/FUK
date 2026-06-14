@@ -74,6 +74,7 @@
   --color-border-light: var(--color-gray-600);
   --color-gradient-background: linear-gradient(to bottom right, #111, #000, #111);
   --color-text-primary: var(--color-gray-100);
+  --color-text: var(--color-text-primary);
   --color-text-secondary: var(--color-gray-500);
   --color-text-muted: var(--color-gray-400);
   --color-text-disabled: var(--color-gray-500);

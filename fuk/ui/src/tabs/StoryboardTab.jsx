@@ -15,18 +15,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Footer from '../components/Footer';
-import { Plus, Trash2, Camera, Film, Loader2, AlertCircle, CheckCircle } from '../components/Icons';
+import { Plus, Trash2, Camera, Film, Loader2, AlertCircle, CheckCircle, Image as ImageIcon, X } from '../components/Icons';
 import { useStoryboard } from '../hooks/useStoryboard';
-import { sendPanelToImage, sendPanelToVideo } from '../utils/storyboardApi';
+import { sendPanelToImage, sendPanelToVideo, snapshotStoryboard, fetchSnapshots, restoreSnapshot } from '../utils/storyboardApi';
 import MarkerTextarea from '../components/MarkerTextarea';
-import {
-  fetchTags,
-  fetchTagCategories,
-  createTag,
-  updateTag,
-  deleteTag,
-  PROMPT_TOKENS_CHANGED_EVENT,
-} from '../utils/promptApi';
+import { buildImageUrl, generateRandomSeed } from '../utils/constants';
 
 // Debounce window for autosave. Short enough to feel snappy, long enough to
 // coalesce a paragraph of typing into one PUT.
@@ -49,7 +42,7 @@ function useDebouncedEffect(value, delay, effect) {
   }, [value, delay]);
 }
 
-export default function StoryboardTab({ activeTab, setActiveTab, project }) {
+export default function StoryboardTab({ activeTab, setActiveTab, project, config }) {
   const sb = useStoryboard(project);
   const { manifest, loading, error } = sb;
 
@@ -91,13 +84,15 @@ export default function StoryboardTab({ activeTab, setActiveTab, project }) {
 
         {manifest && (
           <>
-            <GlobalsSection sb={sb} manifest={manifest} />
+            <SnapshotControl sb={sb} />
+            <GlobalsSection sb={sb} manifest={manifest} config={config} />
             <PanelGrid
               sb={sb}
               manifest={manifest}
               panelOrder={panelOrder}
               project={project}
               setActiveTab={setActiveTab}
+              config={config}
             />
           </>
         )}
@@ -119,218 +114,353 @@ function SaveStatus({ state }) {
 }
 
 // ---------------------------------------------------------------------------
+// Snapshot control — storyboard versioning
+// ---------------------------------------------------------------------------
+
+function SnapshotControl({ sb }) {
+  const [busy, setBusy] = useState(false);
+  const [snapshots, setSnapshots] = useState([]);
+  const [selected, setSelected] = useState('');
+  const [lastSaved, setLastSaved] = useState(null);
+  const [err, setErr] = useState(null);
+
+  const loadSnapshots = useCallback(async () => {
+    try {
+      const { snapshots: list } = await fetchSnapshots();
+      setSnapshots(list);
+    } catch (e) {
+      // Non-fatal — the dropdown will just be empty
+    }
+  }, []);
+
+  useEffect(() => { loadSnapshots(); }, [loadSnapshots]);
+
+  const handleSnapshot = useCallback(async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const { filename } = await snapshotStoryboard();
+      setLastSaved(filename);
+      await loadSnapshots();
+      setTimeout(() => setLastSaved(null), 3000);
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }, [loadSnapshots]);
+
+  const handleLoad = useCallback(async () => {
+    if (!selected) return;
+    if (!confirm(`Load "${selected}"?`)) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await restoreSnapshot(selected);
+      await sb.refresh();
+      setSelected('');
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }, [selected, sb]);
+
+  return (
+    <div className="storyboard-snapshot-bar">
+      <button
+        type="button"
+        className="fuk-btn fuk-btn-secondary"
+        onClick={handleSnapshot}
+        disabled={busy}
+        title="Save a dated copy of the storyboard"
+      >
+        {busy && !selected ? <Loader2 className="animate-spin" /> : null}
+        Snapshot
+      </button>
+
+      <select
+        className="fuk-input storyboard-snapshot-select"
+        value={selected}
+        onChange={e => setSelected(e.target.value)}
+        disabled={snapshots.length === 0 || busy}
+      >
+        <option value="">{snapshots.length === 0 ? 'No snapshots' : 'Load snapshot…'}</option>
+        {snapshots.map(s => (
+          <option key={s.filename} value={s.filename}>
+            {s.filename}
+          </option>
+        ))}
+      </select>
+
+      <button
+        type="button"
+        className="fuk-btn fuk-btn-secondary"
+        onClick={handleLoad}
+        disabled={!selected || busy}
+      >
+        {busy && selected ? <Loader2 className="animate-spin" /> : null}
+        Load
+      </button>
+
+      {lastSaved && (
+        <span className="storyboard-snapshot-ok">
+          <CheckCircle /> {lastSaved}
+        </span>
+      )}
+      {err && <span className="storyboard-error" style={{ fontSize: '0.8rem' }}>{err}</span>}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Globals: subjects + mood + specs
 // ---------------------------------------------------------------------------
 
-function GlobalsSection({ sb, manifest }) {
+function GlobalsSection({ sb, manifest, config }) {
   return (
     <section className="storyboard-globals">
       <h2 className="storyboard-section-title">Globals</h2>
       <p className="storyboard-section-hint">
-        <strong>Subjects</strong> are project-scoped — they live in this storyboard. <strong>Tags</strong> are workspace-scoped — they ship with the install and are available in every project. Both surface as <code>#markers</code> in every shot; subjects win on collision. <strong>Mood</strong> is appended to every prompt at generation.
+        Project tags become <code>#markers</code> available in every shot. Mood is appended to every prompt at generation. Active LoRAs surface their trigger markers and caption phrases in <code>#</code> autocomplete across the project. Type <code>#</code> in any field below to reference an existing marker.
       </p>
       <div className="storyboard-globals-grid">
-        <SubjectsEditor sb={sb} subjects={manifest.globals?.subjects || []} />
-        <TagsEditor />
-      </div>
-      <div className="storyboard-globals-mood-row">
+        <TagsEditor sb={sb} tags={manifest.globals?.tags || []} />
         <MoodEditor sb={sb} mood={manifest.globals?.mood || ''} />
       </div>
+      <GlobalSeedsEditor
+        sb={sb}
+        imageSeed={manifest.globals?.image_seed ?? null}
+        videoSeed={manifest.globals?.video_seed ?? null}
+      />
+      <ActiveLorasPicker
+        sb={sb}
+        active={manifest.globals?.active_loras || []}
+        available={config?.models?.loras || []}
+      />
     </section>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Tags — workspace-scoped #marker vocabulary (prompt_tags.json)
+// Active LoRAs picker — drives caption autocomplete project-wide.
 // ---------------------------------------------------------------------------
 
-function TagsEditor() {
-  const [tags, setTags] = useState([]);
-  const [categories, setCategories] = useState([]);
-  const [loading, setLoading] = useState(true);
+function ActiveLorasPicker({ sb, active, available }) {
+  const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
+  // Normalize available entries; some installs ship them as bare strings.
+  const items = useMemo(() => (available || []).map(l => (
+    typeof l === 'string'
+      ? { key: l, name: l, model: null, trigger_word: null }
+      : { key: l.key, name: l.name || l.description || l.key, model: l.model || null, trigger_word: l.trigger_word || null }
+  )).filter(l => l.key), [available]);
+
+  // Group by model so multi-pipeline installs stay scannable.
+  const grouped = useMemo(() => {
+    const groups = new Map();
+    for (const l of items) {
+      const k = typeof l.model === 'string' && l.model ? l.model : 'other';
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(l);
+    }
+    return [...groups.entries()]
+      .sort(([a], [b]) => String(a).localeCompare(String(b)))
+      .map(([model, list]) => ({ model, list: list.sort((a, b) => String(a.name).localeCompare(String(b.name))) }));
+  }, [items]);
+
+  const activeSet = useMemo(() => new Set(active), [active]);
+
+  const toggle = useCallback(async (key) => {
+    const next = activeSet.has(key)
+      ? active.filter(k => k !== key)
+      : [...active, key];
+    setBusy(true);
     setErr(null);
     try {
-      const [t, c] = await Promise.all([fetchTags(), fetchTagCategories()]);
-      setTags(t?.tags || []);
-      setCategories(c?.categories || []);
+      await sb.updateActiveLoras(next);
     } catch (e) {
       setErr(e.message);
     } finally {
-      setLoading(false);
+      setBusy(false);
     }
-  }, []);
+  }, [active, activeSet, sb]);
 
-  useEffect(() => { refresh(); }, [refresh]);
-
-  // Pick up tag CRUD that happens elsewhere (PromptPanel could add tags too
-  // in the future, and multiple storyboard tabs would race otherwise).
-  useEffect(() => {
-    const handler = () => refresh();
-    window.addEventListener(PROMPT_TOKENS_CHANGED_EVENT, handler);
-    return () => window.removeEventListener(PROMPT_TOKENS_CHANGED_EVENT, handler);
-  }, [refresh]);
-
-  // Group for display. Sort categories alphabetically, with "uncategorized" last.
-  const grouped = useMemo(() => {
-    const groups = new Map();
-    for (const t of tags) {
-      const key = t.category || '~uncategorized';
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(t);
+  const clearAll = useCallback(async () => {
+    if (!active.length) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await sb.updateActiveLoras([]);
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
     }
-    return [...groups.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([cat, items]) => ({
-        category: cat === '~uncategorized' ? 'uncategorized' : cat,
-        items: items.sort((a, b) => (a.name || '').localeCompare(b.name || '')),
-      }));
-  }, [tags]);
-
-  const handleCreate = useCallback(async (payload) => {
-    const created = await createTag(payload);
-    setTags(ts => [...ts, created]);
-    return created;
-  }, []);
-
-  const handleUpdate = useCallback(async (id, payload) => {
-    const updated = await updateTag(id, payload);
-    setTags(ts => ts.map(t => (t.id === id ? updated : t)));
-    return updated;
-  }, []);
-
-  const handleDelete = useCallback(async (id) => {
-    await deleteTag(id);
-    setTags(ts => ts.filter(t => t.id !== id));
-  }, []);
+  }, [active, sb]);
 
   return (
-    <div className="storyboard-tags">
+    <div className="storyboard-loras">
       <div className="storyboard-subsection-header">
-        <h3>Tags</h3>
-        <span className="storyboard-count">{tags.length}</span>
+        <h3>Active LoRAs</h3>
+        <span className="storyboard-count">{active.length}</span>
+        {active.length > 0 && (
+          <button
+            type="button"
+            className="storyboard-loras-clear"
+            onClick={clearAll}
+            disabled={busy}
+            title="Deactivate all"
+          >clear</button>
+        )}
       </div>
-      {err && <div className="storyboard-error">{err}</div>}
-      {loading ? (
-        <div className="storyboard-loading"><Loader2 className="animate-spin" /> Loading tags…</div>
+      <p className="storyboard-section-hint">
+        Click to toggle. Activating a LoRA surfaces its trigger marker (e.g. <code>#italian_horror</code>) and any caption phrases the LoRA shipped with — they appear in <code>#</code> autocomplete everywhere.
+      </p>
+      {items.length === 0 ? (
+        <div className="storyboard-empty-hint">No LoRAs found in your install.</div>
       ) : (
-        <>
-          <ul className="storyboard-tag-list">
-            {grouped.length === 0 && (
-              <li className="storyboard-empty-hint">No tags yet. Add one below to surface a <code>#marker</code> in every project.</li>
-            )}
-            {grouped.map(group => (
-              <li key={group.category} className="storyboard-tag-group">
-                <div className="storyboard-tag-group-header">{group.category}</div>
-                <ul className="storyboard-tag-group-list">
-                  {group.items.map(t => (
-                    <TagRow
-                      key={t.id}
-                      tag={t}
-                      categories={categories}
-                      onUpdate={handleUpdate}
-                      onDelete={handleDelete}
-                    />
-                  ))}
-                </ul>
-              </li>
-            ))}
-          </ul>
-          <NewTagForm categories={categories} onCreate={handleCreate} />
-        </>
+        <div className="storyboard-loras-groups">
+          {grouped.map(g => (
+            <div key={g.model} className="storyboard-loras-group">
+              <div className="storyboard-loras-group-header">{g.model}</div>
+              <ul className="storyboard-loras-chip-list">
+                {g.list.map(l => {
+                  const isActive = activeSet.has(l.key);
+                  return (
+                    <li key={l.key}>
+                      <button
+                        type="button"
+                        className={`storyboard-lora-chip ${isActive ? 'storyboard-lora-chip--on' : ''}`}
+                        onClick={() => toggle(l.key)}
+                        disabled={busy}
+                        title={l.trigger_word ? `trigger: ${l.trigger_word}` : l.key}
+                      >
+                        {l.name}
+                        {l.trigger_word && (
+                          <span className="storyboard-lora-chip-trigger">#{l.trigger_word}</span>
+                        )}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ))}
+        </div>
       )}
+      {err && <div className="storyboard-error">{err}</div>}
     </div>
   );
 }
 
-function NewTagForm({ categories, onCreate }) {
-  const [draft, setDraft] = useState({ name: '', value: '', category: '' });
+// ---------------------------------------------------------------------------
+// Tags: project-local `#marker` shorthand. Lives in the storyboard manifest,
+// shadows workspace tags on marker collision.
+// ---------------------------------------------------------------------------
+
+const TAG_KINDS = ['character', 'prop', 'location', 'other'];
+
+function TagsEditor({ sb, tags }) {
+  const [draft, setDraft] = useState({ name: '', value: '', category: 'character' });
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState(null);
 
-  const handleSubmit = useCallback(async (e) => {
+  const handleAdd = useCallback(async (e) => {
     e.preventDefault();
     if (!draft.name.trim() || !draft.value.trim()) return;
     setSubmitting(true);
     setErr(null);
     try {
-      await onCreate({
+      await sb.createTag({
         name: draft.name,
         value: draft.value,
         category: draft.category || null,
       });
-      setDraft({ name: '', value: '', category: draft.category || '' });
+      setDraft({ name: '', value: '', category: 'character' });
     } catch (e) {
       setErr(e.message);
     } finally {
       setSubmitting(false);
     }
-  }, [draft, onCreate]);
+  }, [draft, sb]);
 
   return (
-    <form className="storyboard-tag-form" onSubmit={handleSubmit}>
-      <input
-        className="fuk-input"
-        placeholder="name (e.g. golden_hour)"
-        value={draft.name}
-        onChange={e => setDraft(d => ({ ...d, name: e.target.value }))}
-        disabled={submitting}
-      />
-      <select
-        className="fuk-input"
-        value={draft.category}
-        onChange={e => setDraft(d => ({ ...d, category: e.target.value }))}
-        disabled={submitting}
-      >
-        <option value="">— category —</option>
-        {categories.map(c => <option key={c} value={c}>{c}</option>)}
-      </select>
-      <textarea
-        className="fuk-textarea"
-        placeholder="expansion — what #marker stands in for at generation time"
-        rows={2}
-        value={draft.value}
-        onChange={e => setDraft(d => ({ ...d, value: e.target.value }))}
-        disabled={submitting}
-      />
-      <button
-        type="submit"
-        className="fuk-btn fuk-btn-primary"
-        disabled={submitting || !draft.name.trim() || !draft.value.trim()}
-      >
-        {submitting ? <Loader2 className="animate-spin" /> : <Plus />} Add tag
-      </button>
-      {err && <div className="storyboard-error">{err}</div>}
-    </form>
+    <div className="storyboard-tags">
+      <div className="storyboard-subsection-header">
+        <h3>Project tags</h3>
+        <span className="storyboard-count">{tags.length}</span>
+      </div>
+      <p className="storyboard-section-hint">
+        Project-local <code>#markers</code> — characters, props, locations, or anything else. Lives with the storyboard, not the global tag library. Shadows workspace tags on marker collision.
+      </p>
+      <ul className="storyboard-subject-list">
+        {tags.map(t => (
+          <TagRow key={t.id} tag={t} sb={sb} />
+        ))}
+        {tags.length === 0 && (
+          <li className="storyboard-empty-hint">No project tags yet. Add one below to create a <code>#marker</code> scoped to this storyboard.</li>
+        )}
+      </ul>
+      <form className="storyboard-subject-form" onSubmit={handleAdd}>
+        <input
+          className="fuk-input"
+          placeholder="name (e.g. sarah, studio_kettle)"
+          value={draft.name}
+          onChange={e => setDraft(d => ({ ...d, name: e.target.value }))}
+          disabled={submitting}
+        />
+        <select
+          className="fuk-input"
+          value={draft.category}
+          onChange={e => setDraft(d => ({ ...d, category: e.target.value }))}
+          disabled={submitting}
+        >
+          {TAG_KINDS.map(k => <option key={k} value={k}>{k}</option>)}
+        </select>
+        <MarkerTextarea
+          className="fuk-textarea"
+          placeholder="value — what #marker expands to at generation time"
+          rows={2}
+          value={draft.value}
+          onChange={(v) => setDraft(d => ({ ...d, value: v }))}
+          disabled={submitting}
+        />
+        <button
+          type="submit"
+          className="fuk-btn fuk-btn-primary"
+          disabled={submitting || !draft.name.trim() || !draft.value.trim()}
+        >
+          {submitting ? <Loader2 className="animate-spin" /> : <Plus />} Add tag
+        </button>
+        {err && <div className="storyboard-error">{err}</div>}
+      </form>
+    </div>
   );
 }
 
-function TagRow({ tag, categories, onUpdate, onDelete }) {
+function TagRow({ tag, sb }) {
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState({ name: tag.name, value: tag.value, category: tag.category || '' });
+  const [draft, setDraft] = useState({ ...tag, category: tag.category || 'other' });
   const [status, setStatus] = useState('idle');
   const [busy, setBusy] = useState(false);
 
-  // Snap back to server state when the tag changes externally — unless we're
-  // mid-edit, in which case the local draft is the authority.
   useEffect(() => {
-    if (!editing) setDraft({ name: tag.name, value: tag.value, category: tag.category || '' });
-  }, [tag.name, tag.value, tag.category, editing]);
+    if (!editing) setDraft({ ...tag, category: tag.category || 'other' });
+  }, [tag, editing]);
 
   useDebouncedEffect(draft, AUTOSAVE_MS, async (current) => {
     if (!editing) return;
     if (
       current.name === tag.name &&
       current.value === tag.value &&
-      (current.category || null) === (tag.category || null)
+      (current.category || '') === (tag.category || '')
     ) return;
     if (!current.name.trim() || !current.value.trim()) return;
     setStatus('saving');
     try {
-      await onUpdate(tag.id, {
+      await sb.updateTag(tag.id, {
         name: current.name,
         value: current.value,
         category: current.category || null,
@@ -345,182 +475,13 @@ function TagRow({ tag, categories, onUpdate, onDelete }) {
     if (!confirm(`Delete tag "${tag.name}"?`)) return;
     setBusy(true);
     try {
-      await onDelete(tag.id);
+      await sb.deleteTag(tag.id);
     } catch (e) {
       alert(e.message);
     } finally {
       setBusy(false);
     }
-  }, [onDelete, tag.id, tag.name]);
-
-  // Build a `#marker` preview from the name (matches backend slug rules
-  // closely enough for display — exact value comes back from the server).
-  const markerPreview = `#${(tag.name || '').replace(/[^A-Za-z0-9_-]+/g, '_')}`;
-
-  if (editing) {
-    return (
-      <li className="storyboard-tag-row storyboard-tag-row--editing">
-        <input
-          className="fuk-input"
-          value={draft.name}
-          onChange={e => setDraft(d => ({ ...d, name: e.target.value }))}
-        />
-        <select
-          className="fuk-input"
-          value={draft.category}
-          onChange={e => setDraft(d => ({ ...d, category: e.target.value }))}
-        >
-          <option value="">— category —</option>
-          {categories.map(c => <option key={c} value={c}>{c}</option>)}
-        </select>
-        <textarea
-          className="fuk-textarea"
-          rows={2}
-          value={draft.value}
-          onChange={e => setDraft(d => ({ ...d, value: e.target.value }))}
-        />
-        <div className="storyboard-tag-row-actions">
-          <SaveStatus state={status} />
-          <button className="fuk-btn fuk-btn-secondary" onClick={() => { setEditing(false); setStatus('idle'); }}>Done</button>
-        </div>
-      </li>
-    );
-  }
-
-  return (
-    <li className="storyboard-tag-row">
-      <div className="storyboard-tag-summary">
-        <code className="storyboard-tag-marker">{markerPreview}</code>
-        <span className="storyboard-tag-value">{tag.value}</span>
-      </div>
-      <div className="storyboard-tag-row-actions">
-        <button className="fuk-btn fuk-btn-secondary" onClick={() => setEditing(true)} disabled={busy}>Edit</button>
-        <button className="fuk-btn fuk-btn-secondary" onClick={handleDelete} disabled={busy}><Trash2 /></button>
-      </div>
-    </li>
-  );
-}
-
-function SubjectsEditor({ sb, subjects }) {
-  const [draft, setDraft] = useState({ name: '', description: '', kind: 'character' });
-  const [submitting, setSubmitting] = useState(false);
-  const [err, setErr] = useState(null);
-
-  const handleAdd = useCallback(async (e) => {
-    e.preventDefault();
-    if (!draft.name.trim() || !draft.description.trim()) return;
-    setSubmitting(true);
-    setErr(null);
-    try {
-      await sb.createSubject(draft);
-      setDraft({ name: '', description: '', kind: 'character' });
-    } catch (e) {
-      setErr(e.message);
-    } finally {
-      setSubmitting(false);
-    }
-  }, [draft, sb]);
-
-  return (
-    <div className="storyboard-subjects">
-      <div className="storyboard-subsection-header">
-        <h3>Subjects</h3>
-        <span className="storyboard-count">{subjects.length}</span>
-      </div>
-      <ul className="storyboard-subject-list">
-        {subjects.map(s => (
-          <SubjectRow key={s.id} subject={s} sb={sb} />
-        ))}
-        {subjects.length === 0 && (
-          <li className="storyboard-empty-hint">No subjects yet. Add one below to surface a <code>#marker</code> across all shots.</li>
-        )}
-      </ul>
-      <form className="storyboard-subject-form" onSubmit={handleAdd}>
-        <input
-          className="fuk-input"
-          placeholder="name (e.g. sarah)"
-          value={draft.name}
-          onChange={e => setDraft(d => ({ ...d, name: e.target.value }))}
-          disabled={submitting}
-        />
-        <select
-          className="fuk-input"
-          value={draft.kind}
-          onChange={e => setDraft(d => ({ ...d, kind: e.target.value }))}
-          disabled={submitting}
-        >
-          <option value="character">character</option>
-          <option value="prop">prop</option>
-          <option value="location">location</option>
-          <option value="other">other</option>
-        </select>
-        <textarea
-          className="fuk-textarea"
-          placeholder="description — what #marker expands to at generation time"
-          rows={2}
-          value={draft.description}
-          onChange={e => setDraft(d => ({ ...d, description: e.target.value }))}
-          disabled={submitting}
-        />
-        <button
-          type="submit"
-          className="fuk-btn fuk-btn-primary"
-          disabled={submitting || !draft.name.trim() || !draft.description.trim()}
-        >
-          {submitting ? <Loader2 className="animate-spin" /> : <Plus />} Add subject
-        </button>
-        {err && <div className="storyboard-error">{err}</div>}
-      </form>
-    </div>
-  );
-}
-
-function SubjectRow({ subject, sb }) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState({ ...subject });
-  const [status, setStatus] = useState('idle'); // idle | saving | saved | error
-  const [busy, setBusy] = useState(false);
-
-  // Sync draft if the underlying subject changes externally (refresh, etc.)
-  // — only when we're not currently editing to avoid overwriting typed input.
-  useEffect(() => {
-    if (!editing) setDraft({ ...subject });
-  }, [subject, editing]);
-
-  // Autosave the edit row on debounce. We only push when there's a real
-  // change against the server-side value to avoid a write loop.
-  useDebouncedEffect(draft, AUTOSAVE_MS, async (current) => {
-    if (!editing) return;
-    if (
-      current.name === subject.name &&
-      current.description === subject.description &&
-      current.kind === subject.kind
-    ) return;
-    if (!current.name.trim() || !current.description.trim()) return;
-    setStatus('saving');
-    try {
-      await sb.updateSubject(subject.id, {
-        name: current.name,
-        description: current.description,
-        kind: current.kind,
-      });
-      setStatus('saved');
-    } catch (e) {
-      setStatus('error');
-    }
-  });
-
-  const handleDelete = useCallback(async () => {
-    if (!confirm(`Delete subject "${subject.name}"?`)) return;
-    setBusy(true);
-    try {
-      await sb.deleteSubject(subject.id);
-    } catch (e) {
-      alert(e.message);
-    } finally {
-      setBusy(false);
-    }
-  }, [sb, subject.id, subject.name]);
+  }, [sb, tag.id, tag.name]);
 
   if (editing) {
     return (
@@ -532,23 +493,20 @@ function SubjectRow({ subject, sb }) {
         />
         <select
           className="fuk-input"
-          value={draft.kind}
-          onChange={e => setDraft(d => ({ ...d, kind: e.target.value }))}
+          value={draft.category}
+          onChange={e => setDraft(d => ({ ...d, category: e.target.value }))}
         >
-          <option value="character">character</option>
-          <option value="prop">prop</option>
-          <option value="location">location</option>
-          <option value="other">other</option>
+          {TAG_KINDS.map(k => <option key={k} value={k}>{k}</option>)}
         </select>
-        <textarea
+        <MarkerTextarea
           className="fuk-textarea"
           rows={2}
-          value={draft.description}
-          onChange={e => setDraft(d => ({ ...d, description: e.target.value }))}
+          value={draft.value}
+          onChange={(v) => setDraft(d => ({ ...d, value: v }))}
         />
         <div className="storyboard-subject-row-actions">
           <SaveStatus state={status} />
-          <button className="fuk-btn fuk-btn-secondary" onClick={() => { setDraft(subject); setEditing(false); setStatus('idle'); }}>Done</button>
+          <button className="fuk-btn fuk-btn-secondary" onClick={() => { setDraft({ ...tag, category: tag.category || 'other' }); setEditing(false); setStatus('idle'); }}>Done</button>
         </div>
       </li>
     );
@@ -557,9 +515,9 @@ function SubjectRow({ subject, sb }) {
   return (
     <li className="storyboard-subject-row">
       <div className="storyboard-subject-summary">
-        <code className="storyboard-subject-marker">{subject.marker}</code>
-        <span className="storyboard-subject-kind">{subject.kind}</span>
-        <span className="storyboard-subject-desc">{subject.description}</span>
+        <code className="storyboard-subject-marker">{tag.marker}</code>
+        <span className="storyboard-subject-kind">{tag.category || 'other'}</span>
+        <span className="storyboard-subject-desc">{tag.value}</span>
       </div>
       <div className="storyboard-subject-row-actions">
         <button className="fuk-btn fuk-btn-secondary" onClick={() => setEditing(true)} disabled={busy}>Edit</button>
@@ -601,14 +559,113 @@ function MoodEditor({ sb, mood }) {
       <p className="storyboard-section-hint">
         One sentence. Style + environment merged. Appended to every shot's prompt at generation as <code>Mood: …</code>.
       </p>
-      <textarea
+      <MarkerTextarea
         className="fuk-textarea"
         rows={4}
         value={draft}
         placeholder="e.g. neo-noir, low-key lighting, rain-soaked Tokyo back alleys at night"
-        onChange={e => { setDraft(e.target.value); localDirtyRef.current = true; }}
+        onChange={(v) => { setDraft(v); localDirtyRef.current = true; }}
       />
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Global seeds — uint32 baked into a new shot's image/video tab on first send.
+// Per-shot edits in the Image/Video tab persist independently afterwards.
+// ---------------------------------------------------------------------------
+
+function GlobalSeedsEditor({ sb, imageSeed, videoSeed }) {
+  return (
+    <div className="storyboard-seeds">
+      <div className="storyboard-subsection-header">
+        <h3>Default seeds</h3>
+      </div>
+      <p className="storyboard-section-hint">
+        Baked into a new shot's seed slot the first time you send it to Image/Video. The shot's seed then lives independently — changing the global later does NOT touch existing shots. Leave blank to let each shot stay on random.
+      </p>
+      <div className="storyboard-seeds-row">
+        <SeedField
+          label="Image"
+          value={imageSeed}
+          onSave={(v) => sb.updateImageSeed(v)}
+        />
+        <SeedField
+          label="Video"
+          value={videoSeed}
+          onSave={(v) => sb.updateVideoSeed(v)}
+        />
+      </div>
+    </div>
+  );
+}
+
+function SeedField({ label, value, onSave }) {
+  const [draft, setDraft] = useState(value == null ? '' : String(value));
+  const [status, setStatus] = useState('idle');
+  const localDirtyRef = useRef(false);
+
+  useEffect(() => {
+    if (!localDirtyRef.current) setDraft(value == null ? '' : String(value));
+  }, [value]);
+
+  useDebouncedEffect(draft, AUTOSAVE_MS, async (current) => {
+    const parsed = current === '' ? null : Number(current);
+    if (parsed === value) return;
+    if (parsed !== null && (!Number.isInteger(parsed) || parsed < 0 || parsed > 4294967295)) {
+      setStatus('error');
+      return;
+    }
+    setStatus('saving');
+    try {
+      await onSave(parsed);
+      localDirtyRef.current = false;
+      setStatus('saved');
+    } catch (e) {
+      setStatus('error');
+    }
+  });
+
+  const handleRandomize = () => {
+    setDraft(String(generateRandomSeed()));
+    localDirtyRef.current = true;
+  };
+
+  const handleClear = () => {
+    setDraft('');
+    localDirtyRef.current = true;
+  };
+
+  return (
+    <label className="storyboard-seed-field">
+      <span className="storyboard-seed-field-label">{label}</span>
+      <div className="storyboard-seed-field-row">
+        <input
+          type="number"
+          className="fuk-input"
+          value={draft}
+          min="0"
+          max="4294967295"
+          step="1"
+          placeholder="(random per shot)"
+          onChange={e => { setDraft(e.target.value); localDirtyRef.current = true; }}
+        />
+        <button
+          type="button"
+          className="fuk-btn fuk-btn-secondary"
+          onClick={handleRandomize}
+          title="Generate a random seed"
+        >Random</button>
+        <button
+          type="button"
+          className="fuk-btn fuk-btn-secondary"
+          onClick={handleClear}
+          disabled={draft === ''}
+          title="Clear — new shots stay on random"
+        ><X /></button>
+        <SaveStatus state={status} />
+      </div>
+    </label>
   );
 }
 
@@ -616,7 +673,7 @@ function MoodEditor({ sb, mood }) {
 // Panel grid: one card per shot
 // ---------------------------------------------------------------------------
 
-function PanelGrid({ sb, manifest, panelOrder, project, setActiveTab }) {
+function PanelGrid({ sb, manifest, panelOrder, project, setActiveTab, config }) {
   return (
     <section className="storyboard-panels">
       <h2 className="storyboard-section-title">Shots</h2>
@@ -632,24 +689,29 @@ function PanelGrid({ sb, manifest, panelOrder, project, setActiveTab }) {
             sb={sb}
             project={project}
             setActiveTab={setActiveTab}
+            config={config}
           />
         ))}
-        <AddPanelCard sb={sb} existingShots={panelOrder} />
+        <AddPanelCard sb={sb} existingShots={panelOrder} project={project} />
       </div>
     </section>
   );
 }
 
-function PanelCard({ shotId, panel, sb, project, setActiveTab }) {
+function PanelCard({ shotId, panel, sb, project, setActiveTab, config }) {
+  const imageModels = config?.models?.image_models || [];
+  const videoModels = config?.models?.video_models || [];
   const [draft, setDraft] = useState({
     imagery_prompt: panel?.imagery_prompt || '',
     action_prompt: panel?.action_prompt || '',
     duration_seconds: panel?.duration_seconds ?? '',
     notes: panel?.notes || '',
+    image_model: panel?.image_model || '',
+    video_model: panel?.video_model || '',
   });
   const [status, setStatus] = useState('idle');
   const [sending, setSending] = useState(null);
-  const [sendErr, setSendErr] = useState(null);
+  const [sendResult, setSendResult] = useState(null); // { target, kind: 'ok' | 'err', message? }
   const localDirtyRef = useRef(false);
 
   const isProjectShot = project?.shots?.includes(shotId);
@@ -663,8 +725,17 @@ function PanelCard({ shotId, panel, sb, project, setActiveTab }) {
       action_prompt: panel?.action_prompt || '',
       duration_seconds: panel?.duration_seconds ?? '',
       notes: panel?.notes || '',
+      image_model: panel?.image_model || '',
+      video_model: panel?.video_model || '',
     });
-  }, [panel?.imagery_prompt, panel?.action_prompt, panel?.duration_seconds, panel?.notes]);
+  }, [
+    panel?.imagery_prompt,
+    panel?.action_prompt,
+    panel?.duration_seconds,
+    panel?.notes,
+    panel?.image_model,
+    panel?.video_model,
+  ]);
 
   const update = (field, value) => {
     setDraft(d => ({ ...d, [field]: value }));
@@ -678,13 +749,17 @@ function PanelCard({ shotId, panel, sb, project, setActiveTab }) {
       current.imagery_prompt === (panel?.imagery_prompt || '') &&
       current.action_prompt === (panel?.action_prompt || '') &&
       String(current.duration_seconds ?? '') === String(panel?.duration_seconds ?? '') &&
-      current.notes === (panel?.notes || '')
+      current.notes === (panel?.notes || '') &&
+      (current.image_model || '') === (panel?.image_model || '') &&
+      (current.video_model || '') === (panel?.video_model || '')
     ) return;
     setStatus('saving');
     try {
       await sb.upsertPanel(shotId, {
         ...current,
         duration_seconds: current.duration_seconds === '' ? null : Number(current.duration_seconds),
+        image_model: current.image_model || null,
+        video_model: current.video_model || null,
       });
       localDirtyRef.current = false;
       setStatus('saved');
@@ -695,35 +770,47 @@ function PanelCard({ shotId, panel, sb, project, setActiveTab }) {
 
   const handleSend = useCallback(async (target) => {
     setSending(target);
-    setSendErr(null);
+    setSendResult(null);
     try {
-      // Make sure the latest draft is persisted before the backend reads it.
+      // Flush any unsaved draft before the backend reads the panel from disk.
       if (localDirtyRef.current) {
         await sb.upsertPanel(shotId, {
           ...draft,
           duration_seconds: draft.duration_seconds === '' ? null : Number(draft.duration_seconds),
+          image_model: draft.image_model || null,
+          video_model: draft.video_model || null,
         });
         localDirtyRef.current = false;
       }
       if (target === 'image') await sendPanelToImage(shotId);
       else await sendPanelToVideo(shotId);
-      if (project.currentFileInfo?.shotNumber !== shotId) {
-        await project.switchShot(shotId);
-      } else {
+
+      // Refresh the in-memory shot state if that shot happens to be the one
+      // currently loaded — otherwise the next visit to Image/Video would
+      // momentarily show stale state before useProject re-reads on switch.
+      // We do NOT switch tabs or shots here: the user stays on storyboard.
+      if (project.currentFileInfo?.shotNumber === shotId && project.currentFilename) {
         await project.loadProjectFile(project.currentFilename);
       }
-      setActiveTab(target);
+      setSendResult({ target, kind: 'ok' });
     } catch (e) {
-      setSendErr(e.message);
+      setSendResult({ target, kind: 'err', message: e.message });
     } finally {
       setSending(null);
     }
-  }, [draft, project, sb, setActiveTab, shotId]);
+  }, [draft, project, sb, shotId]);
+
+  // Auto-dismiss the "sent" pip after a beat so the card doesn't carry stale state.
+  useEffect(() => {
+    if (!sendResult || sendResult.kind !== 'ok') return;
+    const t = setTimeout(() => setSendResult(null), 2500);
+    return () => clearTimeout(t);
+  }, [sendResult]);
 
   return (
     <article className={`storyboard-panel-card ${!panel ? 'storyboard-panel-card--ghost' : ''}`}>
       <header className="storyboard-panel-header">
-        <span className="storyboard-panel-id">Shot {shotId}</span>
+        <span className="storyboard-panel-id">{shotId}</span>
         <div className="storyboard-panel-header-meta">
           {!isProjectShot && (
             <span className="storyboard-panel-warn" title="No shot file exists yet — create the shot before sending">no shot file</span>
@@ -732,71 +819,215 @@ function PanelCard({ shotId, panel, sb, project, setActiveTab }) {
         </div>
       </header>
 
-      <label className="storyboard-panel-label">Imagery (still)</label>
-      <MarkerTextarea
-        className="fuk-textarea storyboard-panel-textarea"
-        value={draft.imagery_prompt}
-        onChange={(v) => update('imagery_prompt', v)}
-        placeholder="#sarah looks down the alley, framed wide, cool moonlight"
-        rows={3}
-      />
-
-      <label className="storyboard-panel-label">Action (motion)</label>
-      <MarkerTextarea
-        className="fuk-textarea storyboard-panel-textarea"
-        value={draft.action_prompt}
-        onChange={(v) => update('action_prompt', v)}
-        placeholder="slow dolly in as she turns toward camera"
-        rows={2}
-      />
-
-      <div className="storyboard-panel-meta">
-        <label>
-          <span>Duration (s)</span>
-          <input
-            type="number"
-            className="fuk-input"
-            value={draft.duration_seconds ?? ''}
-            min="0"
-            step="0.1"
-            onChange={e => update('duration_seconds', e.target.value)}
+      <div className="storyboard-panel-body">
+        <div className="storyboard-panel-inputs">
+          <label className="storyboard-panel-label">Imagery (still)</label>
+          <MarkerTextarea
+            className="fuk-textarea storyboard-panel-textarea"
+            value={draft.imagery_prompt}
+            onChange={(v) => update('imagery_prompt', v)}
+            placeholder="#sarah looks down the alley, framed wide, cool moonlight"
+            rows={4}
           />
-        </label>
-      </div>
 
-      <label className="storyboard-panel-label">Notes</label>
-      <textarea
-        className="fuk-textarea storyboard-panel-textarea"
-        rows={2}
-        value={draft.notes}
-        placeholder="director note, alt take, reference, etc."
-        onChange={e => update('notes', e.target.value)}
-      />
+          <label className="storyboard-panel-label">Action (motion)</label>
+          <MarkerTextarea
+            className="fuk-textarea storyboard-panel-textarea"
+            value={draft.action_prompt}
+            onChange={(v) => update('action_prompt', v)}
+            placeholder="slow dolly in as she turns toward camera"
+            rows={3}
+          />
 
-      <div className="storyboard-panel-actions">
-        <button
-          className="fuk-btn fuk-btn-secondary"
-          onClick={() => handleSend('image')}
-          disabled={!isProjectShot || sending !== null || !draft.imagery_prompt.trim()}
-          title={!isProjectShot ? 'Create shot file first' : 'Push to Image tab'}
-        >
-          {sending === 'image' ? <Loader2 className="animate-spin" /> : <Camera />} → Image
-        </button>
-        <button
-          className="fuk-btn fuk-btn-secondary"
-          onClick={() => handleSend('video')}
-          disabled={!isProjectShot || sending !== null || !draft.action_prompt.trim()}
-          title={!isProjectShot ? 'Create shot file first' : 'Push to Video tab'}
-        >
-          {sending === 'video' ? <Loader2 className="animate-spin" /> : <Film />} → Video
-        </button>
+          <div className="storyboard-panel-meta">
+            <label>
+              <span>Duration (s)</span>
+              <input
+                type="number"
+                className="fuk-input"
+                value={draft.duration_seconds ?? ''}
+                min="0"
+                step="0.1"
+                onChange={e => update('duration_seconds', e.target.value)}
+              />
+            </label>
+          </div>
+
+          <label className="storyboard-panel-label">Notes</label>
+          <textarea
+            className="fuk-textarea storyboard-panel-textarea"
+            rows={2}
+            value={draft.notes}
+            placeholder="director note, alt take, reference, etc."
+            onChange={e => update('notes', e.target.value)}
+          />
+
+          <div className="storyboard-panel-actions">
+            <div className="storyboard-panel-send-row">
+              <button
+                className="fuk-btn fuk-btn-secondary"
+                onClick={() => handleSend('image')}
+                disabled={!isProjectShot || sending !== null || !draft.imagery_prompt.trim()}
+                title={!isProjectShot ? 'Create shot file first' : 'Push to Image tab — you stay here'}
+              >
+                {sending === 'image' ? <Loader2 className="animate-spin" /> : <Camera />} → Image
+              </button>
+              <select
+                className="fuk-input storyboard-panel-model-select"
+                value={draft.image_model}
+                onChange={e => update('image_model', e.target.value)}
+                title="Image model the prompt will land on"
+              >
+                <option value="">(tab default)</option>
+                {imageModels.map(m => (
+                  <option key={m.key} value={m.key}>{m.description || m.key}</option>
+                ))}
+              </select>
+            </div>
+            <div className="storyboard-panel-send-row">
+              <button
+                className="fuk-btn fuk-btn-secondary"
+                onClick={() => handleSend('video')}
+                disabled={!isProjectShot || sending !== null || !draft.action_prompt.trim()}
+                title={!isProjectShot ? 'Create shot file first' : 'Push to Video tab — you stay here'}
+              >
+                {sending === 'video' ? <Loader2 className="animate-spin" /> : <Film />} → Video
+              </button>
+              <select
+                className="fuk-input storyboard-panel-model-select"
+                value={draft.video_model}
+                onChange={e => update('video_model', e.target.value)}
+                title="Video model the prompt will land on"
+              >
+                <option value="">(tab default)</option>
+                {videoModels.map(m => (
+                  <option key={m.key} value={m.key}>{m.description || m.key}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          {sendResult?.kind === 'ok' && (
+            <div className="storyboard-send-ok">
+              ✓ Sent to {sendResult.target === 'image' ? 'Image' : 'Video'} tab
+            </div>
+          )}
+          {sendResult?.kind === 'err' && (
+            <div className="storyboard-error">
+              Send to {sendResult.target} failed: {sendResult.message}
+            </div>
+          )}
+        </div>
+
+        <div className="storyboard-panel-previews">
+          <PreviewSlot
+            kind="image"
+            shotId={shotId}
+            path={panel?.image_preview}
+            sb={sb}
+          />
+          <PreviewSlot
+            kind="video"
+            shotId={shotId}
+            path={panel?.video_preview}
+            sb={sb}
+          />
+        </div>
       </div>
-      {sendErr && <div className="storyboard-error">{sendErr}</div>}
     </article>
   );
 }
 
-function AddPanelCard({ sb, existingShots }) {
+// ---------------------------------------------------------------------------
+// Preview slot — pinned generation thumbnail, accepts drag-from-history.
+// ---------------------------------------------------------------------------
+
+function PreviewSlot({ kind, shotId, path, sb }) {
+  const [hover, setHover] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const url = path ? buildImageUrl(path) : null;
+  const label = kind === 'image' ? 'Image' : 'Video';
+  const Icon = kind === 'image' ? ImageIcon : Film;
+
+  const setPath = useCallback(async (nextPath) => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await sb.setPanelPreview(shotId, { kind, path: nextPath });
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }, [sb, shotId, kind]);
+
+  const handleDragOver = (e) => {
+    // Accept drops that carry our custom MIME, or any text/plain path.
+    if (e.dataTransfer.types.includes('application/x-fuk-generation') ||
+        e.dataTransfer.types.includes('text/plain')) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      setHover(true);
+    }
+  };
+  const handleDragLeave = () => setHover(false);
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setHover(false);
+    let dropped = null;
+    const raw = e.dataTransfer.getData('application/x-fuk-generation');
+    if (raw) {
+      try { dropped = JSON.parse(raw); } catch { /* fall through */ }
+    }
+    const droppedPath = dropped?.path || dropped?.preview || e.dataTransfer.getData('text/plain');
+    if (!droppedPath) return;
+    setPath(droppedPath);
+  };
+
+  const handleClear = (e) => {
+    e.stopPropagation();
+    setPath(null);
+  };
+
+  return (
+    <div className={`storyboard-preview-slot ${hover ? 'storyboard-preview-slot--hover' : ''} ${url ? 'storyboard-preview-slot--filled' : ''}`}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      <div className="storyboard-preview-slot-label">
+        <Icon /> {label}
+        {url && (
+          <button
+            type="button"
+            className="storyboard-preview-slot-clear"
+            onClick={handleClear}
+            disabled={busy}
+            title="Clear preview"
+          ><X /></button>
+        )}
+      </div>
+      <div className="storyboard-preview-slot-media">
+        {url ? (
+          kind === 'video' ? (
+            <video src={url} muted loop playsInline preload="metadata" />
+          ) : (
+            <img src={url} alt={`${label} preview`} />
+          )
+        ) : (
+          <div className="storyboard-preview-slot-empty">
+            <Icon />
+            <span>Drop a {label.toLowerCase()} here<br/>or use → Storyboard in History</span>
+          </div>
+        )}
+        {busy && <div className="storyboard-preview-slot-busy"><Loader2 className="animate-spin" /></div>}
+      </div>
+      {err && <div className="storyboard-error">{err}</div>}
+    </div>
+  );
+}
+
+function AddPanelCard({ sb, existingShots, project }) {
   const [shotInput, setShotInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
@@ -816,13 +1047,14 @@ function AddPanelCard({ sb, existingShots }) {
     setErr(null);
     try {
       await sb.upsertPanel(id, {});
+      await project.createShotFile(id);
       setShotInput('');
     } catch (e) {
       setErr(e.message);
     } finally {
       setBusy(false);
     }
-  }, [existingShots, sb, shotInput]);
+  }, [existingShots, sb, shotInput, project]);
 
   return (
     <article className="storyboard-panel-card storyboard-panel-card--add">

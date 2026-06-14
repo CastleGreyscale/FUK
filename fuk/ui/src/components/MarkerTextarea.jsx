@@ -17,6 +17,7 @@
  */
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { fetchPromptTokens, PROMPT_TOKENS_CHANGED_EVENT } from '../utils/promptApi';
 
 // Match a `#` immediately before the caret followed by an in-progress word.
@@ -106,6 +107,50 @@ const MarkerTextarea = forwardRef(function MarkerTextarea({
   const tokens = tokensProp || localTokens;
 
   const [autocomplete, setAutocomplete] = useState(null); // { query, selected, markerStart, caret }
+  // Computed JS positioning so the dropdown can flip up/down based on
+  // available space and escape ancestor `overflow: hidden/auto` clipping.
+  const [dropdownStyle, setDropdownStyle] = useState(null);
+
+  // Re-compute placement on open and on scroll/resize while open. Capture
+  // the scroll listener so an ancestor scroll container (e.g. the storyboard
+  // tab's overflow-y: auto wrapper) still triggers a reposition.
+  useEffect(() => {
+    if (!autocomplete) {
+      setDropdownStyle(null);
+      return;
+    }
+    const compute = () => {
+      const ta = innerRef.current;
+      if (!ta) return;
+      const r = ta.getBoundingClientRect();
+      const margin = 8;            // gap from the textarea edge
+      const cap = 260;             // visual ceiling for the dropdown
+      const viewportH = window.innerHeight;
+      const spaceBelow = viewportH - r.bottom - margin;
+      const spaceAbove = r.top - margin;
+      // Open in whichever direction has more room. Prefer downward when tied
+      // since users read top-to-bottom.
+      const openDown = spaceBelow >= spaceAbove;
+      const maxH = Math.max(120, Math.min(cap, openDown ? spaceBelow : spaceAbove));
+      const base = {
+        position: 'fixed',
+        left: r.left + 'px',
+        width: r.width + 'px',
+        maxHeight: maxH + 'px',
+        zIndex: 1000,
+      };
+      setDropdownStyle(openDown
+        ? { ...base, top: (r.bottom + margin) + 'px' }
+        : { ...base, top: (r.top - margin - maxH) + 'px' });
+    };
+    compute();
+    window.addEventListener('scroll', compute, true);
+    window.addEventListener('resize', compute);
+    return () => {
+      window.removeEventListener('scroll', compute, true);
+      window.removeEventListener('resize', compute);
+    };
+  }, [autocomplete]);
 
   const handleResize = useCallback((e) => {
     if (!autoResize) return;
@@ -148,8 +193,11 @@ const MarkerTextarea = forwardRef(function MarkerTextarea({
   const filteredTokens = useMemo(() => {
     if (!autocomplete) return [];
     const q = autocomplete.query;
-    // Tokens without a marker (caption phrases) don't surface in the # flow.
-    const candidates = tokens.filter(t => t.marker);
+    // Include markered tokens (tags, LoRA triggers, project subjects) AND
+    // caption phrases (markerless) — the backend only ships caption tokens
+    // when the corresponding LoRA is active, so they're already scoped.
+    // On pick, captions insert as raw text (see insertToken).
+    const candidates = tokens.filter(t => t.marker || t.source === 'caption');
     if (!q) return candidates.slice(0, 30);
     return candidates
       .map(t => ({ t, score: scoreToken(t, q) }))
@@ -165,7 +213,11 @@ const MarkerTextarea = forwardRef(function MarkerTextarea({
     if (!textarea) return;
     const before = value.slice(0, autocomplete.markerStart);
     const after = value.slice(autocomplete.caret);
-    const insert = token.marker;
+    // Markered tokens (tags, LoRA triggers, subjects) insert their `#marker`
+    // so resolution happens at generation. Caption phrases have no marker —
+    // insert the raw phrase text and let the LLM see it verbatim.
+    const insert = token.marker || token.expansion || token.name || '';
+    if (!insert) return;
     const next = `${before}${insert}${after.startsWith(' ') ? '' : ' '}${after}`;
     onChange(next);
     setAutocomplete(null);
@@ -220,13 +272,15 @@ const MarkerTextarea = forwardRef(function MarkerTextarea({
         rows={rows}
         disabled={disabled}
       />
-      {autocomplete && filteredTokens.length > 0 && (
+      {autocomplete && filteredTokens.length > 0 && dropdownStyle && createPortal(
         <TokenDropdown
           tokens={filteredTokens}
           selected={autocomplete.selected}
           onPick={insertToken}
           onHover={(idx) => setAutocomplete(a => ({ ...a, selected: idx }))}
-        />
+          style={dropdownStyle}
+        />,
+        document.body,
       )}
     </div>
   );
@@ -234,9 +288,9 @@ const MarkerTextarea = forwardRef(function MarkerTextarea({
 
 export default MarkerTextarea;
 
-function TokenDropdown({ tokens, selected, onPick, onHover }) {
+function TokenDropdown({ tokens, selected, onPick, onHover, style }) {
   return (
-    <ul className="prompt-token-dropdown" role="listbox">
+    <ul className="prompt-token-dropdown" role="listbox" style={style}>
       {tokens.map((t, idx) => {
         const badge = SOURCE_BADGE[t.source] || SOURCE_BADGE.tag;
         const isSelected = idx === selected;
@@ -254,7 +308,9 @@ function TokenDropdown({ tokens, selected, onPick, onHover }) {
             {t.category && (
               <span className="prompt-token-category">{t.category}</span>
             )}
-            <span className="prompt-token-expansion">{t.expansion}</span>
+            {t.expansion && t.expansion !== t.name && (
+              <span className="prompt-token-expansion">{t.expansion}</span>
+            )}
           </li>
         );
       })}
