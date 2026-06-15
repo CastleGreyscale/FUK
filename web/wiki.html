@@ -88,6 +88,7 @@
                     <div class="sidebar-links" hidden>
                         <a href="#app-layout" class="sidebar-link">App Layout</a>
                         <a href="#project-bar" class="sidebar-link">Project Bar</a>
+                        <a href="#storyboard-tab" class="sidebar-link">Storyboard Tab</a>
                         <a href="#media-input" class="sidebar-link">Media Input</a>
                         <a href="#seed-control" class="sidebar-link">Seed Control</a>
                         <a href="#image-panel" class="sidebar-link">Image Panel</a>
@@ -609,6 +610,7 @@
                         <tr><th>Tab</th><th>Purpose</th></tr>
                     </thead>
                     <tbody>
+                        <tr><td>Storyboard</td><td>Project-level pre-production — shot list, panel grid, project tags, mood, default seeds, active LoRAs; pushes prompts into Image/Video shots</td></tr>
                         <tr><td>Image</td><td>Text-to-image and image-to-image generation</td></tr>
                         <tr><td>Video</td><td>Image-to-video and controlled video generation</td></tr>
                         <tr><td>Preprocess</td><td>Generate conditioning maps — depth, pose, edge — from input images or video</td></tr>
@@ -665,6 +667,77 @@
 
                 <h3>Unsaved Changes</h3>
                 <p>When a generation result is present but not yet saved, the Project Bar displays an unsaved changes indicator. Switching shots or versions without saving will prompt for confirmation.</p>
+            </div>
+
+            <!-- Storyboard Tab -->
+            <div class="wiki-section" id="storyboard-tab">
+                <h2>Storyboard Tab</h2>
+                <p>The Storyboard tab is FUK's project-level pre-production surface. It sits <em>above</em> the per-shot files rather than replacing them: each panel corresponds to one shot, the imagery and action drafts authored here get pushed into that shot's <a href="#image-panel">Image</a> or <a href="#video-panel">Video</a> tab, and the per-shot JSON remains the source of truth for generation settings, history, and pinned versions.</p>
+                <p>Everything on this tab autosaves on a short debounce — there are no Save buttons. The manifest lives next to your shot files as <code>{projectname}_storyboard.json</code>.</p>
+
+                <h3>Layout</h3>
+                <p>Two stacked sections:</p>
+                <ul>
+                    <li><strong>Globals</strong> — project-wide settings that apply across every shot: project tags, mood, default seeds, active LoRAs.</li>
+                    <li><strong>Shots</strong> — a grid of panel cards, one per shot, plus an Add Panel card at the end.</li>
+                </ul>
+                <p>A snapshot bar sits above both, providing dated copies of the manifest and one-click restore.</p>
+
+                <h3>Project Tags</h3>
+                <p>Reusable <code>#markers</code> scoped to this storyboard. Each tag has a name (becomes <code>#name</code>), a category (character, prop, location, other), and a value — the text that <code>#name</code> expands to at generation time. Type <code>#</code> in any storyboard or shot prompt to autocomplete against them.</p>
+                <p>Project tags shadow workspace tags on marker collision, so a project-local <code>#sarah</code> can override a global <code>#sarah</code> without touching the global tag library. Values themselves can contain other <code>#markers</code> — useful for layering a character description on top of a costume tag.</p>
+
+                <h3>Mood / Setting</h3>
+                <p>A single sentence merging style and environment (e.g. <em>neo-noir, low-key lighting, rain-soaked Tokyo back alleys at night</em>). It is appended to every shot's prompt at generation time as <code>Mood: …</code>, so a project-wide tone change is one edit rather than a per-shot sweep. This is the "storyboard-level prompt injection" referenced in the <a href="#prompt-panel">Prompt Panel</a>.</p>
+
+                <h3>Default Seeds</h3>
+                <p>Optional uint32 seeds for image and video. They are baked into a new shot's seed slot the first time you Send the panel to that tab; the shot's seed then lives independently in the Image/Video <a href="#seed-control">Seed Control</a>. Changing the global later does <em>not</em> retroactively touch shots that have already received a send. Leave blank to let each shot stay on random.</p>
+                <p>Each seed field offers Random (generate a new value) and Clear (drop back to random-per-shot) controls.</p>
+
+                <h3>Active LoRAs</h3>
+                <p>A project-wide toggle list of every LoRA discovered in your install, grouped by model family. Activating a LoRA does two things:</p>
+                <ul>
+                    <li>Surfaces its <code>trigger_word</code> as a <code>#marker</code> in <code>#</code> autocomplete across every prompt field in the project.</li>
+                    <li>Adds any caption phrases the LoRA shipped with to the same autocomplete feed.</li>
+                </ul>
+                <p>It does <em>not</em> automatically attach the LoRA to a shot's generation — the Image/Video tab's LoRA selection still controls what actually loads. Active LoRAs are an authoring affordance: they let you reference the right trigger without flipping back to model docs.</p>
+
+                <h3>Panel Card</h3>
+                <p>One card per shot. The header shows the shot ID and a save pip. The body has two columns:</p>
+                <ul>
+                    <li><strong>Imagery (still)</strong> — describes the frame: composition, lighting, lens, mood, subject. Pushed to the shot's Image tab <code>positive_prompt</code>.</li>
+                    <li><strong>Action (motion)</strong> — describes motion within the shot: camera move, subject action, beat timing. Pushed to the shot's Video tab <code>positive_prompt</code>.</li>
+                    <li><strong>Duration (s)</strong> — planned shot length, for downstream edit handoff.</li>
+                    <li><strong>Notes</strong> — freeform director notes; storyboard-only.</li>
+                </ul>
+                <p>Both prompt fields accept <code>#markers</code> from project tags, workspace tags, and active LoRAs — markers stay raw in the manifest and resolve live at generation time, so editing a tag value updates every shot that references it.</p>
+                <p>Side-by-side previews show the current image and video pinned to this panel. Drag any item from <a href="#generation-history">Generation History</a> onto a preview slot to pin it — the drop also mirrors the originating prompt into the matching panel field (image → imagery, video → action). The <code>×</code> on a preview clears it.</p>
+
+                <h3>Send to Image / Send to Video</h3>
+                <p>Each panel has a "→ Image" and "→ Video" button with an adjacent model select. The button flushes any unsaved draft, writes the raw markered prompt into the shot file's <code>positive_prompt</code>, and (if the model select is set) also writes that model selection into the shot. You stay on the Storyboard tab — the Image/Video tab will reflect the change the next time you visit it. If the affected shot happens to be the one currently loaded, its in-memory state is refreshed so you don't see a stale prompt on the next visit.</p>
+                <p>The model select is per-panel and persists in the manifest. Leave it on <code>(tab default)</code> to keep whatever model the destination tab already had.</p>
+                <p>Send buttons are disabled when the corresponding prompt field is empty, or when the shot file does not yet exist (the card shows a <em>no shot file</em> warning in that case — create the shot first via Add Panel).</p>
+
+                <h3>Add Panel</h3>
+                <p>Creates a new panel and the matching shot file in one click. The shot ID must start with an alphanumeric character and may contain letters, digits, and hyphens (up to 32 chars). The new shot file appears in the Project Bar immediately.</p>
+
+                <h3>Snapshots</h3>
+                <p>The snapshot bar at the top saves a dated copy of the current manifest, lists existing snapshots in a dropdown, and restores any of them with confirmation. Snapshots are the storyboard's version-up mechanic — useful before a structural re-cut or a destructive Mood/Active-LoRA change.</p>
+
+                <h3>Relationship to Shot Files</h3>
+                <p>The storyboard does <strong>not</strong> sync bidirectionally with shot files. Send is one-way (storyboard → shot). If you edit the prompt in the Image or Video tab after sending, re-sending will overwrite that edit — version up the shot first if you want to preserve it.</p>
+
+                <h3>API Endpoints</h3>
+                <ul>
+                    <li><code>GET /api/storyboard</code>, <code>PUT /api/storyboard</code> — read or replace the whole manifest.</li>
+                    <li><code>GET /api/storyboard/globals</code>, <code>PUT /api/storyboard/globals/{mood|image_seed|video_seed|loras}</code> — per-field global updates.</li>
+                    <li><code>POST /api/storyboard/globals/tags</code>, <code>PUT /api/storyboard/globals/tags/{tag_id}</code>, <code>DELETE /api/storyboard/globals/tags/{tag_id}</code> — project tag CRUD.</li>
+                    <li><code>PUT /api/storyboard/panels/{shot_id}</code>, <code>DELETE /api/storyboard/panels/{shot_id}</code> — panel upsert and delete.</li>
+                    <li><code>POST /api/storyboard/panels/{shot_id}/preview</code> — set or clear a panel's image/video preview.</li>
+                    <li><code>POST /api/storyboard/panels/{shot_id}/send/image</code>, <code>.../send/video</code> — push the panel's prompt into the shot file.</li>
+                    <li><code>PUT /api/storyboard/sequence</code> — reorder panels.</li>
+                    <li><code>POST /api/storyboard/snapshot</code>, <code>GET /api/storyboard/snapshots</code>, <code>POST /api/storyboard/snapshots/{filename}/restore</code> — snapshot lifecycle.</li>
+                </ul>
             </div>
 
             <!-- Media Input -->
@@ -1011,7 +1084,7 @@
 
                 <h3>Style Chips</h3>
                 <p>The chip tray appears below the prompt textarea whenever slot picks accumulate. Each chip shows the token's display name; hover for its expansion. Click the <code>×</code> on a chip to remove it, or <code>clear</code> on the tray header to drop them all. Chips persist visually until Compile or Expand bakes them into the textarea — at which point the tray clears.</p>
-                <p>Chips don't persist across shot switches in v1; they live only in panel state. Storyboard-level prompt injection (apply a style sentence to every shot in a sequence) is planned as part of the storyboard system.</p>
+                <p>Chips don't persist across shot switches in v1; they live only in panel state. For project-wide style injection (apply a sentence to every shot in a sequence), use the Mood field on the <a href="#storyboard-tab">Storyboard tab</a> — it appends to every shot's prompt at generation time.</p>
 
                 <h3>Disabling States</h3>
                 <ul>

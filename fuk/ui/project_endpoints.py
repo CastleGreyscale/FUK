@@ -1071,6 +1071,9 @@ async def list_generations(
             "date": mtime.strftime("%Y-%m-%d"),
             "timestamp": mtime.strftime("%H:%M:%S"),
             "prompt": metadata.get("prompt", ""),
+            # Raw user prompt with #markers intact — preferred when sending the
+            # prompt back to a storyboard panel since those fields are #marker-aware.
+            "promptSource": metadata.get("prompt_source", ""),
             "seed": metadata.get("seed"),
             "model": metadata.get("model", ""),
             "pinned": is_pinned,
@@ -1125,6 +1128,7 @@ async def list_generations(
                         "date": mtime.strftime("%Y-%m-%d"),
                         "timestamp": mtime.strftime("%H:%M:%S"),
                         "prompt": metadata.get("prompt", ""),
+                        "promptSource": metadata.get("prompt_source", ""),
                         "seed": None,
                         "model": metadata.get("model", ""),
                         "pinned": False,

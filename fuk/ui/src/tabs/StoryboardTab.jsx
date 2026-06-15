@@ -949,11 +949,18 @@ function PreviewSlot({ kind, shotId, path, sb }) {
   const label = kind === 'image' ? 'Image' : 'Video';
   const Icon = kind === 'image' ? ImageIcon : Film;
 
-  const setPath = useCallback(async (nextPath) => {
+  const setPath = useCallback(async (nextPath, prompt) => {
     setBusy(true);
     setErr(null);
     try {
       await sb.setPanelPreview(shotId, { kind, path: nextPath });
+      // When the drop carried a prompt (a history generation), mirror it into
+      // the matching panel field — image → imagery, video → action — so the
+      // panel reflects what produced the pinned media.
+      if (nextPath && prompt) {
+        const field = kind === 'image' ? 'imagery_prompt' : 'action_prompt';
+        await sb.upsertPanel(shotId, { [field]: prompt });
+      }
     } catch (e) {
       setErr(e.message);
     } finally {
@@ -981,7 +988,8 @@ function PreviewSlot({ kind, shotId, path, sb }) {
     }
     const droppedPath = dropped?.path || dropped?.preview || e.dataTransfer.getData('text/plain');
     if (!droppedPath) return;
-    setPath(droppedPath);
+    const droppedPrompt = dropped?.promptSource || dropped?.prompt || '';
+    setPath(droppedPath, droppedPrompt);
   };
 
   const handleClear = (e) => {

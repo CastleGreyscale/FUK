@@ -9,7 +9,7 @@ import { buildImageUrl, API_URL } from '../utils/constants';
 import { useVideoPlayback } from '../hooks/useVideoPlayback';
 import ZoomableImage from './ZoomableImage';
 import ConformHDButton from './ConformHDButton';
-import { setPanelPreview } from '../utils/storyboardApi';
+import { setPanelPreview, upsertPanel } from '../utils/storyboardApi';
 
 // Pin-to-storyboard glyph: stacked thumbnails with an arrow.
 const StoryboardPinIcon = ({ className, style }) => (
@@ -1140,6 +1140,14 @@ export default function GenerationHistory({ project, collapsed, onToggle, galler
     if (!path) return;
     try {
       await setPanelPreview(currentShotId, { kind, path });
+      // Mirror the generation's prompt into the panel field that drives this
+      // kind of output, so the storyboard reflects what actually produced the
+      // pinned media. Prefer the raw #marker draft over the resolved string.
+      const prompt = generation.promptSource || generation.prompt || '';
+      if (prompt) {
+        const field = kind === 'image' ? 'imagery_prompt' : 'action_prompt';
+        await upsertPanel(currentShotId, { [field]: prompt });
+      }
       // Let any mounted storyboard hook refresh its manifest.
       window.dispatchEvent(new CustomEvent('fuk-storyboard-changed', {
         detail: { shotId: currentShotId, kind, path },
