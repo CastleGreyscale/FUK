@@ -440,9 +440,14 @@ active_generations: Dict[str, Dict[str, Any]] = {}
 # Hook up the log capture reference
 _active_generations_ref = active_generations
 
-# Load defaults
+# Load defaults (base + split config fragments; mirrors backend _load_defaults)
 with open(CONFIG_DIR / "defaults.json") as f:
     DEFAULTS = json.load(f)
+for _fragment in ("defaults_loras.json", "defaults_vram.json", "defaults_spec_tool.json", "defaults_dataset.json"):
+    _fragment_path = CONFIG_DIR / _fragment
+    if _fragment_path.exists():
+        with open(_fragment_path) as f:
+            DEFAULTS.update(json.load(f))
 
 
 
