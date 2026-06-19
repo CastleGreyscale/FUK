@@ -18,6 +18,23 @@ const API_URL = '/api';
 
 const VIDEO_EXTS = ['.mp4', '.mov', '.webm', '.mkv', '.avi', '.m4v'];
 
+// Quick-focus chips. Clicking one appends its phrase to the focus field (or
+// removes it if already present), letting the description concentrate on that
+// aspect. The field stays free-text — type anything in addition to these.
+const FOCUS_PRESETS = [
+  { label: 'Subject', phrase: 'the main subject' },
+  { label: 'Wardrobe', phrase: 'wardrobe and clothing' },
+  { label: 'Lighting', phrase: 'lighting' },
+  { label: 'Setting', phrase: 'the setting and environment' },
+  { label: 'Camera', phrase: 'camera angle, lens, and framing' },
+  { label: 'Color', phrase: 'color palette' },
+];
+
+// Split the free-text focus into discrete comma-separated pieces (trimmed).
+function focusPieces(focus) {
+  return focus.split(',').map(s => s.trim()).filter(Boolean);
+}
+
 function buildImageUrl(path) {
   if (!path) return '';
   if (path.startsWith('/')) return `/api/project/files${path}`;
@@ -34,6 +51,7 @@ export default function ImageDescribeTool() {
   const [imagePath, setImagePath] = useState(null);
   const [browsing, setBrowsing] = useState(false);
   const [running, setRunning] = useState(false);
+  const [focus, setFocus] = useState('');
   const [description, setDescription] = useState('');
   const [error, setError] = useState(null);
   const [health, setHealth] = useState(null);
@@ -222,6 +240,16 @@ export default function ImageDescribeTool() {
     }
   }, [browsing, running]);
 
+  const toggleFocusPreset = useCallback((phrase) => {
+    setFocus(prev => {
+      const pieces = focusPieces(prev);
+      const idx = pieces.findIndex(p => p.toLowerCase() === phrase.toLowerCase());
+      if (idx >= 0) pieces.splice(idx, 1);
+      else pieces.push(phrase);
+      return pieces.join(', ');
+    });
+  }, []);
+
   const handleDescribe = useCallback(async () => {
     if (!imagePath || running) return;
     setRunning(true);
@@ -231,7 +259,7 @@ export default function ImageDescribeTool() {
       const res = await fetch(`${API_URL}/llm/describe`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image_path: imagePath }),
+        body: JSON.stringify({ image_path: imagePath, focus: focus.trim() || null }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || `Request failed: ${res.status}`);
@@ -241,7 +269,7 @@ export default function ImageDescribeTool() {
     } finally {
       setRunning(false);
     }
-  }, [imagePath, running]);
+  }, [imagePath, running, focus]);
 
   const handleCopy = useCallback(async () => {
     if (!description) return;
@@ -358,6 +386,50 @@ export default function ImageDescribeTool() {
               <div className="image-describe-path" title={imagePath}>{imagePath}</div>
             </div>
           )}
+
+          <div className="image-describe-focus">
+            <span className="fuk-label">
+              Focus on
+              <span className="image-describe-focus-hint">
+                optional — concentrates the description on this; everything else is reduced to a brief aside
+              </span>
+            </span>
+            <div className="image-describe-focus-row">
+              <input
+                type="text"
+                className="fuk-input image-describe-focus-input"
+                placeholder="e.g. the creature's scaled hide and posture"
+                value={focus}
+                onChange={(e) => setFocus(e.target.value)}
+              />
+              {focus && (
+                <button
+                  className="image-describe-focus-clear"
+                  onClick={() => setFocus('')}
+                  title="Clear focus"
+                >
+                  <X />
+                </button>
+              )}
+            </div>
+            <div className="image-describe-focus-presets">
+              {FOCUS_PRESETS.map(({ label, phrase }) => {
+                const active = focusPieces(focus).some(
+                  p => p.toLowerCase() === phrase.toLowerCase()
+                );
+                return (
+                  <button
+                    key={label}
+                    type="button"
+                    className={`image-describe-focus-chip ${active ? 'image-describe-focus-chip--active' : ''}`}
+                    onClick={() => toggleFocusPreset(phrase)}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
           <button
             className="fuk-btn fuk-btn-primary fuk-btn-full image-describe-run"

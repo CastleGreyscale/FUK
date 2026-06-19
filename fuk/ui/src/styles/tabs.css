@@ -2080,6 +2080,77 @@
   margin-top: 0.3rem;
 }
 
+.image-describe-focus {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+}
+
+.image-describe-focus-hint {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--color-text-muted);
+  margin-top: 0.15rem;
+}
+
+.image-describe-focus-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.image-describe-focus-input {
+  flex: 1;
+}
+
+.image-describe-focus-clear {
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  padding: 0.2rem;
+  border-radius: 3px;
+}
+
+.image-describe-focus-clear:hover {
+  color: var(--color-text);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.image-describe-focus-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.image-describe-focus-chip {
+  font-size: 0.72rem;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: var(--color-transparent);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+
+.image-describe-focus-chip:hover {
+  color: var(--color-text);
+  border-color: var(--color-accent);
+}
+
+.image-describe-focus-chip--active {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: #fff;
+}
+
 .image-describe-result-card {
   min-height: 200px;
 }

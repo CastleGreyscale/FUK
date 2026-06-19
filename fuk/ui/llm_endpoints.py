@@ -62,6 +62,43 @@ DESCRIBE_VIDEO_SYSTEM = (
     "3-5 sentences. No preamble."
 )
 
+# When the user supplies a focus, we swap the balanced "cover everything" brief
+# for a directed one: nearly the whole description goes to the focus target, with
+# at most a single clause of surrounding context. {focus} is the user's text.
+DESCRIBE_FOCUS_SYSTEM = (
+    "You are a visual description assistant for a VFX production pipeline, "
+    "writing with the precision and language of a cinematographer or VFX "
+    "supervisor.\n\n"
+    "The description must concentrate almost entirely on this element:\n"
+    "  \"{focus}\"\n\n"
+    "Devote nearly the whole description to that element — its form, structure, "
+    "materials and texture, color, condition, pose or action, and how it reads in "
+    "the frame. Be exhaustive and concrete about it. Mention lighting, setting, "
+    "mood, camera, or other subjects only in a single brief clause, and only where "
+    "they directly frame the focus element. Do NOT write a balanced scene "
+    "description.\n\n"
+    "If the element is not visible, say so in one sentence instead of inventing it. "
+    "Avoid vague qualitative adjectives (\"beautiful\", \"stunning\"). Write in "
+    "present tense. 2-4 sentences. No preamble."
+)
+
+DESCRIBE_FOCUS_VIDEO_SYSTEM = (
+    "You are a visual description assistant for a VFX production pipeline. You are "
+    "given several frames sampled evenly across a short video clip, ordered from "
+    "earliest to latest. Write with the language of a cinematographer or VFX "
+    "supervisor.\n\n"
+    "The description must concentrate almost entirely on this element:\n"
+    "  \"{focus}\"\n\n"
+    "Devote nearly the whole description to that element — its form, materials and "
+    "texture, color, condition, and how it moves or changes across the clip. Be "
+    "exhaustive and concrete about it. Mention camera movement, lighting, setting, "
+    "mood, or other subjects only in a single brief clause, and only where they "
+    "directly frame the focus element. Do NOT write a balanced scene description.\n\n"
+    "Treat the frames as a single continuous shot. If the element is not visible, "
+    "say so in one sentence instead of inventing it. Avoid vague qualitative "
+    "adjectives. Write in present tense. 3-5 sentences. No preamble."
+)
+
 EXPAND_SYSTEM_BASE = (
     "You are a prompt engineer for an AI media generation pipeline used in "
     "professional VFX and animation production. Your job is to refine the "
@@ -100,6 +137,7 @@ EXPAND_MODE_RULE_VIDEO = (
 class DescribeRequest(BaseModel):
     image_path: str
     max_size: Optional[int] = DESCRIBE_MAX_SIZE
+    focus: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -858,19 +896,31 @@ def setup_llm_routes(app, *, resolve_input_path: Callable[[str], Path], log, con
         is_video = image_path.suffix.lower() in VIDEO_EXTS
         max_size = request.max_size or (VIDEO_FRAME_MAX_SIZE if is_video else DESCRIBE_MAX_SIZE)
         timeout = VIDEO_REQUEST_TIMEOUT if is_video else REQUEST_TIMEOUT
+        focus = (request.focus or "").strip()
 
         try:
             if is_video:
                 images = _sample_video_frames(image_path, VIDEO_FRAME_COUNT, max_size)
-                system_prompt = DESCRIBE_VIDEO_SYSTEM
-                user_text = (
-                    f"{len(images)} frames from a short clip, ordered earliest to latest. "
-                    "Describe the clip as a single continuous shot."
-                )
+                if focus:
+                    system_prompt = DESCRIBE_FOCUS_VIDEO_SYSTEM.format(focus=focus)
+                    user_text = (
+                        f"{len(images)} frames from a short clip, ordered earliest to latest. "
+                        f"Describe the clip as a single continuous shot, concentrating on: {focus}"
+                    )
+                else:
+                    system_prompt = DESCRIBE_VIDEO_SYSTEM
+                    user_text = (
+                        f"{len(images)} frames from a short clip, ordered earliest to latest. "
+                        "Describe the clip as a single continuous shot."
+                    )
             else:
                 images = [_encode_image_for_describe(image_path, max_size)]
-                system_prompt = DESCRIBE_SYSTEM
-                user_text = "Describe this image."
+                if focus:
+                    system_prompt = DESCRIBE_FOCUS_SYSTEM.format(focus=focus)
+                    user_text = f"Describe this image, concentrating on: {focus}"
+                else:
+                    system_prompt = DESCRIBE_SYSTEM
+                    user_text = "Describe this image."
         except HTTPException:
             raise
         except Exception as e:
@@ -922,13 +972,15 @@ def setup_llm_routes(app, *, resolve_input_path: Callable[[str], Path], log, con
             raise HTTPException(status_code=502, detail="LLM returned empty response")
 
         kind = "video" if is_video else "image"
-        log.info("LLM", f"describe ({kind}): {image_path.name} -> {len(content)} chars")
+        focus_note = f" [focus: {focus}]" if focus else ""
+        log.info("LLM", f"describe ({kind}): {image_path.name}{focus_note} -> {len(content)} chars")
 
         return {
             "description": content,
             "model": LLM_MODEL,
             "image_path": str(image_path),
             "kind": kind,
+            "focus": focus or None,
             "frames_used": len(images) if is_video else None,
         }
 
