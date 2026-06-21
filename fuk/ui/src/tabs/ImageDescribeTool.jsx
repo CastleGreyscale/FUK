@@ -384,6 +384,22 @@ export default function ImageDescribeTool() {
                 <img src={buildImageUrl(imagePath)} alt="Selected" />
               )}
               <div className="image-describe-path" title={imagePath}>{imagePath}</div>
+              <div className="image-describe-preview-actions">
+                <button
+                  className="fuk-btn fuk-btn-secondary image-describe-mini"
+                  onClick={handleBrowse}
+                  disabled={browsing || running}
+                >
+                  {browsing ? 'Loading…' : 'Change image'}
+                </button>
+                <button
+                  className="fuk-btn fuk-btn-secondary image-describe-mini"
+                  onClick={handleClear}
+                  disabled={running}
+                >
+                  Remove
+                </button>
+              </div>
             </div>
           )}
 

@@ -2076,6 +2076,12 @@
   font-family: monospace;
 }
 
+.image-describe-preview-actions {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.1rem;
+}
+
 .image-describe-run {
   margin-top: 0.3rem;
 }
