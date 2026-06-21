@@ -2354,19 +2354,20 @@
   align-items: center;
 }
 
-.image-describe-tag-delete {
-  background: transparent;
-  border: none;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  display: flex;
+.image-describe-tag-remove {
+  display: inline-flex;
   align-items: center;
-  padding: 0.2rem;
-  border-radius: 3px;
+  gap: 0.3rem;
 }
 
-.image-describe-tag-delete:hover {
+.image-describe-tag-remove svg {
+  width: 0.85em;
+  height: 0.85em;
+}
+
+.image-describe-tag-remove:hover {
   color: #e57373;
+  border-color: rgba(229, 115, 115, 0.5);
   background: rgba(229, 115, 115, 0.1);
 }
 

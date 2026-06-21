@@ -1765,10 +1765,14 @@ async def serve_cache_file(file_path: str, request: Request):
                 },
             )
     
+    # Serve inline so the file renders in <img>/<video> tags. Passing filename=
+    # makes Starlette emit `Content-Disposition: attachment`, which tells the
+    # browser to download rather than display.
     return FileResponse(
         path=full_path,
         media_type=content_type,
-        filename=full_path.name
+        filename=full_path.name,
+        content_disposition_type="inline",
     )
 
 @router.get("/debug")
@@ -1883,8 +1887,12 @@ async def serve_external_file(file_path: str):
     if content_type is None:
         content_type = "application/octet-stream"
 
+    # Serve inline so the file renders in <img>/<video> tags. Passing filename=
+    # makes Starlette emit `Content-Disposition: attachment`, which tells the
+    # browser to download rather than display.
     return FileResponse(
         path=full_path,
         media_type=content_type,
-        filename=full_path.name
+        filename=full_path.name,
+        content_disposition_type="inline",
     )

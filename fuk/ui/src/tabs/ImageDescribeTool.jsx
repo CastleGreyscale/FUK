@@ -605,11 +605,12 @@ export default function ImageDescribeTool() {
                         Edit
                       </button>
                       <button
-                        className="image-describe-tag-delete"
+                        className="fuk-btn fuk-btn-secondary image-describe-mini image-describe-tag-remove"
                         onClick={() => handleDeleteTag(tag.id)}
-                        title="Delete tag"
+                        title="Remove tag"
                       >
                         <Trash2 />
+                        Remove
                       </button>
                     </div>
                   </div>

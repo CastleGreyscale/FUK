@@ -125,6 +125,7 @@ async def stream_job(job_id: str):
     async def event_generator():
         last_snapshot = None
         idle_ticks = 0
+        job_dir = Path(dataset_jobs[job_id]["job_dir"])
 
         while True:
             job = dataset_jobs.get(job_id)
@@ -132,14 +133,29 @@ async def stream_job(job_id: str):
                 yield _sse({"status": "not_found"})
                 break
 
-            # Build a compact snapshot for diffing
+            # Build a compact snapshot for diffing. image_url is included so the
+            # client renders thumbnails straight from the stream — no per-thumbnail
+            # full-job fetch — and a newly-written image flips the snapshot, which
+            # pushes it out automatically.
             snapshot = {
                 "status":      job["status"],
                 "progress":    round(job["progress"], 4),
                 "current_idx": job["current_idx"],
                 "total":       len(job["variations"]),
                 "variations":  [
-                    {k: v[k] for k in ("id", "label", "status", "approved", "error")}
+                    {
+                        "id":        v["id"],
+                        "label":     v["label"],
+                        "status":    v["status"],
+                        "approved":  v.get("approved"),
+                        "error":     v.get("error"),
+                        # Only expose the image once the variation is finished. The
+                        # file exists() the moment generation starts writing it, so
+                        # gating on exists() alone serves a half-written PNG (renders
+                        # as a partial image, cut off vertically). status flips to
+                        # "completed" only after the backend has closed the file.
+                        "image_url": (str(p) if v["status"] == "completed" and (p := job_dir / "generated" / v["id"] / "generated.png").exists() else None),
+                    }
                     for v in job["variations"]
                 ],
             }
@@ -153,13 +169,20 @@ async def stream_job(job_id: str):
                 idle_ticks = 0
             else:
                 idle_ticks += 1
+                # Heartbeat (~every 10s) so the connection never goes idle while a
+                # single large variation is generating. Without this, proxies/browsers
+                # and the give-up timer below can drop a stream that is still working.
+                if idle_ticks % 20 == 0:
+                    yield ": ping\n\n"
 
             # Terminal states — send final event then stop
             if job["status"] in ("complete", "failed", "cancelled"):
                 break
 
-            # Timeout after ~5 minutes of silence
-            if idle_ticks > 600:
+            # Give up only if the job is genuinely stuck — no change at all for
+            # ~30 min. A single 1328px Qwen-Edit generation can legitimately run
+            # for several minutes, so this must be well above any one variation.
+            if idle_ticks > 3600:
                 break
 
             await asyncio.sleep(0.5)
@@ -180,16 +203,24 @@ async def get_job(job_id: str):
     enriched_variations = []
     for v in job["variations"]:
         img_path = job_dir / "generated" / v["id"] / "generated.png"
+        # Gate on completed status, not just existence — a mid-generation file is
+        # only partially written and would render as a vertically-cut image.
+        ready = v.get("status") == "completed" and img_path.exists()
         enriched_variations.append({
             **v,
-            "image_url": str(img_path) if img_path.exists() else None,
+            "image_url": str(img_path) if ready else None,
         })
+
+    cur_idx = job.get("current_idx", 0)
+    cur = job["variations"][cur_idx] if cur_idx < len(job["variations"]) else None
 
     return {
         **{k: job[k] for k in ("job_id", "subject_name", "subject_type", "created", "status", "progress", "params")},
         "source_paths": job["source_paths"],
         "variations":   enriched_variations,
         "total":        len(job["variations"]),
+        "current_idx":  cur_idx,
+        "current_label": cur["label"] if cur else "",
         "approved_count": sum(1 for v in job["variations"] if v.get("approved") is True),
     }
 

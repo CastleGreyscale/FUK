@@ -349,6 +349,19 @@ def _model_family(model: Optional[str]) -> Optional[str]:
     return str(model).split("_", 1)[0].lower()
 
 
+def _model_ids(model) -> List[str]:
+    """Normalize a config `model` field to a list of model ids.
+
+    A LoRA's `model` may be a single id (``"qwen_image"``) or a list of the
+    variants it ships for (``["qwen_image", "qwen_image_2512"]``). Both forms
+    flow through here so downstream filtering/keying never has to care which.
+    """
+    if not model:
+        return []
+    items = model if isinstance(model, list) else [model]
+    return [s for s in (str(m).strip() for m in items) if s]
+
+
 def _categorize_caption_phrase(phrase: str) -> Optional[str]:
     p = phrase.lower()
     for cat, kws in _CAPTION_CATEGORY_KEYWORDS:
@@ -407,13 +420,14 @@ def _lora_tokens(config_dir: Path, model_family: Optional[str]) -> List[dict]:
         inject = (entry.get("inject_text") or "").strip()
         if not trigger or not inject:
             continue
-        entry_model = entry.get("model") or ""
-        if model_family and _model_family(entry_model) != model_family:
+        entry_models = _model_ids(entry.get("model"))
+        if model_family and not any(_model_family(m) == model_family for m in entry_models):
             continue
         marker = _name_to_marker(trigger)
         if not marker:
             continue
         lora_name = entry.get("name") or trigger
+        entry_model = entry_models[0] if entry_models else ""
         lora_key = f"{entry_model}/{lora_name}" if entry_model else lora_name
         existing = by_marker.get(marker)
         if existing:
@@ -521,10 +535,9 @@ def _resolve_active_lora_triggers(
         if not trigger:
             continue
         name = entry.get("name") or ""
-        model = entry.get("model") or ""
-        composite = f"{model}/{name}" if model else name
+        composites = {f"{m}/{name}" for m in _model_ids(entry.get("model"))}
         for r in requested:
-            if r in (name, composite, trigger):
+            if r == name or r == trigger or r in composites:
                 triggers.add(trigger)
                 matched.add(r)
     # Anything the user passed that didn't match a registered LoRA still

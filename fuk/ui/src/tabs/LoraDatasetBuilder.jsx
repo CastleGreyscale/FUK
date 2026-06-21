@@ -367,27 +367,44 @@ function RunningPhase({ jobId, onComplete }) {
 
   useEffect(() => {
     if (!jobId) return;
+    let done = false;
+
+    const handleData = (data) => {
+      if (done) return;
+      setState(data);
+      if (data.status === 'complete') {
+        cleanup();
+        onComplete(jobId);
+      } else if (data.status === 'failed' || data.status === 'cancelled') {
+        cleanup();
+      }
+    };
+
+    // Primary: SSE stream (fast, push-based). Do NOT close on error — let
+    // EventSource auto-reconnect so a transient drop heals itself.
     const es = new EventSource(`/api/dataset/${jobId}/stream`);
     esRef.current = es;
-
     es.onmessage = (e) => {
+      try { handleData(JSON.parse(e.data)); } catch (_) {}
+    };
+
+    // Fallback: poll full job state as a backstop so the UI keeps advancing
+    // (and still reaches 'complete') even if the stream stalls entirely.
+    const pollId = setInterval(async () => {
       try {
-        const data = JSON.parse(e.data);
-        setState(data);
-        if (data.status === 'complete') {
-          es.close();
-          onComplete(jobId);
-        } else if (data.status === 'failed' || data.status === 'cancelled') {
-          es.close();
-        }
+        const r = await fetch(`/api/dataset/${jobId}`);
+        if (r.ok) handleData(await r.json());
       } catch (_) {}
-    };
+    }, 4000);
 
-    es.onerror = () => {
+    function cleanup() {
+      if (done) return;
+      done = true;
       es.close();
-    };
+      clearInterval(pollId);
+    }
 
-    return () => { es.close(); };
+    return cleanup;
   }, [jobId]);
 
   if (!state) {
@@ -450,7 +467,7 @@ function RunningPhase({ jobId, onComplete }) {
       <div className="dataset-thumb-grid-wrap">
         <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${thumbSize}px, 1fr))`, gap: '0.5rem' }}>
           {(state.variations ?? []).map(v => (
-            <VariationThumbnail key={v.id} variation={v} jobId={jobId} />
+            <VariationThumbnail key={v.id} variation={v} />
           ))}
         </div>
       </div>
@@ -458,21 +475,10 @@ function RunningPhase({ jobId, onComplete }) {
   );
 }
 
-function VariationThumbnail({ variation, jobId }) {
-  const [imgUrl, setImgUrl] = useState(null);
-
-  // Poll for image once variation completes
-  useEffect(() => {
-    if (variation.status !== 'completed') { setImgUrl(null); return; }
-    fetch(`/api/dataset/${jobId}`)
-      .then(r => r.json())
-      .then(data => {
-        const v = data.variations?.find(vv => vv.id === variation.id);
-        if (v?.image_url) setImgUrl(variationImageUrl(v.image_url));
-      })
-      .catch(() => {});
-  }, [variation.status, variation.id, jobId]);
-
+function VariationThumbnail({ variation }) {
+  // image_url now arrives directly on the streamed/polled variation, so the
+  // thumbnail renders as soon as the image exists — no separate fetch needed.
+  const imgUrl = variation.image_url ? variationImageUrl(variation.image_url) : null;
   const status = variation.status;
 
   return (
