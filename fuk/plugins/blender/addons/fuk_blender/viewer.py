@@ -46,9 +46,10 @@ def _set_camera_background(context, img, alpha=1.0):
     cam_data = cam.data
     cam_data.show_background_images = True
 
-    # Drop any stale FUK result overlays (different file, same role) to avoid stacking.
+    # Drop any stale FUK overlays (result + live-diffusion preview) to avoid stacking,
+    # so switching preview <-> final reuses a single background slot.
     for bg in list(cam_data.background_images):
-        if bg.image and bg.image is not img and bpy.path.basename(bg.image.filepath) == "result.png":
+        if bg.image and bg.image is not img and bpy.path.basename(bg.image.filepath) in ("result.png", "preview.png"):
             cam_data.background_images.remove(bg)
 
     bg = next((b for b in cam_data.background_images if b.image is img), None)
@@ -73,19 +74,26 @@ def _open_image_window(context, img):
     return True
 
 
-def show_result(context, img, mode="viewport", alpha=1.0):
-    """Display `img` per `mode`. Returns a short human label of what happened."""
+def show_result(context, img, mode="viewport", alpha=1.0, reuse_only=False):
+    """Display `img` per `mode`. Returns a short human label of what happened.
+
+    `reuse_only` (used for mid-diffusion previews) updates only an already-open
+    display — it never opens a new window, so previews don't spawn one per frame.
+    """
     if mode == "viewport":
         if _set_camera_background(context, img, alpha):
             _switch_to_camera_view(context)
             return "viewport (camera background)"
         # No camera — fall through to an editor.
 
-    if mode in ("editor", "viewport"):
+    if mode in ("editor", "viewport") or reuse_only:
         area = _find_image_editor(context)
         if area is not None:
             area.spaces.active.image = img
             return "Image Editor"
+
+    if reuse_only:
+        return None  # don't pop a new window for every preview frame
 
     if _open_image_window(context, img):
         return "new window"

@@ -74,6 +74,14 @@ is rendering aren't lost: they coalesce into a single **trailing** render of the
 state once the current one finishes (no growing backlog). Live previews are ephemeral
 (no history entries).
 
+**Interrupt** (the small button next to Delay, on by default): in Live mode a new edit
+**cancels the in-flight preview and restarts** with the latest state instead of waiting
+for it to finish — true IPR responsiveness. With it off, edits made mid-render coalesce
+into one trailing render instead.
+
+Press **Esc** during any generation to stop it for real (it aborts at the next
+diffusion step, not just stops waiting).
+
 Shortcuts (3D View): **Ctrl+Shift+P** runs a Quick Preview, **Ctrl+Shift+L** toggles
 Live. (Rebind in Blender's Keymap editor under *3D View*.)
 
@@ -98,6 +106,13 @@ Pick how the generated image comes back under **Result**:
   back to an Image Editor if the scene has no camera.
 - **New Window** — open the result in a standalone Image Editor window.
 - **Image Editor** — reuse an open Image Editor (or a new window if none).
+
+**Diffusion Preview** *(on by default)* — shows the image **forming** during
+generation: the server decodes a few mid-diffusion frames and the addon updates the
+display live (like the progressive preview during diffusion). It adds a little time
+(each preview is a VAE decode) and is opt-in — turn it off for the fastest renders.
+Works in Viewport/Image Editor modes; in New Window mode previews appear once the
+window exists. Currently wired for the Qwen (control-union) models.
 
 ## Requirements / notes
 

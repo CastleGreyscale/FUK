@@ -655,6 +655,7 @@ class ImageGenerationRequest(BaseModel):
     embedded_guidance: Optional[float] = None  # FLUX.2 embedded guidance (null = use guidance_scale)
     eligen_source: Optional[str] = None  # Path to EliGen masks (directory, .psd, or .ora)
     eligen_alpha: Optional[float] = None  # Model LoRA strength (EliGen or control union)
+    live_preview: bool = False  # Decode a few mid-denoise previews (Blender live view)
     # [LAYER STACK DISABLED]
     # stack_id: Optional[str] = None       # e.g. "img_edit_001"
     # layer_name: Optional[str] = None     # Human label for the new layer
@@ -1057,12 +1058,37 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
                 log.info("ImageGen", f"Could not read source image dimensions: {_e}")
 
         log.info("ImageGen", "Starting generation...")
-        
+
+        # Live diffusion preview: decode a few mid-denoise frames to preview.png and
+        # surface the URL in outputs so clients (Blender) can show the image forming.
+        preview_cb = None
+        if getattr(request, "live_preview", False):
+            _preview_path = gen_dir / "preview.png"
+            def preview_cb(step, total, pil):
+                try:
+                    pil.save(_preview_path)
+                    gen = active_generations.get(generation_id)
+                    if gen is not None:
+                        outs = gen.setdefault("outputs", {})
+                        outs["preview"] = f"{get_project_relative_url(_preview_path)}?step={step}"
+                        gen["phase"] = f"diffusing {step}/{total}"
+                        gen["progress"] = (step / total) if total else 0.0
+                        gen["updated_at"] = datetime.now().isoformat()
+                except Exception as _e:
+                    log.warning("ImageGen", f"Preview save failed: {_e}")
+
+        # Cancellation: polled each diffusion step; /api/cancel sets status=cancelled.
+        def cancel_check():
+            gen = active_generations.get(generation_id)
+            return bool(gen) and gen.get("status") == "cancelled"
+
         # Generate using DiffSynth backend
         result = await asyncio.to_thread(
             generation_backend.run,
             "image",
             prompt=prompt,
+            preview_callback=preview_cb,
+            cancel_check=cancel_check,
             output_path=paths["generated_png"],
             model=request.model,
             width=request.width,
@@ -1150,22 +1176,40 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
         clear_vram()
         
     except Exception as e:
-        log.exception("ImageGen", e)
-        active_generations[generation_id].update({
-            "status": "failed",
-            "error": str(e),
-            "failed_at": datetime.now().isoformat()
-        })
+        # Distinguish a user cancellation (GenerationCancelled raised from the step
+        # hook, or status already flipped to cancelled) from a real failure.
+        _gen = active_generations.get(generation_id, {})
+        cancelled = type(e).__name__ == "GenerationCancelled" or _gen.get("status") == "cancelled"
 
-        # Clean up failed generation directory
+        if cancelled:
+            log.info("ImageGen", "Generation cancelled — cleaning up")
+            active_generations[generation_id].update({
+                "status": "cancelled",
+                "phase": "cancelling",
+                "cancelled_at": datetime.now().isoformat(),
+            })
+        else:
+            log.exception("ImageGen", e)
+            active_generations[generation_id].update({
+                "status": "failed",
+                "error": str(e),
+                "failed_at": datetime.now().isoformat()
+            })
+
+        # Clean up the partial generation directory (cancelled or failed)
         gen_dir = active_generations[generation_id].get("gen_dir")
         if gen_dir:
-            cleanup_failed_generation(gen_dir, reason=str(e))
+            cleanup_failed_generation(gen_dir, reason="cancelled" if cancelled else str(e))
 
-        # Clear VRAM even on failure
-        log.info("ImageGen", "Clearing VRAM after failure...")
+        # Clear VRAM
+        log.info("ImageGen", "Clearing VRAM...")
         clear_vram()
-    
+
+        # Only now signal the abort is fully done (phase 'cancelling' -> 'cancelled'),
+        # so a restart can't overlap teardown on the (non-thread-safe) pipeline.
+        if cancelled:
+            active_generations[generation_id]["phase"] = "cancelled"
+
     finally:
         # Always clear the current generation for log capture
         capture.stop()
@@ -1468,24 +1512,16 @@ async def cancel_generation(generation_id: str):
     if gen["status"] in ["complete", "failed"]:
         return {"message": "Generation already finished"}
     
-    # Mark as cancelled
+    # Flip the flag. The diffusion loop's per-step hook polls this and aborts at the
+    # next step (image gens); the generation's own except/finally then marks it
+    # cancelled, cleans up the partial dir, and clears VRAM. We do NOT clear VRAM
+    # here — that would race the still-running step.
     gen["status"] = "cancelled"
-    gen["phase"] = "cancelled"
+    gen["phase"] = "cancelling"
     gen["cancelled_at"] = datetime.now().isoformat()
-    
-    print(f"\nGeneration Cancelled: {generation_id}")
-    print(f"Note: Backend process may still be running (DiffSynth doesn't support mid-generation cancellation)")
-    
-    # Clear VRAM
-    print(f"[{generation_id}] Clearing VRAM after cancellation...")
-    clear_vram()
-    
-    return {"message": "Generation marked as cancelled"}
 
-    # Clean up cancelled generation directory
-    gen_dir = gen.get("gen_dir")
-    if gen_dir:
-        cleanup_failed_generation(gen_dir, reason="cancelled by user")
+    print(f"\nGeneration cancel requested: {generation_id} (aborts at next step)")
+    return {"message": "Cancellation requested"}
 
 # ============================================================================
 # Status & Progress

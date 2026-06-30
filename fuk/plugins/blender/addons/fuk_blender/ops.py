@@ -41,6 +41,10 @@ def _refresh_tokens(client, props) -> int:
 # of edits made during a render down to a single follow-up render of the latest state.
 _LIVE = {"count": 0, "rendered": 0, "last_change": 0.0, "suspend": False}
 
+# The generation currently in flight (so Live can interrupt it). Set by the generate
+# operator on submit, cleared when it finishes.
+_ACTIVE_GEN = {"id": "", "mode": ""}
+
 
 # Object types whose geometry updates are genuine edits. The render + display
 # re-evaluations show up as geometry updates on the CAMERA and on collections/scene
@@ -369,6 +373,8 @@ class FUK_OT_generate(bpy.types.Operator):
     _t0 = 0.0
     _render = None        # render_passes result (beauty, control, kind, w, h)
     _control_path = ""    # the structural map actually sent to FUK
+    _last_preview = ""    # last diffusion-preview URL displayed
+    _cancelling = False   # an Esc-stop is in progress
 
     def invoke(self, context, event):
         props = context.scene.fuk
@@ -420,6 +426,7 @@ class FUK_OT_generate(bpy.types.Operator):
                 "width": result["width"],
                 "height": result["height"],
                 "output_format": props.output_format,
+                "live_preview": bool(props.show_diffusion),
             }
             if control_path:
                 payload["control_image_paths"] = [control_path]
@@ -444,8 +451,11 @@ class FUK_OT_generate(bpy.types.Operator):
         self._out_dir = out_dir
         self._render = result
         self._control_path = control_path or ""
+        self._last_preview = ""
+        self._cancelling = False
         self._t0 = time.time()
         props.busy = True
+        _ACTIVE_GEN.update({"id": self._gen_id, "mode": self.mode})
         props.status = "Queued..."
 
         wm = context.window_manager
@@ -455,12 +465,16 @@ class FUK_OT_generate(bpy.types.Operator):
 
     def modal(self, context, event):
         props = context.scene.fuk
-        if event.type == "ESC":
+        if event.type == "ESC" and not self._cancelling:
+            # Request a real stop, but keep the modal alive (busy=True) until the
+            # server confirms the abort finished — so nothing starts concurrently.
             try:
                 self._client.cancel(self._gen_id)
             except FukError:
                 pass
-            return self._finish(context, "Cancelled")
+            self._cancelling = True
+            props.status = "Cancelling…"
+            return {"PASS_THROUGH"}
         if event.type != "TIMER":
             return {"PASS_THROUGH"}
 
@@ -477,6 +491,18 @@ class FUK_OT_generate(bpy.types.Operator):
 
         if status in ("running", "queued"):
             props.status = f"{phase or status} {progress*100:.0f}% ({elapsed:.0f}s)"
+            # Live diffusion view: show each mid-denoise preview as it arrives.
+            preview_url = (st.get("outputs", {}) or {}).get("preview")
+            if preview_url and preview_url != self._last_preview:
+                self._last_preview = preview_url
+                try:
+                    pdest = os.path.join(self._out_dir, "preview.png")
+                    self._client.download(preview_url, pdest)
+                    pimg = viewer_mod.load_result_image(pdest)
+                    viewer_mod.show_result(context, pimg, props.result_display,
+                                           props.bg_alpha, reuse_only=True)
+                except (FukError, RuntimeError):
+                    pass
             return {"PASS_THROUGH"}
 
         if status == "complete":
@@ -534,8 +560,17 @@ class FUK_OT_generate(bpy.types.Operator):
             tail = (f" — shown in {shown}" if shown else "") + note
             return self._finish(context, f"Done in {elapsed:.0f}s{tail}")
 
-        if status in ("failed", "cancelled"):
-            return self._finish(context, f"{status.capitalize()}: {st.get('error','')}")
+        if status == "failed":
+            return self._finish(context, f"Failed: {st.get('error','')}")
+
+        if status == "cancelled":
+            # Hold busy until the server's diffusion thread has actually aborted
+            # (phase flips 'cancelling' -> 'cancelled'), so a restart can't overlap
+            # the still-running pipeline (DiffSynth isn't thread-safe).
+            if phase == "cancelled":
+                return self._finish(context, "Cancelled")
+            props.status = "Cancelling…"
+            return {"PASS_THROUGH"}
 
         return {"PASS_THROUGH"}
 
@@ -543,6 +578,7 @@ class FUK_OT_generate(bpy.types.Operator):
         props = context.scene.fuk
         props.busy = False
         props.status = message
+        _ACTIVE_GEN.update({"id": "", "mode": ""})
         _live_suspend(False)  # safety: never leave live detection suspended
         if self._timer is not None:
             context.window_manager.event_timer_remove(self._timer)
@@ -593,6 +629,17 @@ class FUK_OT_live(bpy.types.Operator):
         # operator owns suspend + the rendered snapshot; edits made during its
         # diffusion wait bump `count` past `rendered`, owing one trailing render.
         if props.busy:
+            owed = _LIVE["count"] != _LIVE["rendered"]
+            settled = (time.time() - _LIVE["last_change"]) >= props.live_delay
+            # Interrupt & restart: a new edit settled while a Live *preview* is running.
+            if (props.live_interrupt and owed and settled
+                    and _ACTIVE_GEN.get("mode") == "preview" and _ACTIVE_GEN.get("id")):
+                try:
+                    _client(context).cancel(_ACTIVE_GEN["id"])
+                except FukError:
+                    pass
+                _ACTIVE_GEN["id"] = ""  # one request; the generate op handles the rest
+                props.status = "Live: restarting…"
             return {"PASS_THROUGH"}
 
         # Visible state so the loop is observable: did it see your edit? is it settling?

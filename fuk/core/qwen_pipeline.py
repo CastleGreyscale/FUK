@@ -44,6 +44,10 @@ def _qwen_input_embedder_patched(self, pipe, input_image, noise, tiled, tile_siz
 _QwenInputEmbedder.process = _qwen_input_embedder_patched
 
 
+class GenerationCancelled(Exception):
+    """Raised from the per-step hook to abort a generation mid-denoise."""
+
+
 class QwenPipelineRunner(PipelineRunner):
     """
     Runner for all Qwen image generation pipelines.
@@ -78,6 +82,11 @@ class QwenPipelineRunner(PipelineRunner):
         eligen_alpha: Optional[float] = None,  # Override model LoRA strength
         # VRAM
         vram_preset: Optional[str] = None,
+        # Live diffusion preview: callback(step:int, total:int, pil_image) called a
+        # few times mid-denoise. Opt-in; None => zero overhead / unchanged path.
+        preview_callback: Optional[Any] = None,
+        # cancel_check() -> bool, polled each step; True aborts (GenerationCancelled).
+        cancel_check: Optional[Any] = None,
         # Misc
         save_latent: bool = True,
         infer_steps: Optional[int] = None,
@@ -197,6 +206,16 @@ class QwenPipelineRunner(PipelineRunner):
         # Merge pipeline_kwargs from models.json
         pipe_kwargs.update(pipe_defaults)
 
+        # --- Per-step hook: live preview and/or cancellation (opt-in) ---
+        # Grab the un-hooked VAE decode BEFORE latent capture wraps it, so preview
+        # decodes don't trip the "capture first decode" logic and corrupt the latent.
+        preview_cleanup = None
+        if preview_callback is not None or cancel_check is not None:
+            preview_cleanup = self._install_preview_hook(
+                pipe, preview_callback, cancel_check, num_steps,
+                original_vae_decode=pipe.vae.decode,
+            )
+
         # --- Latent capture ---
         latent_path, cleanup_hook = self.setup_latent_capture(pipe, output_path, save_latent)
 
@@ -228,12 +247,79 @@ class QwenPipelineRunner(PipelineRunner):
                     "denoising_strength": denoise,
                 },
             )
+        except GenerationCancelled:
+            _log(self.log_prefix, "Generation cancelled at step boundary", "warning")
+            raise
         except Exception as e:
             _log(self.log_prefix, f"Image generation failed: {e}", "error")
             raise
         finally:
+            if preview_cleanup:
+                preview_cleanup()
             if cleanup_hook:
                 cleanup_hook()
+
+    # ------------------------------------------------------------------
+    # Per-step hook: live diffusion preview + cancellation
+    # ------------------------------------------------------------------
+
+    def _install_preview_hook(self, pipe, callback, cancel_check, total_steps, original_vae_decode):
+        """Wrap pipe.step for mid-denoise previews and/or cancellation.
+
+        - cancel_check(): polled each step; True raises GenerationCancelled to abort.
+        - callback: a few clean x0 previews decoded via `original_vae_decode` (the
+          un-hooked decode, so latent capture is unaffected).
+        Restores pipe.step on cleanup. Decode failures are non-fatal.
+        """
+        original_step = pipe.step
+        total = max(1, int(total_steps or 1))
+        # Preview at ~quarter points (not the final step — that's the real output).
+        marks = {max(1, round(total * f)) for f in (0.25, 0.5, 0.75)} if callback else set()
+        marks.discard(total)
+
+        def hooked_step(scheduler, **kw):
+            # Check for cancellation BEFORE doing the (expensive) step work.
+            if cancel_check is not None and cancel_check():
+                raise GenerationCancelled()
+            latents_next = original_step(scheduler, **kw)
+            step_num = int(kw.get("progress_id", 0)) + 1
+            if callback and step_num in marks:
+                try:
+                    # Decode the x0 PREDICTION (estimated clean latent), not the noisy
+                    # sample — flow-match x_t stays near-noise until the end, so decoding
+                    # it directly looks like static. `to_final=True` gives sample minus
+                    # the velocity scaled by sigma = the current best guess of the result.
+                    progress_id = int(kw.get("progress_id", 0))
+                    x_t = kw.get("latents")
+                    noise_pred = kw.get("noise_pred")
+                    if x_t is not None and noise_pred is not None:
+                        timestep = scheduler.timesteps[progress_id]
+                        preview_latent = scheduler.step(noise_pred, timestep, x_t, to_final=True)
+                    else:
+                        preview_latent = latents_next
+                    pipe.load_models_to_device(["vae"])
+                    out = original_vae_decode(
+                        preview_latent, device=pipe.device,
+                        tiled=kw.get("tiled", False),
+                        tile_size=kw.get("tile_size", 128),
+                        tile_stride=kw.get("tile_stride", 64),
+                    )
+                    pil = pipe.vae_output_to_image(out)
+                    callback(step_num, total, pil)
+                    pipe.load_models_to_device(pipe.in_iteration_models)
+                except Exception as e:
+                    _log(self.log_prefix, f"Preview decode failed (non-fatal): {e}", "warning")
+            return latents_next
+
+        pipe.step = hooked_step
+        _log(self.log_prefix,
+             f"Step hook installed (preview steps {sorted(marks) or 'off'}, "
+             f"cancellable={cancel_check is not None})")
+
+        def cleanup():
+            pipe.step = original_step
+
+        return cleanup
 
     # ------------------------------------------------------------------
     # Source image resolution

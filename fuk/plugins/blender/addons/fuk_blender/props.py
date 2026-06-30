@@ -131,6 +131,11 @@ class FukProps(bpy.types.PropertyGroup):
         name="Preview Steps", default=8, min=1, max=100,
         description="Diffusion steps used for Quick Preview generations",
     )
+    show_diffusion: bpy.props.BoolProperty(
+        name="Diffusion Preview", default=True,
+        description="Show the image forming step-by-step during generation "
+                    "(decodes a few mid-diffusion frames — adds a little time)",
+    )
 
     # --- live (IPR-style auto-update) ---
     live_mode: bpy.props.BoolProperty(
@@ -140,6 +145,11 @@ class FukProps(bpy.types.PropertyGroup):
     live_delay: bpy.props.FloatProperty(
         name="Delay", default=0.6, min=0.1, max=5.0,
         description="Seconds of stillness after a change before auto-previewing",
+    )
+    live_interrupt: bpy.props.BoolProperty(
+        name="Interrupt", default=True,
+        description="In Live mode, cancel an in-flight preview and restart when you "
+                    "make a new edit (instead of waiting for it to finish)",
     )
 
     # --- result display ---

@@ -107,6 +107,7 @@ class FUK_PT_main(bpy.types.Panel):
         box.prop(props, "result_display", text="")
         if props.result_display == "viewport":
             box.prop(props, "bg_alpha", slider=True)
+        box.prop(props, "show_diffusion")
 
         # --- actions ---
         col = layout.column(align=True)
@@ -120,6 +121,7 @@ class FUK_PT_main(bpy.types.Panel):
         row = col.row(align=True)
         row.operator("fuk.live", text="Live", icon="REC", depress=props.live_mode)
         row.prop(props, "live_delay", text="Delay")
+        row.prop(props, "live_interrupt", text="", icon="TRACKING_CLEAR_FORWARDS")
 
         # Save the current (e.g. preview) result to FUK history on demand.
         if props.last_result:
