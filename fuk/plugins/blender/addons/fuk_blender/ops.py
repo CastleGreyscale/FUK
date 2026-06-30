@@ -32,6 +32,56 @@ def _refresh_tokens(client, props) -> int:
     return len(props_mod.TOKEN_CACHE)
 
 
+# Live-mode shared state.
+#   count    monotonic counter the handler bumps on real edits
+#   rendered count snapshot taken when the last render started
+#   suspend  set by the generate operator around its OWN render/display mutations
+#            (those emit geometry updates too, so we must gate them out)
+# A trailing render is owed whenever count != rendered — this coalesces any number
+# of edits made during a render down to a single follow-up render of the latest state.
+_LIVE = {"count": 0, "rendered": 0, "last_change": 0.0, "suspend": False}
+
+
+# Object types whose geometry updates are genuine edits. The render + display
+# re-evaluations show up as geometry updates on the CAMERA and on collections/scene
+# (which aren't Objects) — those must be ignored or Live re-triggers itself forever.
+_GEOMETRY_TYPES = {"MESH", "CURVE", "SURFACE", "META", "FONT",
+                   "VOLUME", "GREASEPENCIL", "GPENCIL", "POINTCLOUD"}
+
+
+def _depsgraph_handler(scene, depsgraph):
+    """Count only genuine transform/geometry edits.
+
+    Filtered out: selection/active-object clicks (no transform/geometry flag), and
+    our OWN render/display, which emit `is_updated_geometry` on the camera and the
+    scene collections. A camera *move* is a transform; the render artifact is
+    geometry-on-camera — so we count object transforms, and geometry only on real
+    geometry objects.
+    """
+    if _LIVE["suspend"]:
+        return
+    for upd in depsgraph.updates:
+        idd = getattr(upd, "id", None)
+        is_object = isinstance(idd, bpy.types.Object)
+        if upd.is_updated_transform and is_object:
+            _LIVE["count"] += 1
+            _LIVE["last_change"] = time.time()
+            return
+        if upd.is_updated_geometry and is_object and idd.type in _GEOMETRY_TYPES:
+            _LIVE["count"] += 1
+            _LIVE["last_change"] = time.time()
+            return
+
+
+def _live_suspend(on: bool):
+    _LIVE["suspend"] = on
+
+
+def _live_snapshot_rendered():
+    """Mark the current edit count as 'rendered' (called when a render starts)."""
+    _LIVE["rendered"] = _LIVE["count"]
+
+
 def _gen_id_from_url(png_url: str) -> str:
     """api/project/cache/<rel>/generated.png -> <rel> (cache-relative entry id)."""
     s = png_url
@@ -335,6 +385,11 @@ class FUK_OT_generate(bpy.types.Operator):
         # One working dir per shot — preview and full overwrite it; "current result".
         out_dir = os.path.join(folder, "cache", "_blender_io", shot_stem)
 
+        # Snapshot the live edit count now, and suspend live change-detection: the
+        # render itself emits geometry updates that must not look like user edits.
+        _live_snapshot_rendered()
+        _live_suspend(True)
+
         try:
             # Make sure the server is pointed at this shot so outputs land in its cache.
             client.set_project_folder(folder)
@@ -377,8 +432,13 @@ class FUK_OT_generate(bpy.types.Operator):
         except (FukError, RuntimeError, KeyError, OSError) as e:
             props.busy = False
             props.status = "Failed"
+            _live_suspend(False)
             self.report({"ERROR"}, str(e))
             return {"CANCELLED"}
+
+        # Render + submit done; resume live detection during the diffusion wait so
+        # edits made now are noticed and a trailing render runs when this finishes.
+        _live_suspend(False)
 
         self._client = client
         self._out_dir = out_dir
@@ -442,10 +502,15 @@ class FUK_OT_generate(bpy.types.Operator):
                 self._client.download(png_url, dest)
                 img = viewer_mod.load_result_image(dest)
                 props.last_result = dest
+                # Displaying mutates the camera (background image) and emits geometry
+                # updates — suspend live detection across it so it isn't seen as an edit.
+                _live_suspend(True)
                 shown = viewer_mod.show_result(context, img, props.result_display, props.bg_alpha)
             except (FukError, RuntimeError) as e:
                 self.report({"WARNING"}, f"Generated, but display failed: {e}")
                 shown = None
+            finally:
+                _live_suspend(False)
 
             # Record the working set so Save-to-History can package it later.
             props.working_dir = self._out_dir
@@ -478,10 +543,80 @@ class FUK_OT_generate(bpy.types.Operator):
         props = context.scene.fuk
         props.busy = False
         props.status = message
+        _live_suspend(False)  # safety: never leave live detection suspended
         if self._timer is not None:
             context.window_manager.event_timer_remove(self._timer)
             self._timer = None
         self.report({"INFO"}, message)
+        return {"FINISHED"}
+
+
+class FUK_OT_live(bpy.types.Operator):
+    bl_idname = "fuk.live"
+    bl_label = "Live"
+    bl_description = "Toggle live mode: auto-run a Quick Preview after camera/object edits settle"
+
+    _timer = None
+
+    def invoke(self, context, event):
+        props = context.scene.fuk
+        # Button acts as a toggle — a second press turns the running watcher off.
+        if props.live_mode:
+            props.live_mode = False
+            return {"FINISHED"}
+        if not props.shot_file:
+            self.report({"ERROR"}, "Connect and load a shot first")
+            return {"CANCELLED"}
+
+        # Clear any stale lock (e.g. left set by an interrupted run) — enabling Live
+        # is a deliberate fresh start, so nothing should be mid-generation here.
+        props.busy = False
+        props.live_mode = True
+        # Start clean: nothing owed until the next real edit.
+        _LIVE.update({"count": 0, "rendered": 0, "last_change": time.time(), "suspend": False})
+        if _depsgraph_handler not in bpy.app.handlers.depsgraph_update_post:
+            bpy.app.handlers.depsgraph_update_post.append(_depsgraph_handler)
+        self._timer = context.window_manager.event_timer_add(0.25, window=context.window)
+        context.window_manager.modal_handler_add(self)
+        props.status = "Live: watching"
+        self.report({"INFO"}, "Live mode on")
+        return {"RUNNING_MODAL"}
+
+    def modal(self, context, event):
+        props = context.scene.fuk
+        if not props.live_mode:
+            return self._stop(context, "Live: off")
+        if event.type != "TIMER":
+            return {"PASS_THROUGH"}
+
+        # A generation is running (this one's, or a manual Render Full). The generate
+        # operator owns suspend + the rendered snapshot; edits made during its
+        # diffusion wait bump `count` past `rendered`, owing one trailing render.
+        if props.busy:
+            return {"PASS_THROUGH"}
+
+        # Visible state so the loop is observable: did it see your edit? is it settling?
+        owed = _LIVE["count"] != _LIVE["rendered"]
+        if not owed:
+            props.status = "Live: watching"
+        elif (time.time() - _LIVE["last_change"]) < props.live_delay:
+            props.status = "Live: change — settling…"
+        else:
+            props.status = "Live: rendering…"
+            try:
+                bpy.ops.fuk.generate("INVOKE_DEFAULT", mode="preview")
+            except RuntimeError as e:
+                self.report({"WARNING"}, f"Live preview failed: {e}")
+        return {"PASS_THROUGH"}
+
+    def _stop(self, context, message):
+        if self._timer is not None:
+            context.window_manager.event_timer_remove(self._timer)
+            self._timer = None
+        if _depsgraph_handler in bpy.app.handlers.depsgraph_update_post:
+            bpy.app.handlers.depsgraph_update_post.remove(_depsgraph_handler)
+        _LIVE["suspend"] = False
+        context.scene.fuk.status = message
         return {"FINISHED"}
 
 
@@ -495,4 +630,5 @@ CLASSES = (
     FUK_OT_use_last_seed,
     FUK_OT_save_to_history,
     FUK_OT_generate,
+    FUK_OT_live,
 )

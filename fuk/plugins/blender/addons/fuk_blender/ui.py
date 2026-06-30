@@ -110,10 +110,16 @@ class FUK_PT_main(bpy.types.Panel):
 
         # --- actions ---
         col = layout.column(align=True)
-        col.enabled = not props.busy
-        col.scale_y = 1.3
-        col.operator("fuk.generate", text="Quick Preview (not saved)", icon="HIDE_OFF").mode = "preview"
-        col.operator("fuk.generate", text="Render Full (saves)", icon="RENDER_STILL").mode = "full"
+        sub = col.column(align=True)
+        sub.enabled = not props.busy
+        sub.scale_y = 1.3
+        sub.operator("fuk.generate", text="Quick Preview (not saved)", icon="HIDE_OFF").mode = "preview"
+        sub.operator("fuk.generate", text="Render Full (saves)", icon="RENDER_STILL").mode = "full"
+
+        # Live (IPR-style) auto-update on camera/object edits.
+        row = col.row(align=True)
+        row.operator("fuk.live", text="Live", icon="REC", depress=props.live_mode)
+        row.prop(props, "live_delay", text="Delay")
 
         # Save the current (e.g. preview) result to FUK history on demand.
         if props.last_result:

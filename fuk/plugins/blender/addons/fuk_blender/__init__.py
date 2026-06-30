@@ -34,13 +34,40 @@ _CLASSES = (
 )
 
 
+_addon_keymaps = []
+
+
+def _register_keymaps():
+    kc = bpy.context.window_manager.keyconfigs.addon
+    if not kc:
+        return
+    km = kc.keymaps.new(name="3D View", space_type="VIEW_3D")
+    # Ctrl+Shift+P — run a Quick Preview; Ctrl+Shift+L — toggle Live mode.
+    kmi = km.keymap_items.new("fuk.generate", "P", "PRESS", ctrl=True, shift=True)
+    kmi.properties.mode = "preview"
+    _addon_keymaps.append((km, kmi))
+    kmi = km.keymap_items.new("fuk.live", "L", "PRESS", ctrl=True, shift=True)
+    _addon_keymaps.append((km, kmi))
+
+
+def _unregister_keymaps():
+    for km, kmi in _addon_keymaps:
+        try:
+            km.keymap_items.remove(kmi)
+        except Exception:
+            pass
+    _addon_keymaps.clear()
+
+
 def register():
     for cls in _CLASSES:
         bpy.utils.register_class(cls)
     bpy.types.Scene.fuk = bpy.props.PointerProperty(type=props.FukProps)
+    _register_keymaps()
 
 
 def unregister():
+    _unregister_keymaps()
     del bpy.types.Scene.fuk
     for cls in reversed(_CLASSES):
         bpy.utils.unregister_class(cls)

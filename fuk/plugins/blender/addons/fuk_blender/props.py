@@ -132,6 +132,16 @@ class FukProps(bpy.types.PropertyGroup):
         description="Diffusion steps used for Quick Preview generations",
     )
 
+    # --- live (IPR-style auto-update) ---
+    live_mode: bpy.props.BoolProperty(
+        name="Live", default=False,
+        description="Auto-run a Quick Preview after camera/object edits settle",
+    )
+    live_delay: bpy.props.FloatProperty(
+        name="Delay", default=0.6, min=0.1, max=5.0,
+        description="Seconds of stillness after a change before auto-previewing",
+    )
+
     # --- result display ---
     result_display: bpy.props.EnumProperty(
         name="Show Result",

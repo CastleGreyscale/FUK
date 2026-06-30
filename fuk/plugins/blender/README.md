@@ -63,6 +63,20 @@ Blender scene ─► beauty.png (write_still)
 - The latest beauty/control/result + a `meta.json` live in
   `<project>/cache/_blender_io/<shot>/` as the working set.
 
+### Live mode (auto-update)
+
+Toggle **Live** for an IPR-style loop: after you move the camera or edit objects and
+the scene settles for **Delay** seconds, it auto-runs a Quick Preview and updates the
+viewport — like Cycles/Redshift interactive rendering (gated by generation time, not
+real-time). It reacts only to real **transform/geometry** edits — selection clicks are
+ignored — and **prompt/seed/setting edits stay manual**. Edits made *while* a preview
+is rendering aren't lost: they coalesce into a single **trailing** render of the latest
+state once the current one finishes (no growing backlog). Live previews are ephemeral
+(no history entries).
+
+Shortcuts (3D View): **Ctrl+Shift+P** runs a Quick Preview, **Ctrl+Shift+L** toggles
+Live. (Rebind in Blender's Keymap editor under *3D View*.)
+
 ### `#tags` (prompt expansion)
 
 The prompt supports FUK's `#markers`, expanded server-side at generation time — the
