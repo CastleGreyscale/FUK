@@ -159,3 +159,8 @@ class FukProps(bpy.types.PropertyGroup):
     status: bpy.props.StringProperty(name="Status", default="Not connected")
     busy: bpy.props.BoolProperty(name="Busy", default=False)
     last_result: bpy.props.StringProperty(name="Last Result", default="", subtype="FILE_PATH")
+    # Whether the current result is already a FUK history entry (Full auto-saves;
+    # Quick Preview does not). Drives the Save-to-History button.
+    result_persisted: bpy.props.BoolProperty(name="Saved", default=False)
+    # The per-shot working dir holding the latest beauty/control/result/meta.
+    working_dir: bpy.props.StringProperty(name="Working Dir", default="", subtype="DIR_PATH")

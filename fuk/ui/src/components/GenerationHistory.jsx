@@ -1055,6 +1055,26 @@ export default function GenerationHistory({ project, collapsed, onToggle, galler
     return () => window.removeEventListener('fuk-generation-complete', handleGenerationComplete);
   }, [imgLimit, videoLimit, fetchGenerations]);
 
+  // Auto-refresh when an external client (e.g. the Blender addon) saves an entry.
+  // Cheap version-counter poll; refetch only when it actually changes.
+  useEffect(() => {
+    let last = null;
+    const id = setInterval(async () => {
+      try {
+        const r = await fetch('/api/blender/signal');
+        if (!r.ok) return;
+        const { version } = await r.json();
+        if (last === null) { last = version; return; }
+        if (version !== last) {
+          last = version;
+          console.log('[History] Blender saved an entry, auto-refreshing...');
+          fetchGenerations(imgLimit, videoLimit, true);
+        }
+      } catch (_) { /* server down / not ready — ignore */ }
+    }, 3000);
+    return () => clearInterval(id);
+  }, [imgLimit, videoLimit, fetchGenerations]);
+
 
   const handleRefresh = () => {
     console.log('[History] Manual refresh clicked');

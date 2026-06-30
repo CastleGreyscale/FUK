@@ -423,7 +423,7 @@ app = FastAPI(title="FUK Generation API", version="1.0.0")
 import logging
 
 # GET requests to these paths are client polling / SSE keepalive — noise, not events.
-_QUIET_ACCESS_PATHS = ("/api/dataset/", "/api/progress/", "/api/status/")
+_QUIET_ACCESS_PATHS = ("/api/dataset/", "/api/progress/", "/api/status/", "/api/blender/signal")
 
 
 class _PollAccessLogFilter(logging.Filter):
@@ -3632,6 +3632,9 @@ setup_dataset_routes(
     defaults=DEFAULTS,
     resolve_input_path=resolve_input_path,
 )
+
+from blender_endpoints import setup_blender_routes
+setup_blender_routes(app)
 
 # ============================================================================
 # Generic Task System

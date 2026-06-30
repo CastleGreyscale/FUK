@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import json
 import time
 import bpy
 
@@ -29,6 +30,80 @@ def _refresh_tokens(client, props) -> int:
     props_mod.TOKEN_CACHE.clear()
     props_mod.TOKEN_CACHE.extend(resp.get("tokens", []))
     return len(props_mod.TOKEN_CACHE)
+
+
+def _gen_id_from_url(png_url: str) -> str:
+    """api/project/cache/<rel>/generated.png -> <rel> (cache-relative entry id)."""
+    s = png_url
+    for pref in ("/api/project/cache/", "api/project/cache/"):
+        if s.startswith(pref):
+            s = s[len(pref):]
+            break
+    return s.rsplit("/", 1)[0]
+
+
+def _resolved_seed(props, seed_used=None):
+    """The concrete seed to record (actual used > fixed value > none for random)."""
+    if seed_used is not None:
+        return int(seed_used)
+    if props.last_used_seed:
+        return int(props.last_used_seed)
+    return None if props.seed_mode == "random" else int(props.seed)
+
+
+def _enrich_payload(props, render, control_path, gen_id):
+    """save-entry payload that enriches the just-generated entry in place."""
+    return {
+        "generation_id": gen_id,
+        "control_path": control_path or None,
+        "beauty_path": (render or {}).get("beauty"),
+        "control_kind": props.control_source,
+        "register_control": True,
+        "prompt": props.prompt,
+        "negative_prompt": props.negative_prompt or "",
+        "model": props.model,
+        "seed": _resolved_seed(props),
+        "width": (render or {}).get("width", 0),
+        "height": (render or {}).get("height", 0),
+    }
+
+
+def _write_io_meta(out_dir, props, render, control_path, result_path, seed_used):
+    """Persist the working set in blender_io so Save-to-History can package it."""
+    meta = {
+        "prompt": props.prompt,
+        "negative_prompt": props.negative_prompt,
+        "model": props.model,
+        "seed": _resolved_seed(props, seed_used),
+        "control_kind": props.control_source,
+        "control": control_path or "",
+        "beauty": (render or {}).get("beauty", ""),
+        "result": result_path,
+        "width": (render or {}).get("width", 0),
+        "height": (render or {}).get("height", 0),
+    }
+    try:
+        with open(os.path.join(out_dir, "meta.json"), "w") as f:
+            json.dump(meta, f, indent=2)
+    except OSError:
+        pass
+
+
+def _create_payload_from_meta(meta):
+    """save-entry payload that creates a fresh entry from a working-set meta dict."""
+    return {
+        "result_path": meta.get("result"),
+        "control_path": meta.get("control") or None,
+        "beauty_path": meta.get("beauty") or None,
+        "control_kind": meta.get("control_kind", "control"),
+        "register_control": True,
+        "prompt": meta.get("prompt", ""),
+        "negative_prompt": meta.get("negative_prompt", ""),
+        "model": meta.get("model", ""),
+        "seed": meta.get("seed"),
+        "width": meta.get("width", 0),
+        "height": meta.get("height", 0),
+    }
 
 
 class FUK_OT_connect(bpy.types.Operator):
@@ -186,6 +261,46 @@ class FUK_OT_use_last_seed(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class FUK_OT_save_to_history(bpy.types.Operator):
+    bl_idname = "fuk.save_to_history"
+    bl_label = "Save to History"
+    bl_description = "Save the current result as a complete FUK history entry (result + control + source)"
+
+    def execute(self, context):
+        props = context.scene.fuk
+        if props.result_persisted:
+            self.report({"INFO"}, "Already in history")
+            return {"CANCELLED"}
+        meta_path = os.path.join(props.working_dir, "meta.json") if props.working_dir else ""
+        if not meta_path or not os.path.exists(meta_path):
+            self.report({"ERROR"}, "Nothing to save — run a Quick Preview first")
+            return {"CANCELLED"}
+        try:
+            with open(meta_path) as f:
+                meta = json.load(f)
+        except (OSError, ValueError) as e:
+            self.report({"ERROR"}, f"Could not read working set: {e}")
+            return {"CANCELLED"}
+        if not meta.get("result") or not os.path.exists(meta["result"]):
+            self.report({"ERROR"}, "Result image missing from working set")
+            return {"CANCELLED"}
+
+        client = _client(context)
+        try:
+            # Make sure the server is on this shot so the entry lands in its cache.
+            client.set_project_folder(_abs_folder(props))
+            if props.shot_file:
+                client.load_shot(props.shot_file)
+            client.save_entry(_create_payload_from_meta(meta))
+        except FukError as e:
+            self.report({"ERROR"}, str(e))
+            return {"CANCELLED"}
+        props.result_persisted = True
+        props.status = "Saved to history"
+        self.report({"INFO"}, "Saved to history")
+        return {"FINISHED"}
+
+
 class FUK_OT_generate(bpy.types.Operator):
     bl_idname = "fuk.generate"
     bl_label = "Generate"
@@ -202,6 +317,8 @@ class FUK_OT_generate(bpy.types.Operator):
     _gen_id = ""
     _out_dir = ""
     _t0 = 0.0
+    _render = None        # render_passes result (beauty, control, kind, w, h)
+    _control_path = ""    # the structural map actually sent to FUK
 
     def invoke(self, context, event):
         props = context.scene.fuk
@@ -215,7 +332,8 @@ class FUK_OT_generate(bpy.types.Operator):
         folder = _abs_folder(props)
         client = _client(context)
         shot_stem = os.path.splitext(props.shot_file)[0]
-        out_dir = os.path.join(folder, "cache", "_blender_io", shot_stem, self.mode)
+        # One working dir per shot — preview and full overwrite it; "current result".
+        out_dir = os.path.join(folder, "cache", "_blender_io", shot_stem)
 
         try:
             # Make sure the server is pointed at this shot so outputs land in its cache.
@@ -264,6 +382,8 @@ class FUK_OT_generate(bpy.types.Operator):
 
         self._client = client
         self._out_dir = out_dir
+        self._render = result
+        self._control_path = control_path or ""
         self._t0 = time.time()
         props.busy = True
         props.status = "Queued..."
@@ -303,13 +423,17 @@ class FUK_OT_generate(bpy.types.Operator):
             png_url = (st.get("outputs", {}) or {}).get("png")
             if not png_url:
                 return self._finish(context, "Complete (no image returned)")
-            # Capture the seed FUK actually used (esp. for random mode).
+
+            # Capture the seed FUK actually used (esp. for random mode) BEFORE we
+            # touch the entry, since previews delete it.
+            seed_used = None
             try:
                 meta = self._client.generation_metadata(png_url)
                 sd = meta.get("seed")
                 if sd not in (None, "", "null"):
-                    props.last_used_seed = max(0, int(sd))
-                    props.seed = props.last_used_seed
+                    seed_used = max(0, int(sd))
+                    props.last_used_seed = seed_used
+                    props.seed = seed_used
             except (FukError, ValueError, TypeError):
                 pass
 
@@ -322,7 +446,27 @@ class FUK_OT_generate(bpy.types.Operator):
             except (FukError, RuntimeError) as e:
                 self.report({"WARNING"}, f"Generated, but display failed: {e}")
                 shown = None
-            tail = f" — shown in {shown}" if shown else " (open it in an Image Editor)"
+
+            # Record the working set so Save-to-History can package it later.
+            props.working_dir = self._out_dir
+            _write_io_meta(self._out_dir, props, self._render, self._control_path, dest, seed_used)
+
+            # Apply the persistence policy: previews are ephemeral, Full persists.
+            gen_id = _gen_id_from_url(png_url)
+            note = ""
+            try:
+                if self.mode == "preview":
+                    self._client.delete_generation(gen_id)  # drop the auto-created entry
+                    props.result_persisted = False
+                    note = " (preview — not saved)"
+                else:
+                    self._client.save_entry(_enrich_payload(props, self._render, self._control_path, gen_id))
+                    props.result_persisted = True
+                    note = " — saved to history"
+            except FukError as e:
+                self.report({"WARNING"}, f"History update failed: {e}")
+
+            tail = (f" — shown in {shown}" if shown else "") + note
             return self._finish(context, f"Done in {elapsed:.0f}s{tail}")
 
         if status in ("failed", "cancelled"):
@@ -349,5 +493,6 @@ CLASSES = (
     FUK_OT_insert_tag,
     FUK_OT_resolve_preview,
     FUK_OT_use_last_seed,
+    FUK_OT_save_to_history,
     FUK_OT_generate,
 )

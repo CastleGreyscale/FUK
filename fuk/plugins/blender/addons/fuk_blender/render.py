@@ -47,8 +47,13 @@ def _find_exr(out_dir, name):
     return matches[-1] if matches else None
 
 
-def _exr_to_png(exr_path, png_path, mode):
-    """Convert a single-pass EXR to an 8-bit PNG via OpenImageIO + numpy."""
+def _exr_to_png(exr_path, png_path, mode, far=1e9):
+    """Convert a single-pass EXR to an 8-bit PNG via OpenImageIO + numpy.
+
+    `far` is the camera clip-end; depth pixels at/beyond it are the empty
+    background (EEVEE writes Z=clip_end there, Cycles ~1e10) and are excluded
+    from the range so geometry keeps its gradient.
+    """
     import OpenImageIO as oiio
     import numpy as np
 
@@ -63,11 +68,22 @@ def _exr_to_png(exr_path, png_path, mode):
 
     a = np.array(pixels).reshape(spec.height, spec.width, spec.nchannels)
     if mode == "depth":
+        # Raw camera Z. Background/sky has no geometry -> a huge sentinel (~1e10)
+        # or non-finite value. Exclude it from the range so the actual geometry
+        # keeps a smooth gradient instead of crushing to near-black against a
+        # white void (the "pure black and white" failure).
         ch = a[..., 0].astype(np.float32)
-        lo, hi = float(ch.min()), float(ch.max())
-        if hi > lo:
-            ch = (ch - lo) / (hi - lo)
-        rgb = np.stack([ch, ch, ch], axis=-1)
+        valid = np.isfinite(ch) & (ch < far * 0.999) & (ch < 1e9)
+        if valid.any():
+            lo, hi = float(ch[valid].min()), float(ch[valid].max())
+        else:
+            lo, hi = 0.0, 1.0
+        norm = np.clip((ch - lo) / (hi - lo), 0.0, 1.0) if hi > lo else np.zeros_like(ch)
+        # Match the Depth-Anything convention the control model expects:
+        # near = white, far = black. Invert, and push the empty background to far.
+        depth = 1.0 - norm
+        depth[~valid] = 0.0
+        rgb = np.stack([depth, depth, depth], axis=-1)
     elif mode == "normals":
         rgb = np.clip(a[..., :3] * 0.5 + 0.5, 0.0, 1.0)
     else:  # passthrough colour (openpose rig render)
@@ -141,10 +157,10 @@ def render_passes(context, out_dir, control_source, preview=False,
             rl.layer = view_layer.name
 
             if want_depth:
-                norm = temp_group.nodes.new("CompositorNodeNormalize")
+                # Write the RAW Z pass (no Normalize node) so the EXR keeps real
+                # distances; we mask the void and normalize in numpy on convert.
                 fo = _add_exr_output(temp_group, "ctl_depth", out_dir, "FLOAT")
-                temp_group.links.new(rl.outputs["Depth"], norm.inputs[0])
-                temp_group.links.new(norm.outputs[0], fo.inputs[0])
+                temp_group.links.new(rl.outputs["Depth"], fo.inputs[0])
             if want_norm:
                 fo = _add_exr_output(temp_group, "ctl_normals", out_dir, "RGBA")
                 temp_group.links.new(rl.outputs["Normal"], fo.inputs[0])
@@ -179,12 +195,15 @@ def render_passes(context, out_dir, control_source, preview=False,
         rx = int(scene.render.resolution_x * scene.render.resolution_percentage / 100)
         ry = int(scene.render.resolution_y * scene.render.resolution_percentage / 100)
 
+        cam = scene.camera
+        far_clip = cam.data.clip_end if (cam and cam.type == "CAMERA") else 1e9
+
         control_path = None
         control_kind = control_source
         if want_depth:
             exr = _find_exr(out_dir, "ctl_depth")
             if exr:
-                control_path = _exr_to_png(exr, os.path.join(out_dir, "depth.png"), "depth")
+                control_path = _exr_to_png(exr, os.path.join(out_dir, "depth.png"), "depth", far=far_clip)
         elif want_norm:
             exr = _find_exr(out_dir, "ctl_normals")
             if exr:

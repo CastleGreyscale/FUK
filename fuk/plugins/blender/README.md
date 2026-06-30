@@ -49,6 +49,20 @@ Blender scene ─► beauty.png (write_still)
 4. The result is shown per the **Result** mode (see below); *Save to Shot* persists
    your settings. Press **Esc** during a run to cancel.
 
+### History entries (FUK side)
+
+- **Quick Preview is ephemeral** — it comes back to Blender but does *not* leave a
+  permanent FUK history entry (no clutter while iterating).
+- **Render Full auto-saves** a complete, native-looking entry: `generated.png` +
+  the control map (`control.png`) + the Blender beauty as `source.png` + metadata.
+  The control map is also registered as a preprocess entry, so it shows in FUK's
+  control/history panel and is draggable into the control input.
+- **Save to History** promotes the *current* result (e.g. a preview you liked) into
+  that same complete entry on demand. The button reads **In History** once saved.
+- The FUK web history **auto-refreshes** when Blender saves (no manual refresh).
+- The latest beauty/control/result + a `meta.json` live in
+  `<project>/cache/_blender_io/<shot>/` as the working set.
+
 ### `#tags` (prompt expansion)
 
 The prompt supports FUK's `#markers`, expanded server-side at generation time — the

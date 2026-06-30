@@ -112,8 +112,16 @@ class FUK_PT_main(bpy.types.Panel):
         col = layout.column(align=True)
         col.enabled = not props.busy
         col.scale_y = 1.3
-        col.operator("fuk.generate", text="Quick Preview", icon="HIDE_OFF").mode = "preview"
-        col.operator("fuk.generate", text="Render Full", icon="RENDER_STILL").mode = "full"
+        col.operator("fuk.generate", text="Quick Preview (not saved)", icon="HIDE_OFF").mode = "preview"
+        col.operator("fuk.generate", text="Render Full (saves)", icon="RENDER_STILL").mode = "full"
+
+        # Save the current (e.g. preview) result to FUK history on demand.
+        if props.last_result:
+            row = layout.row()
+            row.enabled = (not props.busy) and (not props.result_persisted)
+            icon = "CHECKMARK" if props.result_persisted else "EXPORT"
+            label = "In History" if props.result_persisted else "Save to History"
+            row.operator("fuk.save_to_history", text=label, icon=icon)
 
         # --- status ---
         row = layout.row()

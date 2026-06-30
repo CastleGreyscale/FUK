@@ -123,3 +123,11 @@ class FukClient:
 
     def cancel(self, generation_id: str):
         return self.post(f"/api/cancel/{generation_id}", {})
+
+    def delete_generation(self, gen_id: str):
+        """Delete a cache entry (e.g. drop an ephemeral preview's auto-created entry)."""
+        return self._request("DELETE", f"/api/project/generations/{gen_id}", timeout=30.0)
+
+    def save_entry(self, payload: dict):
+        """Turn a Blender render into a complete native history entry (control+source)."""
+        return self.post("/api/blender/save-entry", payload, timeout=60.0)
