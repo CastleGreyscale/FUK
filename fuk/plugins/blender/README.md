@@ -46,8 +46,30 @@ Blender scene ─► beauty.png (write_still)
 3. Edit the prompt / seed / settings, choose a **Control** (depth, normals, openpose,
    canny), frame your camera, and press **Quick Preview** (fast, low-res) or
    **Render Full**.
-4. The result loads into an Image Editor; *Save to Shot* persists your settings.
-   Press **Esc** during a run to cancel.
+4. The result is shown per the **Result** mode (see below); *Save to Shot* persists
+   your settings. Press **Esc** during a run to cancel.
+
+### `#tags` (prompt expansion)
+
+The prompt supports FUK's `#markers`, expanded server-side at generation time — the
+same vocabulary the FUK web UI uses.
+
+- **Insert #tag** opens a searchable list of the available markers (pulled on Connect,
+  or via the refresh button) and drops the chosen `#marker` into the prompt.
+- **Preview** resolves the prompt exactly as generation will (expanding `#markers` and
+  appending the storyboard mood) so you can see the final string; unknown markers are
+  flagged in a warning.
+
+### Result display
+
+Pick how the generated image comes back under **Result**:
+
+- **Viewport** *(default)* — set as the active camera's background overlay (shown in
+  front) and switch the 3D view to camera view, so the result lands registered to your
+  framing. Tune **Overlay Opacity** to flip between the render and your scene. Falls
+  back to an Image Editor if the scene has no camera.
+- **New Window** — open the result in a standalone Image Editor window.
+- **Image Editor** — reuse an open Image Editor (or a new window if none).
 
 ## Requirements / notes
 

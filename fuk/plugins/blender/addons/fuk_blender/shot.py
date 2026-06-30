@@ -1,9 +1,13 @@
 """
 Shot synchronization — keep the shot JSON (source of truth) and FukProps aligned.
 
-- `pull` loads a shot via the server, mirrors `tabs.image` into props, and caches
-  the full JSON so we can merge edits back without losing other fields.
-- `push` merges props back into the cached JSON and saves it via the server.
+The FUK web UI stores image settings per-model:
+    tabs.image = { activeModel, modelSettings: { <model>: {prompt, seed, ...} } }
+(older shots use a flat `tabs.image`). `pull`/`push` resolve the active model's
+settings the same way the web Image tab does, so prompt/seed/etc. flow through both
+ways. Blender's own generation model (control_union) is kept independent of the
+shot's active model so the control round trip isn't broken; Blender-only fields are
+stored flat on `tabs.image` (shot-global).
 """
 
 from __future__ import annotations
@@ -27,39 +31,74 @@ def _aspect_to_height(width: int, aspect: str) -> int:
     return 0
 
 
+def _active_settings(image: dict):
+    """Return (settings, active_model) mirroring the web Image tab's resolution."""
+    model_settings = image.get("modelSettings")
+    if isinstance(model_settings, dict):
+        active = image.get("activeModel") or image.get("model") or ""
+        return dict(model_settings.get(active, {}) or {}), active
+    # Old flat format.
+    return image, image.get("model", "")
+
+
 def pull(client, filename: str, props) -> dict:
-    """Load `filename` via the server and copy tabs.image into props."""
+    """Load `filename` via the server and copy the active model's settings into props."""
     resp = client.load_shot(filename)
     data = resp.get("data", resp)
     _LOADED[filename] = data
     image = (data.get("tabs", {}) or {}).get("image", {}) or {}
+    settings, active = _active_settings(image)
 
-    props.prompt = image.get("prompt", "") or ""
-    props.negative_prompt = image.get("negative_prompt", "") or ""
+    # Prefer the active model's slot; fall back to the flat image dict if a key
+    # is absent there (covers shots that store prompt/negative in either place).
+    def _field(key, default=""):
+        val = settings.get(key, None)
+        if val is None:
+            val = image.get(key, default)
+        return val
 
-    model = image.get("model")
-    valid_models = {m[0] for m in props_mod.MODEL_ITEMS}
-    if model in valid_models:
-        props.model = model
+    props.prompt = _field("prompt") or ""
+    props.negative_prompt = _field("negative_prompt") or ""
 
-    props.steps = int(image.get("steps", props.steps) or props.steps)
-    props.guidance_scale = float(image.get("guidance_scale", props.guidance_scale) or props.guidance_scale)
+    # Adopt the shot's model only if it's a control-capable Blender model; otherwise
+    # keep Blender's current generation model so the control round trip still works.
+    if active in {"qwen_image_control_union_2512", "qwen_image_control_union"}:
+        props.model = active
 
-    seed = image.get("seed", None)
-    if seed in (None, "", "null"):
+    if _field("steps", None) is not None:
+        props.steps = int(_field("steps"))
+    if _field("guidance_scale", None) is not None:
+        props.guidance_scale = float(_field("guidance_scale"))
+
+    seed = _field("seed", None)
+    last_used = _field("lastUsedSeed", None)
+    mode = (_field("seedMode", "") or "").lower()
+    if mode == "random":
         props.seed_mode = "random"
-    else:
+    elif mode in ("fixed", "increment"):
         props.seed_mode = "fixed"
-        try:
-            props.seed = max(0, int(seed))
-        except (ValueError, TypeError):
-            props.seed_mode = "random"
+    else:
+        props.seed_mode = "random" if seed in (None, "", "null") else "fixed"
 
-    of = image.get("output_format", "png")
+    # Always surface a concrete number: the explicit seed if set, else the last
+    # one actually used. Keeps the panel showing the real value in every mode.
+    display_seed = seed if seed not in (None, "", "null") else last_used
+    if display_seed not in (None, "", "null"):
+        try:
+            props.seed = max(0, int(display_seed))
+        except (ValueError, TypeError):
+            pass
+    if last_used not in (None, "", "null"):
+        try:
+            props.last_used_seed = max(0, int(last_used))
+        except (ValueError, TypeError):
+            pass
+
+    of = settings.get("output_format", "png")
     if of in {"png", "exr", "both"}:
         props.output_format = of
 
-    # Blender-specific fields persisted alongside the shot.
+    # Blender-specific fields persisted flat on the shot (shot-global).
     cs = image.get("blender_control_source", "depth")
     if cs in {c[0] for c in props_mod.CONTROL_SOURCE_ITEMS}:
         props.control_source = cs
@@ -72,7 +111,7 @@ def pull(client, filename: str, props) -> dict:
 
 
 def push(client, filename: str, props) -> dict:
-    """Merge props back into the shot JSON and save via the server."""
+    """Merge props back into the active model's settings and save via the server."""
     data = _LOADED.get(filename)
     if data is None:
         # Not cached this session — fetch current state first so we don't clobber.
@@ -83,13 +122,26 @@ def push(client, filename: str, props) -> dict:
     tabs = data.setdefault("tabs", {})
     image = tabs.setdefault("image", {})
 
-    image["prompt"] = props.prompt
-    image["negative_prompt"] = props.negative_prompt
-    image["model"] = props.model
-    image["steps"] = int(props.steps)
-    image["guidance_scale"] = float(props.guidance_scale)
-    image["seed"] = None if props.seed_mode == "random" else int(props.seed)
-    image["output_format"] = props.output_format
+    # Write into the same slot the web Image tab reads from.
+    model_settings = image.get("modelSettings")
+    if isinstance(model_settings, dict):
+        active = image.get("activeModel") or image.get("model") or props.model
+        image.setdefault("activeModel", active)
+        target = model_settings.setdefault(active, {})
+    else:
+        target = image
+
+    target["prompt"] = props.prompt
+    target["negative_prompt"] = props.negative_prompt
+    target["steps"] = int(props.steps)
+    target["guidance_scale"] = float(props.guidance_scale)
+    target["seed"] = None if props.seed_mode == "random" else int(props.seed)
+    target["seedMode"] = "random" if props.seed_mode == "random" else "fixed"
+    if props.last_used_seed:
+        target["lastUsedSeed"] = int(props.last_used_seed)
+    target["output_format"] = props.output_format
+
+    # Blender-only fields stay flat on image (shot-global, model-independent).
     image["blender_control_source"] = props.control_source
     image["blender_openpose_view_layer"] = props.openpose_view_layer
 

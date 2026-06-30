@@ -116,5 +116,10 @@ class FukClient:
     def status(self, generation_id: str):
         return self.get(f"/api/status/{generation_id}", timeout=30.0)
 
+    def generation_metadata(self, output_url: str):
+        """Fetch the metadata.json sitting next to a generation's output file."""
+        meta_url = output_url.rsplit("/", 1)[0] + "/metadata.json"
+        return self.get(meta_url, timeout=15.0)
+
     def cancel(self, generation_id: str):
         return self.post(f"/api/cancel/{generation_id}", {})

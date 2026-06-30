@@ -151,6 +151,10 @@ class FukProps(bpy.types.PropertyGroup):
     # --- prompt resolution preview (read-only) ---
     resolved_preview: bpy.props.StringProperty(name="Resolved", default="")
 
+    # The actual seed FUK used last (random or fixed); shown so the panel always
+    # surfaces a concrete number even in random mode.
+    last_used_seed: bpy.props.IntProperty(name="Last Seed", default=0, min=0)
+
     # --- runtime status (not saved) ---
     status: bpy.props.StringProperty(name="Status", default="Not connected")
     busy: bpy.props.BoolProperty(name="Busy", default=False)

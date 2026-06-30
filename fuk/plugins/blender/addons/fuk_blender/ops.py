@@ -171,6 +171,21 @@ class FUK_OT_resolve_preview(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class FUK_OT_use_last_seed(bpy.types.Operator):
+    bl_idname = "fuk.use_last_seed"
+    bl_label = "Reuse Last Seed"
+    bl_description = "Switch to Fixed mode using the last seed FUK actually used"
+
+    def execute(self, context):
+        props = context.scene.fuk
+        if not props.last_used_seed:
+            self.report({"WARNING"}, "No seed recorded yet")
+            return {"CANCELLED"}
+        props.seed_mode = "fixed"
+        props.seed = props.last_used_seed
+        return {"FINISHED"}
+
+
 class FUK_OT_generate(bpy.types.Operator):
     bl_idname = "fuk.generate"
     bl_label = "Generate"
@@ -288,6 +303,16 @@ class FUK_OT_generate(bpy.types.Operator):
             png_url = (st.get("outputs", {}) or {}).get("png")
             if not png_url:
                 return self._finish(context, "Complete (no image returned)")
+            # Capture the seed FUK actually used (esp. for random mode).
+            try:
+                meta = self._client.generation_metadata(png_url)
+                sd = meta.get("seed")
+                if sd not in (None, "", "null"):
+                    props.last_used_seed = max(0, int(sd))
+                    props.seed = props.last_used_seed
+            except (FukError, ValueError, TypeError):
+                pass
+
             dest = os.path.join(self._out_dir, "result.png")
             try:
                 self._client.download(png_url, dest)
@@ -323,5 +348,6 @@ CLASSES = (
     FUK_OT_refresh_tags,
     FUK_OT_insert_tag,
     FUK_OT_resolve_preview,
+    FUK_OT_use_last_seed,
     FUK_OT_generate,
 )

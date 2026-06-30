@@ -411,6 +411,38 @@ print("[STARTUP] DiffSynth backend initialized (image + video)", flush=True)
 
 app = FastAPI(title="FUK Generation API", version="1.0.0")
 
+
+# ----------------------------------------------------------------------------
+# Quiet the access log for client polling/keepalive requests.
+#
+# The lora-dataset builder (and progress views) poll job state every few seconds
+# and hold open SSE streams to keep thumbnails flowing. Each request would
+# otherwise spam the terminal with one uvicorn access line. Suppress the GET
+# polls/streams for those paths; meaningful POSTs still log.
+# ----------------------------------------------------------------------------
+import logging
+
+# GET requests to these paths are client polling / SSE keepalive — noise, not events.
+_QUIET_ACCESS_PATHS = ("/api/dataset/", "/api/progress/", "/api/status/")
+
+
+class _PollAccessLogFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            msg = record.getMessage()
+        except Exception:
+            return True
+        if '"GET ' in msg and any(p in msg for p in _QUIET_ACCESS_PATHS):
+            return False
+        return True
+
+
+@app.on_event("startup")
+async def _install_access_log_filter():
+    # Runs after uvicorn has configured its loggers, so the filter sticks.
+    logging.getLogger("uvicorn.access").addFilter(_PollAccessLogFilter())
+
+
 # Initialize project system
 from project_endpoints import initialize_project_system
 initialize_project_system(CACHE_ROOT)

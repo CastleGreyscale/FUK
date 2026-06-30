@@ -2,7 +2,28 @@
 
 from __future__ import annotations
 
+import textwrap
 import bpy
+
+
+def _wrap(text, width_px):
+    """Word-wrap `text` to the panel width (approx chars-per-line from pixels)."""
+    cpl = max(16, int((width_px - 24) / 7))
+    lines = []
+    for para in (text or "").split("\n"):
+        lines.extend(textwrap.wrap(para, cpl) or [""])
+    return lines
+
+
+def _draw_growing_text(layout, text, region_width):
+    """Draw `text` word-wrapped over as many rows as needed (auto-expands)."""
+    lines = _wrap(text, region_width)
+    if not text or len(lines) <= 1:
+        return
+    col = layout.column(align=True)
+    col.scale_y = 0.7
+    for line in lines:
+        col.label(text=line)
 
 
 class FUK_PT_main(bpy.types.Panel):
@@ -32,9 +53,8 @@ class FUK_PT_main(bpy.types.Panel):
         box.label(text="Generation", icon="RENDER_STILL")
 
         box.label(text="Prompt")
-        pcol = box.column(align=True)
-        pcol.scale_y = 1.5
-        pcol.prop(props, "prompt", text="")
+        box.prop(props, "prompt", text="")
+        _draw_growing_text(box, props.prompt, context.region.width)
         row = box.row(align=True)
         row.operator("fuk.insert_tag", text="Insert #tag", icon="ADD")
         row.operator("fuk.resolve_preview", text="Preview", icon="VIEWZOOM")
@@ -43,15 +63,13 @@ class FUK_PT_main(bpy.types.Panel):
             sub = box.box()
             sub.scale_y = 0.7
             sub.label(text="Resolves to:", icon="SORTALPHA")
-            for line in props.resolved_preview.split("\n"):
-                if line.strip():
-                    sub.label(text=line.strip())
+            for line in _wrap(props.resolved_preview, context.region.width):
+                sub.label(text=line)
 
         box.separator()
         box.label(text="Negative")
-        ncol = box.column(align=True)
-        ncol.scale_y = 1.3
-        ncol.prop(props, "negative_prompt", text="")
+        box.prop(props, "negative_prompt", text="")
+        _draw_growing_text(box, props.negative_prompt, context.region.width)
 
         box.separator()
         box.prop(props, "model", text="")
@@ -63,6 +81,10 @@ class FUK_PT_main(bpy.types.Panel):
         sub = row.row(align=True)
         sub.enabled = props.seed_mode == "fixed"
         sub.prop(props, "seed", text="")
+        if props.last_used_seed:
+            r = box.row(align=True)
+            r.label(text=f"Last seed: {props.last_used_seed}", icon="KEYINGSET")
+            r.operator("fuk.use_last_seed", text="Reuse", icon="FILE_REFRESH")
         box.prop(props, "output_format", text="Format")
 
         # --- control ---
