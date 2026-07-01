@@ -79,8 +79,11 @@ state once the current one finishes (no growing backlog). Live previews are ephe
 for it to finish — true IPR responsiveness. With it off, edits made mid-render coalesce
 into one trailing render instead.
 
-Press **Esc** during any generation to stop it for real (it aborts at the next
-diffusion step, not just stops waiting).
+Press **Esc** (or the **Cancel** button that appears while generating) to stop a
+generation for real — it aborts at the next diffusion step, not just stops waiting.
+
+The addon **auto-connects** on launch / file open when the project folder is saved in
+the .blend; the **Connect** button reads *Connected* once it's reached the server.
 
 Shortcuts (3D View): **Ctrl+Shift+P** runs a Quick Preview, **Ctrl+Shift+L** toggles
 Live. (Rebind in Blender's Keymap editor under *3D View*.)

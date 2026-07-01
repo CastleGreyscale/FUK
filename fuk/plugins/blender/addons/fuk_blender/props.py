@@ -31,6 +31,17 @@ def shot_enum_items(self, context):
     return items
 
 
+def _on_shot_change(self, context):
+    """Mirror the picked shot into a plain string that survives file save/load.
+
+    The shot dropdown is a dynamic enum whose value can't persist while the shot
+    cache is empty (right after a file loads), so we stash the name here and restore
+    it on (auto)connect.
+    """
+    if self.shot_file:
+        self.last_shot = self.shot_file
+
+
 def token_enum_items(self, context):
     """EnumProperty items (searchable) for the #marker tag inserter."""
     items = []
@@ -57,8 +68,6 @@ def token_enum_items(self, context):
 MODEL_ITEMS = [
     ("qwen_image_control_union_2512", "Control Union 2512", "ControlNet-style structural control (2512 base)"),
     ("qwen_image_control_union", "Control Union", "ControlNet-style structural control"),
-    ("qwen_image_2512", "Qwen Image 2512", "Plain text-to-image (no control)"),
-    ("qwen_image", "Qwen Image", "Plain text-to-image (no control)"),
 ]
 
 CONTROL_SOURCE_ITEMS = [
@@ -92,7 +101,10 @@ class FukProps(bpy.types.PropertyGroup):
         name="Shot",
         description="Shot .json to drive (source of truth)",
         items=shot_enum_items,
+        update=_on_shot_change,
     )
+    # Persisted copy of the selected shot filename, restored on (auto)connect.
+    last_shot: bpy.props.StringProperty(default="")
 
     # --- mirrored shot.tabs.image fields ---
     prompt: bpy.props.StringProperty(name="Prompt", default="")
@@ -177,6 +189,7 @@ class FukProps(bpy.types.PropertyGroup):
 
     # --- runtime status (not saved) ---
     status: bpy.props.StringProperty(name="Status", default="Not connected")
+    connected: bpy.props.BoolProperty(name="Connected", default=False)
     busy: bpy.props.BoolProperty(name="Busy", default=False)
     last_result: bpy.props.StringProperty(name="Last Result", default="", subtype="FILE_PATH")
     # Whether the current result is already a FUK history entry (Full auto-saves;

@@ -148,3 +148,65 @@ def push(client, filename: str, props) -> dict:
     client.save_shot(filename, data)
     props.status = f"Saved {filename}"
     return data
+
+
+def load_current(client, filename: str) -> dict:
+    """Load the shot from the server (also sets the server's project state) and refresh
+    the local cache — so advanced settings edited in the web UI (LoRAs, detail, VRAM)
+    are picked up at generation time WITHOUT a manual Load Shot. Does not touch props;
+    the prompt/seed you edit in Blender stay authoritative.
+    """
+    resp = client.load_shot(filename)
+    data = resp.get("data", resp)
+    _LOADED[filename] = data
+    return data
+
+
+def generation_extras(client, filename: str) -> dict:
+    """Advanced generation fields carried by the shot that the Blender panel doesn't
+    expose (LoRAs, detail bias, EliGen, VRAM preset). These are set in FUK's web UI
+    and must NOT be dropped when generating from Blender.
+
+    Returns a dict of payload fields to merge (mirrors the web Image tab's mapping).
+    """
+    data = _LOADED.get(filename)
+    if data is None:
+        try:
+            resp = client.load_shot(filename)
+            data = resp.get("data", resp)
+            _LOADED[filename] = data
+        except Exception:
+            return {}
+
+    image = (data.get("tabs", {}) or {}).get("image", {}) or {}
+    settings, _ = _active_settings(image)
+    extras = {}
+
+    # LoRAs — forward the array as the web UI stores/sends it.
+    loras = settings.get("loras")
+    if loras:
+        extras["loras"] = loras
+
+    # Detail bias -> denoising_strength (web UI: only when < 1.0).
+    detail = settings.get("detail_bias")
+    try:
+        if detail is not None and float(detail) < 1.0:
+            extras["denoising_strength"] = float(detail)
+    except (TypeError, ValueError):
+        pass
+
+    # Sampling/detail timestep control.
+    if settings.get("exponential_shift_mu") is not None:
+        extras["exponential_shift_mu"] = settings["exponential_shift_mu"]
+
+    # EliGen entity control.
+    if settings.get("eligen_source"):
+        extras["eligen_source"] = settings["eligen_source"]
+    if settings.get("eligen_alpha") is not None:
+        extras["eligen_alpha"] = settings["eligen_alpha"]
+
+    # VRAM preset travels with the shot.
+    if settings.get("vram_preset"):
+        extras["vram_preset"] = settings["vram_preset"]
+
+    return extras

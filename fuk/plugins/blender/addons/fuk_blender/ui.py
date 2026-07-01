@@ -42,7 +42,10 @@ class FUK_PT_main(bpy.types.Panel):
         box.label(text="Shot", icon="FILE_BLEND")
         box.prop(props, "project_folder", text="")
         row = box.row(align=True)
-        row.operator("fuk.connect", icon="LINKED")
+        row.operator("fuk.connect",
+                     text="Connected" if props.connected else "Connect",
+                     icon="LINKED" if props.connected else "UNLINKED",
+                     depress=props.connected)
         row.prop(props, "shot_file", text="")
         row = box.row(align=True)
         row.operator("fuk.load_shot", icon="IMPORT")
@@ -122,6 +125,12 @@ class FUK_PT_main(bpy.types.Panel):
         row.operator("fuk.live", text="Live", icon="REC", depress=props.live_mode)
         row.prop(props, "live_delay", text="Delay")
         row.prop(props, "live_interrupt", text="", icon="TRACKING_CLEAR_FORWARDS")
+
+        # Cancel the in-flight generation (also Esc in the viewport).
+        if props.busy:
+            row = layout.row()
+            row.scale_y = 1.2
+            row.operator("fuk.cancel", text="Cancel", icon="CANCEL")
 
         # Save the current (e.g. preview) result to FUK history on demand.
         if props.last_result:

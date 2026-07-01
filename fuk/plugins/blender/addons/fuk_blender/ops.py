@@ -160,41 +160,54 @@ def _create_payload_from_meta(meta):
     }
 
 
+def connect_to_server(context):
+    """Reach the server, set the project folder, list shots + tags. Sets props.connected
+    and props.status. Returns (ok: bool, message: str). Used by the operator and by the
+    auto-connect handler."""
+    props = context.scene.fuk
+    folder = _abs_folder(props)
+    if not folder or not os.path.isdir(folder):
+        props.connected = False
+        return False, "Pick a valid project folder first"
+    client = _client(context)
+    try:
+        client.health()
+        client.set_project_folder(folder)
+        resp = client.list_shots()
+    except FukError as e:
+        props.connected = False
+        props.status = "Not connected"
+        return False, str(e)
+
+    props_mod.SHOT_CACHE.clear()
+    props_mod.SHOT_CACHE.extend(resp.get("files", []))
+    count = len(props_mod.SHOT_CACHE)
+    names = {e.get("name") for e in props_mod.SHOT_CACHE}
+    # Restore the shot last used in this .blend if it still exists; else first.
+    if props.last_shot and props.last_shot in names:
+        props.shot_file = props.last_shot
+    elif count and props_mod.SHOT_CACHE[0].get("name"):
+        props.shot_file = props_mod.SHOT_CACHE[0]["name"]
+
+    tag_count = 0
+    try:
+        tag_count = _refresh_tokens(client, props)
+    except FukError:
+        pass  # tags are optional; don't block connect
+    props.connected = True
+    props.status = f"Connected — {count} shot(s), {tag_count} tag(s)"
+    return True, props.status
+
+
 class FUK_OT_connect(bpy.types.Operator):
     bl_idname = "fuk.connect"
     bl_label = "Connect"
     bl_description = "Reach the FUK server, set the project folder, and list shots"
 
     def execute(self, context):
-        props = context.scene.fuk
-        folder = _abs_folder(props)
-        if not folder or not os.path.isdir(folder):
-            self.report({"ERROR"}, "Pick a valid project folder first")
-            return {"CANCELLED"}
-        client = _client(context)
-        try:
-            client.health()
-            client.set_project_folder(folder)
-            resp = client.list_shots()
-        except FukError as e:
-            props.status = "Not connected"
-            self.report({"ERROR"}, str(e))
-            return {"CANCELLED"}
-
-        props_mod.SHOT_CACHE.clear()
-        props_mod.SHOT_CACHE.extend(resp.get("files", []))
-        count = len(props_mod.SHOT_CACHE)
-        if count and props_mod.SHOT_CACHE[0].get("name"):
-            props.shot_file = props_mod.SHOT_CACHE[0]["name"]
-
-        tag_count = 0
-        try:
-            tag_count = _refresh_tokens(client, props)
-        except FukError:
-            pass  # tags are optional; don't block connect
-        props.status = f"Connected — {count} shot(s), {tag_count} tag(s)"
-        self.report({"INFO"}, props.status)
-        return {"FINISHED"}
+        ok, msg = connect_to_server(context)
+        self.report({"INFO"} if ok else {"ERROR"}, msg)
+        return {"FINISHED"} if ok else {"CANCELLED"}
 
 
 class FUK_OT_load_shot(bpy.types.Operator):
@@ -397,9 +410,11 @@ class FUK_OT_generate(bpy.types.Operator):
         _live_suspend(True)
 
         try:
-            # Make sure the server is pointed at this shot so outputs land in its cache.
+            # Point the server at this shot AND refresh the local cache, so shot-only
+            # settings (LoRAs, detail, VRAM) edited in the web UI are current without a
+            # manual Load Shot. (Prompt/seed stay as edited here in Blender.)
             client.set_project_folder(folder)
-            client.load_shot(props.shot_file)
+            shot_mod.load_current(client, props.shot_file)
 
             props.status = "Rendering passes..."
             preview = self.mode == "preview"
@@ -428,6 +443,9 @@ class FUK_OT_generate(bpy.types.Operator):
                 "output_format": props.output_format,
                 "live_preview": bool(props.show_diffusion),
             }
+            # Carry the shot's advanced settings (LoRAs, detail bias, EliGen, VRAM
+            # preset) that the Blender panel doesn't expose — set in FUK's web UI.
+            payload.update(shot_mod.generation_extras(client, props.shot_file))
             if control_path:
                 payload["control_image_paths"] = [control_path]
 
@@ -587,6 +605,25 @@ class FUK_OT_generate(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class FUK_OT_cancel(bpy.types.Operator):
+    bl_idname = "fuk.cancel"
+    bl_label = "Cancel"
+    bl_description = "Stop the current generation (aborts at the next diffusion step)"
+
+    def execute(self, context):
+        gid = _ACTIVE_GEN.get("id")
+        if not gid:
+            self.report({"WARNING"}, "Nothing to cancel")
+            return {"CANCELLED"}
+        try:
+            _client(context).cancel(gid)
+        except FukError as e:
+            self.report({"ERROR"}, str(e))
+            return {"CANCELLED"}
+        context.scene.fuk.status = "Cancelling…"
+        return {"FINISHED"}
+
+
 class FUK_OT_live(bpy.types.Operator):
     bl_idname = "fuk.live"
     bl_label = "Live"
@@ -677,5 +714,6 @@ CLASSES = (
     FUK_OT_use_last_seed,
     FUK_OT_save_to_history,
     FUK_OT_generate,
+    FUK_OT_cancel,
     FUK_OT_live,
 )

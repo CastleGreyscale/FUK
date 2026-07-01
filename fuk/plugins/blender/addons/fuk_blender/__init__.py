@@ -59,14 +59,43 @@ def _unregister_keymaps():
     _addon_keymaps.clear()
 
 
+# --- best-effort auto-connect at launch / file load ---------------------------
+def _try_autoconnect():
+    """One-shot: connect if a project folder is set and we're not already connected.
+    Best-effort — silently no-ops if the server is down."""
+    try:
+        scene = bpy.context.scene
+        p = getattr(scene, "fuk", None)
+        if p and p.project_folder and not p.connected and not p.busy:
+            ops.connect_to_server(bpy.context)
+    except Exception:
+        pass
+    return None  # don't repeat
+
+
+@bpy.app.handlers.persistent
+def _on_load_post(_dummy):
+    # After a .blend loads, the scene's saved project folder is available — attempt
+    # a connect shortly after so the shot list is ready without pressing Connect.
+    bpy.app.timers.register(_try_autoconnect, first_interval=0.5)
+
+
 def register():
     for cls in _CLASSES:
         bpy.utils.register_class(cls)
     bpy.types.Scene.fuk = bpy.props.PointerProperty(type=props.FukProps)
     _register_keymaps()
+    if _on_load_post not in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.append(_on_load_post)
+    # And once for the file that's already open when the addon is enabled.
+    bpy.app.timers.register(_try_autoconnect, first_interval=1.0)
 
 
 def unregister():
+    if _on_load_post in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.remove(_on_load_post)
+    if bpy.app.timers.is_registered(_try_autoconnect):
+        bpy.app.timers.unregister(_try_autoconnect)
     _unregister_keymaps()
     del bpy.types.Scene.fuk
     for cls in reversed(_CLASSES):
