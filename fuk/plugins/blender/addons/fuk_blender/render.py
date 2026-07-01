@@ -47,16 +47,9 @@ def _find_exr(out_dir, name):
     return matches[-1] if matches else None
 
 
-def _exr_to_png(exr_path, png_path, mode, far=1e9):
-    """Convert a single-pass EXR to an 8-bit PNG via OpenImageIO + numpy.
-
-    `far` is the camera clip-end; depth pixels at/beyond it are the empty
-    background (EEVEE writes Z=clip_end there, Cycles ~1e10) and are excluded
-    from the range so geometry keeps its gradient.
-    """
+def _read_exr(exr_path):
     import OpenImageIO as oiio
     import numpy as np
-
     src = oiio.ImageInput.open(exr_path)
     if src is None:
         raise RuntimeError(f"OIIO could not open {exr_path}: {oiio.geterror()}")
@@ -65,16 +58,50 @@ def _exr_to_png(exr_path, png_path, mode, far=1e9):
     src.close()
     if pixels is None:
         raise RuntimeError(f"OIIO read failed for {exr_path}: {oiio.geterror()}")
+    return np.array(pixels).reshape(spec.height, spec.width, spec.nchannels)
 
-    a = np.array(pixels).reshape(spec.height, spec.width, spec.nchannels)
+
+def _depth_valid_mask(ch, far):
+    import numpy as np
+    return np.isfinite(ch) & (ch < far * 0.999) & (ch < 1e9)
+
+
+def _global_depth_range(exr_paths, far):
+    """Min/max of valid depth across a whole sequence — so per-frame normalization
+    doesn't flicker as the object's depth range changes frame to frame."""
+    import numpy as np
+    lo, hi = float("inf"), float("-inf")
+    for p in exr_paths:
+        ch = _read_exr(p)[..., 0].astype(np.float32)
+        valid = _depth_valid_mask(ch, far)
+        if valid.any():
+            lo = min(lo, float(ch[valid].min()))
+            hi = max(hi, float(ch[valid].max()))
+    return (lo, hi) if hi > lo else None
+
+
+def _exr_to_png(exr_path, png_path, mode, far=1e9, depth_range=None):
+    """Convert a single-pass EXR to an 8-bit PNG via OpenImageIO + numpy.
+
+    `far` is the camera clip-end; depth pixels at/beyond it are the empty
+    background (EEVEE writes Z=clip_end there, Cycles ~1e10) and are excluded
+    from the range so geometry keeps its gradient. `depth_range` (lo, hi) forces a
+    fixed normalization range (used for temporally-consistent video sequences).
+    """
+    import OpenImageIO as oiio
+    import numpy as np
+
+    a = _read_exr(exr_path)
     if mode == "depth":
         # Raw camera Z. Background/sky has no geometry -> a huge sentinel (~1e10)
         # or non-finite value. Exclude it from the range so the actual geometry
         # keeps a smooth gradient instead of crushing to near-black against a
         # white void (the "pure black and white" failure).
         ch = a[..., 0].astype(np.float32)
-        valid = np.isfinite(ch) & (ch < far * 0.999) & (ch < 1e9)
-        if valid.any():
+        valid = _depth_valid_mask(ch, far)
+        if depth_range is not None:
+            lo, hi = depth_range
+        elif valid.any():
             lo, hi = float(ch[valid].min()), float(ch[valid].max())
         else:
             lo, hi = 0.0, 1.0
@@ -238,3 +265,119 @@ def render_passes(context, out_dir, control_source, preview=False,
             scene.view_layers[openpose_view_layer].use = pose_layer_snap
         if temp_group is not None:
             bpy.data.node_groups.remove(temp_group)
+
+
+# Native controls that can be rendered as a sequence (no per-frame server work).
+SEQUENCE_CONTROLS = {"depth", "normals", "openpose"}
+
+
+def render_control_sequence(context, out_dir, control_source, openpose_view_layer="", percentage=100):
+    """Render the control pass over the scene frame range into a folder of PNGs — the
+    VACE control 'video'. Returns {control_dir, frames, width, height, fps}.
+    `percentage` scales the render resolution (and thus the output video size).
+
+    Depth is normalized over a GLOBAL range across the sequence so it doesn't flicker.
+    Supports native controls (depth, normals, openpose rig layer); canny / estimated
+    openpose need per-frame server preprocessing and aren't supported here.
+    """
+    import shutil
+    scene = context.scene
+    view_layer = context.view_layer
+
+    if control_source == "depth":
+        mode, socket, socket_type = "depth", "Depth", "FLOAT"
+    elif control_source == "normals":
+        mode, socket, socket_type = "normals", "Normal", "RGBA"
+    elif control_source == "openpose" and openpose_view_layer and openpose_view_layer in scene.view_layers:
+        mode, socket, socket_type = "color", "Image", "RGBA"
+    else:
+        raise RuntimeError(
+            "Video control supports depth, normals, or openpose (with a rig layer). "
+            "Canny / estimated openpose aren't supported for sequences."
+        )
+
+    exr_dir = os.path.join(out_dir, "_ctl_exr")
+    control_dir = os.path.join(out_dir, "control")
+    for d in (exr_dir, control_dir):
+        os.makedirs(d, exist_ok=True)
+    for f in glob.glob(os.path.join(control_dir, "*.png")):
+        try:
+            os.remove(f)
+        except OSError:
+            pass
+
+    snap = {
+        "pct": scene.render.resolution_percentage,
+        "filepath": scene.render.filepath,
+        "ffmt": scene.render.image_settings.file_format,
+        "use_nodes": scene.use_nodes,
+        "use_comp": scene.render.use_compositing,
+        "comp_group": scene.compositing_node_group,
+        "pass_z": view_layer.use_pass_z,
+        "pass_n": view_layer.use_pass_normal,
+        "frame": scene.frame_current,
+    }
+    temp_group = None
+    pose_layer_snap = None
+    try:
+        scene.render.resolution_percentage = max(10, min(100, int(percentage)))
+        if mode == "depth":
+            view_layer.use_pass_z = True
+        elif mode == "normals":
+            view_layer.use_pass_normal = True
+
+        layer_name = view_layer.name
+        if mode == "color":
+            pose_vl = scene.view_layers[openpose_view_layer]
+            pose_layer_snap = pose_vl.use
+            pose_vl.use = True
+            layer_name = openpose_view_layer
+
+        temp_group = bpy.data.node_groups.new("FUK_SEQ_COMP", "CompositorNodeTree")
+        rl = temp_group.nodes.new("CompositorNodeRLayers")
+        rl.scene = scene
+        rl.layer = layer_name
+        fo = _add_exr_output(temp_group, "seq", exr_dir, socket_type)
+        temp_group.links.new(rl.outputs[socket], fo.inputs[0])
+
+        scene.use_nodes = True
+        scene.render.use_compositing = True
+        scene.compositing_node_group = temp_group
+        scene.render.image_settings.file_format = "PNG"      # throwaway main output
+        scene.render.filepath = os.path.join(exr_dir, "_beauty_")
+
+        bpy.ops.render.render(animation=True)
+
+        exrs = sorted(glob.glob(os.path.join(exr_dir, "seq*.exr")))
+        cam = scene.camera
+        far = cam.data.clip_end if (cam and cam.type == "CAMERA") else 1e9
+        depth_range = _global_depth_range(exrs, far) if mode == "depth" else None
+        for i, exr in enumerate(exrs):
+            _exr_to_png(exr, os.path.join(control_dir, f"f_{i:04d}.png"),
+                        mode, far=far, depth_range=depth_range)
+
+        rx = int(scene.render.resolution_x * scene.render.resolution_percentage / 100)
+        ry = int(scene.render.resolution_y * scene.render.resolution_percentage / 100)
+        return {
+            "control_dir": control_dir,
+            "frames": len(exrs),
+            "width": rx,
+            "height": ry,
+            "fps": scene.render.fps,
+        }
+
+    finally:
+        scene.render.resolution_percentage = snap["pct"]
+        scene.render.filepath = snap["filepath"]
+        scene.render.image_settings.file_format = snap["ffmt"]
+        scene.compositing_node_group = snap["comp_group"]
+        scene.use_nodes = snap["use_nodes"]
+        scene.render.use_compositing = snap["use_comp"]
+        view_layer.use_pass_z = snap["pass_z"]
+        view_layer.use_pass_normal = snap["pass_n"]
+        scene.frame_current = snap["frame"]
+        if pose_layer_snap is not None and openpose_view_layer in scene.view_layers:
+            scene.view_layers[openpose_view_layer].use = pose_layer_snap
+        if temp_group is not None:
+            bpy.data.node_groups.remove(temp_group)
+        shutil.rmtree(exr_dir, ignore_errors=True)

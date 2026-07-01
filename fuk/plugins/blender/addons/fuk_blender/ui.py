@@ -126,6 +126,30 @@ class FUK_PT_main(bpy.types.Panel):
         row.prop(props, "live_delay", text="Delay")
         row.prop(props, "live_interrupt", text="", icon="TRACKING_CLEAR_FORWARDS")
 
+        # --- video (Wan-VACE) ---
+        box = layout.box()
+        box.label(text="Video (VACE)", icon="RENDER_ANIMATION")
+        scene = context.scene
+        frames = scene.frame_end - scene.frame_start + 1
+        box.label(text=f"Range {scene.frame_start}–{scene.frame_end} ({frames}f @ {scene.render.fps}fps)")
+        if props.control_source not in ("depth", "normals", "openpose"):
+            box.label(text="Control must be depth / normals / openpose", icon="ERROR")
+        # effective output size at the chosen scale
+        vw = scene.render.resolution_x * props.video_percentage // 100
+        vh = scene.render.resolution_y * props.video_percentage // 100
+        row = box.row(align=True)
+        row.prop(props, "video_percentage")
+        row.label(text=f"{vw}x{vh}")
+        row = box.row(align=True)
+        row.prop(props, "video_steps")
+        row.prop(props, "video_guidance")
+        vcol = box.column(align=True)
+        vcol.enabled = (not props.busy) and bool(props.last_result)
+        vcol.scale_y = 1.2
+        vcol.operator("fuk.generate_video", text="Generate Video", icon="RENDER_ANIMATION")
+        if not props.last_result:
+            box.label(text="Generate a still first (VACE reference)", icon="INFO")
+
         # Cancel the in-flight generation (also Esc in the viewport).
         if props.busy:
             row = layout.row()

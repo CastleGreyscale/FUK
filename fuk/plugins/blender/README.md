@@ -88,6 +88,24 @@ the .blend; the **Connect** button reads *Connected* once it's reached the serve
 Shortcuts (3D View): **Ctrl+Shift+P** runs a Quick Preview, **Ctrl+Shift+L** toggles
 Live. (Rebind in Blender's Keymap editor under *3D View*.)
 
+### Video (Wan-VACE)
+
+Animate a still with your scene's motion. Workflow:
+
+1. Generate a **still** first (image flow) — it becomes the VACE **reference** (the look).
+2. Set the scene **frame range** (the motion) and pick a **depth / normals / openpose**
+   control.
+3. Press **Generate Video** (in the *Video (VACE)* panel). The addon renders the control
+   pass over the whole frame range into a folder (depth is normalized over a *global*
+   range so it doesn't flicker) and runs `wan_vace_a14b` with `vace_video` = that
+   sequence and `vace_reference_image` = your still.
+4. The result mp4 loads into Blender's **Video Sequencer** to scrub/play.
+
+Notes: video is slow (minutes) and runs on demand — no live mode. Control must be a
+native pass (depth/normals/openpose-rig); canny/estimated openpose aren't supported for
+sequences. Requires the **wan_vace_a14b** weights on the server. Esc stops *waiting* but
+video isn't abortable mid-render yet (unlike images).
+
 ### `#tags` (prompt expansion)
 
 The prompt supports FUK's `#markers`, expanded server-side at generation time — the

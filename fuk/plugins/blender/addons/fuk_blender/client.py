@@ -113,6 +113,9 @@ class FukClient:
     def generate_image(self, payload: dict):
         return self.post("/api/generate/image", payload)
 
+    def generate_video(self, payload: dict):
+        return self.post("/api/generate/video", payload)
+
     def status(self, generation_id: str):
         return self.get(f"/api/status/{generation_id}", timeout=30.0)
 

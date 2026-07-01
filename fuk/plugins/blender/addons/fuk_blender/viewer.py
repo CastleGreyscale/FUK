@@ -74,6 +74,61 @@ def _open_image_window(context, img):
     return True
 
 
+def _sequencer_strips(scene):
+    se = scene.sequence_editor_create()
+    if hasattr(se, "strips"):      # Blender 5.x
+        return se.strips
+    if hasattr(se, "sequences"):   # older
+        return se.sequences
+    return None
+
+
+def _open_sequencer_window(context):
+    try:
+        bpy.ops.wm.window_new()
+    except RuntimeError:
+        return False
+    win = context.window_manager.windows[-1]
+    area = max(win.screen.areas, key=lambda a: a.width * a.height)
+    area.type = "SEQUENCE_EDITOR"
+    for space in area.spaces:
+        if space.type == "SEQUENCE_EDITOR":
+            try:
+                space.view_type = "SEQUENCER_PREVIEW"
+            except Exception:
+                pass
+            break
+    return True
+
+
+def show_video(context, mp4_path):
+    """Load the result mp4 into the scene's Video Sequencer and reveal it."""
+    scene = context.scene
+    strips = _sequencer_strips(scene)
+    if strips is None:
+        return None
+    # Replace any prior FUK result strip.
+    for s in list(strips):
+        if s.name.startswith("FUK_result"):
+            try:
+                strips.remove(s)
+            except Exception:
+                pass
+    try:
+        strip = strips.new_movie(name="FUK_result", filepath=mp4_path,
+                                 channel=1, frame_start=scene.frame_start)
+    except Exception:
+        return None
+    try:  # extend the scene range so playback covers the whole clip
+        scene.frame_end = max(scene.frame_end, int(strip.frame_final_end) - 1)
+    except Exception:
+        pass
+    # Reuse an open sequencer if there is one; else pop a window.
+    if not any(a.type == "SEQUENCE_EDITOR" for a in context.screen.areas):
+        _open_sequencer_window(context)
+    return "Video Sequencer"
+
+
 def show_result(context, img, mode="viewport", alpha=1.0, reuse_only=False):
     """Display `img` per `mode`. Returns a short human label of what happened.
 

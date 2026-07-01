@@ -262,7 +262,9 @@ class WanPipelineRunner(PipelineRunner):
         if p.exists() and p.suffix in (".mp4", ".avi", ".mov", ".mkv"):
             return VideoData(str(p), height=height, width=width)
         if p.is_dir():
-            return VideoData(str(p), height=height, width=width)
+            # A folder of frames must go through `image_folder`, not the positional
+            # `video_file` arg (which would try to open the directory as a video).
+            return VideoData(image_folder=str(p), height=height, width=width)
 
         _log(self.log_prefix, f"Could not load video data from: {source}", "warning")
         return None

@@ -605,6 +605,131 @@ class FUK_OT_generate(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class FUK_OT_generate_video(bpy.types.Operator):
+    bl_idname = "fuk.generate_video"
+    bl_label = "Generate Video"
+    bl_description = ("Render the control-pass sequence over the frame range and run "
+                     "Wan-VACE, using the last generated still as the reference")
+
+    _timer = None
+    _client = None
+    _gen_id = ""
+    _out_dir = ""
+    _t0 = 0.0
+
+    def invoke(self, context, event):
+        props = context.scene.fuk
+        if props.busy:
+            self.report({"WARNING"}, "A generation is already running")
+            return {"CANCELLED"}
+        if not props.shot_file:
+            self.report({"ERROR"}, "Connect and load a shot first")
+            return {"CANCELLED"}
+        ref = bpy.path.abspath(props.last_result) if props.last_result else ""
+        if not ref or not os.path.exists(ref):
+            self.report({"ERROR"}, "No reference still yet — generate an image first (it's the VACE reference)")
+            return {"CANCELLED"}
+
+        folder = _abs_folder(props)
+        client = _client(context)
+        shot_stem = os.path.splitext(props.shot_file)[0]
+        out_dir = os.path.join(folder, "cache", "_blender_io", shot_stem, "video")
+        try:
+            client.set_project_folder(folder)
+            shot_mod.load_current(client, props.shot_file)
+            props.status = "Rendering control sequence…"
+            seq = render_mod.render_control_sequence(
+                context, out_dir, props.control_source, props.openpose_view_layer,
+                percentage=props.video_percentage)
+            if not seq["frames"]:
+                raise FukError("No frames rendered — check the scene frame range")
+            payload = {
+                "task": "wan_vace_a14b",
+                "prompt": props.prompt,
+                "negative_prompt": props.negative_prompt or None,
+                "image_path": ref,
+                "control_path": seq["control_dir"],
+                "video_length": seq["frames"],
+                "width": seq["width"],
+                "height": seq["height"],
+                "steps": int(props.video_steps),
+                "guidance_scale": float(props.video_guidance),
+                "seed": None if props.seed_mode == "random" else int(props.seed),
+            }
+            props.status = f"Submitting {seq['frames']}f video to FUK…"
+            resp = client.generate_video(payload)
+            self._gen_id = resp.get("generation_id", "")
+            if not self._gen_id:
+                raise FukError("Server did not return a generation id")
+        except (FukError, RuntimeError, OSError) as e:
+            props.busy = False
+            props.status = "Failed"
+            self.report({"ERROR"}, str(e))
+            return {"CANCELLED"}
+
+        self._client = client
+        self._out_dir = out_dir
+        self._t0 = time.time()
+        props.busy = True
+        _ACTIVE_GEN.update({"id": self._gen_id, "mode": "video"})
+        wm = context.window_manager
+        self._timer = wm.event_timer_add(0.8, window=context.window)
+        wm.modal_handler_add(self)
+        return {"RUNNING_MODAL"}
+
+    def modal(self, context, event):
+        props = context.scene.fuk
+        if event.type == "ESC":
+            # Video isn't truly abortable server-side yet, so just stop waiting.
+            try:
+                self._client.cancel(self._gen_id)
+            except FukError:
+                pass
+            return self._finish(context, "Cancelled (video keeps rendering on the server)")
+        if event.type != "TIMER":
+            return {"PASS_THROUGH"}
+        try:
+            st = self._client.status(self._gen_id)
+        except FukError as e:
+            self.report({"ERROR"}, str(e))
+            return self._finish(context, "Failed")
+
+        status = st.get("status", "")
+        phase = st.get("phase", "")
+        progress = st.get("progress", 0.0) or 0.0
+        elapsed = time.time() - self._t0
+        if status in ("running", "queued"):
+            props.status = f"video {phase or status} {progress*100:.0f}% ({elapsed:.0f}s)"
+            return {"PASS_THROUGH"}
+        if status == "complete":
+            mp4 = (st.get("outputs", {}) or {}).get("mp4")
+            if not mp4:
+                return self._finish(context, "Complete (no video returned)")
+            dest = os.path.join(self._out_dir, "result.mp4")
+            shown = None
+            try:
+                self._client.download(mp4, dest)
+                shown = viewer_mod.show_video(context, dest)
+            except (FukError, RuntimeError) as e:
+                self.report({"WARNING"}, f"Video done, display failed: {e}")
+            tail = f" — in {shown}" if shown else " (open the mp4 manually)"
+            return self._finish(context, f"Video done in {elapsed:.0f}s{tail}")
+        if status in ("failed", "cancelled"):
+            return self._finish(context, f"{status.capitalize()}: {st.get('error','')}")
+        return {"PASS_THROUGH"}
+
+    def _finish(self, context, message):
+        props = context.scene.fuk
+        props.busy = False
+        props.status = message
+        _ACTIVE_GEN.update({"id": "", "mode": ""})
+        if self._timer is not None:
+            context.window_manager.event_timer_remove(self._timer)
+            self._timer = None
+        self.report({"INFO"}, message)
+        return {"FINISHED"}
+
+
 class FUK_OT_cancel(bpy.types.Operator):
     bl_idname = "fuk.cancel"
     bl_label = "Cancel"
@@ -714,6 +839,7 @@ CLASSES = (
     FUK_OT_use_last_seed,
     FUK_OT_save_to_history,
     FUK_OT_generate,
+    FUK_OT_generate_video,
     FUK_OT_cancel,
     FUK_OT_live,
 )

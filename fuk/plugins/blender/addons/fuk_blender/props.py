@@ -149,6 +149,21 @@ class FukProps(bpy.types.PropertyGroup):
                     "(decodes a few mid-diffusion frames — adds a little time)",
     )
 
+    # --- video (Wan-VACE) ---
+    video_percentage: bpy.props.IntProperty(
+        name="Video %", default=50, min=10, max=100,
+        description="Resolution percentage for the video render (scales the control "
+                    "sequence and the output video — lower is much faster)",
+    )
+    video_steps: bpy.props.IntProperty(
+        name="Video Steps", default=20, min=1, max=100,
+        description="Diffusion steps for the Wan-VACE video generation",
+    )
+    video_guidance: bpy.props.FloatProperty(
+        name="Video Guidance", default=5.0, min=0.0, max=30.0,
+        description="CFG scale for the video generation",
+    )
+
     # --- live (IPR-style auto-update) ---
     live_mode: bpy.props.BoolProperty(
         name="Live", default=False,
