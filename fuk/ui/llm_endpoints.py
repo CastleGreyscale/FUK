@@ -730,14 +730,25 @@ def _resolve_prompt(
 
     expanded_markers: List[str] = []
     unknown_markers: List[str] = []
+    expanding: set = set()   # markers on the current expansion stack (cycle guard)
 
     def _replace(match: re.Match) -> str:
         marker = match.group(0)
-        if marker in marker_to_expansion:
-            expanded_markers.append(marker)
-            return marker_to_expansion[marker]
-        unknown_markers.append(marker)
-        return marker
+        if marker not in marker_to_expansion:
+            unknown_markers.append(marker)
+            return marker
+        if marker in expanding:
+            # Self-referential expansion (#a -> "#b", #b -> "#a"). Leave the
+            # marker raw rather than recurse forever.
+            return marker
+        expanded_markers.append(marker)
+        expanding.add(marker)
+        # Recurse so markers *inside* an expansion resolve too (#sarah ->
+        # "... wearing #redcoat"). re.sub scans its input only once, so we
+        # re-scan each expansion ourselves.
+        result = _MARKER_SCAN_RE.sub(_replace, marker_to_expansion[marker])
+        expanding.discard(marker)
+        return result
 
     resolved = _MARKER_SCAN_RE.sub(_replace, text or "").strip()
 
