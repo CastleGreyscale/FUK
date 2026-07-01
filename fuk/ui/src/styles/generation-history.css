@@ -1386,3 +1386,208 @@
   opacity: 0.6;
   cursor: not-allowed;
 }
+
+/* ── A/B compare ── */
+
+.gallery-compare-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.3rem 0.5rem;
+  background: transparent;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-muted);
+  font-size: 0.65rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-base);
+}
+
+.gallery-compare-btn svg {
+  width: var(--icon-base);
+  height: var(--icon-base);
+}
+
+.gallery-compare-btn:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text-primary);
+}
+
+.gallery-compare-btn.active {
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+/* compare viewer (before/after wipe) */
+.compare-container {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+  cursor: crosshair;
+  user-select: none;
+}
+
+/* both images fill the box and share one transform (set inline) so they align */
+.compare-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  pointer-events: none;
+}
+
+/* non-transformed wrapper clips image B in screen space → fixed divider line */
+.compare-clip {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.compare-divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+  cursor: ew-resize;
+  z-index: 5;
+}
+
+.compare-divider-handle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.65);
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  font-size: 0.8rem;
+  line-height: 1;
+}
+
+.compare-label {
+  position: absolute;
+  top: 0.5rem;
+  padding: 0.15rem 0.45rem;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 700;
+  border-radius: var(--radius-sm);
+  pointer-events: none;
+  z-index: 6;
+  transition: opacity var(--transition-base);
+}
+
+.compare-label--b { left: 0.5rem; }
+.compare-label--a { right: 0.5rem; }
+
+/* A/B badge on thumbnails while picking */
+.gallery-thumb-compare-badge {
+  position: absolute;
+  top: 0.25rem;
+  left: 0.25rem;
+  min-width: 1rem;
+  height: 1rem;
+  padding: 0 0.25rem;
+  border-radius: var(--radius-sm);
+  color: #fff;
+  font-size: 0.55rem;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 3;
+  line-height: 1;
+}
+
+.gallery-thumb-compare-badge.a { background: #3b82f6; }
+.gallery-thumb-compare-badge.b { background: #f59e0b; }
+
+.gallery-thumb.compare-a { border-color: #3b82f6; box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.35); }
+.gallery-thumb.compare-b { border-color: #f59e0b; box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.35); }
+
+/* compare sidebar */
+.gallery-compare-header {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.gallery-compare-header svg { width: 0.85rem; height: 0.85rem; }
+
+.gallery-compare-slot {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.4rem;
+  background: var(--color-surface-hover);
+  border-radius: var(--radius-md);
+}
+
+.gallery-compare-tag {
+  flex-shrink: 0;
+  width: 1.1rem;
+  height: 1.1rem;
+  border-radius: var(--radius-sm);
+  color: #fff;
+  font-size: 0.6rem;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.gallery-compare-tag.a { background: #3b82f6; }
+.gallery-compare-tag.b { background: #f59e0b; }
+
+.gallery-compare-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.65rem;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gallery-compare-x {
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  padding: 0.15rem;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  display: flex;
+  border-radius: var(--radius-sm);
+}
+
+.gallery-compare-x svg { width: 0.7rem; height: 0.7rem; }
+.gallery-compare-x:hover { color: var(--color-error-500); background: var(--color-surface); }
+
+.gallery-compare-hint {
+  font-size: 0.6rem;
+  color: var(--color-text-muted);
+  line-height: 1.4;
+}

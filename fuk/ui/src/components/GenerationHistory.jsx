@@ -4,10 +4,11 @@
  */
 
 import { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from 'react';
-import { Film, Camera, Clock, Trash2, RefreshCw, ChevronDown, ChevronRight, Enhance, Zap, ArrowUp, Layers, Download, PinIcon, ImportIcon, SequenceIcon, ThumbsUp, ThumbsDown, Maximize2, X } from './Icons';
+import { Film, Camera, Clock, Trash2, RefreshCw, ChevronDown, ChevronRight, Enhance, Zap, ArrowUp, Layers, Download, PinIcon, ImportIcon, SequenceIcon, ThumbsUp, ThumbsDown, Maximize2, Columns, X } from './Icons';
 import { buildImageUrl, API_URL } from '../utils/constants';
 import { useVideoPlayback } from '../hooks/useVideoPlayback';
 import ZoomableImage from './ZoomableImage';
+import CompareImage from './CompareImage';
 import ConformHDButton from './ConformHDButton';
 import { setPanelPreview, upsertPanel } from '../utils/storyboardApi';
 
@@ -398,7 +399,7 @@ function processingType(g) {
 
 // ─── single gallery thumbnail ─────────────────────────────────────────────────
 
-function GalleryThumb({ generation, isPinned, isSelected, isMultiSelected, vote, onSelect, onTogglePin, onVote, onDelete, onSendToStoryboard, sendToStoryboardEnabled }) {
+function GalleryThumb({ generation, isPinned, isSelected, isMultiSelected, compareRole, vote, onSelect, onTogglePin, onVote, onDelete, onSendToStoryboard, sendToStoryboardEnabled }) {
   const [imgErr, setImgErr] = useState(false);
   const video   = isGenVideo(generation);
   const seq     = generation.isSequence;
@@ -410,7 +411,7 @@ function GalleryThumb({ generation, isPinned, isSelected, isMultiSelected, vote,
 
   return (
     <div
-      className={`gallery-thumb${isSelected ? ' selected' : ''}${isPinned ? ' pinned' : ''}${isMultiSelected ? ' multi-selected' : ''}`}
+      className={`gallery-thumb${isSelected ? ' selected' : ''}${isPinned ? ' pinned' : ''}${isMultiSelected ? ' multi-selected' : ''}${compareRole ? ` compare-${compareRole}` : ''}`}
       onClick={e => onSelect(generation, e.shiftKey)}
     >
       <div className="gallery-thumb-media">
@@ -443,6 +444,9 @@ function GalleryThumb({ generation, isPinned, isSelected, isMultiSelected, vote,
         )}
         {isMultiSelected && (
           <div className="gallery-thumb-check">✓</div>
+        )}
+        {compareRole && (
+          <div className={`gallery-thumb-compare-badge ${compareRole}`}>{compareRole.toUpperCase()}</div>
         )}
       </div>
 
@@ -604,6 +608,54 @@ function GalleryLargeView({ generation, generations, isPinned, vote, onTogglePin
   );
 }
 
+// ─── A/B compare view (before/after wipe) ────────────────────────────────────
+
+function CompareLargeView({ a, b, onSwap, onClearA, onClearB, onExit }) {
+  const srcA = buildImageUrl(a.preview);
+  const srcB = buildImageUrl(b.preview);
+  const nameA = a.name || a.id;
+  const nameB = b.name || b.id;
+
+  return (
+    <div className="gallery-large-view">
+      <div className="gallery-large-media">
+        <CompareImage
+          key={`${srcA}|${srcB}`}
+          srcA={srcA}
+          srcB={srcB}
+          labelA="A"
+          labelB="B"
+        />
+      </div>
+
+      <div className="gallery-large-sidebar">
+        <div className="gallery-compare-header">
+          <Columns /> A/B Compare
+        </div>
+        <div className="gallery-compare-slot">
+          <span className="gallery-compare-tag a">A</span>
+          <span className="gallery-compare-name" title={nameA}>{nameA}</span>
+          <button className="gallery-compare-x" onClick={onClearA} title="Clear A"><X /></button>
+        </div>
+        <div className="gallery-compare-slot">
+          <span className="gallery-compare-tag b">B</span>
+          <span className="gallery-compare-name" title={nameB}>{nameB}</span>
+          <button className="gallery-compare-x" onClick={onClearB} title="Clear B"><X /></button>
+        </div>
+
+        <div className="gallery-detail-actions">
+          <button className="gen-history-pin" onClick={onSwap}><Columns />Swap A / B</button>
+          <button className="gallery-bulk-clear" onClick={onExit}><X />Exit compare</button>
+        </div>
+
+        <div className="gallery-compare-hint">
+          Drag the bar to wipe · scroll to zoom · move mouse to pan
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── fullscreen gallery overlay ───────────────────────────────────────────────
 
 function FullscreenGallery({ generations, pinnedIds, votes, onTogglePin, onVote, onDelete, onClose, hasMore, loading, onLoadMore, onLoadAll, onSendToStoryboard, sendToStoryboardEnabled }) {
@@ -612,6 +664,10 @@ function FullscreenGallery({ generations, pinnedIds, votes, onTogglePin, onVote,
   const [previewPct, setPreviewPct]   = useState(55);
   const [multiSelected, setMultiSelected] = useState(new Set());
   const [deleteConfirm, setDeleteConfirm] = useState(null); // { ids: [...], label: '' }
+  // A/B compare: pick two images and wipe between them
+  const [compareMode, setCompareMode] = useState(false);
+  const [compareA, setCompareA]       = useState(null);
+  const [compareB, setCompareB]       = useState(null);
   const bodyRef      = useRef(null);
   const isDragging   = useRef(false);
   const dragStartY   = useRef(0);
@@ -711,8 +767,33 @@ function FullscreenGallery({ generations, pinnedIds, votes, onTogglePin, onVote,
     window.addEventListener('mouseup', onUp);
   };
 
-  // Thumb click: shift-click ranges, plain click sets anchor
+  // Assign a picked image to the next open A/B slot (or clear it if already picked).
+  const handleCompareAssign = useCallback((generation) => {
+    if (isGenVideo(generation)) return;            // wipe/zoom only makes sense for stills
+    if (compareA?.id === generation.id) { setCompareA(null); return; } // toggle A off
+    if (compareB?.id === generation.id) { setCompareB(null); return; } // toggle B off
+    if (!compareA) { setCompareA(generation); return; }  // fill A first
+    if (!compareB) { setCompareB(generation); return; }  // then fill B
+    setCompareB(generation);                             // both full → replace B
+  }, [compareA, compareB]);
+
+  const toggleCompareMode = useCallback(() => {
+    setCompareMode(m => {
+      const next = !m;
+      if (next) {
+        // Seed slot A with the current selection when it's a still image.
+        const seed = selected && !isGenVideo(selected) ? selected : null;
+        setCompareA(seed);
+        setCompareB(null);
+        setMultiSelected(new Set());
+      }
+      return next;
+    });
+  }, [selected]);
+
+  // Thumb click: in compare mode assign A/B; otherwise shift-click ranges / anchor
   const handleThumbSelect = useCallback((generation, shiftKey) => {
+    if (compareMode) { handleCompareAssign(generation); return; }
     if (shiftKey && anchorId.current) {
       const ids = orderedGens.map(g => g.id);
       const aIdx = ids.indexOf(anchorId.current);
@@ -724,7 +805,7 @@ function FullscreenGallery({ generations, pinnedIds, votes, onTogglePin, onVote,
       anchorId.current = generation.id;
     }
     setSelected(generation);
-  }, [orderedGens]);
+  }, [orderedGens, compareMode, handleCompareAssign]);
 
   const handleDelete = useCallback(generation => {
     setDeleteConfirm({ gens: [generation], label: generation.name || generation.id });
@@ -792,6 +873,14 @@ function FullscreenGallery({ generations, pinnedIds, votes, onTogglePin, onVote,
           </label>
         </div>
         <div className="gallery-header-right">
+          <button
+            className={`gallery-compare-btn${compareMode ? ' active' : ''}`}
+            onClick={toggleCompareMode}
+            title={compareMode ? 'Exit A/B compare' : 'A/B compare (before/after wipe)'}
+          >
+            <Columns />
+            <span>Compare</span>
+          </button>
           <button className="gallery-close-btn" onClick={onClose} title="Close (Esc)"><X /></button>
         </div>
       </div>
@@ -800,7 +889,24 @@ function FullscreenGallery({ generations, pinnedIds, votes, onTogglePin, onVote,
       <div className="gallery-body" ref={bodyRef}>
         {/* large preview */}
         <div className="gallery-large-preview" style={{ height: `${previewPct}%` }}>
-          {selected ? (
+          {compareMode ? (
+            (compareA && compareB) ? (
+              <CompareLargeView
+                a={compareA}
+                b={compareB}
+                onSwap={() => { setCompareA(compareB); setCompareB(compareA); }}
+                onClearA={() => setCompareA(null)}
+                onClearB={() => setCompareB(null)}
+                onExit={() => setCompareMode(false)}
+              />
+            ) : (
+              <div className="gallery-large-empty">
+                {!compareA
+                  ? 'A/B compare — click an image to set slot A'
+                  : 'A/B compare — click a second image to set slot B'}
+              </div>
+            )
+          ) : selected ? (
             <GalleryLargeView
               generation={selected}
               generations={generations}
@@ -841,6 +947,7 @@ function FullscreenGallery({ generations, pinnedIds, votes, onTogglePin, onVote,
                   isPinned={true}
                   isSelected={selected?.id === g.id}
                   isMultiSelected={multiSelected.has(g.id)}
+                  compareRole={compareMode ? (compareA?.id === g.id ? 'a' : compareB?.id === g.id ? 'b' : null) : null}
                   vote={votes[g.id] || 0}
                   onSelect={handleThumbSelect}
                   onTogglePin={onTogglePin}
@@ -862,6 +969,7 @@ function FullscreenGallery({ generations, pinnedIds, votes, onTogglePin, onVote,
                 isPinned={false}
                 isSelected={selected?.id === g.id}
                 isMultiSelected={multiSelected.has(g.id)}
+                compareRole={compareMode ? (compareA?.id === g.id ? 'a' : compareB?.id === g.id ? 'b' : null) : null}
                 vote={votes[g.id] || 0}
                 onSelect={handleThumbSelect}
                 onTogglePin={onTogglePin}
