@@ -562,6 +562,21 @@ class CompileRequest(BaseModel):
 _SENTENCE_END_RE = re.compile(r"[.!?]['\")\]]*\s*$")
 _MOOD_LABEL = "Mood"
 
+# One auto-appended mood tail: blank-line separator + "Mood: …" running to EOL.
+# Anchored to the end of the string so an author's inline "Mood:" mid-prompt is
+# left untouched — we only peel stacked tails off the end.
+_MOOD_TAIL_RE = re.compile(r"\s*\n\s*" + re.escape(_MOOD_LABEL) + r":[^\n]*$", re.IGNORECASE)
+
+
+def _strip_trailing_mood_blocks(text: str) -> str:
+    """Remove any trailing auto-appended `Mood: …` block(s) from a resolved
+    prompt so regenerating a round-tripped prompt doesn't stack them."""
+    prev = None
+    while prev != text:
+        prev = text
+        text = _MOOD_TAIL_RE.sub("", text).rstrip()
+    return text
+
 
 def _storyboard_context() -> tuple[List[dict], str]:
     """Lazy-load storyboard project-tag tokens and mood for the active project.
@@ -756,6 +771,12 @@ def _resolve_prompt(
     mood_applied = ""
     if apply_mood and mood:
         mood_sentence = f"{_MOOD_LABEL}: {mood.rstrip('.')}."
+        # Self-heal: strip any previously auto-appended "Mood: …" tail(s) before
+        # re-appending. Resolved prompts get round-tripped back into editable
+        # fields (restore-from-history, send-to-storyboard, Blender), and the
+        # guard below only matches the *current* mood — so an older/different
+        # mood line would otherwise stack "Mood:" over and over each regen.
+        resolved = _strip_trailing_mood_blocks(resolved)
         # Only append if the mood isn't already present verbatim — author may
         # have written it explicitly in the prompt and we shouldn't double up.
         if mood.lower() not in resolved.lower():

@@ -440,7 +440,11 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
       const meta = await res.json();
 
       const updates = {};
-      if (meta.prompt)                    updates.prompt                = meta.prompt;
+      // Restore the RAW draft (with #markers intact), not the resolved string —
+      // the resolved `prompt` has mood + expanded markers baked in, which would
+      // re-bake into the editable field and stack "Mood: …" on the next gen.
+      const draftPrompt = meta.prompt_source || meta.prompt;
+      if (draftPrompt)                    updates.prompt                = draftPrompt;
       if (meta.negative_prompt)           updates.negative_prompt       = meta.negative_prompt;
       if (meta.model)                     updates.model                 = resolveModelKey(meta.model);
       if (meta.guidance_scale != null)    updates.guidance_scale        = meta.guidance_scale;

@@ -152,19 +152,24 @@ function SnapshotControl({ sb }) {
 
   const handleLoad = useCallback(async () => {
     if (!selected) return;
-    if (!confirm(`Load "${selected}"?`)) return;
+    if (!confirm(`Load "${selected}"?\n\nThe current storyboard is snapshotted first, so nothing is lost.`)) return;
     setBusy(true);
     setErr(null);
     try {
+      // Version-up the live state before it's replaced. Edits autosave to the
+      // live manifest, so this snapshot captures the current version — the
+      // restore then swaps in the selected snapshot without discarding it.
+      await snapshotStoryboard();
       await restoreSnapshot(selected);
       await sb.refresh();
+      await loadSnapshots();
       setSelected('');
     } catch (e) {
       setErr(e.message);
     } finally {
       setBusy(false);
     }
-  }, [selected, sb]);
+  }, [selected, sb, loadSnapshots]);
 
   return (
     <div className="storyboard-snapshot-bar">
