@@ -986,6 +986,19 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
         #     if base_preview.exists():
         #         control_images.append(base_preview)
 
+        # Copy control inputs into the entry so it's self-contained (mirrors the
+        # video flow). Without this the history entry only references the original
+        # source path, which dangles once a temp upload is cleaned up or moved.
+        if control_images:
+            import shutil
+            control_dir = gen_dir / "control"
+            control_dir.mkdir(exist_ok=True)
+            for idx, ctrl in enumerate(control_images):
+                try:
+                    dest = control_dir / f"control_{idx}{ctrl.suffix or '.png'}"
+                    shutil.copy(ctrl, dest)
+                except Exception as _e:
+                    log.warning("ImageGen", f"Failed to copy control image {ctrl}: {_e}")
 
         # Handle EliGen mask source (directory or .psd/.ora file)
         eligen_source_abs = None
