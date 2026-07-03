@@ -132,6 +132,17 @@
                     </div>
                 </div>
 
+                <div class="sidebar-group">
+                    <button class="sidebar-category" aria-expanded="false">
+                        Plugins
+                        <svg class="sidebar-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+                    <div class="sidebar-links" hidden>
+                        <a href="#plugins" class="sidebar-link">Overview</a>
+                        <a href="#blender-plugin" class="sidebar-link">Blender Bridge</a>
+                    </div>
+                </div>
+
             </nav>
         </aside>
 
@@ -185,7 +196,7 @@
                 </ol>
 
                 <h3>First Launch</h3>
-                <p>On first launch FUK will verify model paths and report any missing files. The interface will open at <code>http://localhost:7860</code> by default. If a model fails to load it will appear grayed out in the model selector — check the terminal output for the specific error.</p>
+                <p>On first launch FUK will verify model paths and report any missing files. The server runs at <code>http://localhost:8000</code> by default (easily changed if needed). If a model fails to load it will appear grayed out in the model selector — check the terminal output for the specific error.</p>
 
                 <div class="wiki-note">
                     <p>See the <a href="https://github.com/CastleGreyscale/FUK" target="_blank">GitHub README</a> for the complete and up-to-date installation instructions, including Windows/WSL2 setup.</p>
@@ -1767,6 +1778,71 @@
 
                 <h3>Portability</h3>
                 <p>Because metadata is stored as sidecar files alongside outputs rather than in a central database, output directories are fully portable. Copy a version directory to another machine and FUK will recognize it on first launch. If a model file referenced in the sidecar is missing or has a different hash, FUK will warn before re-queuing.</p>
+            </div>
+
+            <!-- Plugins Overview -->
+            <div class="wiki-section" id="plugins">
+                <h2>Plugins</h2>
+                <p>FUK exposes its generation pipeline over a local HTTP API, which makes it straightforward to drive from other applications. Plugins live under <code>fuk/plugins/</code> and act as clients to the running FUK server — they gather inputs in the host application, hand them to FUK, and bring the results back.</p>
+                <p>Because a plugin and the FUK server run on the same machine, inputs are exchanged by file path rather than upload, and the shot <code>.json</code> remains the single source of truth for settings.</p>
+
+                <h3>Available Plugins</h3>
+                <ul>
+                    <li><strong><a href="#blender-plugin">Blender Bridge</a></strong> — render structural control passes from a Blender scene, generate control-guided stills and VACE video in FUK, and bring the results back into the viewport.</li>
+                </ul>
+            </div>
+
+            <!-- Blender Bridge -->
+            <div class="wiki-section" id="blender-plugin">
+                <h2>Blender Bridge</h2>
+                <p>The Blender Bridge is a Blender add-on (<code>fuk/plugins/blender/</code>) that drives FUK from inside Blender. It renders your scene's structural control passes, sends them to FUK for control-guided generation, and returns the result to the viewport — for both stills and VACE-driven video. It targets Blender 4.2+ and is validated on 5.x.</p>
+
+                <div class="wiki-note">
+                    <p>Requires a running FUK server on the same machine, plus the relevant model weights: <code>qwen_image_control_union_2512</code> (or <code>qwen_image_control_union</code>) for stills, and <code>wan_vace_a14b</code> for video.</p>
+                </div>
+
+                <h3>Installation</h3>
+                <ol>
+                    <li>Start the FUK server.</li>
+                    <li>In Blender: <em>Edit ▸ Preferences ▸ Add-ons ▸ Install from Disk…</em> and pick <code>fuk/plugins/blender/addons/fuk_blender.zip</code>. Enable <strong>FUK Bridge</strong>.</li>
+                    <li>Set the <strong>Server URL</strong> in the add-on preferences if it isn't the default (<code>http://localhost:8000</code>).</li>
+                    <li>Open the <strong>FUK</strong> tab in the 3D viewport sidebar (press <code>N</code>).</li>
+                </ol>
+
+                <h3>Connecting to a Shot</h3>
+                <p>Pick your <strong>project folder</strong> (the one holding the shot <code>.json</code> files) and press <strong>Connect</strong>; the button reads <em>Connected</em> once it reaches the server. The add-on also auto-connects on file open when a project folder is saved in the .blend, and restores the last shot you used.</p>
+                <p><strong>Load Shot</strong> mirrors the shot's prompt, seed, and settings into the panel (the shot is the source of truth); <strong>Save to Shot</strong> writes your edits back. Advanced settings you don't edit in Blender — LoRAs, detail bias, VRAM preset — are read from the shot at generation time, so changes made in the FUK web UI apply automatically.</p>
+
+                <h3>Control Passes</h3>
+                <p>The bridge derives structural control from your 3D scene, which is far more accurate than estimating it from a 2D render:</p>
+                <ul>
+                    <li><strong>Depth</strong> — the exact Z pass, normalized (near = white, far = black, background masked) to match the convention the control model expects.</li>
+                    <li><strong>Normals</strong> — the normal pass, remapped.</li>
+                    <li><strong>OpenPose</strong> — from a view layer that renders your pose rig; falls back to FUK's estimator if no rig layer is set.</li>
+                    <li><strong>Canny</strong> — derived by FUK from the beauty render.</li>
+                </ul>
+
+                <h3>Generating Stills</h3>
+                <p>Frame your camera, choose a control, and press <strong>Quick Preview</strong> (fast, low-res) or <strong>Render Full</strong>. The add-on renders the beauty and control passes, sends them to the control-union model, and returns the image. History policy: Quick Preview is ephemeral, Render Full saves a complete entry (result + control + source), and <strong>Save to History</strong> promotes any result on demand. The FUK web history auto-refreshes when Blender saves.</p>
+                <p>Prompts support FUK's <code>#tags</code>: <strong>Insert #tag</strong> searches the vocabulary and <strong>Preview</strong> shows the resolved prompt.</p>
+
+                <h3>Result Display</h3>
+                <p>Under <strong>Result</strong>, choose how the image comes back: <strong>Viewport</strong> (a camera-background overlay with adjustable opacity, registered to your framing), <strong>New Window</strong>, or <strong>Image Editor</strong>. With <strong>Diffusion Preview</strong> on, the image is shown forming step-by-step during generation.</p>
+
+                <h3>Live Mode</h3>
+                <p>Toggle <strong>Live</strong> for an IPR-style loop: after you move the camera or edit geometry and the scene settles for the <strong>Delay</strong>, it auto-runs a Quick Preview. With <strong>Interrupt</strong> on, a new edit cancels the in-flight preview and restarts with the latest state; with it off, edits made mid-render coalesce into a single trailing render. Selection clicks are ignored. Shortcuts (3D View): <code>Ctrl+Shift+P</code> preview, <code>Ctrl+Shift+L</code> toggle Live.</p>
+
+                <h3>Video (Wan-VACE)</h3>
+                <p>Animate a still with your scene's motion:</p>
+                <ol>
+                    <li>Generate a <strong>still</strong> first — it becomes the VACE reference (the look).</li>
+                    <li>Set the scene <strong>frame range</strong> (the motion) and a depth / normals / openpose control.</li>
+                    <li>Set <strong>Video %</strong> (resolution scale) and press <strong>Generate Video</strong>.</li>
+                </ol>
+                <p>The add-on renders the control pass over the whole range into a folder (depth is normalized over a global range so it doesn't flicker) and runs <code>wan_vace_a14b</code> with that sequence as the control video and your still as the reference. The result loads into Blender's Video Sequencer. Video is slow and runs on demand — there is no live mode for it.</p>
+
+                <h3>Cancelling</h3>
+                <p>Press <strong>Esc</strong> or the <strong>Cancel</strong> button to stop a generation. Image generations abort at the next diffusion step; video currently stops waiting but continues rendering on the server.</p>
             </div>
 
         </main>
