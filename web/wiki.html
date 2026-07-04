@@ -1,8 +1,6 @@
 <!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<html lang="en"><head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Wiki - FUK | Framework for Unified Kreation</title>
     <meta name="description" content="Documentation, guides, and reference for FUK — the local-first AI rendering pipeline.">
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
@@ -13,7 +11,7 @@
     <header>
         <div class="header-content">
             <div class="logo-section">
-                <a href="./index.html"><img class="logo-image" src="./images/fuk_sm.svg"></a>
+                <a href="./index.html"><img class="logo-image" src="data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiIHN0YW5kYWxvbmU9Im5vIj8+CjwhLS0gQ3JlYXRlZCB3aXRoIElua3NjYXBlIChodHRwOi8vd3d3Lmlua3NjYXBlLm9yZy8pIC0tPgoKPHN2ZwogICB3aWR0aD0iOTEuNzA3MDYybW0iCiAgIGhlaWdodD0iNDYuMDg1NTZtbSIKICAgdmlld0JveD0iMCAwIDkxLjcwNzA2MiA0Ni4wODU1NiIKICAgdmVyc2lvbj0iMS4xIgogICBpZD0ic3ZnMSIKICAgaW5rc2NhcGU6dmVyc2lvbj0iMS40LjMgKDBkMTVmNzUwNDIsIDIwMjUtMTItMjUpIgogICBzb2RpcG9kaTpkb2NuYW1lPSJmdWtfbW9ub2dyYW0uc3ZnIgogICB4bWxuczppbmtzY2FwZT0iaHR0cDovL3d3dy5pbmtzY2FwZS5vcmcvbmFtZXNwYWNlcy9pbmtzY2FwZSIKICAgeG1sbnM6c29kaXBvZGk9Imh0dHA6Ly9zb2RpcG9kaS5zb3VyY2Vmb3JnZS5uZXQvRFREL3NvZGlwb2RpLTAuZHRkIgogICB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciCiAgIHhtbG5zOnN2Zz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgogIDxzb2RpcG9kaTpuYW1lZHZpZXcKICAgICBpZD0ibmFtZWR2aWV3MSIKICAgICBwYWdlY29sb3I9IiM1MDUwNTAiCiAgICAgYm9yZGVyY29sb3I9IiNmZmZmZmYiCiAgICAgYm9yZGVyb3BhY2l0eT0iMSIKICAgICBpbmtzY2FwZTpzaG93cGFnZXNoYWRvdz0iMCIKICAgICBpbmtzY2FwZTpwYWdlb3BhY2l0eT0iMCIKICAgICBpbmtzY2FwZTpwYWdlY2hlY2tlcmJvYXJkPSIxIgogICAgIGlua3NjYXBlOmRlc2tjb2xvcj0iIzUwNTA1MCIKICAgICBpbmtzY2FwZTpkb2N1bWVudC11bml0cz0ibW0iCiAgICAgaW5rc2NhcGU6em9vbT0iMS4wNzcwNDEyIgogICAgIGlua3NjYXBlOmN4PSI1MTUuMzAwNjIiCiAgICAgaW5rc2NhcGU6Y3k9IjU0Ny43OTcwNiIKICAgICBpbmtzY2FwZTp3aW5kb3ctd2lkdGg9IjE2NzIiCiAgICAgaW5rc2NhcGU6d2luZG93LWhlaWdodD0iOTkzIgogICAgIGlua3NjYXBlOndpbmRvdy14PSIwIgogICAgIGlua3NjYXBlOndpbmRvdy15PSIwIgogICAgIGlua3NjYXBlOndpbmRvdy1tYXhpbWl6ZWQ9IjEiCiAgICAgaW5rc2NhcGU6Y3VycmVudC1sYXllcj0ibGF5ZXI0IgogICAgIHNob3dndWlkZXM9InRydWUiPgogICAgPHNvZGlwb2RpOmd1aWRlCiAgICAgICBwb3NpdGlvbj0iNDEuODk3NzU5LDMyLjY2MTg3IgogICAgICAgb3JpZW50YXRpb249IjAsLTEiCiAgICAgICBpZD0iZ3VpZGUxIgogICAgICAgaW5rc2NhcGU6bG9ja2VkPSJmYWxzZSIgLz4KICAgIDxzb2RpcG9kaTpndWlkZQogICAgICAgcG9zaXRpb249IjQxLjcxMzUxOSwyOC4zMDE0NSIKICAgICAgIG9yaWVudGF0aW9uPSIwLC0xIgogICAgICAgaWQ9Imd1aWRlMiIKICAgICAgIGlua3NjYXBlOmxvY2tlZD0iZmFsc2UiIC8+CiAgICA8aW5rc2NhcGU6cGFnZQogICAgICAgeD0iMCIKICAgICAgIHk9IjAiCiAgICAgICB3aWR0aD0iOTEuNzA3MDYyIgogICAgICAgaGVpZ2h0PSI0Ni4wODU1NiIKICAgICAgIGlkPSJwYWdlMiIKICAgICAgIG1hcmdpbj0iMCIKICAgICAgIGJsZWVkPSIwIiAvPgogIDwvc29kaXBvZGk6bmFtZWR2aWV3PgogIDxkZWZzCiAgICAgaWQ9ImRlZnMxIiAvPgogIDxnCiAgICAgaW5rc2NhcGU6Z3JvdXBtb2RlPSJsYXllciIKICAgICBpZD0ibGF5ZXI0IgogICAgIGlua3NjYXBlOmxhYmVsPSJvcHQwMyIKICAgICBzdHlsZT0iZGlzcGxheTppbmxpbmUiCiAgICAgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoLTExMS42OTk2NCwtMTIzLjg5ODkpIj4KICAgIDxwYXRoCiAgICAgICBpZD0idGV4dDEtOS05LTktNy03LTEtMyIKICAgICAgIHN0eWxlPSJmb250LXNpemU6MTkycHg7bGluZS1oZWlnaHQ6MTtmb250LWZhbWlseTpGbGV4aWJsZTstaW5rc2NhcGUtZm9udC1zcGVjaWZpY2F0aW9uOidGbGV4aWJsZSwgQEhHSFQ9MjAwLHdkdGg9NDk0Jztmb250LXZhcmlhdGlvbi1zZXR0aW5nczonSEdIVCcgMjAwLCAnd2R0aCcgNDk0O2xldHRlci1zcGFjaW5nOi0wLjExcHg7d29yZC1zcGFjaW5nOi0wLjMzcHg7d2hpdGUtc3BhY2U6cHJlO3NoYXBlLXBhZGRpbmc6MC45Mjg0NztkaXNwbGF5OmlubGluZTtmaWxsOiNmZmZmZmY7c3Ryb2tlOiMwMDAwMDA7c3Ryb2tlLXdpZHRoOjAiCiAgICAgICBkPSJtIDExMS42OTk2NCwxMjMuODk4OSB2IDQ1LjI0NTMgaCAxMi40MTAxIHYgLTE1LjI1Mzg1IGggMTAuMzQyIHYgLTEyLjIxNjMxIGggLTEwLjM0MiB2IC00LjQ2MDE5IGggMTEuMzc2MDUgViAxMjMuODk4OSBaIG0gMjYuOTQ3MTksMCB2IDEzLjM2MjQ5IGggMTIuNDc1MjEgViAxMjMuODk4OSBaIG0gMTYuODcwMjksMCB2IDEzLjM2MjQ5IGggMTIuNDc0NjkgViAxMjMuODk4OSBaIG0gMTUuNjM2MjYsMCB2IDQ1LjI0NTMgaCAxMi40MTAwOSB2IC04Ljg1NTI4IGMgMCwtMS44MDk4MiAtMC4xOTM3OCwtNS40MTcyMyAtMC4xOTM3OCwtNS40MTcyMyAwLjI1ODU0LDEuMjkyNzIgMC43NzUyOSwzLjE1NDk4IDEuMzU3MDIsNC41NzY5OCBsIDMuODEzNzIsOS42OTU1MyBoIDE0Ljg2NjI4IGwgLTEwLjQwNjA5LC0yMi42ODY5OSB2IC0wLjA2NDYgbCA5Ljg4OTMyLC0yMi40OTM3MSBoIC0xNC42MDc4OSBsIC0zLjY4NDUzLDEwLjM0MiBjIC0wLjQ0OTIzLDEuNzA2NTIgLTEuMDMzOTIsMy4yODQ0NiAtMS4yMjc4Myw0LjI1NCAwLDAgMC4xOTM3OCwtNC4yNTQxMyAwLjE5Mzc4LC01LjY3NjEzIHYgLTguOTE5ODcgeiBtIC0zMi41MDY1NSwxNy43MjI5NSB2IDEwLjEzNTMgYyAwLDUuODgxOTEgNC4yZS00LDE4LjE2MjY3IDE0LjA5MTEzLDE4LjIyNzMxIGggMS4xNjMyNCBjIDE0LjAyNjA4LC0wLjA2NDYgMTQuMDkwNjEsLTEyLjM0NTQgMTQuMDkwNjEsLTE4LjIyNzMxIHYgLTEwLjEzNTMgaCAtMTIuNDc0NjkgdiA4LjU4Mzk3IGMgMCw0LjcxODQ1IC0wLjMyMzM5LDYuMzk5MDYgLTIuMTMzMiw2LjQ2MzY5IGggLTAuMTI5MTkgYyAtMS44MDk4MSwtMC4wNjQ2IC0yLjEzMjY5LC0xLjc0NTI0IC0yLjEzMjY5LC02LjQ2MzY5IHYgLTguNTgzOTcgeiIKICAgICAgIHNvZGlwb2RpOm5vZGV0eXBlcz0iY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2Njc2NjY2NjY2NjY2NzY2Njc2Njc2Njc2Njc2NjIiAvPgogIDwvZz4KPC9zdmc+Cg=="></a>
                 <a href="./index.html" class="logo-home-link"><span class="logo-text">Framework for Unified Kreation</span></a>
             </div>
             <nav class="main-nav">
@@ -22,13 +20,13 @@
             </nav>
             <nav class="social-links">
                 <a href="https://github.com/CastleGreyscale/FUK" target="_blank" rel="noopener" aria-label="GitHub">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"></path></svg>
                 </a>
                 <a href="https://bradwalter.substack.com/" target="_blank" rel="noopener" aria-label="Substack">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M22.539 8.242H1.46V5.406h21.08v2.836zM1.46 10.812V24L12 18.11 22.54 24V10.812H1.46zM22.54 0H1.46v2.836h21.08V0z"/></svg>
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M22.539 8.242H1.46V5.406h21.08v2.836zM1.46 10.812V24L12 18.11 22.54 24V10.812H1.46zM22.54 0H1.46v2.836h21.08V0z"></path></svg>
                 </a>
                 <a href="https://vimeo.com/user/1771911/folder/27993210" target="_blank" rel="noopener" aria-label="Vimeo">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M23.977 6.416c-.105 2.338-1.739 5.543-4.894 9.609-3.268 4.247-6.026 6.37-8.29 6.37-1.409 0-2.578-1.294-3.553-3.881L5.322 11.4C4.603 8.816 3.834 7.522 3.01 7.522c-.179 0-.806.378-1.881 1.132L0 7.197a315.065 315.065 0 003.501-3.128C5.08 2.701 6.266 1.984 7.055 1.91c1.867-.18 3.016 1.1 3.447 3.838.465 2.953.789 4.789.971 5.507.539 2.45 1.131 3.674 1.776 3.674.502 0 1.256-.796 2.265-2.385 1.004-1.589 1.54-2.797 1.612-3.628.144-1.371-.395-2.061-1.614-2.061-.574 0-1.167.121-1.777.391 1.186-3.868 3.434-5.757 6.762-5.637 2.473.06 3.628 1.664 3.493 4.797l-.013.01z"/></svg>
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M23.977 6.416c-.105 2.338-1.739 5.543-4.894 9.609-3.268 4.247-6.026 6.37-8.29 6.37-1.409 0-2.578-1.294-3.553-3.881L5.322 11.4C4.603 8.816 3.834 7.522 3.01 7.522c-.179 0-.806.378-1.881 1.132L0 7.197a315.065 315.065 0 003.501-3.128C5.08 2.701 6.266 1.984 7.055 1.91c1.867-.18 3.016 1.1 3.447 3.838.465 2.953.789 4.789.971 5.507.539 2.45 1.131 3.674 1.776 3.674.502 0 1.256-.796 2.265-2.385 1.004-1.589 1.54-2.797 1.612-3.628.144-1.371-.395-2.061-1.614-2.061-.574 0-1.167.121-1.777.391 1.186-3.868 3.434-5.757 6.762-5.637 2.473.06 3.628 1.664 3.493 4.797l-.013.01z"></path></svg>
                 </a>
                 <a href="mailto:hello@fuk-ai.io" aria-label="Email">
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>
@@ -42,7 +40,7 @@
 
         <!-- Mobile sidebar toggle -->
         <button class="sidebar-toggle" aria-label="Toggle navigation">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
             Contents
         </button>
 
@@ -51,12 +49,12 @@
             <nav class="sidebar-nav">
 
                 <div class="sidebar-group">
-                    <button class="sidebar-category" aria-expanded="true">
+                    <button class="sidebar-category" aria-expanded="false">
                         Getting Started
-                        <svg class="sidebar-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                        <svg class="sidebar-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>
                     </button>
-                    <div class="sidebar-links">
-                        <a href="#overview" class="sidebar-link">Overview</a>
+                    <div class="sidebar-links" hidden="">
+                        <a href="#overview" class="sidebar-link active">Overview</a>
                         <a href="#installation" class="sidebar-link">Installation</a>
                         <a href="#system-requirements" class="sidebar-link">System Requirements</a>
                     </div>
@@ -65,16 +63,16 @@
                 <div class="sidebar-group">
                     <button class="sidebar-category" aria-expanded="false">
                         Capabilities
-                        <svg class="sidebar-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                        <svg class="sidebar-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>
                     </button>
-                    <div class="sidebar-links" hidden>
+                    <div class="sidebar-links" hidden="">
                         <a href="#image-generation" class="sidebar-link">Image Generation</a>
                         <a href="#video-generation" class="sidebar-link">Video Generation</a>
                         <a href="#preprocessors" class="sidebar-link">Preprocessors</a>
                         <a href="#regional-conditioning" class="sidebar-link">Regional Conditioning</a>
                         <a href="#upscaling" class="sidebar-link">Upscaling</a>
                         <a href="#interpolation" class="sidebar-link">Frame Interpolation</a>
-                        <a href="#aovs" class="sidebar-link">AOVs & Passes</a>
+                        <a href="#aovs" class="sidebar-link">AOVs &amp; Passes</a>
                         <a href="#exr-export" class="sidebar-link">EXR Export</a>
                         <a href="#lora-dataset-builder" class="sidebar-link">LoRA Dataset Builder</a>
                     </div>
@@ -83,9 +81,9 @@
                 <div class="sidebar-group">
                     <button class="sidebar-category" aria-expanded="false">
                         UI
-                        <svg class="sidebar-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                        <svg class="sidebar-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>
                     </button>
-                    <div class="sidebar-links" hidden>
+                    <div class="sidebar-links" hidden="">
                         <a href="#app-layout" class="sidebar-link">App Layout</a>
                         <a href="#project-bar" class="sidebar-link">Project Bar</a>
                         <a href="#storyboard-tab" class="sidebar-link">Storyboard Tab</a>
@@ -107,9 +105,9 @@
                 <div class="sidebar-group">
                     <button class="sidebar-category" aria-expanded="false">
                         Config
-                        <svg class="sidebar-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                        <svg class="sidebar-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>
                     </button>
-                    <div class="sidebar-links" hidden>
+                    <div class="sidebar-links" hidden="">
                         <a href="#config-overview" class="sidebar-link">Overview</a>
                         <a href="#config-defaults" class="sidebar-link">defaults.json</a>
                         <a href="#config-models" class="sidebar-link">models.json</a>
@@ -123,21 +121,22 @@
                 <div class="sidebar-group">
                     <button class="sidebar-category" aria-expanded="false">
                         Reference
-                        <svg class="sidebar-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                        <svg class="sidebar-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>
                     </button>
-                    <div class="sidebar-links" hidden>
+                    <div class="sidebar-links" hidden="">
                         <a href="#shortcuts" class="sidebar-link">Keyboard Shortcuts</a>
                         <a href="#file-locations" class="sidebar-link">File Locations</a>
-                        <a href="#metadata" class="sidebar-link">Metadata & Repeatability</a>
+                        <a href="#cache-folder" class="sidebar-link">Cache Folder</a>
+                        <a href="#metadata" class="sidebar-link">Metadata &amp; Repeatability</a>
                     </div>
                 </div>
 
                 <div class="sidebar-group">
                     <button class="sidebar-category" aria-expanded="false">
                         Plugins
-                        <svg class="sidebar-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                        <svg class="sidebar-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>
                     </button>
-                    <div class="sidebar-links" hidden>
+                    <div class="sidebar-links" hidden="">
                         <a href="#plugins" class="sidebar-link">Overview</a>
                         <a href="#blender-plugin" class="sidebar-link">Blender Bridge</a>
                     </div>
@@ -175,6 +174,9 @@
             <!-- Installation -->
             <div class="wiki-section" id="installation">
                 <h2>Installation</h2>
+                <div class="wiki-video" data-vimeo="" data-title="Installation">
+                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
+                </div>
 
                 <h3>Prerequisites</h3>
                 <ul>
@@ -188,7 +190,7 @@
                 <ol>
                     <li>Clone the repository:<br><code>git clone https://github.com/CastleGreyscale/FUK</code></li>
                     <li>Install dependencies:<br><code>pip install -e .</code></li>
-                    <li>Run setup:<br><code>chmod +x setup.sh && ./setup.sh</code></li>
+                    <li>Run setup:<br><code>chmod +x setup.sh &amp;&amp; ./setup.sh</code></li>
                     <li>Configure models — edit <code>config/models.json</code> to select which models to use, remove entries for any you don't want</li>
                     <li>Set model root — edit <code>config/defaults.json</code> and set the model root directory to wherever your models live</li>
                     <li>Download models:<br><code>./download_models.sh</code></li>
@@ -206,7 +208,6 @@
             <!-- System Requirements -->
             <div class="wiki-section" id="system-requirements">
                 <h2>System Requirements</h2>
-
                 <h3>Tested Configuration</h3>
                 <table class="wiki-table">
                     <thead>
@@ -246,6 +247,9 @@
             <!-- Image Generation -->
             <div class="wiki-section" id="image-generation">
                 <h2>Image Generation</h2>
+                <div class="wiki-video" data-vimeo="" data-title="Image Generation">
+                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
+                </div>
                 <p>FUK's image generation pipeline supports Qwen Image models with full control over generation parameters. Outputs are organized by project / shot / version hierarchy and accompanied by full metadata sidecar files. Every generation is reproducible from its sidecar alone.</p>
 
                 <h3>Supported Models</h3>
@@ -297,7 +301,7 @@
                 <p>The result is grittier surfaces, more visible micro-detail, and slightly less of the "diffusion smoothness" sheen. Composition becomes more conservative (the model has less room to wander globally), which makes this knob pair naturally with reference images and ControlNet conditioning where you didn't want global drift anyway.</p>
                 <p>The slider is clamped to <strong>0.85–1.00</strong>; values below 0.85 strip too much of the composition phase and produce broken output. Try 0.85–0.90 for noticeable grit, 0.95 for a subtle bump.</p>
 
-                <h3>Image Input & ControlNet</h3>
+                <h3>Image Input &amp; ControlNet</h3>
                 <p>Edit and context models accept one or more reference images as conditioning input. Load a reference image via the <a href="#media-input">Media Input</a> component, select a preprocessor to extract a conditioning signal, and set the edit strength. See <a href="#preprocessors">Preprocessors</a> for available preprocessing modes.</p>
 
                 <h3>Batch Generation</h3>
@@ -307,6 +311,9 @@
             <!-- Video Generation -->
             <div class="wiki-section" id="video-generation">
                 <h2>Video Generation</h2>
+                <div class="wiki-video" data-vimeo="" data-title="Video Generation">
+                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
+                </div>
                 <p>FUK supports video generation from text prompts and image inputs using Wan pipelines. Output is organized under the same project / shot / version hierarchy as images. Generated video can be passed directly to <a href="#interpolation">Frame Interpolation</a> to increase frame rate before delivery.</p>
 
                 <h3>Supported Pipelines</h3>
@@ -350,6 +357,7 @@
             <!-- Preprocessors -->
             <div class="wiki-section" id="preprocessors">
                 <h2>Preprocessors</h2>
+                <div class="wiki-video" data-vimeo="https://framerate.tv/watch/8446d7f7-5deb-496c-be3d-676cee1f7d8f" data-title="Preprocessors"><iframe src="https://framerate.tv/watch/8446d7f7-5deb-496c-be3d-676cee1f7d8f" title="Preprocessors" loading="lazy" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen=""></iframe></div>
                 <p>Preprocessors convert input images into conditioning signals that guide generation — giving precise control over pose, depth, structure, and edges in the output without fighting the model through prompt engineering alone. Preprocessing is done in the <a href="#preprocess-panel">Preprocess Panel</a>; the output is then used as a ControlNet conditioning input in the Image Panel.</p>
 
                 <h3>Canny Edge Detection</h3>
@@ -404,6 +412,9 @@
             <!-- Regional Conditioning -->
             <div class="wiki-section" id="regional-conditioning">
                 <h2>Regional Conditioning (EliGen)</h2>
+                <div class="wiki-video" data-vimeo="" data-title="Regional Conditioning (EliGen)">
+                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
+                </div>
                 <p>EliGen integration brings regional conditioning directly into the generation pipeline. Define compositional zones within the frame and assign independent parameters to each — separate prompts, weights, and conditioning per region. This gives you direct spatial control over composition without relying entirely on prompt engineering.</p>
 
                 <h3>How It Works</h3>
@@ -435,6 +446,9 @@
             <!-- Upscaling -->
             <div class="wiki-section" id="upscaling">
                 <h2>Upscaling</h2>
+                <div class="wiki-video" data-vimeo="" data-title="Upscaling">
+                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
+                </div>
                 <p>FUK integrates Real-ESRGAN for post-generation upscaling. Apply to single images or to video frame sequences. Upscaling runs as a separate pass in the <a href="#postprocess-panel">Postprocess Panel</a> — it does not require re-running the full generation pipeline, and the original output is always preserved.</p>
 
                 <h3>Available Models</h3>
@@ -465,6 +479,9 @@
             <!-- Frame Interpolation -->
             <div class="wiki-section" id="interpolation">
                 <h2>Frame Interpolation</h2>
+                <div class="wiki-video" data-vimeo="" data-title="Frame Interpolation">
+                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
+                </div>
                 <p>FILM (Frame Interpolation for Large Motion) synthesizes intermediate frames to increase the effective frame rate of generated video. Useful for smoothing motion, converting a 12fps generation to a 24fps deliverable, or creating slow-motion sequences from standard-rate output. Interpolation runs in the <a href="#postprocess-panel">Postprocess Panel</a>.</p>
 
                 <h3>How FILM Works</h3>
@@ -493,7 +510,10 @@
 
             <!-- AOVs -->
             <div class="wiki-section" id="aovs">
-                <h2>AOVs & Passes</h2>
+                <h2>AOVs &amp; Passes</h2>
+                <div class="wiki-video" data-vimeo="" data-title="AOVs &amp; Passes">
+                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
+                </div>
                 <p>FUK generates Arbitrary Output Variables (AOVs) alongside the beauty render via the <a href="#layers-panel">Layers Panel</a>. These technical passes enable compositing, grading, and integration with professional DCC tools downstream.</p>
 
                 <div class="wiki-warning">
@@ -527,6 +547,9 @@
             <!-- EXR Export -->
             <div class="wiki-section" id="exr-export">
                 <h2>EXR Export</h2>
+                <div class="wiki-video" data-vimeo="" data-title="EXR Export">
+                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
+                </div>
                 <p>FUK exports multi-layer EXR files containing all available AOV passes in a single file via the <a href="#export-panel">Export Panel</a>. EXR is the standard interchange format in professional VFX and compositing pipelines — it preserves full floating-point precision and carries all passes in one file.</p>
 
                 <h3>Layer Structure</h3>
@@ -565,6 +588,9 @@
             <!-- LoRA Dataset Builder -->
             <div class="wiki-section" id="lora-dataset-builder">
                 <h2>LoRA Dataset Builder</h2>
+                <div class="wiki-video" data-vimeo="" data-title="LoRA Dataset Builder">
+                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
+                </div>
                 <p>The LoRA Dataset Builder generates training datasets for custom LoRA models using FUK's own generation pipeline. Rather than sourcing and curating images manually, it generates a structured set of variations from a subject description — covering pose, lighting, and context diversity needed for effective LoRA training. The tool lives in the Utilities tab.</p>
 
                 <h3>Workflow</h3>
@@ -613,6 +639,7 @@
             <!-- App Layout -->
             <div class="wiki-section" id="app-layout">
                 <h2>App Layout</h2>
+                <div class="wiki-video" data-vimeo="https://framerate.tv/watch/c0fb8a22-9288-418e-995a-791d95e8dd19" data-title="App Layout"><iframe src="https://framerate.tv/watch/c0fb8a22-9288-418e-995a-791d95e8dd19" title="App Layout" loading="lazy" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen=""></iframe></div>
                 <p>The FUK interface is a single-page application organized around a tab bar at the top, a project bar below it, and a collapsible generation history panel on the right. Each tab corresponds to a stage in the pipeline — from generation through post-processing and export.</p>
 
                 <h3>Tab Overview</h3>
@@ -651,6 +678,7 @@
             <!-- Project Bar -->
             <div class="wiki-section" id="project-bar">
                 <h2>Project Bar</h2>
+                <div class="wiki-video" data-vimeo="https://framerate.tv/watch/603df77b-ec3c-4504-830a-ebd344c6a2c5" data-title="Project Bar"><iframe src="https://framerate.tv/watch/603df77b-ec3c-4504-830a-ebd344c6a2c5" title="Project Bar" loading="lazy" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen=""></iframe></div>
                 <p>The Project Bar sits below the tab bar and persists across all tabs. It manages the three-level hierarchy — project / shot / version — that all FUK outputs are organized under. Every save operation writes to the currently selected project, shot, and version.</p>
 
                 <h3>Hierarchy</h3>
@@ -683,6 +711,7 @@
             <!-- Storyboard Tab -->
             <div class="wiki-section" id="storyboard-tab">
                 <h2>Storyboard Tab</h2>
+                <div class="wiki-video" data-vimeo="https://framerate.tv/watch/aedf75ed-e3ea-49ee-a510-fc16e1817edc" data-title="Storyboard Tab"><iframe src="https://framerate.tv/watch/aedf75ed-e3ea-49ee-a510-fc16e1817edc" title="Storyboard Tab" loading="lazy" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen=""></iframe></div>
                 <p>The Storyboard tab is FUK's project-level pre-production surface. It sits <em>above</em> the per-shot files rather than replacing them: each panel corresponds to one shot, the imagery and action drafts authored here get pushed into that shot's <a href="#image-panel">Image</a> or <a href="#video-panel">Video</a> tab, and the per-shot JSON remains the source of truth for generation settings, history, and pinned versions.</p>
                 <p>Everything on this tab autosaves on a short debounce — there are no Save buttons. The manifest lives next to your shot files as <code>{projectname}_storyboard.json</code>.</p>
 
@@ -754,6 +783,9 @@
             <!-- Media Input -->
             <div class="wiki-section" id="media-input">
                 <h2>Media Input</h2>
+                <div class="wiki-video" data-vimeo="" data-title="Media Input">
+                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
+                </div>
                 <p>The Media Input component (MediaUploader) is the standard file input throughout FUK. It appears in every tab that accepts an image, video, or sequence as input. All instances share the same behavior and supported formats.</p>
 
                 <h3>Input Methods</h3>
@@ -783,6 +815,9 @@
             <!-- Seed Control -->
             <div class="wiki-section" id="seed-control">
                 <h2>Seed Control</h2>
+                <div class="wiki-video" data-vimeo="" data-title="Seed Control">
+                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
+                </div>
                 <p>The Seed Control component appears in the Image and Video tabs. It manages the randomness seed used during generation — the single most important parameter for reproducibility.</p>
 
                 <h3>Modes</h3>
@@ -812,6 +847,9 @@
             <!-- Image Panel -->
             <div class="wiki-section" id="image-panel">
                 <h2>Image Panel</h2>
+                <div class="wiki-video" data-vimeo="" data-title="Image Panel">
+                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
+                </div>
                 <p>The Image tab is the primary generation interface. Its layout is divided into a preview area on the left and a column of parameter cards on the right.</p>
 
                 <h3>Preview Area</h3>
@@ -826,7 +864,7 @@
                     <li><strong>Entity Masks</strong> (EliGen models) — path to a <code>.psd</code> or <code>.ora</code> file containing per-zone masks; each layer becomes an independent conditioning zone</li>
                 </ul>
 
-                <h3>Model & Style Card</h3>
+                <h3>Model &amp; Style Card</h3>
                 <ul>
                     <li><strong>Model dropdown</strong> — selects the active image model; the available list is populated from <code>config/models.json</code>; settings are persisted per-model so switching models doesn't lose your configuration for either</li>
                     <li><strong>LoRA section</strong> — add multiple LoRAs via the add button; each LoRA has its own dropdown (selects from <code>models/loras/</code>), multiplier (0.0–2.0), bypass toggle, and remove button; bypass lets you quickly A/B a LoRA without removing it from the list</li>
@@ -858,6 +896,9 @@
             <!-- Video Panel -->
             <div class="wiki-section" id="video-panel">
                 <h2>Video Panel</h2>
+                <div class="wiki-video" data-vimeo="" data-title="Video Panel">
+                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
+                </div>
                 <p>The Video tab drives Wan I2V and Fun Control video generation. Its layout mirrors the Image tab — preview on the left, parameter cards on the right.</p>
 
                 <h3>Preview Area</h3>
@@ -885,7 +926,7 @@
                     <li><strong>Scale Factor</strong> — 100%, 75%, 50%, or 25%; output resolution is calculated from the source dimensions × scale factor, rounded to the nearest 64px</li>
                 </ul>
 
-                <h3>Model & Settings Card</h3>
+                <h3>Model &amp; Settings Card</h3>
                 <ul>
                     <li><strong>Task dropdown</strong> — selects the video pipeline (I2V-A14B, Fun Control, etc.)</li>
                     <li><strong>LoRA</strong> — single LoRA with multiplier and bypass toggle (video generation supports one LoRA at a time)</li>
@@ -898,6 +939,9 @@
             <!-- Preprocess Panel -->
             <div class="wiki-section" id="preprocess-panel">
                 <h2>Preprocess Panel</h2>
+                <div class="wiki-video" data-vimeo="" data-title="Preprocess Panel">
+                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
+                </div>
                 <p>The Preprocess tab converts input images or videos into conditioning maps — depth, pose skeleton, or edge maps — for use as ControlNet inputs in the Image tab. Preprocessing is a separate step from generation so you can reuse a conditioning map across many generations without recomputing it.</p>
 
                 <h3>Layout</h3>
@@ -916,6 +960,9 @@
             <!-- Postprocess Panel -->
             <div class="wiki-section" id="postprocess-panel">
                 <h2>Postprocess Panel</h2>
+                <div class="wiki-video" data-vimeo="" data-title="Postprocess Panel">
+                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
+                </div>
                 <p>The Postprocess tab handles upscaling and frame interpolation. Both operations accept the same input types (image, video, or sequence) and save their output as a new versioned result alongside the original.</p>
 
                 <h3>Upscale Tab</h3>
@@ -940,6 +987,9 @@
             <!-- Layers Panel -->
             <div class="wiki-section" id="layers-panel">
                 <h2>Layers Panel</h2>
+                <div class="wiki-video" data-vimeo="" data-title="Layers Panel">
+                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
+                </div>
                 <p>The Layers tab generates AOV passes — depth maps, surface normals, and Cryptomatte segmentation — from an existing image or video. This is a post-generation step: you bring your finished beauty output here and extract the technical passes needed for compositing.</p>
 
                 <h3>Input</h3>
@@ -982,6 +1032,9 @@
             <!-- Export Panel -->
             <div class="wiki-section" id="export-panel">
                 <h2>Export Panel</h2>
+                <div class="wiki-video" data-vimeo="" data-title="Export Panel">
+                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
+                </div>
                 <p>The Export tab assembles beauty and AOV pass images into multi-layer EXR files ready for professional compositing pipelines. Each pass is loaded independently — you can mix outputs from different generation runs if needed.</p>
 
                 <h3>Layer Inputs Card</h3>
@@ -1022,6 +1075,7 @@
             <!-- Spec Tool -->
             <div class="wiki-section" id="spec-tool">
                 <h2>Spec Tool</h2>
+                <div class="wiki-video" data-vimeo="https://framerate.tv/watch/20041a8d-4359-4577-b4fc-ceb44417a8e1" data-title="Spec Tool"><iframe src="https://framerate.tv/watch/20041a8d-4359-4577-b4fc-ceb44417a8e1" title="Spec Tool" loading="lazy" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen=""></iframe></div>
                 <p>The Spec Tool lives in the Utilities tab. AI generation spec dimensions have non-obvious constraints — models are trained on specific aspect ratios and resolution buckets, and going outside those ranges degrades output quality. The Spec Tool provides a guided way to create valid generation specs and downloadable composition guide templates.</p>
 
                 <h3>Spec Configuration</h3>
@@ -1056,6 +1110,9 @@
             <!-- Prompt Panel -->
             <div class="wiki-section" id="prompt-panel">
                 <h2>Prompt Panel</h2>
+                <div class="wiki-video" data-vimeo="" data-title="Prompt Panel">
+                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
+                </div>
                 <p>The Prompt Panel is the floating control in every Image and Video tab where you author the positive and negative prompt. It is more than a textarea: it unifies your saved <strong>prompt tags</strong>, the <strong>trigger words of installed LoRAs</strong>, and <strong>caption analyses</strong> exported from the LoRA builder into a single shorthand vocabulary. From that vocabulary you have three ways to build a prompt — fast inline shorthand, structured slot picks, or an LLM refinement — and they all share the same source of truth.</p>
 
                 <h3>The Three Modes</h3>
@@ -1119,6 +1176,7 @@
             <!-- Describe & Tag -->
             <div class="wiki-section" id="describe-tag">
                 <h2>Describe &amp; Tag</h2>
+                <div class="wiki-video" data-vimeo="https://framerate.tv/watch/3eaab30c-572a-486f-9c34-d8855098ae43" data-title="Describe &amp; Tag"><iframe src="https://framerate.tv/watch/3eaab30c-572a-486f-9c34-d8855098ae43" title="Describe &amp; Tag" loading="lazy" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen=""></iframe></div>
                 <p>The Describe &amp; Tag tool lives in the Utilities tab. It is the first slice of FUK's LLM integration: a vision-language model (Ollama-hosted) writes a cinematographer-style description of any image or short video clip, and lets you save fragments of that description as named prompt-shorthand tags for reuse later in the pipeline.</p>
 
                 <h3>Requirements</h3>
@@ -1204,6 +1262,7 @@
             <!-- Generation History -->
             <div class="wiki-section" id="generation-history">
                 <h2>Generation History</h2>
+                <div class="wiki-video" data-vimeo="https://framerate.tv/watch/e59949c7-ce5e-422a-ad08-6c1c0a517742" data-title="Generation History"><iframe src="https://framerate.tv/watch/e59949c7-ce5e-422a-ad08-6c1c0a517742" title="Generation History" loading="lazy" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen=""></iframe></div>
                 <p>The Generation History is a collapsible side panel available from any tab. It shows all previous generation outputs for the current session and provides drag-and-drop access to any result — the primary way to chain pipeline steps without manual file picking.</p>
 
                 <h3>Panel Contents</h3>
@@ -1214,6 +1273,7 @@
                 </ul>
 
                 <h3>Drag and Drop</h3>
+                <div class="wiki-video" data-vimeo="https://framerate.tv/watch/2b2f952d-11a6-47ab-b656-e60f8bba92f4" data-title="Drag and Drop"><iframe src="https://framerate.tv/watch/2b2f952d-11a6-47ab-b656-e60f8bba92f4" title="Drag and Drop" loading="lazy" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen=""></iframe></div>
                 <p>Any history item can be dragged onto:</p>
                 <ul>
                     <li>A tab's <strong>preview area</strong> — reloads all metadata from that result into the active tab's parameter cards, including model, prompt, seed, LoRA settings, and dimensions</li>
@@ -1228,6 +1288,7 @@
             <!-- Config Overview -->
             <div class="wiki-section" id="config-overview">
                 <h2>Config Overview</h2>
+                <div class="wiki-video" data-vimeo="https://framerate.tv/watch/f3bb1f95-449e-4d5d-90d6-9b30ea27c2df" data-title="Config Overview"><iframe src="https://framerate.tv/watch/f3bb1f95-449e-4d5d-90d6-9b30ea27c2df" title="Config Overview" loading="lazy" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen=""></iframe></div>
                 <p>All FUK configuration lives in <code>fuk/config/</code> as plain JSON files. There are no environment variables, no hidden settings, and no GUI-only config — everything that affects generation behaviour is readable and editable in these files. Changes take effect on the next launch unless noted otherwise.</p>
 
                 <h3>File Map</h3>
@@ -1242,8 +1303,6 @@
                         <tr><td><code>defaults_loras.json</code></td><td>LoRA adapter registry — paths, target models, trigger words</td><td>When adding new LoRAs</td></tr>
                         <tr><td><code>defaults_dataset.json</code></td><td>LoRA Dataset Builder — angle, lighting, and variation templates</td><td>When customising dataset generation</td></tr>
                         <tr><td><code>defaults_spec_tool.json</code></td><td>Spec Tool defaults — aspect ratios, guide overlays, burn-in settings</td><td>Rarely; UI persists changes automatically</td></tr>
-                        <tr><td><code>tools/musubi-qwen.json</code></td><td>Image pipeline runner — CLI flags, VRAM profiles, arg mapping for musubi-tuner</td><td>Advanced: when tuning pipeline execution</td></tr>
-                        <tr><td><code>tools/musubi-wan.json</code></td><td>Video pipeline runner — same as above for Wan video generation</td><td>Advanced</td></tr>
                         <tr><td><code>tools/depth-anything-v3.json</code></td><td>DA3 depth estimation — model variants and inference settings</td><td>Rarely</td></tr>
                         <tr><td><code>tools/sam2.json</code></td><td>SAM2 segmentation — model variants and auto-mask thresholds</td><td>Rarely</td></tr>
                     </tbody>
@@ -1409,6 +1468,9 @@
             <!-- defaults_vram.json -->
             <div class="wiki-section" id="config-vram">
                 <h2>defaults_vram.json</h2>
+                <div class="wiki-video" data-vimeo="" data-title="defaults_vram.json">
+                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
+                </div>
                 <p>Controls how FUK manages GPU memory. When a model is too large to fit entirely in VRAM, FUK offloads unused tensors to system RAM or disk. This file defines the available offload strategies and which one is active. Located at <code>fuk/config/defaults_vram.json</code>.</p>
 
                 <h3>Choosing a Preset</h3>
@@ -1442,6 +1504,9 @@
             <!-- defaults_loras.json -->
             <div class="wiki-section" id="config-loras">
                 <h2>defaults_loras.json</h2>
+                <div class="wiki-video" data-vimeo="" data-title="defaults_loras.json">
+                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
+                </div>
                 <p>The LoRA adapter registry. Defines which LoRA files are available in the Image and Video panel dropdowns. Located at <code>fuk/config/defaults_loras.json</code>.</p>
 
                 <h3>Discovery</h3>
@@ -1480,6 +1545,9 @@
             <!-- defaults_dataset.json -->
             <div class="wiki-section" id="config-dataset">
                 <h2>defaults_dataset.json</h2>
+                <div class="wiki-video" data-vimeo="" data-title="defaults_dataset.json">
+                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
+                </div>
                 <p>Configuration for the <a href="#lora-dataset-builder">LoRA Dataset Builder</a>. Defines the angle, lighting, and context variation templates used when generating training datasets. Located at <code>fuk/config/defaults_dataset.json</code>.</p>
                 <p>This is the file to edit when you want to add or change the variations the Dataset Builder generates — for example, adding a custom camera angle or a lighting setup specific to your subject matter.</p>
 
@@ -1536,51 +1604,10 @@
             <!-- Tool Configs -->
             <div class="wiki-section" id="config-tools">
                 <h2>Tool Configs</h2>
+                <div class="wiki-video" data-vimeo="" data-title="Tool Configs">
+                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
+                </div>
                 <p>Advanced configuration files in <code>fuk/config/tools/</code> that control how FUK invokes external pipeline runners. Most users won't need to edit these — they exist to let you tune pipeline execution if you're running non-standard hardware or adding a new model family.</p>
-
-                <h3>musubi-qwen.json</h3>
-                <p>Controls how FUK invokes the musubi-tuner Qwen image generation script (<code>qwen_image_generate_image.py</code>).</p>
-
-                <h4>performance</h4>
-                <table class="wiki-table">
-                    <thead><tr><th>Key</th><th>Default</th><th>Description</th></tr></thead>
-                    <tbody>
-                        <tr><td><code>fp8_scaled</code></td><td><code>true</code></td><td>Use 8-bit scaled precision — reduces VRAM usage with minimal quality impact</td></tr>
-                        <tr><td><code>vae_enable_tiling</code></td><td><code>true</code></td><td>Process the VAE in tiles rather than all at once — reduces peak VRAM at high resolutions</td></tr>
-                        <tr><td><code>blocks_to_swap_default</code></td><td><code>0</code></td><td>Number of transformer blocks to offload to CPU; increase if you get OOM on large images</td></tr>
-                    </tbody>
-                </table>
-
-                <h4>vram_profiles</h4>
-                <p>Automatic per-VRAM-tier configuration. Three profiles — 24GB, 16GB, 12GB — each set specific combinations of precision flags and block swapping. FUK selects the appropriate profile based on the detected GPU and the active <a href="#config-vram">VRAM preset</a>.</p>
-
-                <h4>arg_mapping</h4>
-                <p>Maps FUK's internal parameter names to the CLI argument names expected by musubi-tuner. Edit this if you're pointing FUK at a different version of the script that uses different argument names:</p>
-                <pre><code>"arg_mapping": {
-    "positive_prompt": "--prompt",
-    "guidance_scale": "--guidance_scale",
-    "lora_path": "--lora_weight"
-}</code></pre>
-
-                <h3>musubi-wan.json</h3>
-                <p>Controls Wan video generation (<code>wan_generate_video.py</code>). Same structure as musubi-qwen.json with video-specific additions.</p>
-
-                <h4>Video-specific performance flags</h4>
-                <table class="wiki-table">
-                    <thead><tr><th>Key</th><th>Default</th><th>Description</th></tr></thead>
-                    <tbody>
-                        <tr><td><code>vae_cache_cpu</code></td><td><code>true</code></td><td>Keep VAE decoder on CPU — frees VRAM for the diffusion model at the cost of decode speed</td></tr>
-                        <tr><td><code>cpu_noise</code></td><td><code>true</code></td><td>Generate initial noise on CPU — avoids GPU memory spike at the start of generation</td></tr>
-                        <tr><td><code>lazy_loading</code></td><td><code>true</code></td><td>Load model weights on demand rather than all at once at startup</td></tr>
-                        <tr><td><code>attn_mode</code></td><td><code>"torch"</code></td><td>Attention backend: <code>torch</code> (default), <code>flash</code> (faster if installed), <code>sdpa</code></td></tr>
-                    </tbody>
-                </table>
-
-                <h4>video_length_constraint</h4>
-                <p>Documents the 4n+1 frame count requirement for Wan models. The formula and a list of valid values are stored here so FUK can validate input and show helpful errors. Valid counts: 5, 9, 13, 17, 21, 25, 33, 41, 49, 57, 65, 81, 97.</p>
-
-                <h4>task_requirements</h4>
-                <p>Per-task definitions of required and optional inputs. For example, the <code>i2v</code> task requires <code>image_path</code>; the <code>flf2v</code> task requires both <code>image_path</code> and <code>end_image_path</code>. FUK uses this to show the correct input cards in the Video Panel and validate before submitting a generation job.</p>
 
                 <h3>depth-anything-v3.json</h3>
                 <p>Configuration for the Depth Anything V3 depth estimation model used in the Preprocess and Layers panels.</p>
@@ -1748,9 +1775,53 @@
                 </table>
             </div>
 
+            <!-- Cache Folder -->
+            <div class="wiki-section" id="cache-folder">
+                <h2>Cache Folder</h2>
+                <div class="wiki-video" data-vimeo="https://framerate.tv/watch/578e2899-29f8-40fa-8b0c-222e475b3503" data-title="Cache Folder"><iframe src="https://framerate.tv/watch/578e2899-29f8-40fa-8b0c-222e475b3503" title="Cache Folder" loading="lazy" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen=""></iframe></div>
+                <p>Everything you generate lands in <code>fuk/cache/</code> first. It's the local working store the app reads and writes during a session — and the <a href="#generation-history">Generation History</a> panel is simply a view of it: every history card is one folder on disk. The cache is git-ignored and fully regenerable, so it's safe to clear when reclaiming disk space (that just empties history for those shots).</p>
+
+                <h3>Layout</h3>
+                <p>The cache is organised by <strong>shot version</strong>, then by <strong>generation</strong>. Each generation gets its own numbered folder holding the output plus a <code>metadata.json</code> sidecar with the full parameters used.</p>
+                <pre><code>fuk/cache/                                  ← local working store (git-ignored)
+└── {project}_shot{shot}_{version}/         ← one folder per shot version
+    │                                         e.g. crazyAL_lookDev_shot01_260606/
+    ├── img_gen_001/                        ← a numbered generation, tagged by type
+    │   ├── generated.png                   ← the output (png / mp4 / exr)
+    │   ├── metadata.json                   ← full parameters — see Metadata &amp; Repeatability
+    │   └── latents/generated.latent.pt     ← saved latent, for refine / re-use
+    ├── img_gen_002/
+    ├── video_001/
+    │   └── generated.mp4
+    └── preprocess_001/
+        └── ...</code></pre>
+
+                <h3>Generation Types</h3>
+                <p>The prefix on each folder is the tool that produced it. This is how History groups images vs. video and how a result knows which panel to reopen in.</p>
+                <table class="wiki-table">
+                    <thead>
+                        <tr><th>Prefix</th><th>Produced by</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td><code>img_gen_</code></td><td>Image Panel generations</td></tr>
+                        <tr><td><code>img_edit_</code></td><td>Qwen-Edit / image edits</td></tr>
+                        <tr><td><code>video_</code> / <code>video_layers_</code></td><td>Video Panel generations</td></tr>
+                        <tr><td><code>preprocess_</code></td><td>Preprocess Panel (depth, pose, canny, …)</td></tr>
+                        <tr><td><code>layers_</code></td><td>Layers Panel (SAM2 mattes, cryptomatte)</td></tr>
+                        <tr><td><code>upscale_</code> / <code>interpolate_</code></td><td>Postprocess Panel</td></tr>
+                        <tr><td><code>export_exr_</code> / <code>export_exr_seq_</code></td><td>EXR export staging</td></tr>
+                        <tr><td><code>import_</code></td><td>Imported media — reference only, no copy (see note)</td></tr>
+                    </tbody>
+                </table>
+
+                <div class="wiki-note">
+                    <p>Imports don't duplicate your files — an <code>import_</code> folder holds only a <code>metadata.json</code> that points at the original media on disk. If you move or delete that source, the imported entry breaks. Everything else in the cache is self-contained.</p>
+                </div>
+            </div>
+
             <!-- Metadata -->
             <div class="wiki-section" id="metadata">
-                <h2>Metadata & Repeatability</h2>
+                <h2>Metadata &amp; Repeatability</h2>
                 <p>Every generation in FUK captures a complete record of the parameters used. This metadata is written to a <code>meta.json</code> sidecar file alongside the output and is accessible by dropping the output onto any tab's preview area. A generation is fully reproducible from its sidecar alone, on any machine with the same model files.</p>
 
                 <h3>Captured Metadata</h3>
@@ -1783,6 +1854,9 @@
             <!-- Plugins Overview -->
             <div class="wiki-section" id="plugins">
                 <h2>Plugins</h2>
+                <div class="wiki-video" data-vimeo="" data-title="Plugins">
+                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
+                </div>
                 <p>FUK exposes its generation pipeline over a local HTTP API, which makes it straightforward to drive from other applications. Plugins live under <code>fuk/plugins/</code> and act as clients to the running FUK server — they gather inputs in the host application, hand them to FUK, and bring the results back.</p>
                 <p>Because a plugin and the FUK server run on the same machine, inputs are exchanged by file path rather than upload, and the shot <code>.json</code> remains the single source of truth for settings.</p>
 
@@ -1795,6 +1869,9 @@
             <!-- Blender Bridge -->
             <div class="wiki-section" id="blender-plugin">
                 <h2>Blender Bridge</h2>
+                <div class="wiki-video" data-vimeo="" data-title="Blender Bridge">
+                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
+                </div>
                 <p>The Blender Bridge is a Blender add-on (<code>fuk/plugins/blender/</code>) that drives FUK from inside Blender. It renders your scene's structural control passes, sends them to FUK for control-guided generation, and returns the result to the viewport — for both stills and VACE-driven video. It targets Blender 4.2+ and is validated on 5.x.</p>
 
                 <div class="wiki-note">
@@ -1850,7 +1927,7 @@
 
     <!-- Footer -->
     <footer>
-        <p>&copy; 2026 FUK - Framework for Unified Kreation. Open source under MIT License.</p>
+        <p>© 2026 FUK - Framework for Unified Kreation. Open source under MIT License.</p>
         <p>Get FUKed. Render locally.</p>
     </footer>
 
@@ -1899,6 +1976,23 @@
                 if (window.innerWidth < 900) sidebar.classList.remove('open');
             });
         });
+
+        // Wiki section videos — paste a Vimeo ID (or full player URL) into a
+        // section's data-vimeo="" to activate; empty ones keep the placeholder.
+        document.querySelectorAll('.wiki-video').forEach(box => {
+            const v = (box.dataset.vimeo || '').trim();
+            if (!v) return;
+            const src = /^https?:\/\//.test(v) ? v : `https://player.vimeo.com/video/${v}`;
+            const iframe = document.createElement('iframe');
+            iframe.src = src;
+            iframe.title = box.dataset.title || 'FUK breakdown';
+            iframe.loading = 'lazy';
+            iframe.allow = 'autoplay; fullscreen; picture-in-picture';
+            iframe.setAttribute('allowfullscreen', '');
+            box.replaceChildren(iframe);
+        });
     </script>
-</body>
-</html>
+
+
+
+</body></html>

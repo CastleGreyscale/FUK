@@ -479,6 +479,21 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
 
       setFormData(prev => ({ ...prev, ...updates }));
 
+      // Restore control images from the copies saved alongside the gen. Prefer
+      // the stable in-project cache URLs; fall back to the raw control_image
+      // paths for older entries generated before the copies existed. This is
+      // applied in a follow-up tick because a model switch above recomputes the
+      // form from the new model's saved settings (and clears control images) —
+      // by the next tick that switch has settled, so the paths survive.
+      const ctrlPaths = meta.control_image_urls?.length
+        ? meta.control_image_urls
+        : (Array.isArray(meta.control_image) ? meta.control_image : []);
+      if (ctrlPaths.length) {
+        setTimeout(() => {
+          setFormData(prev => ({ ...prev, control_image_paths: ctrlPaths }));
+        }, 0);
+      }
+
       // Show the dropped gen's preview — droppedPreview takes priority over existing result
       const previewPath = gen.preview || gen.path;
       setDroppedPreview(previewPath ? buildImageUrl(previewPath) : null);

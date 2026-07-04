@@ -989,6 +989,9 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
         # Copy control inputs into the entry so it's self-contained (mirrors the
         # video flow). Without this the history entry only references the original
         # source path, which dangles once a temp upload is cleaned up or moved.
+        # The copied cache URLs are stored in metadata so a history drop can
+        # repopulate the control slots from stable, in-project files.
+        control_image_urls = []
         if control_images:
             import shutil
             control_dir = gen_dir / "control"
@@ -997,6 +1000,7 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
                 try:
                     dest = control_dir / f"control_{idx}{ctrl.suffix or '.png'}"
                     shutil.copy(ctrl, dest)
+                    control_image_urls.append(get_project_relative_url(dest))
                 except Exception as _e:
                     log.warning("ImageGen", f"Failed to copy control image {ctrl}: {_e}")
 
@@ -1158,6 +1162,7 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
             lora_multiplier=request.lora_multiplier,
             loras=request.loras or [],
             control_image=[str(p) for p in control_images] if control_images else None,
+            control_image_urls=control_image_urls or None,
             denoising_strength=request.denoising_strength,
             exponential_shift_mu=request.exponential_shift_mu,
             eligen_source=str(eligen_source_abs) if eligen_source_abs else None,
