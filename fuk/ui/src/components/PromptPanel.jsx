@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { compilePrompt, expandPrompt, fetchPromptTokens, PROMPT_TOKENS_CHANGED_EVENT } from '../utils/promptApi';
+import { resolvePromptPreview } from '../utils/storyboardApi';
 import MarkerTextarea from './MarkerTextarea';
 
 export default function PromptPanel({
@@ -33,6 +34,13 @@ export default function PromptPanel({
   // trailing "Style: …" sentence on Compile. Inline `#` autocomplete writes
   // markers directly to the textarea via MarkerTextarea.
   const [styleChips, setStyleChips] = useState([]);
+
+  // Live "Expanded" reference panel. While the prompt textarea is focused we
+  // resolve `#markers` (and the storyboard mood) via /api/prompt/resolve and
+  // show the result to the left — the same string the generator will actually
+  // see. It's deterministic and debounced, so it's cheap to run per keystroke.
+  const [promptFocused, setPromptFocused] = useState(false);
+  const [expandedPreview, setExpandedPreview] = useState(null);
 
   // Tokens drive both the autocomplete (passed down to MarkerTextarea) and
   // the slot picker / category groupings. One fetch shared across both.
@@ -70,6 +78,40 @@ export default function PromptPanel({
       window.removeEventListener('fuk-shortcut-focus-neg-prompt', focusNeg);
     };
   }, []);
+
+  // Track focus on the prompt textarea directly off the DOM node — the panel
+  // only shows while the user is actively typing. (MarkerTextarea forwards its
+  // ref to the underlying <textarea>, so promptRef.current is that element.)
+  useEffect(() => {
+    const el = promptRef.current;
+    if (!el) return;
+    const onFocus = () => setPromptFocused(true);
+    const onBlur = () => setPromptFocused(false);
+    el.addEventListener('focus', onFocus);
+    el.addEventListener('blur', onBlur);
+    return () => {
+      el.removeEventListener('focus', onFocus);
+      el.removeEventListener('blur', onBlur);
+    };
+  }, []);
+
+  // Debounced resolve while focused. Cancel in-flight results on unmount / dep
+  // change so a slow response can't clobber a newer edit.
+  useEffect(() => {
+    if (!promptFocused) return;
+    const text = prompt || '';
+    if (!text.trim()) {
+      setExpandedPreview(null);
+      return;
+    }
+    let cancelled = false;
+    const id = setTimeout(() => {
+      resolvePromptPreview({ text, model, activeLoras: activeLoraKeys })
+        .then(res => { if (!cancelled) setExpandedPreview(res); })
+        .catch(() => { if (!cancelled) setExpandedPreview(null); });
+    }, 250);
+    return () => { cancelled = true; clearTimeout(id); };
+  }, [prompt, promptFocused, model, activeLoraKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleCompile = async () => {
     if (compiling) return;
@@ -141,6 +183,12 @@ export default function PromptPanel({
   const canCompile = styleChips.length > 0;
   const canExpand = (prompt && prompt.trim().length > 0) || styleChips.length > 0;
 
+  // Only surface the reference panel when the resolved text actually differs
+  // from what's typed — i.e. there's a marker or mood expansion worth showing.
+  const expandedText = expandedPreview?.resolved?.trim() || '';
+  const showExpanded = promptFocused && expandedText.length > 0
+    && expandedText !== (prompt || '').trim();
+
   // Group tokens by category for the slot picker. The category list comes
   // from prompt_tag_categories.json so the user can edit / extend it from
   // disk; anything outside that list (including tokens with no category)
@@ -183,6 +231,15 @@ export default function PromptPanel({
 
   return (
     <div className="prompt-panel">
+      {showExpanded && (
+        <ExpandedPreview
+          text={expandedPreview.resolved}
+          segments={expandedPreview.segments}
+          expandedMarkers={expandedPreview.expanded_markers}
+          unknownMarkers={expandedPreview.unknown_markers}
+          moodApplied={expandedPreview.mood_applied}
+        />
+      )}
       <div className="prompt-panel-header">
         <span className="prompt-panel-title">Prompt</span>
         <div className="prompt-panel-header-actions">
@@ -271,6 +328,53 @@ export default function PromptPanel({
           tokens={tokens}
         />
       </div>
+    </div>
+  );
+}
+
+// Read-only "what this actually resolves to" panel, shown to the left of the
+// prompt while typing. Purely a reference — no interaction. Segments coming
+// from a `#marker` expansion (or the appended mood) get a highlight so it's
+// obvious where the expanded text lives; falls back to plain text pre-fetch.
+function ExpandedPreview({ text, segments, expandedMarkers, unknownMarkers, moodApplied }) {
+  const markerCount = expandedMarkers?.length || 0;
+  const unknown = unknownMarkers || [];
+  const segs = segments?.length ? segments : [{ text, kind: 'literal', marker: null }];
+  return (
+    <div className="prompt-expanded-preview" aria-hidden="true">
+      <div className="prompt-expanded-preview-header">
+        <span className="prompt-expanded-preview-title">Expanded</span>
+        <span className="prompt-expanded-preview-hint">
+          {markerCount > 0
+            ? `${markerCount} marker${markerCount === 1 ? '' : 's'} resolved`
+            : 'preview'}
+        </span>
+      </div>
+      <div className="prompt-expanded-preview-body">
+        {segs.map((s, i) => (
+          s.kind === 'literal'
+            ? <span key={i}>{s.text}</span>
+            : (
+              <span
+                key={i}
+                className={`prompt-expanded-seg prompt-expanded-seg--${s.kind}`}
+                title={s.marker || (s.kind === 'mood' ? 'storyboard mood' : undefined)}
+              >
+                {s.text}
+              </span>
+            )
+        ))}
+      </div>
+      {(moodApplied || unknown.length > 0) && (
+        <div className="prompt-expanded-preview-footer">
+          {moodApplied && <span className="prompt-expanded-preview-tag">+ mood</span>}
+          {unknown.length > 0 && (
+            <span className="prompt-expanded-preview-tag prompt-expanded-preview-tag--warn">
+              unknown: {unknown.join(', ')}
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }

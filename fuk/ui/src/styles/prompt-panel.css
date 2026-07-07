@@ -430,3 +430,108 @@
   background: rgba(255, 255, 255, 0.1);
   color: var(--color-text);
 }
+
+/* ============================================================================
+ * EXPANDED PREVIEW — read-only reference of the resolved prompt (#markers +
+ * storyboard mood), hung off the LEFT edge of the panel while typing.
+ * ========================================================================== */
+
+.prompt-expanded-preview {
+  position: absolute;
+  right: calc(100% + 0.6rem);   /* sit just left of the prompt panel */
+  bottom: 0;
+  width: 320px;
+  max-height: 60vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  background: rgba(10, 14, 22, 0.88);
+  backdrop-filter: blur(14px);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  z-index: 9;   /* one below the prompt panel */
+  animation: prompt-expanded-fade 120ms ease;
+}
+
+@keyframes prompt-expanded-fade {
+  from { opacity: 0; transform: translateX(6px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+.prompt-expanded-preview-header {
+  position: sticky;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid var(--color-border);
+  background: rgba(10, 14, 22, 0.94);
+}
+
+.prompt-expanded-preview-title {
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-primary-400);
+}
+
+.prompt-expanded-preview-hint {
+  font-size: 0.55rem;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.prompt-expanded-preview-body {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.72rem;
+  line-height: 1.6;
+  color: var(--color-text-muted);   /* literal author text sits back */
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Highlight the spans a `#marker` pulled in, so it's obvious where the
+ * expanded text lives. box-decoration-break keeps the pill intact when a
+ * span wraps across lines. */
+.prompt-expanded-seg {
+  border-radius: 3px;
+  padding: 0 0.12em;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+.prompt-expanded-seg--expanded {
+  background: rgba(120, 160, 220, 0.22);
+  color: var(--color-primary-400);
+}
+.prompt-expanded-seg--mood {
+  background: rgba(209, 150, 255, 0.16);
+  color: #d196ff;
+}
+
+.prompt-expanded-preview-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  padding: 0 0.75rem 0.5rem;
+}
+
+.prompt-expanded-preview-tag {
+  font-size: 0.55rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  background: rgba(120, 160, 220, 0.16);
+  color: var(--color-primary-400);
+}
+.prompt-expanded-preview-tag--warn {
+  background: rgba(216, 160, 90, 0.12);
+  color: var(--color-warning, #d8a05a);
+  text-transform: none;
+  letter-spacing: 0;
+}

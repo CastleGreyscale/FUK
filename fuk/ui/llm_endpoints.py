@@ -727,6 +727,64 @@ class ResolveRequest(BaseModel):
     apply_mood: Optional[bool] = True
 
 
+# ----------------------------------------------------------------------------
+# Segment helpers — /api/prompt/resolve returns the resolved string as a list
+# of labeled chunks ({text, kind, marker}) so the UI can highlight which spans
+# came from a `#marker` expansion vs. the author's literal text. joining the
+# segment texts always reproduces `resolved` exactly.
+# ----------------------------------------------------------------------------
+def _join_segments(segments: List[dict]) -> str:
+    return "".join(s["text"] for s in segments)
+
+
+def _strip_segment_edges(segments: List[dict]) -> List[dict]:
+    """Mirror str.strip() over a segment list: trim outer whitespace, dropping
+    segments that empty out, so the joined text and its labels stay aligned."""
+    while segments:
+        lstripped = segments[0]["text"].lstrip()
+        if lstripped:
+            segments[0] = {**segments[0], "text": lstripped}
+            break
+        segments.pop(0)
+    while segments:
+        rstripped = segments[-1]["text"].rstrip()
+        if rstripped:
+            segments[-1] = {**segments[-1], "text": rstripped}
+            break
+        segments.pop()
+    return segments
+
+
+def _truncate_segments(segments: List[dict], length: int) -> List[dict]:
+    """Keep only the first `length` characters of the joined segment text."""
+    out: List[dict] = []
+    total = 0
+    for s in segments:
+        t = s["text"]
+        if total + len(t) <= length:
+            out.append(s)
+            total += len(t)
+        else:
+            keep = length - total
+            if keep > 0:
+                out.append({**s, "text": t[:keep]})
+            break
+    return out
+
+
+def _merge_segments(segments: List[dict]) -> List[dict]:
+    """Coalesce adjacent segments sharing a kind + marker (and drop empties)."""
+    merged: List[dict] = []
+    for s in segments:
+        if not s["text"]:
+            continue
+        if merged and merged[-1]["kind"] == s["kind"] and merged[-1]["marker"] == s["marker"]:
+            merged[-1] = {**merged[-1], "text": merged[-1]["text"] + s["text"]}
+        else:
+            merged.append(dict(s))
+    return merged
+
+
 def _resolve_prompt(
     text: str,
     config_dir: Path,
@@ -747,46 +805,76 @@ def _resolve_prompt(
     unknown_markers: List[str] = []
     expanding: set = set()   # markers on the current expansion stack (cycle guard)
 
-    def _replace(match: re.Match) -> str:
-        marker = match.group(0)
-        if marker not in marker_to_expansion:
-            unknown_markers.append(marker)
-            return marker
-        if marker in expanding:
-            # Self-referential expansion (#a -> "#b", #b -> "#a"). Leave the
-            # marker raw rather than recurse forever.
-            return marker
-        expanded_markers.append(marker)
-        expanding.add(marker)
-        # Recurse so markers *inside* an expansion resolve too (#sarah ->
-        # "... wearing #redcoat"). re.sub scans its input only once, so we
-        # re-scan each expansion ourselves.
-        result = _MARKER_SCAN_RE.sub(_replace, marker_to_expansion[marker])
-        expanding.discard(marker)
-        return result
+    def _segment(src: str, origin: Optional[str]) -> List[dict]:
+        # Walk `src`, expanding #markers into labeled segments. `origin` is the
+        # marker whose expansion produced this text — None at the top level, so
+        # author text stays "literal" and everything a marker pulled in becomes
+        # "expanded" (carrying the marker name for the UI tooltip). Recurses so
+        # markers *inside* an expansion resolve too (#sarah -> "... #redcoat").
+        kind = "expanded" if origin else "literal"
+        out: List[dict] = []
+        pos = 0
+        for m in _MARKER_SCAN_RE.finditer(src):
+            if m.start() > pos:
+                out.append({"text": src[pos:m.start()], "kind": kind, "marker": origin})
+            marker = m.group(0)
+            if marker not in marker_to_expansion:
+                unknown_markers.append(marker)
+                out.append({"text": marker, "kind": kind, "marker": origin})
+            elif marker in expanding:
+                # Self-referential expansion (#a -> "#b", #b -> "#a"). Leave the
+                # marker raw rather than recurse forever.
+                out.append({"text": marker, "kind": kind, "marker": origin})
+            else:
+                expanded_markers.append(marker)
+                expanding.add(marker)
+                out.extend(_segment(marker_to_expansion[marker], marker))
+                expanding.discard(marker)
+            pos = m.end()
+        if pos < len(src):
+            out.append({"text": src[pos:], "kind": kind, "marker": origin})
+        return out
 
-    resolved = _MARKER_SCAN_RE.sub(_replace, text or "").strip()
+    segments = _strip_segment_edges(_segment(text or "", None))  # mirror .strip()
 
     _, mood = _storyboard_context()
     mood_applied = ""
     if apply_mood and mood:
-        mood_sentence = f"{_MOOD_LABEL}: {mood.rstrip('.')}."
+        body = _join_segments(segments)
         # Self-heal: strip any previously auto-appended "Mood: …" tail(s) before
         # re-appending. Resolved prompts get round-tripped back into editable
         # fields (restore-from-history, send-to-storyboard, Blender), and the
         # guard below only matches the *current* mood — so an older/different
         # mood line would otherwise stack "Mood:" over and over each regen.
-        resolved = _strip_trailing_mood_blocks(resolved)
+        stripped = _strip_trailing_mood_blocks(body)
+        if stripped != body:
+            # The stripped result is always a prefix of `body`, so truncating to
+            # its length keeps segment text and labels in lockstep.
+            segments = _truncate_segments(segments, len(stripped))
+            body = _join_segments(segments)
         # Only append if the mood isn't already present verbatim — author may
         # have written it explicitly in the prompt and we shouldn't double up.
-        if mood.lower() not in resolved.lower():
-            if resolved and not _SENTENCE_END_RE.search(resolved):
-                resolved = resolved + "."
-            resolved = f"{resolved}\n\n{mood_sentence}" if resolved else mood_sentence
+        if mood.lower() not in body.lower():
+            if body and not _SENTENCE_END_RE.search(body):
+                segments.append({"text": ".", "kind": "literal", "marker": None})
+                body = body + "."
+            sep = "\n\n" if body else ""
+            segments.append({"text": f"{sep}{_MOOD_LABEL}: ", "kind": "mood", "marker": None})
+            # Resolve `#markers` inside the mood too — a subject/tag referenced in
+            # the mood should expand just like one in the prompt. Literal mood
+            # prose is tagged "mood"; markers it pulls in keep the "expanded"
+            # highlight. (rstrip('.') mirrors the old single-period tail.)
+            mood_segs = _segment(mood.rstrip('.'), None)
+            for s in mood_segs:
+                if s["kind"] == "literal":
+                    s["kind"] = "mood"
+            segments.extend(mood_segs)
+            segments.append({"text": ".", "kind": "mood", "marker": None})
             mood_applied = mood
 
     return {
-        "resolved": resolved,
+        "resolved": _join_segments(segments),
+        "segments": _merge_segments(segments),
         "expanded_markers": expanded_markers,
         "unknown_markers": sorted(set(unknown_markers)),
         "mood_applied": mood_applied,
