@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List, Union
 
 from pipeline_base import PipelineRunner, _log
+from perf_monitor import record_timing
 
 
 # --- Patch DiffSynth's input-image embedder for "Detail Bias" -------------
@@ -228,8 +229,13 @@ class QwenPipelineRunner(PipelineRunner):
             _log(self.log_prefix, "  ✗ negative_prompt NOT in pipe_kwargs", "warning")
 
         try:
+            _t_pipe = time.perf_counter()
             with torch.inference_mode():
                 image = pipe(**pipe_kwargs)
+            _pipe_s = time.perf_counter() - _t_pipe
+            _log(self.log_prefix, f"[timing] pipe() denoise+decode: {_pipe_s:.1f}s")
+            record_timing(f"denoise_per_step:{model_type}:{width}x{height}",
+                          _pipe_s / max(1, num_steps))
             image.save(output_path)
 
             elapsed = time.time() - start_time
@@ -263,6 +269,27 @@ class QwenPipelineRunner(PipelineRunner):
     # Per-step hook: live diffusion preview + cancellation
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _vae_can_stream(pipe):
+        """True if the VAE can decode without an explicit load_models_to_device().
+
+        Wrapped modules (AutoWrappedModule/AutoWrappedLinear) copy their weights
+        to the computation device on-the-fly during forward, so decode works with
+        the weights resting on CPU. The exception is disk offload, where offloaded
+        weights live on the meta device and MUST be onloaded first. Without vram
+        management, load_models_to_device() is a no-op anyway.
+        """
+        if not getattr(pipe, "vram_management_enabled", False):
+            return True
+        seen_wrapped = False
+        for m in pipe.vae.modules():
+            od = getattr(m, "offload_device", None)
+            if od is not None:
+                seen_wrapped = True
+                if str(od) == "disk":
+                    return False
+        return seen_wrapped
+
     def _install_preview_hook(self, pipe, callback, cancel_check, total_steps, original_vae_decode):
         """Wrap pipe.step for mid-denoise previews and/or cancellation.
 
@@ -276,6 +303,11 @@ class QwenPipelineRunner(PipelineRunner):
         # Preview at ~quarter points (not the final step — that's the real output).
         marks = {max(1, round(total * f)) for f in (0.25, 0.5, 0.75)} if callback else set()
         marks.discard(total)
+        # When VAE weights can stream to GPU during forward, skip the explicit
+        # device shuffles — load_models_to_device(["vae"]) demotes the entire
+        # GPU-resident DiT to CPU and the follow-up call re-promotes it, a
+        # multi-GB PCIe round trip per preview under the CPU-offload presets.
+        vae_streams = self._vae_can_stream(pipe) if callback else True
 
         def hooked_step(scheduler, **kw):
             # Check for cancellation BEFORE doing the (expensive) step work.
@@ -285,6 +317,7 @@ class QwenPipelineRunner(PipelineRunner):
             step_num = int(kw.get("progress_id", 0)) + 1
             if callback and step_num in marks:
                 try:
+                    _t0 = time.perf_counter()
                     # Decode the x0 PREDICTION (estimated clean latent), not the noisy
                     # sample — flow-match x_t stays near-noise until the end, so decoding
                     # it directly looks like static. `to_final=True` gives sample minus
@@ -297,7 +330,15 @@ class QwenPipelineRunner(PipelineRunner):
                         preview_latent = scheduler.step(noise_pred, timestep, x_t, to_final=True)
                     else:
                         preview_latent = latents_next
-                    pipe.load_models_to_device(["vae"])
+                    # Previews don't need full resolution: half-res decode is ~4x
+                    # cheaper and its activations fit in the headroom left by the
+                    # still-resident DiT.
+                    if preview_latent.dim() == 4 and min(preview_latent.shape[-2:]) >= 32:
+                        preview_latent = torch.nn.functional.interpolate(
+                            preview_latent, scale_factor=0.5, mode="bilinear",
+                        )
+                    if not vae_streams:
+                        pipe.load_models_to_device(["vae"])
                     out = original_vae_decode(
                         preview_latent, device=pipe.device,
                         tiled=kw.get("tiled", False),
@@ -306,15 +347,27 @@ class QwenPipelineRunner(PipelineRunner):
                     )
                     pil = pipe.vae_output_to_image(out)
                     callback(step_num, total, pil)
-                    pipe.load_models_to_device(pipe.in_iteration_models)
+                    if not vae_streams:
+                        pipe.load_models_to_device(pipe.in_iteration_models)
+                    if torch.cuda.is_available():
+                        _alloc = torch.cuda.memory_allocated() / (1024**3)
+                        _resv = torch.cuda.memory_reserved() / (1024**3)
+                        _vram = f", VRAM alloc {_alloc:.1f}GB resv {_resv:.1f}GB"
+                    else:
+                        _vram = ""
+                    _log(self.log_prefix,
+                         f"[timing] preview decode @ step {step_num}: "
+                         f"{time.perf_counter() - _t0:.2f}s{_vram}")
                 except Exception as e:
-                    _log(self.log_prefix, f"Preview decode failed (non-fatal): {e}", "warning")
+                    # One failure (e.g. OOM) means the rest would fail too — stop trying.
+                    marks.clear()
+                    _log(self.log_prefix, f"Preview decode failed (non-fatal, previews disabled): {e}", "warning")
             return latents_next
 
         pipe.step = hooked_step
         _log(self.log_prefix,
              f"Step hook installed (preview steps {sorted(marks) or 'off'}, "
-             f"cancellable={cancel_check is not None})")
+             f"vae_streams={vae_streams}, cancellable={cancel_check is not None})")
 
         def cleanup():
             pipe.step = original_step

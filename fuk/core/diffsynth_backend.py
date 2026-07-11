@@ -37,12 +37,21 @@ else:
     print(f"⚠  DiffSynth-Studio not found at {_DIFFSYNTH_DIR}")
     print(f"   Expected vendor layout: vendor/DiffSynth-Studio/diffsynth/...")
 
+# core/ itself must be importable for bare sibling imports (perf_monitor,
+# pipeline runners) even when this module is imported as core.diffsynth_backend.
+if str(_THIS_DIR) not in sys.path:
+    sys.path.insert(0, str(_THIS_DIR))
+
 # ---------------------------------------------------------------------------
 
 import os
+import time
 import torch
 from typing import Optional, Dict, Any, List
 import json
+
+from perf_monitor import record_timing
+from encode_cache import install_encode_cache
 
 
 #from latent_manager import LatentManager
@@ -439,6 +448,7 @@ class DiffSynthBackend:
             return
 
         # Something changed — need to rebuild the LoRA stack
+        _t_lora = time.perf_counter()
         has_model_lora = cache_key in self._model_lora_config
         
         if current or has_model_lora:
@@ -476,7 +486,7 @@ class DiffSynthBackend:
 
         self._active_user_loras[cache_key] = lora_specs
         names = ", ".join(f"{Path(p).stem}(α={a})" for p, a in lora_specs)
-        _log("BACKEND", f"User LoRA(s) active: {names}", "success")
+        _log("BACKEND", f"[timing] LoRA rebuild: {time.perf_counter() - _t_lora:.1f}s — active: {names}", "success")
 
     def _clear_user_loras(self, pipeline, cache_key: str):
         """
@@ -690,36 +700,45 @@ class DiffSynthBackend:
         cache_key = f"{model_type}:{active_preset}"
 
         if cache_key in self.pipelines:
+            # Re-insert to mark most-recently-used (dicts preserve insertion order)
+            self.pipelines[cache_key] = self.pipelines.pop(cache_key)
             _log("BACKEND", f"Using cached pipeline: {cache_key}")
             return self.pipelines[cache_key]
         entry = self.get_model_entry(model_type)
         pipeline_name = entry["pipeline"]
 
-        # --- Eviction: only keep ONE pipeline cached at a time ---
+        # --- Eviction: LRU with a small slot budget ---
+        # Idle pipelines under CPU-offload presets hold ~0 VRAM (their weights
+        # rest in system RAM), so keeping e.g. one image + one video pipeline
+        # cached avoids a full from_pretrained disk reload on every model
+        # switch. Fully-resident pipelines ("none" preset) can't share the GPU,
+        # so any involvement of "none" collapses the budget to a single slot.
         import gc
-        stale = [k for k in list(self.pipelines.keys()) if k != cache_key]
-        if stale:
-            for k in stale:
-                stale_model = k.split(":")[0]
-                stale_family = self.get_model_entry(stale_model).get("pipeline", "?")
-                if stale_family == pipeline_name:
-                    reason = "same family, different model"
-                elif k.startswith(f"{model_type}:"):
-                    reason = "same model, different preset"
-                else:
-                    reason = "different family"
-                _log("BACKEND", f"Evicting pipeline ({reason}): {k}")
-                del self.pipelines[k]
-                self._active_user_loras.pop(k, None)
-                self._model_lora_config.pop(k, None)
-                self._model_lora_alpha.pop(k, None)
-            gc.collect()
+        evicted = []
 
+        # The same model under a different preset is pure waste — always evict.
+        for k in [k for k in self.pipelines if k.startswith(f"{model_type}:")]:
+            _log("BACKEND", f"Evicting pipeline (same model, different preset): {k}")
+            self._evict_pipeline(k)
+            evicted.append(k)
+
+        slots = int(self.defaults_config.get("vram", {}).get("pipeline_cache_slots", 2))
+        if active_preset == "none" or any(k.endswith(":none") for k in self.pipelines):
+            slots = 1
+        # Leave room for the pipeline about to be loaded.
+        while len(self.pipelines) > max(0, slots - 1):
+            lru = next(iter(self.pipelines))
+            _log("BACKEND", f"Evicting pipeline (LRU, budget {slots}): {lru}")
+            self._evict_pipeline(lru)
+            evicted.append(lru)
+
+        if evicted:
             # GC first so Python releases refs, THEN clear CUDA cache
+            gc.collect()
             gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
-            _log("BACKEND", f"Evicted {len(stale)} pipeline(s), RAM freed", "success")
+            _log("BACKEND", f"Evicted {len(evicted)} pipeline(s), RAM freed", "success")
 
 
         PipelineCls = PIPELINE_CLASSES.get(pipeline_name)
@@ -760,8 +779,16 @@ class DiffSynthBackend:
         import inspect as _inspect
         valid_params = _inspect.signature(PipelineCls.from_pretrained).parameters
         filtered_kwargs = {k: v for k, v in kwargs.items() if k in valid_params}
+        _t0 = time.perf_counter()
         pipeline = PipelineCls.from_pretrained(**filtered_kwargs)
-        _log("BACKEND", f"Pipeline loaded: {cache_key}", "success")
+        _load_s = time.perf_counter() - _t0
+        _log("BACKEND", f"[timing] pipeline load {cache_key}: {_load_s:.1f}s", "success")
+        record_timing(f"pipeline_load:{cache_key}", _load_s)
+
+        # Skip re-encoding unchanged control/reference/input media across gens
+        if self.defaults_config.get("vram", {}).get("vae_encode_cache", True):
+            if install_encode_cache(pipeline, log=lambda m: _log("BACKEND", m)):
+                _log("BACKEND", "VAE encode cache installed")
 
         # Model-bundled LoRA (e.g. Control-Union, EliGen) — load and track config
         lora_cfg = entry.get("lora")
@@ -772,6 +799,13 @@ class DiffSynthBackend:
 
         self.pipelines[cache_key] = pipeline
         return pipeline
+
+    def _evict_pipeline(self, cache_key: str):
+        """Drop a cached pipeline and its LoRA bookkeeping (caller handles GC)."""
+        self.pipelines.pop(cache_key, None)
+        self._active_user_loras.pop(cache_key, None)
+        self._model_lora_config.pop(cache_key, None)
+        self._model_lora_alpha.pop(cache_key, None)
 
     def unload_pipeline(self, model_type: str):
         """Unload all cached pipelines for a model type (any preset)."""
@@ -851,12 +885,13 @@ class DiffSynthBackend:
         def cleanup():
             pipe.vae.decode = original_decode
             if captured:
+                _t0 = time.perf_counter()
                 # Synchronize to ensure non-blocking copy completed
                 if torch.cuda.is_available():
                     torch.cuda.synchronize()
                 save_path.parent.mkdir(parents=True, exist_ok=True)
                 torch.save(captured, str(save_path))
-                _log("BACKEND", f"Latent tensor saved: {save_path} (shape: {captured['shape']})")
+                _log("BACKEND", f"[timing] latent save: {time.perf_counter() - _t0:.2f}s — {save_path} (shape: {captured['shape']})")
                 captured.clear()  # Free the CPU tensor
             
         return cleanup

@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List, Union
 
 from pipeline_base import PipelineRunner, _log
+from perf_monitor import record_timing
 
 
 class WanPipelineRunner(PipelineRunner):
@@ -183,8 +184,13 @@ class WanPipelineRunner(PipelineRunner):
 
         # --- Generate ---
         try:
+            _t_pipe = time.perf_counter()
             with torch.inference_mode():
                 video = pipe(**pipe_kwargs)
+            _pipe_s = time.perf_counter() - _t_pipe
+            _log(self.log_prefix, f"[timing] pipe() denoise+decode: {_pipe_s:.1f}s")
+            record_timing(f"denoise_per_step:{model_type}:{width}x{height}x{num_frames}",
+                          _pipe_s / max(1, num_steps))
 
             if progress_callback:
                 progress_callback("saving", 0, 1)
@@ -214,12 +220,10 @@ class WanPipelineRunner(PipelineRunner):
             _log(self.log_prefix, f"Video generation failed: {e}", "error")
             raise
         finally:
+            # VRAM/GC cleanup is handled by the server's clear_vram() after the
+            # request completes — a second gc/empty_cache here just adds stalls.
             if cleanup_hook:
                 cleanup_hook()
-            import gc
-            gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
 
     # ------------------------------------------------------------------
     # Wan-specific input mapping overrides

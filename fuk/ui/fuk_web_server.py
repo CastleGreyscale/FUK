@@ -409,9 +409,6 @@ print("[STARTUP] DiffSynth backend initialized (image + video)", flush=True)
 # Global State
 # ============================================================================
 
-app = FastAPI(title="FUK Generation API", version="1.0.0")
-
-
 # ----------------------------------------------------------------------------
 # Quiet the access log for client polling/keepalive requests.
 #
@@ -421,6 +418,7 @@ app = FastAPI(title="FUK Generation API", version="1.0.0")
 # polls/streams for those paths; meaningful POSTs still log.
 # ----------------------------------------------------------------------------
 import logging
+from contextlib import asynccontextmanager
 
 # GET requests to these paths are client polling / SSE keepalive — noise, not events.
 _QUIET_ACCESS_PATHS = ("/api/dataset/", "/api/progress/", "/api/status/", "/api/blender/signal")
@@ -437,10 +435,14 @@ class _PollAccessLogFilter(logging.Filter):
         return True
 
 
-@app.on_event("startup")
-async def _install_access_log_filter():
-    # Runs after uvicorn has configured its loggers, so the filter sticks.
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    # Startup: runs after uvicorn has configured its loggers, so the filter sticks.
     logging.getLogger("uvicorn.access").addFilter(_PollAccessLogFilter())
+    yield
+
+
+app = FastAPI(title="FUK Generation API", version="1.0.0", lifespan=_lifespan)
 
 
 # Initialize project system
@@ -765,29 +767,39 @@ class ProgressCallback:
 # VRAM Management
 # ============================================================================
 
-def clear_vram():
-    """Aggressively clear VRAM and system RAM after generation"""
+def clear_vram(full: bool = False):
+    """Release generation memory.
+
+    light (default): gc.collect + stats only — leaves the CUDA allocator
+    cache intact so the next same-model generation reuses pooled memory
+    instead of re-paying cudaMalloc (expandable_segments is enabled, so
+    reserved memory stays reusable and fragmentation is contained).
+    full: also empty_cache + synchronize — for failures, cancellations and
+    pipeline evictions, where actually returning memory to the driver matters.
+    """
     try:
         import torch
         import gc
-        
+
+        _t0 = time.perf_counter()
         # GC first — release Python objects that hold GPU tensor refs
         gc.collect()
-        
-        # Clear CUDA cache if available
+
         if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-            torch.cuda.synchronize()
-            
+            if full:
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+
             # Get VRAM stats
             allocated = torch.cuda.memory_allocated() / (1024**3)  # GB
             reserved = torch.cuda.memory_reserved() / (1024**3)    # GB
-            
+
+            mode = "full" if full else "light"
             print(f"VRAM - Allocated: {allocated:.2f}GB, Reserved: {reserved:.2f}GB")
-            print(f"VRAM cleared")
+            print(f"[timing] VRAM clear ({mode}): {time.perf_counter() - _t0:.2f}s")
         else:
             print(f"CUDA not available, skipping VRAM clear")
-        
+
         _prune_stale_generations()
 
     except Exception as e:
@@ -818,6 +830,18 @@ def _prune_stale_generations(max_age_minutes: int = 30):
 # ============================================================================
 # System Management Endpoints
 # ============================================================================
+
+@app.get("/api/system/perf")
+async def system_perf():
+    """Rolling timing benchmarks (pipeline loads, per-step denoise speed).
+
+    Backed by perf_monitor's history of the [timing] measurements; each metric
+    reports its recent median so slowdowns are visible at a glance
+    (last_vs_median > 1.5 is the same threshold that triggers log warnings).
+    """
+    from perf_monitor import summary as perf_summary
+    return {"metrics": perf_summary()}
+
 
 @app.post("/api/system/evict")
 async def evict_all_models():
@@ -1137,14 +1161,14 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
         if request.output_format in ["exr", "both"]:
             active_generations[generation_id]["phase"] = "converting_to_exr"
             log.info("ImageGen", "Converting to EXR...")
-            
+            _t_exr = time.time()
             FormatConverter.png_to_exr_32bit(
                 paths["generated_png"],
                 paths["generated_exr"],
                 linear=True
             )
             outputs["exr"] = get_project_relative_url(paths["generated_exr"])
-            log.info("ImageGen", f"EXR saved: {paths['generated_exr']}")
+            log.timing("ImageGen", _t_exr, f"EXR saved: {paths['generated_exr']}")
         
         # Save metadata. `prompt` is the resolved string (true model input);
         # `prompt_source` preserves the raw draft with `#markers` so the
@@ -1219,9 +1243,9 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
         if gen_dir:
             cleanup_failed_generation(gen_dir, reason="cancelled" if cancelled else str(e))
 
-        # Clear VRAM
+        # Clear VRAM (full — failure/cancel paths must recover from OOM states)
         log.info("ImageGen", "Clearing VRAM...")
-        clear_vram()
+        clear_vram(full=True)
 
         # Only now signal the abort is fully done (phase 'cancelling' -> 'cancelled'),
         # so a restart can't overlap teardown on the (non-thread-safe) pipeline.
@@ -1459,9 +1483,9 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
         if gen_dir:
             cleanup_failed_generation(gen_dir, reason=str(e))
 
-        # Clear VRAM even on failure (if not already done by wrapper)
+        # Clear VRAM even on failure (full — must recover from OOM states)
         try:
-            clear_vram()
+            clear_vram(full=True)
         except:
             pass
     
@@ -2233,7 +2257,7 @@ async def preprocess_image(request: PreprocessRequest):
         # Clear preprocessor cache to free VRAM
         # For demo/testing - remove if you want models to stay cached for fast iteration
         preprocessor_manager.clear_caches([request.method])
-        clear_vram()
+        clear_vram(full=True)
         
         return result
         
@@ -2243,7 +2267,7 @@ async def preprocess_image(request: PreprocessRequest):
         traceback.print_exc()
         # Clear on error too
         preprocessor_manager.clear_caches([request.method])
-        clear_vram()
+        clear_vram(full=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -2863,7 +2887,7 @@ async def preprocess_image(request: PreprocessRequest):
         
         # Clear preprocessor cache to free VRAM
         preprocessor_manager.clear_caches([request.method])
-        clear_vram()
+        clear_vram(full=True)
         
         return result
         
@@ -2873,7 +2897,7 @@ async def preprocess_image(request: PreprocessRequest):
         traceback.print_exc()
         # Clear on error too
         preprocessor_manager.clear_caches([request.method])
-        clear_vram()
+        clear_vram(full=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

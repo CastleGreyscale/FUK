@@ -200,6 +200,17 @@ p {
     font-size: 1rem;
 }
 
+.feature-link {
+    display: inline-block;
+    margin-top: 1rem;
+    font-size: 0.9rem;
+    color: var(--accent);
+}
+
+.feature-link:hover {
+    color: var(--accent-hover);
+}
+
 /* Video Section */
 .video-container {
     position: relative;
