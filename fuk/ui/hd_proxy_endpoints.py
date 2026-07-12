@@ -23,6 +23,13 @@ class HDConformRequest(BaseModel):
     # Detail strength = denoising_strength on the latent-init path.
     # 0.20 ≈ texture-only pass, 0.30 default, 0.50 = noticeable motion/detail drift.
     denoising_strength: float = 0.30
+    # Sliding window over the temporal axis. Conforms run at source-still
+    # resolution, so full-clip attention usually blows past VRAM — these let
+    # the user chunk the denoise into windows (size = frames per window,
+    # stride = step between windows; size - stride = overlap blended between
+    # windows). None = disabled, whole clip in one window.
+    sliding_window_size: Optional[int] = None
+    sliding_window_stride: Optional[int] = None
     vram_preset: Optional[str] = None       # inherits backend default if None
 
 
@@ -122,6 +129,8 @@ def setup_hd_proxy_routes(
             # denoising_strength, so generation denoises *from* the proxy.
             input_video_path=str(proxy_video),
             denoising_strength=float(request.denoising_strength),
+            sliding_window_size=request.sliding_window_size,
+            sliding_window_stride=request.sliding_window_stride,
             vram_preset=request.vram_preset,
         )
 
@@ -139,10 +148,15 @@ def setup_hd_proxy_routes(
         }
         background_tasks.add_task(run_video_generation, generation_id, vreq)
 
+        window_desc = (
+            f", window={request.sliding_window_size}/{request.sliding_window_stride}"
+            if request.sliding_window_size or request.sliding_window_stride else ""
+        )
         log.info(
             "HDConform",
             f"Queued conform from {request.source_id} "
-            f"({width}x{height}, {video_length}f, denoise={request.denoising_strength})",
+            f"({width}x{height}, {video_length}f, denoise={request.denoising_strength}"
+            f"{window_desc})",
         )
         return {
             "generation_id": generation_id,

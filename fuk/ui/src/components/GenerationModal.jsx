@@ -21,6 +21,7 @@ const TYPE_LABELS = {
   upscale: 'Upscale',
   upscale_video: 'Video Upscale',
   interpolate: 'Interpolation',
+  hd_conform: 'HD Conform',
   layers: 'Layer Generation',
   layers_video: 'Video Layer Generation',
   export: 'EXR Export',

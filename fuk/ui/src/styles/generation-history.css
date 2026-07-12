@@ -1361,6 +1361,45 @@
   line-height: 1.25;
 }
 
+.conform-hd-windows {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem;
+}
+
+.conform-hd-window-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.conform-hd-window-field label {
+  font-size: 0.65rem;
+  color: var(--color-text-muted);
+}
+
+.conform-hd-window-field input {
+  width: 100%;
+  padding: 0.25rem 0.35rem;
+  background: var(--color-background);
+  border: var(--border-width) solid var(--color-surface-hover);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  font-size: 0.65rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.conform-hd-window-field input:focus {
+  outline: none;
+  border-color: #6366f1;
+}
+
+/* The conform's progress modal must clear the fullscreen gallery overlay
+ * (z-index 10000) — the base .gen-modal-overlay sits at 1000. */
+.gen-history-conform-hd-wrap .gen-modal-overlay {
+  z-index: 10002;
+}
+
 .conform-hd-error {
   font-size: 0.6rem;
   color: var(--color-error-500);

@@ -14,6 +14,8 @@
 import { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { ArrowUp, X } from './Icons';
 import { API_URL } from '../utils/constants';
+import { useGeneration } from '../hooks/useGeneration';
+import GenerationModal from './GenerationModal';
 
 function isConformable(generation) {
   if (!generation || generation.type !== 'video') return false;
@@ -30,8 +32,28 @@ function isConformable(generation) {
 export default function ConformHDButton({ generation, variant = 'compact' }) {
   const [open, setOpen] = useState(false);
   const [strength, setStrength] = useState(0.30);
+  // Sliding window over the temporal axis. Conforms run at source-still
+  // resolution, so full-clip attention usually exceeds VRAM — chunking the
+  // denoise into windows is how a conform survives HD. Blank = disabled.
+  const [windowSize, setWindowSize] = useState(null);
+  const [windowStride, setWindowStride] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+
+  // Same progress-overlay mechanic as normal generations: the queued conform
+  // id feeds the shared SSE stream, which drives the fullscreen GenerationModal
+  // and fires `fuk-generation-complete` when the conform actually finishes.
+  const {
+    generating,
+    progress,
+    error: genError,
+    elapsedSeconds,
+    consoleLog,
+    showModal,
+    startGeneration,
+    cancel,
+    closeModal,
+  } = useGeneration();
   const [popStyle, setPopStyle] = useState({ position: 'fixed', left: -9999, top: -9999, visibility: 'hidden' });
   const btnRef = useRef(null);
   const popRef = useRef(null);
@@ -106,6 +128,8 @@ export default function ConformHDButton({ generation, variant = 'compact' }) {
         body: JSON.stringify({
           source_id: generation.id,
           denoising_strength: strength,
+          sliding_window_size: windowSize,
+          sliding_window_stride: windowStride,
         }),
       });
       if (!res.ok) {
@@ -114,11 +138,10 @@ export default function ConformHDButton({ generation, variant = 'compact' }) {
       }
       const data = await res.json();
       setOpen(false);
-      // History panel listens for this event to refresh; the queued gen will
-      // appear once it completes and writes its metadata.json.
-      window.dispatchEvent(new CustomEvent('fuk-generation-complete', {
-        detail: { source: 'hd_conform', generation_id: data.generation_id },
-      }));
+      // Opens the progress modal and subscribes to the SSE stream; the hook
+      // dispatches `fuk-generation-complete` when the conform finishes, which
+      // is when the history panel should refresh (metadata.json exists then).
+      startGeneration(data.generation_id);
     } catch (err) {
       setError(err.message || 'Conform failed');
     } finally {
@@ -138,7 +161,7 @@ export default function ConformHDButton({ generation, variant = 'compact' }) {
         className={btnClass}
         onClick={(e) => { e.stopPropagation(); setOpen(o => !o); }}
         title="Conform HD — re-render this proxy at source resolution via VACE"
-        disabled={busy}
+        disabled={busy || generating}
       >
         <ArrowUp />
         {isLarge && <span>Conform HD</span>}
@@ -173,6 +196,41 @@ export default function ConformHDButton({ generation, variant = 'compact' }) {
           <div className="conform-hd-hint">
             0.20 texture-only · 0.30 default · 0.40+ more freedom
           </div>
+          <div className="conform-hd-windows">
+            <div className="conform-hd-window-field">
+              <label htmlFor="conform-hd-window-size" title="Frames per sliding window chunk. Leave blank to denoise the whole clip at once.">
+                Window size
+              </label>
+              <input
+                id="conform-hd-window-size"
+                type="number"
+                min="1"
+                step="1"
+                placeholder="off"
+                value={windowSize ?? ''}
+                onChange={(e) => setWindowSize(e.target.value ? parseInt(e.target.value) : null)}
+                disabled={busy}
+              />
+            </div>
+            <div className="conform-hd-window-field">
+              <label htmlFor="conform-hd-window-stride" title="Step between windows. Size minus stride = overlapping frames blended between chunks.">
+                Window stride
+              </label>
+              <input
+                id="conform-hd-window-stride"
+                type="number"
+                min="1"
+                step="1"
+                placeholder="off"
+                value={windowStride ?? ''}
+                onChange={(e) => setWindowStride(e.target.value ? parseInt(e.target.value) : null)}
+                disabled={busy}
+              />
+            </div>
+          </div>
+          <div className="conform-hd-hint">
+            Conform runs at source res — set these to chunk frames and stay in VRAM
+          </div>
           {error && <div className="conform-hd-error">{error}</div>}
           <button
             className="conform-hd-run"
@@ -183,6 +241,17 @@ export default function ConformHDButton({ generation, variant = 'compact' }) {
           </button>
         </div>
       )}
+      <GenerationModal
+        isOpen={showModal}
+        type="hd_conform"
+        generating={generating}
+        progress={progress}
+        elapsedSeconds={elapsedSeconds}
+        consoleLog={consoleLog}
+        error={genError}
+        onCancel={cancel}
+        onClose={closeModal}
+      />
     </div>
   );
 }
