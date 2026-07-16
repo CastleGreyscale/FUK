@@ -42,6 +42,31 @@ _project_state = None  # Current loaded project state
 _cache_root = None
 _default_cache_root = None  # Original cache root before any project is opened
 
+_CONFIG_DIR = Path(__file__).parent.parent / "config"
+_defaults_cache = None
+
+
+def _load_defaults() -> dict:
+    """Load user defaults (base + split config fragments).
+
+    Never `from fuk_web_server import DEFAULTS` here: the server runs as
+    __main__, so importing it by module name executes the whole module a
+    second time — re-running initialize_project_system() and silently
+    resetting _cache_root mid-session (empty history, broken previews).
+    """
+    global _defaults_cache
+    if _defaults_cache is None:
+        with open(_CONFIG_DIR / "defaults.json") as f:
+            defaults = json.load(f)
+        for fragment in ("defaults_loras.json", "defaults_vram.json",
+                         "defaults_spec_tool.json", "defaults_dataset.json"):
+            fragment_path = _CONFIG_DIR / fragment
+            if fragment_path.exists():
+                with open(fragment_path) as f:
+                    defaults.update(json.load(f))
+        _defaults_cache = defaults
+    return _defaults_cache
+
 router = APIRouter(prefix="/api/project", tags=["project"])
 
 
@@ -679,8 +704,7 @@ async def create_new(data: dict = Body(...)):
         filename = f"{project_name}_shot{shot_number}_{version}{suffix}.json"
         file_path = _project_folder / filename
     
-    # Import DEFAULTS from main module
-    from fuk_web_server import DEFAULTS
+    DEFAULTS = _load_defaults()
 
     # Create project state populated with defaults from defaults.json
     # Use sections directly so field names match defaults.json exactly
@@ -733,8 +757,7 @@ async def get_config():
 @router.get("/defaults")
 async def get_defaults():
     """Get user defaults from defaults.json"""
-    from fuk_web_server import DEFAULTS
-    return DEFAULTS
+    return _load_defaults()
 
 @router.get("/cache-info")
 async def get_cache_info():
