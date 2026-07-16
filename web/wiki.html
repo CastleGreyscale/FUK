@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en"><head>
+<meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Wiki - FUK | Framework for Unified Kreation</title>
     <meta name="description" content="Documentation, guides, and reference for FUK — the local-first AI rendering pipeline.">
@@ -89,6 +90,8 @@
                         <a href="#storyboard-tab" class="sidebar-link">Storyboard Tab</a>
                         <a href="#media-input" class="sidebar-link">Media Input</a>
                         <a href="#seed-control" class="sidebar-link">Seed Control</a>
+                        <a href="#model-lora-selection" class="sidebar-link">Model &amp; LoRA Selection</a>
+                        <a href="#vram-management" class="sidebar-link">VRAM Management</a>
                         <a href="#image-panel" class="sidebar-link">Image Panel</a>
                         <a href="#video-panel" class="sidebar-link">Video Panel</a>
                         <a href="#preprocess-panel" class="sidebar-link">Preprocess Panel</a>
@@ -842,6 +845,78 @@
 
                 <h3>Favorites</h3>
                 <p>Favorite seeds are stored in local settings and persist across sessions. Add a descriptive note when saving a seed — the note appears in the dropdown, making it easy to identify which seed produced a specific result without having to cross-reference the History Panel.</p>
+            </div>
+
+            <!-- Model & LoRA Selection -->
+            <div class="wiki-section" id="model-lora-selection">
+                <h2>Model &amp; LoRA Selection</h2>
+                <div class="wiki-video" data-vimeo="https://framerate.tv/watch/e7367ef7-a787-450a-b276-2b4fde74d05c" data-title="Model & LoRA Selection">
+                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
+                </div>
+                <p>The Model &amp; Style card appears in both the Image and Video tabs. It selects the base model a generation runs on and layers one or more LoRA adapters on top. The controls behave the same across both tabs — the only difference is that the Image tab can stack multiple LoRAs while the Video tab takes one at a time.</p>
+
+                <h3>Model Dropdown</h3>
+                <ul>
+                    <li>Lists every model registered in <a href="#config-models">models.json</a> whose category matches the current tab — image models in the Image tab, video models in the Video tab.</li>
+                    <li>Settings are <strong>persisted per-model</strong> — your parameters and LoRA stack are remembered separately for each model, so switching back and forth never clobbers the configuration you had for either.</li>
+                    <li>The active model determines which LoRAs are offered: the LoRA dropdown is filtered to the model's family, so a Qwen model won't list Wan-only adapters and vice versa.</li>
+                </ul>
+
+                <h3>LoRA Controls</h3>
+                <p>LoRAs blend a trained concept into the base model at generation time. Each LoRA row exposes:</p>
+                <table class="wiki-table">
+                    <thead><tr><th>Control</th><th>Behavior</th></tr></thead>
+                    <tbody>
+                        <tr><td>LoRA dropdown</td><td>Selects an adapter. The list is built from the discovery directories and explicit entries in <a href="#config-loras">defaults_loras.json</a>, filtered to the active model's family</td></tr>
+                        <tr><td>Multiplier</td><td>Blend weight, 0.0–2.0. Starts at the LoRA's <code>default_strength</code> if one is configured, otherwise 1.0. Higher values push the concept harder; overly high values can overcook the result</td></tr>
+                        <tr><td>Bypass toggle</td><td>Temporarily disables the LoRA without removing it — the fast way to A/B whether an adapter is actually helping</td></tr>
+                        <tr><td>Remove</td><td>Drops the LoRA row entirely</td></tr>
+                    </tbody>
+                </table>
+
+                <h3>Single vs. Stacked</h3>
+                <ul>
+                    <li><strong>Image tab</strong> — use the add button to stack multiple LoRAs; they blend together, each with its own multiplier and bypass toggle.</li>
+                    <li><strong>Video tab</strong> — one LoRA at a time, with the same multiplier and bypass controls.</li>
+                </ul>
+
+                <h3>Trigger Words</h3>
+                <p>If a selected LoRA defines a <code>trigger_word</code> in its config, it is surfaced as a hint but <em>not</em> injected automatically — you still add it to your prompt yourself, or via the <a href="#prompt-panel">Prompt Panel</a> shorthand where each LoRA trigger becomes a <code>#marker</code>. A LoRA that defines <code>inject_text</code> has that text appended to the positive prompt whenever it is active. See <a href="#config-loras">defaults_loras.json</a> for how both are configured.</p>
+
+                <div class="wiki-note">
+                    <p>LoRAs are matched to models by family in <a href="#config-loras">defaults_loras.json</a>. If an adapter you expect isn't in the dropdown, check that its <code>model</code> field matches the family of the model you currently have selected.</p>
+                </div>
+            </div>
+
+            <!-- VRAM Management -->
+            <div class="wiki-section" id="vram-management">
+                <h2>VRAM Management</h2>
+                <div class="wiki-video" data-vimeo="https://framerate.tv/watch/d3256aa4-e864-4652-8c44-19268253a56a" data-title="VRAM Management">
+                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
+                </div>
+                <p>The VRAM Management dropdown lives in the Generation card of both the Image and Video tabs (and in the <a href="#postprocess-panel">Postprocess Panel</a>). It selects the offload strategy FUK uses to fit a model into available GPU memory. The trade-off is always the same: the more of the model that is offloaded to system RAM or disk, the lower the VRAM floor and the slower the generation.</p>
+
+                <h3>Presets</h3>
+                <table class="wiki-table">
+                    <thead><tr><th>Preset</th><th>Strategy</th><th>VRAM Required</th><th>Speed Impact</th></tr></thead>
+                    <tbody>
+                        <tr><td>None</td><td>No offloading — full model in VRAM</td><td>48GB+</td><td>Fastest</td></tr>
+                        <tr><td>Low</td><td>CPU offload in bfloat16</td><td>16–24GB</td><td>Minimal</td></tr>
+                        <tr><td>Medium</td><td>CPU offload in float8</td><td>12–16GB</td><td>Moderate</td></tr>
+                        <tr><td>High</td><td>Disk offload</td><td>8GB</td><td>Significant — requires a fast SSD</td></tr>
+                    </tbody>
+                </table>
+
+                <h3>How to Choose</h3>
+                <ul>
+                    <li>Start at the lowest offload level your card can hold and only move up if you hit out-of-memory errors.</li>
+                    <li>Larger output resolutions — and, for video, longer frame counts — raise the VRAM ceiling, so a preset that works for a short clip may need bumping up for a longer one.</li>
+                    <li><strong>High</strong> (disk offload) is a last resort for 8GB cards; it leans on SSD read speed and is dramatically slower than the CPU-offload presets.</li>
+                </ul>
+
+                <div class="wiki-note">
+                    <p>The dropdown overrides the launch default for the current session only — it does not persist to disk. The persistent default and advanced knobs like <code>buffer_gb</code> (activation headroom; raise it if you OOM mid-generation) and <code>computation_dtype</code> live in <a href="#config-vram">defaults_vram.json</a>.</p>
+                </div>
             </div>
 
             <!-- Image Panel -->
