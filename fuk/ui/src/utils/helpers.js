@@ -15,9 +15,12 @@ export function formatTime(seconds) {
 
 /**
  * Calculate dimensions based on aspect ratio and width.
- * Both width and height are rounded to the nearest 16-multiple —
- * Qwen's ShapeChecker requires this, and all other supported models
- * accept any multiple of 16 (it's always a multiple of 8 too).
+ * Both width and height are rounded UP to the next 16-multiple —
+ * Qwen's ShapeChecker requires a multiple of 16, and all other supported
+ * models accept any multiple of 16 (it's always a multiple of 8 too).
+ * We always round up (ceil, never nearest) so the output is at least the
+ * requested size: users can crop off the few extra pixels rather than
+ * being forced to upscale a too-small image.
  *
  * @param {string} aspectRatioValue - The aspect ratio value (e.g., "1.78:1")
  * @param {number} width - Target width
@@ -27,9 +30,13 @@ export function formatTime(seconds) {
 export function calculateDimensions(aspectRatioValue, width, aspectRatios = []) {
   const ratio = aspectRatios.find(ar => ar.value === aspectRatioValue)?.ratio || 1;
   const rawHeight = width / ratio;
+  // Round up to the next 16-multiple, but tolerate a sub-pixel epsilon first so
+  // a value already sitting on a boundary (e.g. 1440.04 from an approximate
+  // ratio) isn't pushed up a needless extra 16px.
+  const ceil16 = (v) => Math.ceil(v / 16 - 1e-2) * 16;
   return {
-    width: Math.round(width / 16) * 16,
-    height: Math.round(rawHeight / 16) * 16
+    width: ceil16(width),
+    height: ceil16(rawHeight)
   };
 }
 
