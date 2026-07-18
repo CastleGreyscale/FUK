@@ -11,6 +11,7 @@ import ZoomableImage from './ZoomableImage';
 import CompareImage from './CompareImage';
 import ConformHDButton from './ConformHDButton';
 import { setPanelPreview, upsertPanel } from '../utils/storyboardApi';
+import { saveGenerationToLocation } from '../utils/historyApi';
 
 // Pin-to-storyboard glyph: stacked thumbnails with an arrow.
 const StoryboardPinIcon = ({ className, style }) => (
@@ -23,6 +24,40 @@ const StoryboardPinIcon = ({ className, style }) => (
 );
 
 
+
+// Save-a-copy button. Opens a native "Save As" dialog (server-side) and copies
+// the generation's png/mp4 to the chosen location. `compact` = icon only for
+// action bars; `large` = labeled button for the gallery detail panel.
+function SaveButton({ generation, variant = 'compact' }) {
+  const [busy, setBusy] = useState(false);
+
+  const handleSave = async (e) => {
+    e.stopPropagation();
+    if (busy) return;
+    setBusy(true);
+    try {
+      const res = await saveGenerationToLocation(generation);
+      if (res && res.success === false && !res.cancelled && res.error) {
+        alert(`Save failed: ${res.error}`);
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const isLarge = variant === 'large';
+  return (
+    <button
+      className={`gen-history-save${isLarge ? ' large' : ''}`}
+      onClick={handleSave}
+      disabled={busy}
+      title="Save a copy to another location"
+    >
+      <Download />
+      {isLarge && <span>{busy ? 'Saving…' : 'Save'}</span>}
+    </button>
+  );
+}
 
 // Hover preview popup component
 function HoverPreview({ generation, position, videoRef }) {
@@ -323,6 +358,7 @@ function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned, onHov
         </button>
         <div className="gen-history-actions-bar-right">
           <ConformHDButton generation={generation} variant="compact" />
+          <SaveButton generation={generation} variant="compact" />
           {onSendToStoryboard && (
             <button
               className="gen-history-pin-storyboard"
@@ -458,6 +494,7 @@ function GalleryThumb({ generation, isPinned, isSelected, isMultiSelected, compa
           title={isPinned ? 'Unpin' : 'Pin'}
         ><PinIcon /></button>
         <div className="gen-history-actions-bar-right">
+          <SaveButton generation={generation} variant="compact" />
           {onSendToStoryboard && (
             <button
               className="gen-history-pin-storyboard"
@@ -854,6 +891,7 @@ function GalleryLargeView({ generation, generations, isPinned, vote, onTogglePin
             className={`gen-history-vote down ${vote === -1 ? 'active' : ''}`}
             onClick={() => onVote(generation, vote === -1 ? 0 : -1)}
           ><ThumbsDown />Bad</button>
+          <SaveButton generation={generation} variant="large" />
           <ConformHDButton generation={generation} variant="large" />
           <button
             className="gen-history-delete"

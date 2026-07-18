@@ -302,6 +302,42 @@ def open_directory_dialog(
     return selected if selected else None
 
 
+def save_file_dialog(
+    title: str = "Save As",
+    initial_dir: Optional[str] = None,
+    initial_file: Optional[str] = None,
+    file_types: Optional[List] = None,
+) -> Optional[str]:
+    """Open a native 'Save As' dialog and return the chosen destination path."""
+    import tkinter as tk
+    from tkinter import filedialog
+
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes('-topmost', True)
+
+    if initial_dir and Path(initial_dir).exists():
+        init_dir = initial_dir
+    else:
+        init_dir = str(Path.home())
+
+    kwargs = {"title": title, "initialdir": init_dir}
+    if initial_file:
+        kwargs["initialfile"] = initial_file
+        ext = Path(initial_file).suffix
+        if ext:
+            kwargs["defaultextension"] = ext
+            kwargs["filetypes"] = file_types or [(f"{ext.lstrip('.').upper()} file", f"*{ext}"), ("All files", "*.*")]
+    elif file_types:
+        kwargs["filetypes"] = file_types
+
+    selected = filedialog.asksaveasfilename(**kwargs)
+
+    root.destroy()
+
+    return selected if selected else None
+
+
 def scan_directory(
     directory: str,
     recursive: bool = False,
@@ -364,9 +400,10 @@ def main():
     import argparse
     
     parser = argparse.ArgumentParser(description="FUK File Browser")
-    parser.add_argument("command", choices=["open", "directory", "scan"])
+    parser.add_argument("command", choices=["open", "directory", "scan", "save"])
     parser.add_argument("--title", default="Select Media")
     parser.add_argument("--initial-dir", default=None)
+    parser.add_argument("--initial-file", default=None)
     parser.add_argument("--multiple", action="store_true", default=True)
     parser.add_argument("--no-multiple", action="store_false", dest="multiple")
     parser.add_argument("--detect-sequences", action="store_true", default=True)
@@ -417,7 +454,19 @@ def main():
                 "success": True,
                 "directory": directory,
             }
-            
+
+        elif args.command == "save":
+            dest = save_file_dialog(
+                title=args.title,
+                initial_dir=args.initial_dir,
+                initial_file=args.initial_file,
+                file_types=file_types,
+            )
+            result = {
+                "success": True,
+                "path": dest,
+            }
+
         elif args.command == "scan":
             if not args.initial_dir:
                 result = {"success": False, "error": "Directory required for scan"}

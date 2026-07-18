@@ -41,6 +41,7 @@ _project_folder = None
 _project_state = None  # Current loaded project state
 _cache_root = None
 _default_cache_root = None  # Original cache root before any project is opened
+_last_export_dir = None  # Remembers the last "Save generation as…" destination folder
 
 _CONFIG_DIR = Path(__file__).parent.parent / "config"
 _defaults_cache = None
@@ -1469,6 +1470,106 @@ async def get_generation_metadata(gen_id: str):
             return json.load(f)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read metadata: {e}")
+
+
+def _resolve_media_url_to_path(url: str) -> Optional[Path]:
+    """
+    Map a frontend media URL back to a real file on disk.
+
+    Handles the two schemes the history panel emits:
+      - api/project/cache/<rel>   → cache root (project, then default)
+      - api/project/files/<abs>   → absolute path (imports / external refs)
+
+    Returns a validated Path within an allowed root, or None.
+    """
+    if not url:
+        return None
+    u = url.lstrip("/")
+    for prefix in ("api/project/cache/", "project/cache/"):
+        if u.startswith(prefix):
+            rel = u[len(prefix):]
+            for root in (_cache_root, _default_cache_root):
+                if not root:
+                    continue
+                candidate = (root / rel)
+                try:
+                    candidate.resolve().relative_to(root.resolve())
+                except ValueError:
+                    continue
+                if candidate.exists() and candidate.is_file():
+                    return candidate
+            return None
+    for prefix in ("api/project/files/", "project/files/"):
+        if u.startswith(prefix):
+            abs_path = Path("/" + u[len(prefix):])
+            allowed = [Path.home(), Path("/tmp")]
+            if _project_folder:
+                allowed.append(Path(_project_folder))
+            resolved = abs_path.resolve()
+            for root in allowed:
+                try:
+                    resolved.relative_to(root.resolve())
+                except ValueError:
+                    continue
+                if abs_path.exists() and abs_path.is_file():
+                    return abs_path
+            return None
+    return None
+
+
+@router.post("/generations/export")
+async def export_generation(data: dict = Body(...)):
+    """
+    Copy a generation's output file (png/mp4/…) to a user-chosen location via a
+    native Save-As dialog. Lets finished generations be pulled out of the project
+    cache for sharing/approval without hunting through cache folders.
+
+    Body:
+        source: the generation's preview/path URL
+                (e.g. "api/project/cache/<rel>/generated.png")
+        name:   suggested default filename for the dialog (optional)
+    """
+    global _last_export_dir
+
+    if not _cache_root:
+        raise HTTPException(status_code=400, detail="No project loaded")
+
+    source = (data.get("source") or "").strip()
+    if not source:
+        raise HTTPException(status_code=400, detail="No source file specified")
+
+    src_path = _resolve_media_url_to_path(source)
+    if src_path is None:
+        raise HTTPException(status_code=404, detail="Source file not found")
+
+    # Sensible default filename; strip any path separators the caller included.
+    default_name = (data.get("name") or src_path.name).strip()
+    default_name = default_name.replace("/", "_").replace("\\", "_")
+
+    # Native Save-As dialog (subprocess to avoid tkinter/asyncio conflicts).
+    result = _run_dialog_subprocess([
+        "save",
+        "--title", "Save generation as…",
+        "--initial-file", default_name,
+        "--initial-dir", str(_last_export_dir or Path.home()),
+    ])
+
+    dest = result.get("path")
+    if not result.get("success") or not dest:
+        # User cancelled, or the dialog failed — not an error worth 500-ing over.
+        return {"success": False, "cancelled": True, "error": result.get("error")}
+
+    dest_path = Path(dest)
+    try:
+        import shutil
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src_path, dest_path)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save: {e}")
+
+    _last_export_dir = dest_path.parent
+    print(f"[HISTORY] Exported {src_path} -> {dest_path}", flush=True)
+    return {"success": True, "path": str(dest_path)}
 
 
 @router.delete("/generations/{gen_id:path}")

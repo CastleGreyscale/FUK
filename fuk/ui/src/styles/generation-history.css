@@ -848,7 +848,7 @@
 }
 
 .gallery-large-sidebar {
-  width: 220px;
+  width: 330px;
   flex-shrink: 0;
   background: var(--color-surface);
   border-left: var(--border-width) solid var(--color-border);
@@ -1285,7 +1285,7 @@
 
 /* ─── A/B compare: side-by-side settings diff ────────────────────────────── */
 .gallery-large-sidebar--compare {
-  width: 300px;
+  width: 450px;
 }
 
 .gallery-compare-table-head {
@@ -1444,6 +1444,47 @@
 }
 
 .gen-history-conform-hd.large svg {
+  width: 0.7rem;
+  height: 0.7rem;
+}
+
+/* Save-a-copy button (mirrors the conform-hd button treatment) */
+.gen-history-save {
+  background: transparent;
+  border: none;
+  padding: 0.2rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  transition: all var(--transition-base);
+  color: var(--color-text-muted);
+}
+
+.gen-history-save svg {
+  width: 0.6rem;
+  height: 0.6rem;
+}
+
+.gen-history-save:hover {
+  color: #22c55e;
+}
+
+.gen-history-save:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.gen-history-save.large {
+  font-size: 0.65rem;
+  padding: 0.3rem 0.5rem;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-hover);
+}
+
+.gen-history-save.large svg {
   width: 0.7rem;
   height: 0.7rem;
 }
