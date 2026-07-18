@@ -2286,6 +2286,25 @@
   gap: 0.2rem;
 }
 
+.image-describe-tag-value-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.image-describe-tag-value-count {
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.image-describe-tag-value-count--over {
+  color: #e57373;
+  font-weight: 600;
+}
+
 .image-describe-tag-value {
   width: 100%;
   min-height: 100px;

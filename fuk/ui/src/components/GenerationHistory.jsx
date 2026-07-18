@@ -489,6 +489,257 @@ function GalleryThumb({ generation, isPinned, isSelected, isMultiSelected, compa
   );
 }
 
+// ─── generation-settings detail (fullscreen gallery sidebar) ─────────────────
+
+// Scalar generation settings shown as compact label/value cells, in display
+// order. `fmt` formats the raw metadata.json value; a field is rendered only
+// when present. Anything not listed here (and not hidden below) still shows up
+// via the generic pass, so new settings surface without touching this list.
+const SETTING_FIELDS = [
+  { key: 'image_size',            label: 'Resolution', fmt: v => Array.isArray(v) && v.length >= 2 ? `${v[0]} × ${v[1]}` : String(v) },
+  { key: 'seed',                  label: 'Seed' },
+  { key: 'infer_steps',           label: 'Steps' },
+  { key: 'guidance_scale',        label: 'CFG' },
+  { key: 'denoising_strength',    label: 'Denoise' },
+  { key: 'sigma_shift',           label: 'Sigma shift' },
+  { key: 'exponential_shift_mu',  label: 'Shift μ' },
+  { key: 'video_length',          label: 'Frames' },
+  { key: 'sliding_window_size',   label: 'Window' },
+  { key: 'sliding_window_stride', label: 'Stride' },
+  { key: 'eligen_alpha',          label: 'Eligen α' },
+  { key: 'model',                 label: 'Model' },
+];
+
+// Keys handled explicitly elsewhere, or too noisy/structured to dump generically.
+const SETTING_HIDDEN_KEYS = new Set([
+  ...SETTING_FIELDS.map(f => f.key),
+  'prompt', 'prompt_source', 'negative_prompt', 'lora', 'loras', 'lora_multiplier',
+  'timestamp', 'display_name', 'source_path', 'first_frame_path', 'media_type',
+  'is_sequence', 'frame_count', 'frame_pattern', 'first_frame', 'last_frame',
+  'available_layers', 'layer_count', 'is_video', 'subtype',
+  'prompt_expanded_markers', 'prompt_unknown_markers', 'mood_applied',
+  'control_image', 'control_image_urls',
+]);
+
+const humanizeKey = (k) => k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+
+const isPresent = (v) =>
+  v !== null && v !== undefined && v !== '' && !(Array.isArray(v) && v.length === 0);
+
+const fmtSettingValue = (v) => {
+  if (typeof v === 'boolean') return v ? 'Yes' : 'No';
+  if (Array.isArray(v)) return v.join(', ');
+  return String(v);
+};
+
+// Strip a LoRA name down to its basename (drops long cache/model paths).
+const shortLora = (s) => {
+  const str = String(s);
+  return str.split(/[\\/]/).pop() || str;
+};
+
+// Long or path-like values get their own full-width row instead of a grid cell.
+const isWideValue = (v) => v.length > 32 || v.includes('/') || v.includes('\\');
+
+// Collapse a metadata object's LoRA fields into a single display string.
+// Handles the `loras[]` array (objects or strings) and the legacy single
+// `lora` + `lora_multiplier` pair.
+function formatLoras(meta) {
+  const items = [];
+  if (Array.isArray(meta.loras) && meta.loras.length) {
+    for (const l of meta.loras) {
+      if (typeof l === 'string') { items.push(shortLora(l)); continue; }
+      const name = shortLora(l.name || l.path || l.id || 'lora');
+      const mult = l.multiplier ?? l.strength ?? l.weight;
+      items.push(mult != null ? `${name} · ${mult}` : name);
+    }
+  } else if (isPresent(meta.lora)) {
+    const name = shortLora(meta.lora);
+    items.push(meta.lora_multiplier != null ? `${name} · ${meta.lora_multiplier}` : name);
+  }
+  return items.join(', ');
+}
+
+// Flatten a metadata.json into an ordered [{ key, label, value }] list of scalar
+// generation settings: curated fields first (SETTING_FIELDS order), then any
+// other primitive fields, then a derived LoRA summary. Shared by the single-item
+// panel and the A/B compare table so both stay in sync. Prompt/negative are
+// handled separately by callers since they render as text blocks.
+function collectSettingRows(meta) {
+  const rows = [];
+  if (!meta) return rows;
+  const seen = new Set();
+
+  for (const f of SETTING_FIELDS) {
+    if (!isPresent(meta[f.key])) continue;
+    seen.add(f.key);
+    rows.push({ key: f.key, label: f.label, value: f.fmt ? f.fmt(meta[f.key]) : fmtSettingValue(meta[f.key]) });
+  }
+  for (const [k, v] of Object.entries(meta)) {
+    if (seen.has(k) || SETTING_HIDDEN_KEYS.has(k)) continue;
+    if (!isPresent(v) || typeof v === 'object') continue;
+    rows.push({ key: k, label: humanizeKey(k), value: fmtSettingValue(v) });
+  }
+  const lora = formatLoras(meta);
+  if (lora) rows.push({ key: 'lora', label: 'LoRA', value: lora });
+  return rows;
+}
+
+// Shared metadata cache so the large view and both A/B slots reuse fetches.
+const _metaCache = new Map();
+
+// Fetch (and cache) the full metadata.json for a generation id.
+function useGenerationMetadata(id) {
+  const [meta, setMeta] = useState(() => (id && _metaCache.has(id) ? _metaCache.get(id) : null));
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!id) { setMeta(null); return; }
+    if (_metaCache.has(id)) { setMeta(_metaCache.get(id)); setLoading(false); return; }
+
+    let cancelled = false;
+    setMeta(null);
+    setLoading(true);
+    // Keep the id's internal slashes real (route is {gen_id:path}); only encode
+    // within each segment.
+    const encodedId = id.split('/').map(encodeURIComponent).join('/');
+    fetch(`${API_URL}/project/generations/${encodedId}/metadata`)
+      .then(r => (r.ok ? r.json() : null))
+      .then(data => { if (cancelled) return; _metaCache.set(id, data); setMeta(data); })
+      .catch(() => { if (!cancelled) setMeta(null); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [id]);
+
+  return { meta, loading };
+}
+
+// Renders the full set of generation settings from a loaded metadata.json.
+function GenerationSettings({ meta, loading }) {
+  if (loading && !meta) {
+    return <div className="gallery-detail-settings-status">Loading settings…</div>;
+  }
+  if (!meta) return null;
+
+  const rows = collectSettingRows(meta);
+  const gridRows = rows.filter(r => !isWideValue(r.value));
+  const wideRows = rows.filter(r =>  isWideValue(r.value));
+  const hasPrompt = isPresent(meta.prompt);
+  const hasNeg = isPresent(meta.negative_prompt);
+
+  if (!rows.length && !hasPrompt && !hasNeg) return null;
+
+  return (
+    <div className="gallery-detail-settings">
+      <div className="gallery-detail-settings-label">Settings</div>
+
+      {gridRows.length > 0 && (
+        <div className="gallery-detail-settings-grid">
+          {gridRows.map(r => (
+            <div className="gallery-setting" key={r.key}>
+              <span className="gallery-setting-key">{r.label}</span>
+              <span className="gallery-setting-val">{r.value}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {wideRows.map(r => (
+        <div className="gallery-setting gallery-setting--wide" key={r.key}>
+          <span className="gallery-setting-key">{r.label}</span>
+          <span className="gallery-setting-val gallery-setting-val--path" title={r.value}>{r.value}</span>
+        </div>
+      ))}
+
+      {hasPrompt && (
+        <div className="gallery-detail-text">
+          <span className="gallery-detail-text-label">Prompt</span>
+          <div className="gallery-detail-text-body">{meta.prompt}</div>
+        </div>
+      )}
+      {hasNeg && (
+        <div className="gallery-detail-text">
+          <span className="gallery-detail-text-label">Negative</span>
+          <div className="gallery-detail-text-body">{meta.negative_prompt}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Side-by-side settings for A/B compare. Builds a label | A | B table over the
+// union of both items' settings and highlights rows whose values differ, then
+// stacks the prompt/negative prompt for each side (also diff-highlighted).
+function CompareSettings({ metaA, metaB, loading }) {
+  if (loading && !metaA && !metaB) {
+    return <div className="gallery-detail-settings-status">Loading settings…</div>;
+  }
+  if (!metaA && !metaB) return null;
+
+  const mapA = new Map(collectSettingRows(metaA).map(r => [r.key, r]));
+  const mapB = new Map(collectSettingRows(metaB).map(r => [r.key, r]));
+
+  // Union of keys: A's order first, then any keys only present in B.
+  const keys = [...mapA.keys()];
+  for (const k of mapB.keys()) if (!mapA.has(k)) keys.push(k);
+
+  const rows = keys.map(key => {
+    const ra = mapA.get(key);
+    const rb = mapB.get(key);
+    const va = ra ? ra.value : '—';
+    const vb = rb ? rb.value : '—';
+    return { key, label: (ra || rb).label, va, vb, diff: va !== vb };
+  });
+
+  const promptA = metaA && isPresent(metaA.prompt) ? metaA.prompt : '';
+  const promptB = metaB && isPresent(metaB.prompt) ? metaB.prompt : '';
+  const negA = metaA && isPresent(metaA.negative_prompt) ? metaA.negative_prompt : '';
+  const negB = metaB && isPresent(metaB.negative_prompt) ? metaB.negative_prompt : '';
+  const showPrompt = promptA || promptB;
+  const showNeg = negA || negB;
+
+  if (!rows.length && !showPrompt && !showNeg) return null;
+
+  const textPair = (label, valA, valB) => (
+    <div className="gallery-detail-text">
+      <span className="gallery-detail-text-label">{label}</span>
+      <div className="gallery-compare-text">
+        <div className="gallery-compare-text-side">
+          <span className="gallery-compare-tag a">A</span>
+          <div className={`gallery-detail-text-body${valA !== valB ? ' diff' : ''}`}>{valA || '—'}</div>
+        </div>
+        <div className="gallery-compare-text-side">
+          <span className="gallery-compare-tag b">B</span>
+          <div className={`gallery-detail-text-body${valA !== valB ? ' diff' : ''}`}>{valB || '—'}</div>
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="gallery-detail-settings">
+      <div className="gallery-compare-table-head">
+        <span className="gallery-detail-settings-label">Settings</span>
+        <span className="gallery-compare-tag a">A</span>
+        <span className="gallery-compare-tag b">B</span>
+      </div>
+
+      <div className="gallery-compare-table">
+        {rows.map(r => (
+          <div className={`gallery-compare-row${r.diff ? ' diff' : ''}`} key={r.key}>
+            <span className="gallery-compare-cell key">{r.label}</span>
+            <span className="gallery-compare-cell val" title={r.va}>{r.va}</span>
+            <span className="gallery-compare-cell val" title={r.vb}>{r.vb}</span>
+          </div>
+        ))}
+      </div>
+
+      {showPrompt && textPair('Prompt', promptA, promptB)}
+      {showNeg && textPair('Negative', negA, negB)}
+    </div>
+  );
+}
+
 // ─── large preview (top panel in the gallery) ────────────────────────────────
 
 function GalleryLargeView({ generation, generations, isPinned, vote, onTogglePin, onVote, onDelete, onNavigate, multiSelected, onBulkVote, onBulkDelete, onClearSelection, deleteConfirm, onConfirmDelete, onCancelDelete }) {
@@ -499,6 +750,10 @@ function GalleryLargeView({ generation, generations, isPinned, vote, onTogglePin
   const currentIdx = generations.findIndex(g => g.id === generation.id);
   const hasPrev = currentIdx > 0;
   const hasNext = currentIdx < generations.length - 1;
+
+  // Load the full metadata.json for the selected item to show every generation
+  // setting (seed, resolution, CFG, steps, LoRAs, …).
+  const { meta, loading: metaLoading } = useGenerationMetadata(generation.id);
 
   const typeColors = {
     depth: '#3b82f6', normals: '#a855f7', crypto: '#f59e0b',
@@ -584,6 +839,8 @@ function GalleryLargeView({ generation, generations, isPinned, vote, onTogglePin
           {generation.sourcePath && <div className="gallery-detail-row path"><span>Source</span><span title={generation.sourcePath}>{generation.sourcePath}</span></div>}
         </div>
 
+        <GenerationSettings meta={meta} loading={metaLoading} />
+
         <div className="gallery-detail-actions">
           <button
             className={`gen-history-pin ${isPinned ? 'active' : ''}`}
@@ -616,6 +873,10 @@ function CompareLargeView({ a, b, onSwap, onClearA, onClearB, onExit }) {
   const nameA = a.name || a.id;
   const nameB = b.name || b.id;
 
+  // Full settings for both sides so the sidebar can diff them.
+  const { meta: metaA, loading: loadingA } = useGenerationMetadata(a.id);
+  const { meta: metaB, loading: loadingB } = useGenerationMetadata(b.id);
+
   return (
     <div className="gallery-large-view">
       <div className="gallery-large-media">
@@ -628,7 +889,7 @@ function CompareLargeView({ a, b, onSwap, onClearA, onClearB, onExit }) {
         />
       </div>
 
-      <div className="gallery-large-sidebar">
+      <div className="gallery-large-sidebar gallery-large-sidebar--compare">
         <div className="gallery-compare-header">
           <Columns /> A/B Compare
         </div>
@@ -642,6 +903,8 @@ function CompareLargeView({ a, b, onSwap, onClearA, onClearB, onExit }) {
           <span className="gallery-compare-name" title={nameB}>{nameB}</span>
           <button className="gallery-compare-x" onClick={onClearB} title="Clear B"><X /></button>
         </div>
+
+        <CompareSettings metaA={metaA} metaB={metaB} loading={loadingA || loadingB} />
 
         <div className="gallery-detail-actions">
           <button className="gen-history-pin" onClick={onSwap}><Columns />Swap A / B</button>

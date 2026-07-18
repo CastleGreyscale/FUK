@@ -18,6 +18,11 @@ const API_URL = '/api';
 
 const VIDEO_EXTS = ['.mp4', '.mov', '.webm', '.mkv', '.avi', '.m4v'];
 
+// Hard cap on a tag value — mirrors the backend's limit in llm_endpoints.py
+// (_validate_payload). Surfaced in the UI as a live character count so a long
+// description can be trimmed to fit before Save rather than failing on submit.
+const TAG_VALUE_MAX = 4000;
+
 // Quick-focus chips. Clicking one appends its phrase to the focus field (or
 // removes it if already present), letting the description concentrate on that
 // aspect. The field stays free-text — type anything in addition to these.
@@ -314,6 +319,9 @@ export default function ImageDescribeTool() {
   }, {});
   const uncategorizedCount = tags.filter(t => !t.category).length;
 
+  const tagValueLen = tagValue.length;
+  const tagValueOver = tagValueLen - TAG_VALUE_MAX;   // >0 when the value exceeds the cap
+
   // ---- Render -------------------------------------------------------------
 
   return (
@@ -559,13 +567,18 @@ export default function ImageDescribeTool() {
               </div>
             </div>
 
-            <span className="fuk-label">Value</span>
+            <div className="image-describe-tag-value-label">
+              <span className="fuk-label">Value</span>
+              <span className={`image-describe-tag-value-count ${tagValueOver > 0 ? 'image-describe-tag-value-count--over' : ''}`}>
+                {tagValueLen.toLocaleString()} / {TAG_VALUE_MAX.toLocaleString()}
+                {tagValueOver > 0 && ` — ${tagValueOver.toLocaleString()} over, trim to save`}
+              </span>
+            </div>
             <textarea
               className="fuk-input image-describe-tag-value"
               placeholder="Full text the tag should expand to. Use 'Tag selection' on the description above to fill this in."
               value={tagValue}
               onChange={(e) => setTagValue(e.target.value)}
-              maxLength={4000}
             />
 
             {tagError && <div className="image-describe-error">{tagError}</div>}
@@ -574,7 +587,7 @@ export default function ImageDescribeTool() {
               <button
                 className="fuk-btn fuk-btn-primary"
                 onClick={handleSaveTag}
-                disabled={tagSaving || !tagName.trim() || !tagValue.trim()}
+                disabled={tagSaving || !tagName.trim() || !tagValue.trim() || tagValueOver > 0}
               >
                 {tagSaving ? 'Saving…' : editingId ? 'Update Tag' : 'Save Tag'}
               </button>
