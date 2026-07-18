@@ -332,38 +332,53 @@ export default function PromptPanel({
   );
 }
 
+// Deepest a segment can nest before we stop deepening the tint — keeps the
+// depth palette bounded (matches the `--d1`…`--d4` CSS rules).
+const MAX_DEPTH_TINT = 4;
+
 // Read-only "what this actually resolves to" panel, shown to the left of the
 // prompt while typing. Purely a reference — no interaction. Segments coming
 // from a `#marker` expansion (or the appended mood) get a highlight so it's
-// obvious where the expanded text lives; falls back to plain text pre-fetch.
+// obvious where the expanded text lives; a marker chip + depth tint + ancestry
+// tooltip make nested injections (a tag pulling in another tag) readable so
+// it's clear where a chain trips up. Falls back to plain text pre-fetch.
 function ExpandedPreview({ text, segments, expandedMarkers, unknownMarkers, moodApplied }) {
   const markerCount = expandedMarkers?.length || 0;
   const unknown = unknownMarkers || [];
-  const segs = segments?.length ? segments : [{ text, kind: 'literal', marker: null }];
+  const segs = segments?.length ? segments : [{ text, kind: 'literal', marker: null, depth: 0, path: [] }];
+  // Deepest injection level present — surfaced in the header so a runaway
+  // nesting chain is obvious at a glance.
+  const maxDepth = segs.reduce((d, s) => Math.max(d, s.depth || 0), 0);
   return (
     <div className="prompt-expanded-preview" aria-hidden="true">
       <div className="prompt-expanded-preview-header">
         <span className="prompt-expanded-preview-title">Expanded</span>
         <span className="prompt-expanded-preview-hint">
           {markerCount > 0
-            ? `${markerCount} marker${markerCount === 1 ? '' : 's'} resolved`
+            ? `${markerCount} marker${markerCount === 1 ? '' : 's'}${maxDepth > 1 ? ` · depth ${maxDepth}` : ''}`
             : 'preview'}
         </span>
       </div>
       <div className="prompt-expanded-preview-body">
-        {segs.map((s, i) => (
-          s.kind === 'literal'
-            ? <span key={i}>{s.text}</span>
-            : (
-              <span
-                key={i}
-                className={`prompt-expanded-seg prompt-expanded-seg--${s.kind}`}
-                title={s.marker || (s.kind === 'mood' ? 'storyboard mood' : undefined)}
-              >
-                {s.text}
-              </span>
-            )
-        ))}
+        {segs.map((s, i) => {
+          if (s.kind === 'literal') return <span key={i}>{s.text}</span>;
+          const path = s.path || [];
+          const depthClass = s.marker ? ` prompt-expanded-seg--d${Math.min(s.depth || 1, MAX_DEPTH_TINT)}` : '';
+          // Tooltip shows the full injection chain (outermost → innermost) so
+          // hovering a nested span reveals exactly which tags pulled it in.
+          const pathLabel = path.length ? path.join(' ▸ ')
+            : (s.kind === 'mood' ? 'storyboard mood' : s.marker || undefined);
+          return (
+            <span
+              key={i}
+              className={`prompt-expanded-seg prompt-expanded-seg--${s.kind}${depthClass}`}
+              title={pathLabel}
+            >
+              {s.marker && <span className="prompt-expanded-seg-tag">{s.marker}</span>}
+              {s.text}
+            </span>
+          );
+        })}
       </div>
       {(moodApplied || unknown.length > 0) && (
         <div className="prompt-expanded-preview-footer">

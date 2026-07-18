@@ -773,12 +773,17 @@ def _truncate_segments(segments: List[dict], length: int) -> List[dict]:
 
 
 def _merge_segments(segments: List[dict]) -> List[dict]:
-    """Coalesce adjacent segments sharing a kind + marker (and drop empties)."""
+    """Coalesce adjacent segments sharing a kind + marker + injection path
+    (and drop empties). Path is part of the key so the same marker appearing at
+    two different nesting depths stays as distinct runs."""
     merged: List[dict] = []
     for s in segments:
         if not s["text"]:
             continue
-        if merged and merged[-1]["kind"] == s["kind"] and merged[-1]["marker"] == s["marker"]:
+        if (merged
+                and merged[-1]["kind"] == s["kind"]
+                and merged[-1]["marker"] == s["marker"]
+                and merged[-1].get("path") == s.get("path")):
             merged[-1] = {**merged[-1], "text": merged[-1]["text"] + s["text"]}
         else:
             merged.append(dict(s))
@@ -805,37 +810,47 @@ def _resolve_prompt(
     unknown_markers: List[str] = []
     expanding: set = set()   # markers on the current expansion stack (cycle guard)
 
-    def _segment(src: str, origin: Optional[str]) -> List[dict]:
-        # Walk `src`, expanding #markers into labeled segments. `origin` is the
-        # marker whose expansion produced this text — None at the top level, so
-        # author text stays "literal" and everything a marker pulled in becomes
-        # "expanded" (carrying the marker name for the UI tooltip). Recurses so
-        # markers *inside* an expansion resolve too (#sarah -> "... #redcoat").
+    def _segment(src: str, path: List[str]) -> List[dict]:
+        # Walk `src`, expanding #markers into labeled segments. `path` is the
+        # chain of markers whose expansions produced this text — empty at the
+        # top level, so author text stays "literal" and everything a marker
+        # pulled in becomes "expanded". Each chunk carries its immediate
+        # `marker`, its nesting `depth`, and the full `path` (outermost →
+        # innermost) so the UI can show which tag injected into which. Recurses
+        # so markers *inside* an expansion resolve too (#sarah -> "... #redcoat"
+        # -> "..."), deepening the path one level per hop.
+        origin = path[-1] if path else None
         kind = "expanded" if origin else "literal"
+        depth = len(path)
+
+        def _chunk(t: str) -> dict:
+            return {"text": t, "kind": kind, "marker": origin,
+                    "depth": depth, "path": list(path)}
+
         out: List[dict] = []
         pos = 0
         for m in _MARKER_SCAN_RE.finditer(src):
             if m.start() > pos:
-                out.append({"text": src[pos:m.start()], "kind": kind, "marker": origin})
+                out.append(_chunk(src[pos:m.start()]))
             marker = m.group(0)
             if marker not in marker_to_expansion:
                 unknown_markers.append(marker)
-                out.append({"text": marker, "kind": kind, "marker": origin})
+                out.append(_chunk(marker))
             elif marker in expanding:
                 # Self-referential expansion (#a -> "#b", #b -> "#a"). Leave the
                 # marker raw rather than recurse forever.
-                out.append({"text": marker, "kind": kind, "marker": origin})
+                out.append(_chunk(marker))
             else:
                 expanded_markers.append(marker)
                 expanding.add(marker)
-                out.extend(_segment(marker_to_expansion[marker], marker))
+                out.extend(_segment(marker_to_expansion[marker], path + [marker]))
                 expanding.discard(marker)
             pos = m.end()
         if pos < len(src):
-            out.append({"text": src[pos:], "kind": kind, "marker": origin})
+            out.append(_chunk(src[pos:]))
         return out
 
-    segments = _strip_segment_edges(_segment(text or "", None))  # mirror .strip()
+    segments = _strip_segment_edges(_segment(text or "", []))  # mirror .strip()
 
     _, mood = _storyboard_context()
     mood_applied = ""
@@ -856,20 +871,20 @@ def _resolve_prompt(
         # have written it explicitly in the prompt and we shouldn't double up.
         if mood.lower() not in body.lower():
             if body and not _SENTENCE_END_RE.search(body):
-                segments.append({"text": ".", "kind": "literal", "marker": None})
+                segments.append({"text": ".", "kind": "literal", "marker": None, "depth": 0, "path": []})
                 body = body + "."
             sep = "\n\n" if body else ""
-            segments.append({"text": f"{sep}{_MOOD_LABEL}: ", "kind": "mood", "marker": None})
+            segments.append({"text": f"{sep}{_MOOD_LABEL}: ", "kind": "mood", "marker": None, "depth": 0, "path": []})
             # Resolve `#markers` inside the mood too — a subject/tag referenced in
             # the mood should expand just like one in the prompt. Literal mood
             # prose is tagged "mood"; markers it pulls in keep the "expanded"
             # highlight. (rstrip('.') mirrors the old single-period tail.)
-            mood_segs = _segment(mood.rstrip('.'), None)
+            mood_segs = _segment(mood.rstrip('.'), [])
             for s in mood_segs:
                 if s["kind"] == "literal":
                     s["kind"] = "mood"
             segments.extend(mood_segs)
-            segments.append({"text": ".", "kind": "mood", "marker": None})
+            segments.append({"text": ".", "kind": "mood", "marker": None, "depth": 0, "path": []})
             mood_applied = mood
 
     return {
