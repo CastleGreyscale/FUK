@@ -540,6 +540,7 @@ const SETTING_FIELDS = [
   { key: 'denoising_strength',    label: 'Denoise' },
   { key: 'sigma_shift',           label: 'Sigma shift' },
   { key: 'exponential_shift_mu',  label: 'Shift μ' },
+  { key: 'exponential_shift_mu_used', label: 'Shift μ (auto)', fmt: v => Number(v).toFixed(4) },
   { key: 'video_length',          label: 'Frames' },
   { key: 'sliding_window_size',   label: 'Window' },
   { key: 'sliding_window_stride', label: 'Stride' },

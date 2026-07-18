@@ -207,6 +207,25 @@ class QwenPipelineRunner(PipelineRunner):
         # Merge pipeline_kwargs from models.json
         pipe_kwargs.update(pipe_defaults)
 
+        # --- Diagnostic: recover the effective exponential-shift mu ---
+        # When exponential_shift_mu is left unset (auto), the Qwen scheduler derives
+        # mu from the latent sequence length ((h//16)*(w//16)) via the same formula
+        # used below. Recover the exact value the scheduler will use so it can be
+        # surfaced in the generation metadata for diagnosing its effect on the image.
+        effective_shift_mu = None
+        try:
+            _mu_arg = pipe_kwargs.get("exponential_shift_mu")
+            if _mu_arg is not None:
+                effective_shift_mu = float(_mu_arg)
+            else:
+                _seq_len = (height // 16) * (width // 16)
+                effective_shift_mu = float(pipe.scheduler._calculate_shift_qwen_image(_seq_len))
+            _log(self.log_prefix,
+                 f"Exponential shift μ (effective): {effective_shift_mu:.4f} "
+                 f"[{'manual' if _mu_arg is not None else 'auto'}]")
+        except Exception as _mu_err:
+            _log(self.log_prefix, f"Could not compute effective shift μ: {_mu_err}", "warning")
+
         # --- Per-step hook: live preview and/or cancellation (opt-in) ---
         # Grab the un-hooked VAE decode BEFORE latent capture wraps it, so preview
         # decodes don't trip the "capture first decode" logic and corrupt the latent.
@@ -252,6 +271,7 @@ class QwenPipelineRunner(PipelineRunner):
                     "cfg_scale": effective_cfg,
                     "denoising_strength": denoise,
                 },
+                exponential_shift_mu_used=effective_shift_mu,
             )
         except GenerationCancelled:
             _log(self.log_prefix, "Generation cancelled at step boundary", "warning")

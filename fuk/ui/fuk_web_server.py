@@ -1189,6 +1189,12 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
             control_image_urls=control_image_urls or None,
             denoising_strength=request.denoising_strength,
             exponential_shift_mu=request.exponential_shift_mu,
+            # Diagnostic: the mu the scheduler actually used. Only recorded when
+            # left on auto (null request) — on manual it equals exponential_shift_mu.
+            exponential_shift_mu_used=(
+                result.get("exponential_shift_mu_used")
+                if request.exponential_shift_mu is None else None
+            ),
             eligen_source=str(eligen_source_abs) if eligen_source_abs else None,
             eligen_alpha=request.eligen_alpha,
             prompt_source=prompt_source,
