@@ -13,6 +13,8 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { FolderOpen, X, Trash2 } from '../components/Icons';
+import MarkerTextarea from '../components/MarkerTextarea';
+import { notifyPromptTokensChanged } from '../utils/promptApi';
 
 const API_URL = '/api';
 
@@ -153,6 +155,9 @@ export default function ImageDescribeTool() {
       if (!res.ok) throw new Error(data.detail || `Save failed: ${res.status}`);
       resetTagForm();
       await loadTags();
+      // Let open `#` autocompletes (including this panel's own) pick up the
+      // new/edited tag without a reload.
+      notifyPromptTokensChanged();
     } catch (e) {
       setTagError(e.message);
     } finally {
@@ -170,6 +175,7 @@ export default function ImageDescribeTool() {
       }
       if (editingId === id) resetTagForm();
       await loadTags();
+      notifyPromptTokensChanged();
     } catch (e) {
       setTagError(e.message);
     }
@@ -574,11 +580,12 @@ export default function ImageDescribeTool() {
                 {tagValueOver > 0 && ` — ${tagValueOver.toLocaleString()} over, trim to save`}
               </span>
             </div>
-            <textarea
+            <MarkerTextarea
               className="fuk-input image-describe-tag-value"
-              placeholder="Full text the tag should expand to. Use 'Tag selection' on the description above to fill this in."
+              placeholder="Full text the tag should expand to. Type # to reference another tag, or use 'Tag selection' above."
               value={tagValue}
-              onChange={(e) => setTagValue(e.target.value)}
+              onChange={setTagValue}
+              autoResize={false}
             />
 
             {tagError && <div className="image-describe-error">{tagError}</div>}
