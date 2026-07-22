@@ -341,6 +341,7 @@
                         <tr><td>Steps</td><td>Denoising steps</td><td>20–40 typical; presets available</td></tr>
                         <tr><td>Guidance Scale</td><td>Prompt adherence</td><td>—</td></tr>
                         <tr><td>Sigma Shift</td><td>Adjusts the noise schedule — higher values shift more denoising toward early steps</td><td>Range 0.0–10.0</td></tr>
+                        <tr><td>DiT Switch Boundary</td><td>Timestep (×1000) where dual-DiT Wan 2.2 models hand off from the high-noise DiT (global composition) to the low-noise DiT (detail) — higher values give the high-noise expert more steps</td><td>Range 0.0–1.0; default 0.875; A14B (dual-DiT) models only</td></tr>
                         <tr><td>Motion Bucket ID</td><td>Controls baseline motion amount in supported pipelines</td><td>Optional; leave blank to use model default</td></tr>
                         <tr><td>Denoising Strength</td><td>How much the model deviates from the input image (img2vid modes)</td><td>Range 0.0–1.0; lower values stay closer to the input</td></tr>
                         <tr><td>Sliding Window</td><td>Size and stride for sliding window video processing</td><td>Optional; used to process sequences longer than the model's native context</td></tr>
@@ -946,6 +947,9 @@
                 </ul>
 
                 <h3>Generation Card</h3>
+                <div class="wiki-video" data-vimeo="" data-title="Generation Card">
+                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
+                </div>
                 <ul>
                     <li><strong>Steps</strong> — preset buttons (20, 40) or custom input (1–100)</li>
                     <li><strong>Guidance Scale</strong> — prompt adherence, 1.0–10.0</li>
@@ -954,6 +958,9 @@
                 </ul>
 
                 <h3>Dimensions Card</h3>
+                <div class="wiki-video" data-vimeo="" data-title="Dimensions Card">
+                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
+                </div>
                 <p>For text-to-image models:</p>
                 <ul>
                     <li><strong>Aspect Ratio</strong> — dropdown of common ratios; changing it recalculates height automatically</li>
@@ -1356,6 +1363,9 @@
                 </ul>
                 <p>This is the standard workflow for passing results between pipeline steps — generate in Image, drag to Layers for AOV extraction, drag from Layers to Export for EXR assembly.</p>
 
+                <h3>Quick Save</h3>
+                <p>Every history item carries a <strong>Save</strong> action that copies its output to a location of your choosing without leaving the app. The button opens a native "Save As" dialog and writes a copy of the rendered result — the PNG for an image, or the composited MP4 for a video — to the target path, leaving the original version directory untouched. It appears as a compact icon on each thumbnail's action bar and as a labeled button in the fullscreen gallery detail panel, so you can hand a single result off to a client, review folder, or scratch directory without walking the project hierarchy by hand.</p>
+
                 <h3>Playback Speed</h3>
                 <p>The global playback speed control (6–48 FPS) in the app header affects video thumbnail playback in the history panel. Set it to match your generation frame rate for accurate motion preview.</p>
             </div>
@@ -1440,6 +1450,7 @@
                         <tr><td><code>steps</code></td><td>integer</td><td><code>20</code></td><td>Denoising steps</td></tr>
                         <tr><td><code>guidance_scale</code></td><td>float</td><td><code>5.0</code></td><td>Prompt adherence</td></tr>
                         <tr><td><code>sigma_shift</code></td><td>float</td><td><code>5.0</code></td><td>Noise schedule shift; model-specific, leave at default unless you know the target value</td></tr>
+                        <tr><td><code>switch_dit_boundary</code></td><td>float</td><td><code>0.875</code></td><td>Dual-DiT handoff point; timesteps below this (×1000) run on the low-noise DiT. A14B models only</td></tr>
                         <tr><td><code>denoising_strength</code></td><td>float</td><td><code>1.0</code></td><td>Deviation from input image (img2vid modes)</td></tr>
                     </tbody>
                 </table>
@@ -1921,6 +1932,9 @@
 
                 <h3>Metadata Format</h3>
                 <p>Sidecar files are standard JSON, saved as <code>meta.json</code> in the version directory. They are human-readable and can be parsed by any standard JSON library. No database or index is required — the History panel reads sidecar files directly from disk.</p>
+
+                <h3>Metadata Display</h3>
+                <p>The <a href="#generation-history">Generation History</a> gallery renders a generation's captured metadata as a structured settings panel rather than a raw JSON dump. Curated fields — resolution, seed, steps, CFG, denoise, sigma shift, exponential shift μ, frame count, sliding window, model, and the LoRA stack — are surfaced as compact labelled cells in a consistent order, while long or path-like values such as LoRA names and source paths get their own full-width rows for readability. Any parameter not in the curated list still appears automatically via a generic pass, so newly added generation settings show up in the panel without a UI change. Positive and negative prompts render as their own text blocks, and two generations can be opened side by side for a field-by-field A/B comparison of their settings.</p>
 
                 <h3>Portability</h3>
                 <p>Because metadata is stored as sidecar files alongside outputs rather than in a central database, output directories are fully portable. Copy a version directory to another machine and FUK will recognize it on first launch. If a model file referenced in the sidecar is missing or has a different hash, FUK will warn before re-queuing.</p>

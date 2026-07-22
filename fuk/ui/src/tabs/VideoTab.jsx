@@ -82,6 +82,7 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
     stepsMode: videoDefaults.stepsMode ?? 'preset',
     guidance_scale: videoDefaults.guidance_scale ?? 5.0,
     sigma_shift: videoDefaults.sigma_shift ?? 5.0,
+    switch_dit_boundary: videoDefaults.switch_dit_boundary ?? 0.875,
     sliding_window_size: videoDefaults.sliding_window_size ?? null,
     sliding_window_stride: videoDefaults.sliding_window_stride ?? null,
     denoising_strength: videoDefaults.denoising_strength ?? 1.0,
@@ -564,6 +565,7 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
         updates.loras = [{ key: meta.lora, multiplier: meta.lora_multiplier ?? 1.0 }];
       }
       if (meta.sigma_shift != null)        updates.sigma_shift         = meta.sigma_shift;
+      if (meta.switch_dit_boundary != null) updates.switch_dit_boundary = meta.switch_dit_boundary;
 if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoising_strength;
       if (meta.sliding_window_size != null)   updates.sliding_window_size   = meta.sliding_window_size;
       if (meta.sliding_window_stride != null) updates.sliding_window_stride = meta.sliding_window_stride;
@@ -1022,6 +1024,23 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
                   step={0.5}
                   min={1}
                   max={10}
+                />
+              </div>
+            </div>
+
+            <div className="fuk-form-pair">
+              <div className="fuk-form-group-compact">
+                <label className="fuk-label" title="Timestep fraction (×1000) where Wan 2.2 switches from the high-noise DiT to the low-noise DiT. Higher = more steps on the high-noise expert. Dual-DiT (A14B) models only. Default: 0.875">
+                  DiT Switch Boundary <Info className="fuk-label-info" />
+                </label>
+                <input
+                  type="number"
+                  className="fuk-input"
+                  value={formData.switch_dit_boundary}
+                  onChange={(e) => setFormData({...formData, switch_dit_boundary: parseFloat(e.target.value)})}
+                  step={0.025}
+                  min={0}
+                  max={1}
                 />
               </div>
             </div>

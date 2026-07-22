@@ -539,6 +539,7 @@ const SETTING_FIELDS = [
   { key: 'guidance_scale',        label: 'CFG' },
   { key: 'denoising_strength',    label: 'Denoise' },
   { key: 'sigma_shift',           label: 'Sigma shift' },
+  { key: 'switch_dit_boundary',   label: 'DiT boundary' },
   { key: 'exponential_shift_mu',  label: 'Shift μ' },
   { key: 'exponential_shift_mu_used', label: 'Shift μ (auto)', fmt: v => Number(v).toFixed(4) },
   { key: 'video_length',          label: 'Frames' },

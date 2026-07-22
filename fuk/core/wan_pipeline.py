@@ -90,6 +90,11 @@ class WanPipelineRunner(PipelineRunner):
         # Wan-specific params
         sigma_shift = (kwargs.get("sigma_shift") if kwargs.get("sigma_shift") is not None
                        else defaults.get("sigma_shift", 5.0))
+        # Dual-DiT boundary: timestep fraction (×1000) below which Wan 2.2 switches
+        # from the high-noise DiT to the low-noise DiT. Higher = more steps on the
+        # high-noise expert. Only meaningful for dual-DiT (A14B) models.
+        switch_dit_boundary = (kwargs.get("switch_dit_boundary") if kwargs.get("switch_dit_boundary") is not None
+                               else defaults.get("switch_dit_boundary", 0.875))
         sliding_window_size = (kwargs.get("sliding_window_size") if kwargs.get("sliding_window_size") is not None
                                else defaults.get("sliding_window_size"))
         sliding_window_stride = (kwargs.get("sliding_window_stride") if kwargs.get("sliding_window_stride") is not None
@@ -106,6 +111,7 @@ class WanPipelineRunner(PipelineRunner):
             "denoising_strength": denoise,
             "seed": seed,
             "sigma_shift": sigma_shift,
+            "switch_dit_boundary": switch_dit_boundary,
             "input_image": image_path,
             "control_path": control_path,
             "pipeline_kwargs": pipe_defaults if pipe_defaults else None,
@@ -135,6 +141,7 @@ class WanPipelineRunner(PipelineRunner):
             cfg_scale=effective_cfg,
             denoising_strength=denoise,
             sigma_shift=sigma_shift,
+            switch_DiT_boundary=switch_dit_boundary,
         )
 
         # Optional Wan params — only pass when explicitly set
@@ -214,6 +221,7 @@ class WanPipelineRunner(PipelineRunner):
                     "steps": num_steps, "size": f"{width}x{height}",
                     "frames": num_frames, "cfg_scale": effective_cfg,
                     "denoising_strength": denoise, "sigma_shift": sigma_shift,
+                    "switch_dit_boundary": switch_dit_boundary,
                 },
             )
         except Exception as e:
