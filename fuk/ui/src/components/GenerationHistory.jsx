@@ -9,6 +9,7 @@ import { buildImageUrl, API_URL } from '../utils/constants';
 import { useVideoPlayback } from '../hooks/useVideoPlayback';
 import ZoomableImage from './ZoomableImage';
 import CompareImage from './CompareImage';
+import VideoSyncController from './VideoSyncController';
 import ConformHDButton from './ConformHDButton';
 import { setPanelPreview, upsertPanel } from '../utils/storyboardApi';
 import { saveGenerationToLocation } from '../utils/historyApi';
@@ -905,6 +906,36 @@ function GalleryLargeView({ generation, generations, isPinned, vote, onTogglePin
   );
 }
 
+// ─── Side-by-side synced video A/B compare ───────────────────────────────────
+// Two videos rendered in parallel panes, driven by a single VideoSyncController
+// so play/pause/scrub act on both at once. The controller reads each video's
+// duration on mount, so we gate it behind both <video>s reporting metadata —
+// otherwise it mounts against readyState 0 elements and never picks up duration.
+
+function CompareVideos({ srcA, srcB, labelA = 'A', labelB = 'B' }) {
+  const videoARef = useRef(null);
+  const videoBRef = useRef(null);
+  const videoRefs = useMemo(() => [videoARef, videoBRef], []);
+  const [loadedCount, setLoadedCount] = useState(0);
+  const onLoaded = useCallback(() => setLoadedCount((c) => c + 1), []);
+
+  return (
+    <div className="compare-video">
+      <div className="compare-video-stage">
+        <div className="compare-video-pane">
+          <span className="compare-video-label a">{labelA}</span>
+          <video ref={videoARef} src={srcA} muted playsInline preload="auto" onLoadedMetadata={onLoaded} />
+        </div>
+        <div className="compare-video-pane">
+          <span className="compare-video-label b">{labelB}</span>
+          <video ref={videoBRef} src={srcB} muted playsInline preload="auto" onLoadedMetadata={onLoaded} />
+        </div>
+      </div>
+      {loadedCount >= 2 && <VideoSyncController videoRefs={videoRefs} />}
+    </div>
+  );
+}
+
 // ─── A/B compare view (before/after wipe) ────────────────────────────────────
 
 function CompareLargeView({ a, b, onSwap, onClearA, onClearB, onExit }) {
@@ -912,6 +943,9 @@ function CompareLargeView({ a, b, onSwap, onClearA, onClearB, onExit }) {
   const srcB = buildImageUrl(b.preview);
   const nameA = a.name || a.id;
   const nameB = b.name || b.id;
+  // Videos can't be wiped like stills — show them side by side with synced
+  // playback instead. Falls back to the wipe slider for images (or mixed pairs).
+  const bothVideos = isGenVideo(a) && isGenVideo(b);
 
   // Full settings for both sides so the sidebar can diff them.
   const { meta: metaA, loading: loadingA } = useGenerationMetadata(a.id);
@@ -920,13 +954,23 @@ function CompareLargeView({ a, b, onSwap, onClearA, onClearB, onExit }) {
   return (
     <div className="gallery-large-view">
       <div className="gallery-large-media">
-        <CompareImage
-          key={`${srcA}|${srcB}`}
-          srcA={srcA}
-          srcB={srcB}
-          labelA="A"
-          labelB="B"
-        />
+        {bothVideos ? (
+          <CompareVideos
+            key={`${srcA}|${srcB}`}
+            srcA={srcA}
+            srcB={srcB}
+            labelA="A"
+            labelB="B"
+          />
+        ) : (
+          <CompareImage
+            key={`${srcA}|${srcB}`}
+            srcA={srcA}
+            srcB={srcB}
+            labelA="A"
+            labelB="B"
+          />
+        )}
       </div>
 
       <div className="gallery-large-sidebar gallery-large-sidebar--compare">
@@ -952,7 +996,9 @@ function CompareLargeView({ a, b, onSwap, onClearA, onClearB, onExit }) {
         </div>
 
         <div className="gallery-compare-hint">
-          Drag the bar to wipe · scroll to zoom · move mouse to pan
+          {bothVideos
+            ? 'Videos are synced · use the controls below the panes to play, pause, and scrub both at once'
+            : 'Drag the bar to wipe · scroll to zoom · move mouse to pan'}
         </div>
       </div>
     </div>
