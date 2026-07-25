@@ -1,7 +1,12 @@
 import { useEffect, useRef } from 'react';
 
 const INPUT_TAGS = new Set(['INPUT', 'TEXTAREA', 'SELECT']);
-const inInput = () => INPUT_TAGS.has(document.activeElement?.tagName);
+const inInput = () => {
+  const el = document.activeElement;
+  if (INPUT_TAGS.has(el?.tagName)) return true;
+  if (el?.contentEditable === 'true') return true;
+  return false;
+};
 const dispatch = (name, detail) =>
   window.dispatchEvent(new CustomEvent(name, detail !== undefined ? { detail } : undefined));
 
@@ -56,16 +61,15 @@ export function useKeyboardShortcuts({
       }
 
       // Shift+G: generate
-      if (key === 'G' && shift && !ctrl) {
+      if (key === 'G' && shift && !ctrl && !inInput()) {
         dispatch('fuk-shortcut-generate');
         return;
       }
 
       // Escape: blur focused input or cancel generation
       if (key === 'Escape') {
-        const active = document.activeElement;
-        if (active?.tagName === 'TEXTAREA' || active?.tagName === 'INPUT') {
-          active.blur();
+        if (inInput()) {
+          document.activeElement?.blur();
         } else {
           dispatch('fuk-shortcut-cancel');
         }
