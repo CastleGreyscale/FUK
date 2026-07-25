@@ -1116,9 +1116,8 @@ function FullscreenGallery({ generations, pinnedIds, votes, onTogglePin, onVote,
     window.addEventListener('mouseup', onUp);
   };
 
-  // Assign a picked image to the next open A/B slot (or clear it if already picked).
+  // Assign a picked image/video to the next open A/B slot (or clear it if already picked).
   const handleCompareAssign = useCallback((generation) => {
-    if (isGenVideo(generation)) return;            // wipe/zoom only makes sense for stills
     if (compareA?.id === generation.id) { setCompareA(null); return; } // toggle A off
     if (compareB?.id === generation.id) { setCompareB(null); return; } // toggle B off
     if (!compareA) { setCompareA(generation); return; }  // fill A first
