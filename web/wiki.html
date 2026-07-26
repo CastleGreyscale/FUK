@@ -266,13 +266,14 @@
                         <tr><td>Qwen Image + EliGen</td><td>Regional prompt conditioning — see <a href="#regional-conditioning">Regional Conditioning</a></td></tr>
                         <tr><td>Qwen Image 2512</td><td>High-resolution variant</td></tr>
                         <tr><td>Qwen Image Edit 2511</td><td>Image-to-image editing</td></tr>
+                        <tr><td>Flux 2 Dev</td><td>Image-to-image editing</td></tr>
                     </tbody>
                 </table>
 
                 <h3>Easily Added Models</h3>
                 <p>FUK's pipeline architecture supports additional model families with minimal configuration. The following have been tested or are known to be compatible:</p>
                 <ul>
-                    <li><a href="https://huggingface.co/black-forest-labs/FLUX.2-dev" target="_blank">Flux 2</a></li>
+                    <li><a href="https://huggingface.co/krea/Krea-2-Turbo" target="_blank">Krea 2</a></li>
                     <li><a href="https://huggingface.co/Tongyi-MAI/Z-Image-Turbo" target="_blank">Z-Image Turbo</a></li>
                     <li><a href="https://www.modelscope.cn/models/PaddlePaddle/ERNIE-Image" target="_blank">ERNIE-Image</a></li>
                     <li><a href="https://joyaiimage.com/" target="_blank">JoyAI Image Edit</a></li>
@@ -325,10 +326,16 @@
                         <tr><th>Pipeline</th><th>Input</th><th>Notes</th></tr>
                     </thead>
                     <tbody>
-                        <tr><td>I2V-A14B</td><td>Image + text prompt</td><td>Image anchors the first frame; motion is synthesized toward the prompt</td></tr>
-                        <tr><td>Fun Control</td><td>Control video + optional start/end images</td><td>Uses a reference video as a motion/structure guide</td></tr>
+                        <tr><td>Wan 2.2 I2V-A14B</td><td>Image + text prompt</td><td>Image anchors the first frame; motion is synthesized toward the prompt</td></tr>
+                        <tr><td>Wan 2.2 Fun Control</td><td>Control video + optional start/end images</td><td>Uses a reference video as a motion/structure guide</td></tr>
+                        <tr><td>FFLF</td><td>Image + text prompt</td><td>Fast frame generation; optimized for quick iteration and smooth motion synthesis</td></tr>
+                        <tr><td>Wan Animate</td><td>Image + text prompt</td><td>Animation-focused pipeline with enhanced character and object motion control</td></tr>
                     </tbody>
                 </table>
+
+                <h3>Alternative Models</h3>
+                <p><strong>LTX 2.3</strong> is an available video generation model but is not currently built into FUK's standard pipeline. If you're interested in adding support, it can be integrated via model configuration.</p>
+                <p><strong>Flux Video</strong> is coming soon. Support will be added to FUK upon release.</p>
 
                 <h3>Generation Parameters</h3>
                 <table class="wiki-table">
@@ -787,9 +794,6 @@
             <!-- Media Input -->
             <div class="wiki-section" id="media-input">
                 <h2>Media Input</h2>
-                <div class="wiki-video" data-vimeo="" data-title="Media Input">
-                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
-                </div>
                 <p>The Media Input component (MediaUploader) is the standard file input throughout FUK. It appears in every tab that accepts an image, video, or sequence as input. All instances share the same behavior and supported formats.</p>
 
                 <h3>Input Methods</h3>

@@ -92,6 +92,10 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
     lastUsedSeed: videoDefaults.lastUsedSeed ?? null,
     image_path: videoDefaults.image_path ?? null,
     end_image_path: videoDefaults.end_image_path ?? null,
+    animate_pose_video: videoDefaults.animate_pose_video ?? null,
+    animate_face_video: videoDefaults.animate_face_video ?? null,
+    animate_inpaint_video: videoDefaults.animate_inpaint_video ?? null,
+    animate_mask_video: videoDefaults.animate_mask_video ?? null,
     width: videoDefaults.width ?? null,
     height: videoDefaults.height ?? null,
     source_width: videoDefaults.source_width ?? null,
@@ -402,6 +406,10 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
       image_path: formData.image_path ? formData.image_path.replace(/^\/outputs\//, '') : null,
       end_image_path: formData.end_image_path ? formData.end_image_path.replace(/^\/outputs\//, '') : null,
       control_path: formData.control_path ? formData.control_path.replace(/^\/outputs\//, '') : null,
+      animate_pose_video: formData.animate_pose_video ? formData.animate_pose_video.replace(/^\/outputs\//, '') : null,
+      animate_face_video: formData.animate_face_video ? formData.animate_face_video.replace(/^\/outputs\//, '') : null,
+      animate_inpaint_video: formData.animate_inpaint_video ? formData.animate_inpaint_video.replace(/^\/outputs\//, '') : null,
+      animate_mask_video: formData.animate_mask_video ? formData.animate_mask_video.replace(/^\/outputs\//, '') : null,
       denoising_strength: 1.0,
       lora: null,
       lora_multiplier: 1.0,
@@ -511,6 +519,22 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
     setFormData(prev => ({ ...prev, control_path: paths[0] || null }));
   };
 
+  const handleAnimatePoseVideoChange = (paths) => {
+    setFormData(prev => ({ ...prev, animate_pose_video: paths[0] || null }));
+  };
+
+  const handleAnimateFaceVideoChange = (paths) => {
+    setFormData(prev => ({ ...prev, animate_face_video: paths[0] || null }));
+  };
+
+  const handleAnimateInpaintVideoChange = (paths) => {
+    setFormData(prev => ({ ...prev, animate_inpaint_video: paths[0] || null }));
+  };
+
+  const handleAnimateMaskVideoChange = (paths) => {
+    setFormData(prev => ({ ...prev, animate_mask_video: paths[0] || null }));
+  };
+
   // Check if task requires images or control video — always check both model supports and task
   // name so neither source alone can cause a false negative during config load or key mismatches.
   const selectedModel = videoModels.find(m => m.key === formData.task);
@@ -521,8 +545,13 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
     || modelSupports.includes('vace_reference_image')
     || formData.task?.includes('i2v')
     || formData.task?.includes('flf2v')
-    || formData.task?.includes('inp');
+    || formData.task?.includes('inp')
+    || modelSupports.includes('animate_pose_video');
   const requiresEndImage = modelSupports.includes('end_image') || formData.task?.includes('flf2v');
+  const requiresAnimatePoseVideo = modelSupports.includes('animate_pose_video');
+  const requiresAnimateFaceVideo = modelSupports.includes('animate_face_video');
+  const requiresAnimateInpaintVideo = modelSupports.includes('animate_inpaint_video');
+  const requiresAnimateMaskVideo = modelSupports.includes('animate_mask_video');
   
   // Calculate whether current frame input is valid
   const currentFrameValid = (parseInt(frameInput) - 1) % 4 === 0;
@@ -579,6 +608,11 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
         updates.width         = meta.image_size[0];
         updates.height        = meta.image_size[1];
       }
+      // Restore animate video inputs if present
+      if (meta.animate_pose_video)    updates.animate_pose_video    = meta.animate_pose_video;
+      if (meta.animate_face_video)    updates.animate_face_video    = meta.animate_face_video;
+      if (meta.animate_inpaint_video) updates.animate_inpaint_video = meta.animate_inpaint_video;
+      if (meta.animate_mask_video)    updates.animate_mask_video    = meta.animate_mask_video;
 
       setFormData(prev => ({ ...prev, ...updates }));
 
@@ -715,9 +749,9 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
           {/* Input Images Card */}
           <div className="fuk-card">
             <h3 className="fuk-card-title fuk-mb-3">
-              {isFunControl ? 'Control Inputs' : 'Input Images'}
+              {requiresAnimatePoseVideo ? 'Animate Inputs' : isFunControl ? 'Control Inputs' : 'Input Images'}
             </h3>
-            
+
             {/* Control Video for Fun Control mode */}
             {requiresControlVideo && (
               <div className="fuk-form-group-compact">
@@ -737,15 +771,95 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
                 </p>
               </div>
             )}
-            
-            {/* Start Image - for I2V modes (optional in Fun Control) */}
+
+            {/* Animate Pose Video */}
+            {requiresAnimatePoseVideo && (
+              <div className="fuk-form-group-compact">
+                <label className="fuk-label">
+                  Pose Video <span className="fuk-label-required">(Required)</span>
+                </label>
+                <MediaUploader
+                  images={formData.animate_pose_video ? [formData.animate_pose_video] : []}
+                  onImagesChange={handleAnimatePoseVideoChange}
+                  disabled={generating}
+                  multiple={false}
+                  accept="all"
+                  label="Drop video or click to browse"
+                />
+                <p className="fuk-help-text">
+                  Pose keypoints video for animation control
+                </p>
+              </div>
+            )}
+
+            {/* Animate Face Video */}
+            {requiresAnimateFaceVideo && (
+              <div className="fuk-form-group-compact fuk-mt-4">
+                <label className="fuk-label">
+                  Face Video <span className="fuk-label-required">(Required)</span>
+                </label>
+                <MediaUploader
+                  images={formData.animate_face_video ? [formData.animate_face_video] : []}
+                  onImagesChange={handleAnimateFaceVideoChange}
+                  disabled={generating}
+                  multiple={false}
+                  accept="all"
+                  label="Drop video or click to browse"
+                />
+                <p className="fuk-help-text">
+                  Facial animation video for expression control
+                </p>
+              </div>
+            )}
+
+            {/* Animate Inpaint Video (Replace mode only) */}
+            {requiresAnimateInpaintVideo && (
+              <div className="fuk-form-group-compact fuk-mt-4">
+                <label className="fuk-label">
+                  Inpaint Video <span className="fuk-label-description">(Optional for Replace)</span>
+                </label>
+                <MediaUploader
+                  images={formData.animate_inpaint_video ? [formData.animate_inpaint_video] : []}
+                  onImagesChange={handleAnimateInpaintVideoChange}
+                  disabled={generating}
+                  multiple={false}
+                  accept="all"
+                  label="Drop video or click to browse"
+                />
+                <p className="fuk-help-text">
+                  Inpaint content video for texture replacement
+                </p>
+              </div>
+            )}
+
+            {/* Animate Mask Video (Replace mode only) */}
+            {requiresAnimateMaskVideo && (
+              <div className="fuk-form-group-compact fuk-mt-4">
+                <label className="fuk-label">
+                  Mask Video <span className="fuk-label-description">(Optional for Replace)</span>
+                </label>
+                <MediaUploader
+                  images={formData.animate_mask_video ? [formData.animate_mask_video] : []}
+                  onImagesChange={handleAnimateMaskVideoChange}
+                  disabled={generating}
+                  multiple={false}
+                  accept="all"
+                  label="Drop video or click to browse"
+                />
+                <p className="fuk-help-text">
+                  Mask video for selective replacement areas
+                </p>
+              </div>
+            )}
+
+            {/* Start Image - for I2V modes (optional in Fun Control, required for Animate) */}
             {(requiresStartImage || isFunControl) ? (
               <>
-                <div className={`fuk-form-group-compact ${requiresControlVideo ? 'fuk-mt-4' : ''}`}>
+                <div className={`fuk-form-group-compact ${(requiresControlVideo || requiresAnimatePoseVideo) ? 'fuk-mt-4' : ''}`}>
                   <label className="fuk-label">
-                    Start Image 
-                    {!isFunControl && <span className="fuk-label-required">(Required)</span>}
-                    {isFunControl && <span className="fuk-label-description">(Optional)</span>}
+                    {requiresAnimatePoseVideo ? 'Reference Image' : 'Start Image'}
+                    {(requiresAnimatePoseVideo || (!isFunControl && !requiresAnimatePoseVideo)) && <span className="fuk-label-required">(Required)</span>}
+                    {isFunControl && !requiresAnimatePoseVideo && <span className="fuk-label-description">(Optional)</span>}
                   </label>
                   <MediaUploader
                     images={formData.image_path ? [formData.image_path] : []}
@@ -760,7 +874,7 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
                     </p>
                   )}
                 </div>
-                
+
                 {requiresEndImage && (
                   <div className="fuk-form-group-compact fuk-mt-4">
                     <label className="fuk-label">
@@ -775,13 +889,13 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
                     />
                   </div>
                 )}
-                
+
               </>
             ) : (
               <div className="fuk-empty-state">
                 <Film className="fuk-empty-state-icon" />
                 <p className="fuk-empty-state-text">
-                  Select an I2V, FLF2V, or Fun Control model<br />to enable control inputs
+                  Select an I2V, FLF2V, Animate, or Fun Control model<br />to enable control inputs
                 </p>
               </div>
             )}
@@ -1130,7 +1244,7 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
         elapsedSeconds={elapsedSeconds}
         onGenerate={handleGenerate}
         onCancel={cancel}
-        canGenerate={!!formData.prompt && (!requiresStartImage || !!formData.image_path) && (!requiresEndImage || !!formData.end_image_path)}
+        canGenerate={!!formData.prompt && (!requiresStartImage || !!formData.image_path) && (!requiresEndImage || !!formData.end_image_path) && (!requiresAnimatePoseVideo || !!formData.animate_pose_video) && (!requiresAnimateFaceVideo || !!formData.animate_face_video)}
         generateLabel="Generate Video"
         generatingLabel={batchProgress ? `Generating ${batchProgress.current}/${batchProgress.total}...` : 'Generating...'}
         batchCount={formData.batchCount}

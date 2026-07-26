@@ -48,6 +48,11 @@ class WanPipelineRunner(PipelineRunner):
         image_path: Optional[Path] = None,
         end_image_path: Optional[Path] = None,
         control_path: Optional[Path] = None,
+        # Animate video inputs
+        animate_pose_video: Optional[Path] = None,
+        animate_face_video: Optional[Path] = None,
+        animate_inpaint_video: Optional[Path] = None,
+        animate_mask_video: Optional[Path] = None,
         # Optional init-video (for the HD-proxy conform path). When present,
         # the pipeline VAE-encodes the video and the scheduler adds noise at
         # a level set by `denoising_strength`, so generation denoises *from*
@@ -101,7 +106,7 @@ class WanPipelineRunner(PipelineRunner):
                                  else defaults.get("sliding_window_stride"))
 
         # --- Logging ---
-        self.log_generation_header("VIDEO GENERATION", model_type, entry, {
+        log_params = {
             "prompt": prompt,
             "task": f"{task} → {model_type}",
             "size": f"{width}x{height}",
@@ -117,7 +122,17 @@ class WanPipelineRunner(PipelineRunner):
             "pipeline_kwargs": pipe_defaults if pipe_defaults else None,
             "lora": f"{lora} (α={lora_multiplier})" if lora else None,
             "loras": [f"{l.get('name','?')} (α={l.get('alpha', 1.0)})" for l in (loras or [])],
-        })
+        }
+        # Add animate inputs if present
+        if animate_pose_video:
+            log_params["animate_pose_video"] = animate_pose_video
+        if animate_face_video:
+            log_params["animate_face_video"] = animate_face_video
+        if animate_inpaint_video:
+            log_params["animate_inpaint_video"] = animate_inpaint_video
+        if animate_mask_video:
+            log_params["animate_mask_video"] = animate_mask_video
+        self.log_generation_header("VIDEO GENERATION", model_type, entry, log_params)
 
         # --- Pipeline + LoRA ---
         if progress_callback:
@@ -158,10 +173,19 @@ class WanPipelineRunner(PipelineRunner):
         semantic_inputs = {}
         if image_path:
             semantic_inputs["reference_image"] = image_path
-        if end_image_path:                              # <-- ADD
+        if end_image_path:
             semantic_inputs["end_image"] = end_image_path
         if control_path:
             semantic_inputs["control_input"] = control_path
+        # Animate video inputs
+        if animate_pose_video:
+            semantic_inputs["animate_pose_video"] = animate_pose_video
+        if animate_face_video:
+            semantic_inputs["animate_face_video"] = animate_face_video
+        if animate_inpaint_video:
+            semantic_inputs["animate_inpaint_video"] = animate_inpaint_video
+        if animate_mask_video:
+            semantic_inputs["animate_mask_video"] = animate_mask_video
 
         mapped_inputs = self.map_inputs(model_type, semantic_inputs, width, height)
         pipe_kwargs.update(mapped_inputs)
@@ -253,11 +277,22 @@ class WanPipelineRunner(PipelineRunner):
                 _log(self.log_prefix, f"  Mapped {semantic_name} → vace_reference_image")
                 return {"vace_reference_image": img}
             return None
+
         if model_param == "end_image":
             img = self.load_image(value, width, height)
             if img:
                 _log(self.log_prefix, f"  Mapped {semantic_name} → end_image")
                 return {"end_image": img}
+            return None
+
+        # Animate video inputs — load as raw frame data
+        if model_param in ("animate_pose_video", "animate_face_video",
+                          "animate_inpaint_video", "animate_mask_video"):
+            video_data = self._load_video_data(value, height, width)
+            if video_data:
+                raw_frames = video_data.raw_data()
+                _log(self.log_prefix, f"  Mapped {semantic_name} → {model_param} ({len(raw_frames)} frames)")
+                return {model_param: raw_frames}
             return None
 
         # Fall back to base implementation for common types
