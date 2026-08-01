@@ -8,6 +8,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import Footer from '../components/Footer';
 import LoraDatasetBuilder from './LoraDatasetBuilder';
 import ImageDescribeTool from './ImageDescribeTool';
+import ThreeDReconstruct from './ThreeDReconstruct';
 
 // ============================================================================
 // Helpers
@@ -539,9 +540,10 @@ const SUB_TABS = [
   { key: 'spec', label: 'Spec Tool' },
   { key: 'lora', label: 'LoRA Dataset Builder' },
   { key: 'describe', label: 'Describe & Tag' },
+  { key: 'threed', label: '3D Reconstruct' },
 ];
 
-export default function UtilitiesTab({ activeTab, setActiveTab, config }) {
+export default function UtilitiesTab({ activeTab, setActiveTab, config, project }) {
   const [subTab, setSubTab] = useState('spec');
 
   return (
@@ -567,6 +569,7 @@ export default function UtilitiesTab({ activeTab, setActiveTab, config }) {
         {subTab === 'spec' && <SpecTool config={config} />}
         {subTab === 'lora' && <LoraDatasetBuilder config={config} />}
         {subTab === 'describe' && <ImageDescribeTool />}
+        {subTab === 'threed' && <ThreeDReconstruct config={config} project={project} />}
       </div>
 
       {/* Footer */}

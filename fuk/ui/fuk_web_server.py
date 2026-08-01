@@ -3990,8 +3990,35 @@ async def _dispatch_task(task_type: str, payload: dict, generation_id: str) -> d
         req = EXRSequenceExportRequest(**payload)
         return await export_exr_sequence(req)
 
+    # ---- 3D reconstruction (TRELLIS / VGGT) ----
+    elif task_type == "threed_reconstruct":
+        from threed_endpoints import ThreeDReconstructRequest, run_reconstruction
+        req = ThreeDReconstructRequest(**payload)
+        return await run_reconstruction(req, generation_id=generation_id)
+
     else:
         raise ValueError(f"Unknown task_type: '{task_type}'")
+
+
+# ============================================================================
+# 3D Reconstruction
+# ============================================================================
+# Registered after the task system because setup logs through `log`, which
+# reads the capture globals defined in that section.
+
+from threed_endpoints import setup_threed_routes
+
+setup_threed_routes(
+    app,
+    generation_backend=generation_backend,
+    resolve_input_path=resolve_input_path,
+    get_generation_output_dir=get_generation_output_dir,
+    get_project_relative_url=get_project_relative_url,
+    active_generations=active_generations,
+    clear_vram=clear_vram,
+    datasets_root=OUTPUT_ROOT / "lora_datasets",
+    log=log,
+)
 
 
 async def _forward_to_endpoint(path: str, payload: dict) -> dict:

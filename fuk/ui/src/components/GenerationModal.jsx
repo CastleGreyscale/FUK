@@ -27,6 +27,7 @@ const TYPE_LABELS = {
   export: 'EXR Export',
   export_exr: 'EXR Export',
   export_exr_sequence: 'EXR Sequence Export',
+  threed_reconstruct: '3D Reconstruction',
 };
 
 export default function GenerationModal({

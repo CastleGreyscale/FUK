@@ -76,6 +76,7 @@
                         <a href="#aovs" class="sidebar-link">AOVs &amp; Passes</a>
                         <a href="#exr-export" class="sidebar-link">EXR Export</a>
                         <a href="#lora-dataset-builder" class="sidebar-link">LoRA Dataset Builder</a>
+                        <a href="#threed-reconstruction" class="sidebar-link">3D Reconstruction</a>
                     </div>
                 </div>
 
@@ -645,6 +646,115 @@
 
                 <h3>Captioning</h3>
                 <p>Captions are generated automatically for each image based on the subject name and variation context. The caption format is compatible with most LoRA training pipelines (kohya_ss, SimpleTuner, etc.). Captions can be edited manually after generation — open the caption editor from the dataset panel before finalizing.</p>
+            </div>
+
+            <!-- 3D Reconstruction -->
+            <div class="wiki-section" id="threed-reconstruction">
+                <h2>3D Reconstruction</h2>
+                <div class="wiki-video" data-vimeo="" data-title="3D Reconstruction">
+                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
+                </div>
+                <p>Generates proxy 3D geometry from images — either captured photos or Qwen-generated orbital views from the LoRA Dataset Builder. The tool lives in the Utilities tab, alongside the Spec Tool and Dataset Builder.</p>
+                <p>The target output is production-useful proxy geometry: collision meshes, depth references, NeRF initialization, and geometry-informed passes for compositing. Synthetic-to-3D — driving reconstruction from generated views rather than photographs — is the workflow this exists for.</p>
+
+                <div class="wiki-warning">
+                    <p>This is not photogrammetry. Qwen is a generative model, not a physically consistent renderer, so geometry across generated views is approximate by construction. For prop reference, collision meshes and compositing depth guides this is fine. For precision measurement or hero asset creation it is not.</p>
+                </div>
+
+                <h3>Two Model Tiers</h3>
+                <table class="wiki-table">
+                    <thead>
+                        <tr><th>Model</th><th>Input</th><th>Output</th><th>VRAM</th><th>Speed</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td><strong>TRELLIS</strong></td><td>Single image</td><td>Textured GLB mesh with baked UVs</td><td>~12GB peak</td><td>~55s typical</td></tr>
+                        <tr><td><strong>VGGT</strong></td><td>1 to hundreds of images</td><td>GLB mesh + PLY point cloud + camera solve</td><td>~13GB peak</td><td>~10s inference</td></tr>
+                    </tbody>
+                </table>
+                <p>TRELLIS decodes Structured 3D Latents into a mesh and bakes a texture onto it. VGGT is a single feed-forward transformer that returns camera parameters, dense depth and a 3D point cloud in one pass — no pairwise matching, no global bundle adjustment. Choose TRELLIS for a fast proxy from one image; choose VGGT when you have coverage.</p>
+
+                <h3>Image Count Guidance (VGGT)</h3>
+                <p>Angular spread matters more than raw count — clustered views give diminishing returns. The panel warns live as you add or remove views.</p>
+                <table class="wiki-table">
+                    <thead>
+                        <tr><th>Views</th><th>Result</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>4–6</td><td>Rough proxy, usable for quick geometry reference</td></tr>
+                        <tr><td>8–12</td><td>Solid object reconstruction — recommended minimum for a clean mesh</td></tr>
+                        <tr><td>16–24</td><td>Full 360° coverage with top and bottom; best results</td></tr>
+                    </tbody>
+                </table>
+
+                <h3>Input Selection</h3>
+                <p>Three input sources: a multi-select file browser, a folder (expanded recursively), or the <strong>Dataset Builder</strong> shortcut, which lists every generated dataset and loads its approved or generated views in one click.</p>
+                <p>Selected views appear in a vertical filmstrip between the settings and the viewport. Click any thumbnail to toggle it in or out of the solve — excluded views grey out but stay visible, so the angular spread of the full set stays readable while you narrow it down. All / None / Invert act on the whole set. Drag the splitter to trade filmstrip width against viewport size; double-click it to reset.</p>
+                <p>This matters more than it sounds. Finding a working image set is mostly elimination — bad angles, inconsistent subject scale, and views the generator rendered differently all drag the reconstruction down, and pulling them out is far quicker than re-picking the input from scratch.</p>
+
+                <h3>Background Handling</h3>
+                <p>VGGT reconstructs a <em>scene</em>, not an object — it assigns depth to every pixel, background included. A plain studio backdrop is textureless, so those depths are unconstrained and the model invents a curved sheet behind the subject. Across generated views those invented sheets disagree with each other, and the point cloud ends up with a shell of contradictory geometry wrapped around the subject. On a 64-view test orbit, <strong>69% of surviving points were backdrop</strong>.</p>
+                <div class="wiki-note">
+                    <p>Matting your source images to alpha does <strong>not</strong> fix this on its own: VGGT composites transparency onto white before inference, which produces exactly the white background that causes the problem. FUK applies alpha after inference instead, where it works.</p>
+                </div>
+                <table class="wiki-table">
+                    <thead>
+                        <tr><th>Mode</th><th>Behaviour</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>Remove studio backdrop <em>(default)</em></td><td>Keys out bright, near-neutral pixels before meshing. A brightness slider handles pale subjects being over-cut.</td></tr>
+                        <tr><td>Use source alpha matte</td><td>Uses the input images' alpha channel; falls back to backdrop keying when there is none.</td></tr>
+                        <tr><td>Keep everything</td><td>Correct for environment and scene captures, where the background <em>is</em> the subject.</td></tr>
+                    </tbody>
+                </table>
+
+                <h3>Viewer</h3>
+                <p>A Three.js viewport with matcap shading — deliberately minimal, since this is a proxy review tool rather than a material editor. Left-drag orbits, scroll zooms, right-drag pans. Reframe recentres on the geometry. Toggle between <strong>Solid</strong>, <strong>Wireframe</strong> and <strong>Point Cloud</strong>; when a run exports more than one format, switch which file the viewport is showing. Meshes carrying a baked texture (TRELLIS) render with it rather than matcap. Download buttons are provided per exported format.</p>
+
+                <h3>Export Formats</h3>
+                <table class="wiki-table">
+                    <thead>
+                        <tr><th>Format</th><th>Use</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>GLB <em>(default)</em></td><td>Primary deliverable — mesh with vertex colours or a baked texture. Universal; imports directly into Blender, Nuke and Resolve.</td></tr>
+                        <tr><td>PLY</td><td>Point cloud, for tools that want the raw solve rather than a surface.</td></tr>
+                        <tr><td>OBJ</td><td>For compositing workflows that prefer it over GLB.</td></tr>
+                    </tbody>
+                </table>
+
+                <h3>Output Structure</h3>
+                <pre><code>cache/[project]_shot[shot]_[version]/
+└── threed_vggt_001/
+    ├── mesh.glb                   ← primary deliverable
+    ├── pointcloud.ply             ← optional
+    └── reconstruction_meta.json   ← inputs, model, settings, camera solve, timings</code></pre>
+                <p><code>reconstruction_meta.json</code> records the exact input list, so a good set of views can be reproduced or re-run against the other model tier. For VGGT it also stores the solved camera extrinsics and intrinsics for every view.</p>
+
+                <h3>Tuning</h3>
+                <p>Sensible defaults cover most runs; the Advanced panel adapts to the selected model.</p>
+                <table class="wiki-table">
+                    <thead>
+                        <tr><th>Model</th><th>Control</th><th>Effect</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>VGGT</td><td>Confidence cutoff</td><td>Keeps the most confident share of predicted points</td></tr>
+                        <tr><td>VGGT</td><td>Build mesh / Poisson depth</td><td>Surface reconstruction from the point cloud; higher depth captures more detail and more noise</td></tr>
+                        <tr><td>VGGT</td><td>Max points</td><td>Caps cloud density — a dense solve is millions of points before thinning</td></tr>
+                        <tr><td>TRELLIS</td><td>Seed / Steps / Guidance</td><td>Standard sampler controls</td></tr>
+                        <tr><td>TRELLIS</td><td>Simplify</td><td>Share of faces removed during postprocessing</td></tr>
+                        <tr><td>TRELLIS</td><td>Fill holes</td><td>Closes gaps by rendering the mesh from 1000 viewpoints. This is the slowest stage by far — turn it off first if a run is dragging.</td></tr>
+                        <tr><td>TRELLIS</td><td>Texture size</td><td>Resolution of the baked texture (512 / 1024 / 2048)</td></tr>
+                    </tbody>
+                </table>
+                <div class="wiki-note">
+                    <p>TRELLIS runtime is dominated by mesh postprocessing, not sampling. Sampling takes about 5 seconds; simplifying, hole filling, UV unwrapping and texture baking take the rest. The raw decoded mesh is far larger than the export — routinely 600k+ vertices reduced to around 13k — and a denser one can push a run to several minutes. The console reports the raw mesh size and warns when it is large.</p>
+                </div>
+
+                <h3>Installation Note</h3>
+                <p>VGGT runs in FUK's main environment and needs no extra setup. TRELLIS requires CUDA extensions that conflict with FUK's PyTorch build, so it installs into its own isolated environment and runs as a subprocess — this keeps image and video generation safe from its dependencies. Run <code>bash fuk/core/threed/install_trellis_env.sh</code> once to build it. Until then TRELLIS shows as unavailable in the model list, with the missing pieces named; VGGT is unaffected.</p>
+
+                <h3>Capture Rig Path</h3>
+                <p>The endpoint accepts an arbitrary list of images, so a multi-camera capture rig feeds the same multi-view path with no architectural changes — the rig simply becomes another input source alongside the file browser and Dataset Builder.</p>
             </div>
 
             <!-- App Layout -->

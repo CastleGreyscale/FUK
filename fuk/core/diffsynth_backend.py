@@ -158,6 +158,12 @@ class DiffSynthBackend:
         except ImportError as e:
             _log("BACKEND", f"Flux2PipelineRunner not available: {e}", "warning")
 
+        try:
+            from threed_pipeline import ThreeDPipelineRunner
+            self.runners["threed"] = ThreeDPipelineRunner(self)
+        except ImportError as e:
+            _log("BACKEND", f"ThreeDPipelineRunner not available: {e}", "warning")
+
         # Future runners:
         # from chained_pipeline import ChainedPipelineRunner
         # self.runners["chain"] = ChainedPipelineRunner(self)
