@@ -227,6 +227,7 @@ export default function App() {
           galleryOpen={historyFullscreen}
           onGalleryOpenChange={setHistoryFullscreen}
           playbackSpeed={playbackSpeed}
+          onPlaybackSpeedChange={(speed) => setPlaybackFPS(Math.round(speed * 24))}
         />
     </div>
   );

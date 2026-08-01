@@ -782,7 +782,7 @@ function CompareSettings({ metaA, metaB, loading }) {
 
 // ─── large preview (top panel in the gallery) ────────────────────────────────
 
-function GalleryLargeView({ generation, generations, isPinned, vote, onTogglePin, onVote, onDelete, onNavigate, multiSelected, onBulkVote, onBulkDelete, onClearSelection, deleteConfirm, onConfirmDelete, onCancelDelete }) {
+function GalleryLargeView({ generation, generations, isPinned, vote, onTogglePin, onVote, onDelete, onNavigate, multiSelected, onBulkVote, onBulkDelete, onClearSelection, deleteConfirm, onConfirmDelete, onCancelDelete, playbackSpeed }) {
   const preview  = buildImageUrl(generation.preview);
   const video    = isGenVideo(generation);
   const ProcIcon = processingIcon(generation);
@@ -790,6 +790,7 @@ function GalleryLargeView({ generation, generations, isPinned, vote, onTogglePin
   const currentIdx = generations.findIndex(g => g.id === generation.id);
   const hasPrev = currentIdx > 0;
   const hasNext = currentIdx < generations.length - 1;
+  const videoRef = useVideoPlayback(playbackSpeed);
 
   // Load the full metadata.json for the selected item to show every generation
   // setting (seed, resolution, CFG, steps, LoRAs, …).
@@ -812,7 +813,7 @@ function GalleryLargeView({ generation, generations, isPinned, vote, onTogglePin
         >‹</button>
 
         {video
-          ? <video key={preview} src={preview} controls autoPlay muted loop playsInline />
+          ? <video ref={videoRef} key={preview} src={preview} controls autoPlay muted loop playsInline />
           : <ZoomableImage key={preview} src={preview} alt={generation.name || generation.id} defaultZoom={2} />
         }
 
@@ -912,9 +913,9 @@ function GalleryLargeView({ generation, generations, isPinned, vote, onTogglePin
 // duration on mount, so we gate it behind both <video>s reporting metadata —
 // otherwise it mounts against readyState 0 elements and never picks up duration.
 
-function CompareVideos({ srcA, srcB, labelA = 'A', labelB = 'B' }) {
-  const videoARef = useRef(null);
-  const videoBRef = useRef(null);
+function CompareVideos({ srcA, srcB, labelA = 'A', labelB = 'B', playbackSpeed }) {
+  const videoARef = useVideoPlayback(playbackSpeed);
+  const videoBRef = useVideoPlayback(playbackSpeed);
   const videoRefs = useMemo(() => [videoARef, videoBRef], []);
   const [loadedCount, setLoadedCount] = useState(0);
   const onLoaded = useCallback(() => setLoadedCount((c) => c + 1), []);
@@ -938,7 +939,7 @@ function CompareVideos({ srcA, srcB, labelA = 'A', labelB = 'B' }) {
 
 // ─── A/B compare view (before/after wipe) ────────────────────────────────────
 
-function CompareLargeView({ a, b, onSwap, onClearA, onClearB, onExit }) {
+function CompareLargeView({ a, b, onSwap, onClearA, onClearB, onExit, playbackSpeed }) {
   const srcA = buildImageUrl(a.preview);
   const srcB = buildImageUrl(b.preview);
   const nameA = a.name || a.id;
@@ -961,6 +962,7 @@ function CompareLargeView({ a, b, onSwap, onClearA, onClearB, onExit }) {
             srcB={srcB}
             labelA="A"
             labelB="B"
+            playbackSpeed={playbackSpeed}
           />
         ) : (
           <CompareImage
@@ -1007,7 +1009,8 @@ function CompareLargeView({ a, b, onSwap, onClearA, onClearB, onExit }) {
 
 // ─── fullscreen gallery overlay ───────────────────────────────────────────────
 
-function FullscreenGallery({ generations, pinnedIds, votes, onTogglePin, onVote, onDelete, onClose, hasMore, loading, onLoadMore, onLoadAll, onSendToStoryboard, sendToStoryboardEnabled }) {
+function FullscreenGallery({ generations, pinnedIds, votes, onTogglePin, onVote, onDelete, onClose, hasMore, loading, onLoadMore, onLoadAll, onSendToStoryboard, sendToStoryboardEnabled, playbackSpeed, onPlaybackSpeedChange }) {
+  const playbackFPS = Math.round((playbackSpeed || 1.0) * 24);
   const [zoom, setZoom]               = useState(160);
   const [selected, setSelected]       = useState(generations[0] || null);
   const [previewPct, setPreviewPct]   = useState(55);
@@ -1219,6 +1222,18 @@ function FullscreenGallery({ generations, pinnedIds, votes, onTogglePin, onVote,
             />
             <span>{zoom}px</span>
           </label>
+          {onPlaybackSpeedChange && (
+            <label className="gallery-playback-label">
+              <span>Playback</span>
+              <input
+                type="range" min={6} max={48} step={6}
+                value={playbackFPS}
+                onChange={e => onPlaybackSpeedChange(parseInt(e.target.value) / 24)}
+                className="gallery-playback-slider"
+              />
+              <span>{playbackFPS} FPS</span>
+            </label>
+          )}
         </div>
         <div className="gallery-header-right">
           <button
@@ -1246,6 +1261,7 @@ function FullscreenGallery({ generations, pinnedIds, votes, onTogglePin, onVote,
                 onClearA={() => setCompareA(null)}
                 onClearB={() => setCompareB(null)}
                 onExit={() => setCompareMode(false)}
+                playbackSpeed={playbackSpeed}
               />
             ) : (
               <div className="gallery-large-empty">
@@ -1271,6 +1287,7 @@ function FullscreenGallery({ generations, pinnedIds, votes, onTogglePin, onVote,
               deleteConfirm={deleteConfirm}
               onConfirmDelete={executePendingDelete}
               onCancelDelete={() => setDeleteConfirm(null)}
+              playbackSpeed={playbackSpeed}
             />
           ) : (
             <div className="gallery-large-empty">Click a thumbnail to preview</div>
@@ -1346,7 +1363,7 @@ function FullscreenGallery({ generations, pinnedIds, votes, onTogglePin, onVote,
 
 // ─── main component ───────────────────────────────────────────────────────────
 
-export default function GenerationHistory({ project, collapsed, onToggle, galleryOpen, onGalleryOpenChange, playbackSpeed }) {
+export default function GenerationHistory({ project, collapsed, onToggle, galleryOpen, onGalleryOpenChange, playbackSpeed, onPlaybackSpeedChange }) {
   const [generations, setGenerations] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -1803,6 +1820,8 @@ export default function GenerationHistory({ project, collapsed, onToggle, galler
           onLoadAll={handleLoadAll}
           onSendToStoryboard={handleSendToStoryboard}
           sendToStoryboardEnabled={!!currentShotId}
+          playbackSpeed={playbackSpeed}
+          onPlaybackSpeedChange={onPlaybackSpeedChange}
         />
       )}
     </div>
