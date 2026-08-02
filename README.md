@@ -555,7 +555,7 @@ The short version:
 |---|---|---|---|
 | **DSINE** | Surface normals preprocessor | Imperial College academic | ❌ No |
 | **VGGT-1B** *(weights)* | 3D reconstruction utility | CC-BY-NC-4.0 | ❌ No |
-| **FLUX.2-dev** | Image generation model | FLUX [dev] Non-Commercial v2.0 | ⚠️ Grey — see below |
+| **FLUX.2-dev** | Image editing — alternative to Qwen-Image-Edit | FLUX [dev] Non-Commercial v2.0 | ⚠️ Grey — see below |
 
 For DSINE and VGGT the restriction attaches to *what you use the tool for*, not
 to whether you redistribute FUK. If you are paid for work whose pipeline
@@ -570,15 +570,19 @@ BFL's self-serve tiers. See [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)
 for the clauses.
 
 All three are optional. A configuration with no restricted component in it —
-Qwen or **Krea 2** + Wan for generation, DA3 for depth **and** normals, SAM2 for
-mattes, TRELLIS for 3D, Real-ESRGAN / SeedVR2 for upscaling, FILM for
-interpolation — covers the whole pipeline. Everything else in the stack is
-Apache 2.0, MIT, or BSD-3-Clause.
+Qwen-Image for generation, Qwen-Image-Edit 2511 for editing, Wan for video, DA3
+for depth **and** normals, SAM2 for mattes, TRELLIS for 3D, Real-ESRGAN /
+SeedVR2 for upscaling, FILM for interpolation — covers the whole pipeline.
+Everything else in the stack is Apache 2.0, MIT, or BSD-3-Clause.
+
+FLUX.2-dev is carried as an *alternative* to Qwen-Image-Edit rather than as the
+primary editing path, so dropping it costs an option, not a capability.
 
 **Krea 2** (Krea's own from-scratch 13B, *not* the FLUX.1 Krea [dev] finetune,
 which carries FLUX's non-commercial terms) is free for commercial use below
 $1M company-wide annual revenue, subject to running a content filter and
-disclosing AI generation where required.
+disclosing AI generation where required. It is text-to-image only — it does not
+replace an editing model.
 
 ---
 
