@@ -132,6 +132,7 @@
                         <a href="#file-locations" class="sidebar-link">File Locations</a>
                         <a href="#cache-folder" class="sidebar-link">Cache Folder</a>
                         <a href="#metadata" class="sidebar-link">Metadata &amp; Repeatability</a>
+                        <a href="#licensing" class="sidebar-link">Licensing &amp; Commercial Use</a>
                     </div>
                 </div>
 
@@ -309,6 +310,30 @@
                 <h3>Image Input &amp; ControlNet</h3>
                 <p>Edit and context models accept one or more reference images as conditioning input. Load a reference image via the <a href="#media-input">Media Input</a> component, select a preprocessor to extract a conditioning signal, and set the edit strength. See <a href="#preprocessors">Preprocessors</a> for available preprocessing modes.</p>
 
+                <h4>OpenPose</h4>
+                <div class="wiki-video" data-vimeo="https://framerate.tv/watch/9736d20a-db4f-45a5-a929-b42f1290e954" data-title="ControlNet — OpenPose">
+                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
+                </div>
+                <p>Skeletal pose conditioning — transfers body, hand, and facial keypoints from the reference while leaving appearance to the prompt. See <a href="#preprocessors">OpenPose</a>.</p>
+
+                <h4>Canny</h4>
+                <div class="wiki-video" data-vimeo="https://framerate.tv/watch/1283ddfc-0e2e-4241-90b3-d1d813d47590" data-title="ControlNet — Canny">
+                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
+                </div>
+                <p>Edge-map conditioning — locks silhouette and hard structural lines to the reference. See <a href="#preprocessors">Canny Edge Detection</a>.</p>
+
+                <h4>Depth</h4>
+                <div class="wiki-video" data-vimeo="https://framerate.tv/watch/d61f9fb4-31b4-4d63-bf60-2d48a110c790" data-title="ControlNet — Depth">
+                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
+                </div>
+                <p>Depth-map conditioning — preserves spatial layout and volume without constraining edge detail. See <a href="#preprocessors">Depth Estimation</a>.</p>
+
+                <h4>EliGen</h4>
+                <div class="wiki-video" data-vimeo="https://framerate.tv/watch/850d2526-ac1a-478c-9b51-0845c47861ea" data-title="ControlNet — EliGen">
+                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
+                </div>
+                <p>Regional prompt conditioning — drives separate prompts through masked zones of the frame rather than a reference-derived signal. See <a href="#regional-conditioning">Regional Conditioning (EliGen)</a>.</p>
+
                 <h3>Batch Generation</h3>
                 <p>FUK supports batch generation — queue multiple runs from the same settings in a single pass. Each result is saved as its own versioned output with its own metadata sidecar. Batch jobs run sequentially and can be monitored from the generation modal.</p>
             </div>
@@ -461,31 +486,58 @@
                 <div class="wiki-video" data-vimeo="" data-title="Upscaling">
                     <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
                 </div>
-                <p>FUK integrates Real-ESRGAN for post-generation upscaling. Apply to single images or to video frame sequences. Upscaling runs as a separate pass in the <a href="#postprocess-panel">Postprocess Panel</a> — it does not require re-running the full generation pipeline, and the original output is always preserved.</p>
+                <p>FUK has two upscaling paths, and which one you want depends entirely on whether you are working on a still or a sequence. Upscaling runs as a separate pass in the <a href="#postprocess-panel">Postprocess Panel</a> — it does not require re-running the full generation pipeline, and the original output is always preserved.</p>
 
                 <h3>Available Models</h3>
                 <table class="wiki-table">
                     <thead>
-                        <tr><th>Model</th><th>Best For</th><th>Scale</th></tr>
+                        <tr><th>Model</th><th>Best For</th><th>Scale</th><th>Temporal</th></tr>
                     </thead>
                     <tbody>
-                        <tr><td>Real-ESRGAN x4 Plus</td><td>General photographic and detailed content</td><td>4×</td></tr>
-                        <tr><td>Real-ESRGAN x2 Plus</td><td>Moderate upscale with less processing time</td><td>2×</td></tr>
-                        <tr><td>Real-ESRGAN x4 Anime</td><td>Illustrated, stylized, or anime-adjacent output</td><td>4×</td></tr>
-                        <tr><td>RealESR-General-x4v3</td><td>General-purpose; handles a wider variety of content types</td><td>4×</td></tr>
+                        <tr><td>SeedVR2 3B</td><td>Video — restores the whole sequence together</td><td>2×, 4×</td><td>Yes</td></tr>
+                        <tr><td>SeedVR2 7B</td><td>Video, 40GB+ cards only</td><td>2×, 4×</td><td>Yes</td></tr>
+                        <tr><td>Real-ESRGAN x4 Plus</td><td>Stills; video fallback</td><td>2×, 4×, 8×</td><td>No</td></tr>
+                        <tr><td>Lanczos</td><td>Fast, non-AI resize</td><td>2×, 4×, 8×</td><td>No</td></tr>
                     </tbody>
                 </table>
+
+                <h3>Why Two Paths</h3>
+                <p>Real-ESRGAN has no temporal model. Applied to video it enhances each frame in isolation, and because it hallucinates detail independently per frame, that detail crawls and shimmers between frames. On Wan output — where frame-to-frame motion is already slightly irregular — this is very visible.</p>
+                <p>SeedVR2 is a one-step diffusion transformer that restores a sequence as a sequence, so the detail it synthesizes is consistent across frames. It is the default for video and the reason the per-frame path is now labelled as a fallback.</p>
 
                 <h3>Workflow</h3>
                 <ol>
                     <li>Go to the <a href="#postprocess-panel">Postprocess Panel</a> and select the Upscale tab</li>
-                    <li>Load an image or frame sequence</li>
-                    <li>Select an upscaling model and scale factor</li>
-                    <li>Run — the upscaled result is saved as a new version alongside the original</li>
+                    <li>Load an image or a video</li>
+                    <li>Select a model and scale factor — the model list changes depending on whether the input is a still or a sequence</li>
+                    <li>Run — the result is saved as a new version alongside the original</li>
                 </ol>
 
-                <h3>Upscaling Video</h3>
-                <p>When applied to a video sequence, upscaling runs frame by frame. Processing time scales linearly with frame count. The output is a new upscaled frame sequence saved in the same version directory.</p>
+                <h3>SeedVR2 Settings</h3>
+                <table class="wiki-table">
+                    <thead>
+                        <tr><th>Setting</th><th>Description</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>Variant</td><td>3B fits a 24GB card. 7B needs 40GB+ and is not the default for that reason.</td></tr>
+                        <tr><td>Resolution Cap</td><td>Longest output edge. SeedVR2's attention cost scales with resolution, so this is the setting that actually decides whether a clip fits in VRAM — an uncapped 4× on a 1080p source will not fit on 24GB.</td></tr>
+                        <tr><td>Frame Window</td><td>Frames restored per forward pass. Larger windows hold coherence across more motion at higher memory cost. Auto picks from detected VRAM. Below roughly 5 frames, quality degrades noticeably.</td></tr>
+                    </tbody>
+                </table>
+
+                <h3>Installation</h3>
+                <p>SeedVR2 runs in an isolated environment, for the same reason TRELLIS does — it needs flash-attn built against its own torch, which would conflict with the main venv's torch used for Qwen and Wan generation. Install it with:</p>
+                <pre><code>bash fuk/core/install_seedvr2_env.sh</code></pre>
+                <p>The script clones the source, builds the environment, and downloads the 3B weights. Set <code>SEEDVR2_VARIANT=7b</code> or <code>SEEDVR2_VARIANT=both</code> to fetch the larger model. Until it is installed the Postprocess Panel shows SeedVR2 as unavailable and falls back to Real-ESRGAN.</p>
+                <p>SeedVR2 is Apache 2.0 for both code and weights — see <a href="#licensing">Licensing</a>.</p>
+
+                <h3>Practical Notes</h3>
+                <ul>
+                    <li>SeedVR2 is video-only. Stills still go through Real-ESRGAN, which is the right tool for a single frame and much faster.</li>
+                    <li>Long clips are processed in chunks and concatenated. Chunk boundaries are the one place coherence can break — raise the frame window if you see a seam.</li>
+                    <li>If the resolution cap is at or below the source resolution, the effective scale drops to 1× and SeedVR2 acts as a restorer rather than an upscaler. This is sometimes what you want on soft footage.</li>
+                    <li>Out-of-memory failures name the fix in the error rather than surfacing a raw CUDA traceback — lower the scale, the cap, or the frame window.</li>
+                </ul>
             </div>
 
             <!-- Frame Interpolation -->
@@ -1166,15 +1218,16 @@
                 <h3>Upscale Tab</h3>
                 <ul>
                     <li><strong>Input</strong> — <a href="#media-input">Media Input</a>; accepts images, videos, or frame sequences</li>
-                    <li><strong>Method</strong> — upscaling model selector (Real-ESRGAN variants)</li>
-                    <li><strong>Factor</strong> — scale multiplier: 1×, 2×, 3×, or 4×</li>
+                    <li><strong>Method</strong> — upscaling model selector. The list changes with the input: video offers SeedVR2 (temporal, default) and Real-ESRGAN (per-frame fallback); stills offer Real-ESRGAN and Lanczos</li>
+                    <li><strong>Factor</strong> — scale multiplier: 2× or 4× for SeedVR2, 2×/4×/8× for Real-ESRGAN</li>
+                    <li><strong>Variant / Resolution Cap / Frame Window</strong> — SeedVR2 only; these govern VRAM use</li>
                 </ul>
                 <p>The result preview shows a before/after comparison. For video, the comparison is shown at the current frame. See <a href="#upscaling">Upscaling</a> for available models.</p>
 
                 <h3>Frame Interpolation Tab</h3>
                 <ul>
                     <li><strong>Input</strong> — frame sequence or video file</li>
-                    <li><strong>Method</strong> — interpolation model (RIFE)</li>
+                    <li><strong>Method</strong> — interpolation model (FILM)</li>
                     <li><strong>Source Framerate</strong> — the frame rate of the input sequence; must be set correctly for the output to play at the right speed</li>
                     <li><strong>Target Framerate</strong> — desired output frame rate; FILM synthesizes as many intermediate frames as needed</li>
                     <li><strong>Video Output Mode</strong> — whether to generate an MP4 preview alongside the output sequence</li>
@@ -2054,6 +2107,79 @@
 
                 <h3>Portability</h3>
                 <p>Because metadata is stored as sidecar files alongside outputs rather than in a central database, output directories are fully portable. Copy a version directory to another machine and FUK will recognize it on first launch. If a model file referenced in the sidecar is missing or has a different hash, FUK will warn before re-queuing.</p>
+            </div>
+
+            <!-- Licensing -->
+            <div class="wiki-section" id="licensing">
+                <h2>Licensing &amp; Commercial Use</h2>
+                <p>FUK itself is MIT licensed. It is an orchestration layer — it ships no model weights of its own, and nearly everything that does the actual work is a third-party component with its own licence. <strong>Those licences are not all the same, and three of them prohibit commercial use.</strong></p>
+                <p>The full audit lives in <code>THIRD_PARTY_LICENSES.md</code> in the repository root. This page is the summary.</p>
+
+                <h3>Restricted Components</h3>
+                <table class="wiki-table">
+                    <thead>
+                        <tr><th>Component</th><th>Used For</th><th>Licence</th><th>Paid Work</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>DSINE</td><td>Surface normals preprocessor</td><td>Imperial College London academic licence</td><td>No</td></tr>
+                        <tr><td>VGGT-1B (weights)</td><td>3D reconstruction utility</td><td>CC-BY-NC-4.0</td><td>No</td></tr>
+                        <tr><td>FLUX.2-dev</td><td>Image generation model</td><td>FLUX [dev] Non-Commercial v2.0</td><td>Grey — see below</td></tr>
+                    </tbody>
+                </table>
+
+                <h3>What "Non-Commercial" Means Here</h3>
+                <div class="wiki-warning">
+                    <p>For DSINE and VGGT the restriction attaches to <strong>what you use the tool for</strong>, not to whether you redistribute FUK. Never packaging or selling FUK does not exempt you. If you are paid for work whose pipeline included either, that is commercial use under the plain reading of these licences.</p>
+                </div>
+                <p>DSINE is the most explicit — its clause 2(b)(4) prohibits <em>"use of the Software to provide any service to an external organisation for which payment is received."</em> That is precisely the freelance and studio-work case.</p>
+                <p>Commercial paths exist: DSINE via <code>researchcontracts.engineering@imperial.ac.uk</code>, and VGGT via Meta.</p>
+
+                <h3>FLUX Is a Special Case</h3>
+                <p>FLUX's licence is not a flat prohibition, and it is easy to read either way. Two clauses pull in opposite directions.</p>
+                <p><strong>Outputs are explicitly permitted:</strong> <em>"We claim no ownership rights in and to the Outputs… You may use Output for any purpose (including for commercial purposes)."</em> Outputs are not Derivatives; the only restriction is that you may not train a competing model on them.</p>
+                <p><strong>Model use is not:</strong> <em>"You may only access, use, Distribute, or create Derivatives of the FLUX.1 [dev] Model… for Non-Commercial Purposes"</em> — and Black Forest Labs define Non-Commercial Purpose to exclude <em>"revenue-generating activity."</em></p>
+                <p>So selling an image you generated is squarely permitted; running the model as part of paid work is the contested act. BFL's own tier structure settles how they read it — their Professional tier is sold to agencies producing work "on behalf of named clients," and the entry Builder tier is explicitly "not meant for client use or downstream applications."</p>
+                <p><strong>Practical reading:</strong> personal work, R&amp;D and unpaid experiments are fine on FLUX.2-dev. Paid client deliverables want a Builder or Professional licence, or a different model.</p>
+                <p><strong>FLUX.1 Krea [dev]</strong> is the BFL × Krea collaboration finetune and carries the <em>same</em> non-commercial terms. Despite the name it is not a friendlier option, and it is not the same thing as Krea 2 below.</p>
+
+                <h3>Krea 2 — The Permissive Alternative</h3>
+                <p>Krea's own from-scratch 13B model, unrelated to the FLUX collaboration, ships under the <strong>Krea 2 Community License</strong>:</p>
+                <ul>
+                    <li>Commercial use is <strong>free below $1,000,000 USD</strong> company-wide annual revenue (trailing twelve months, all affiliated entities). Above that, an enterprise licence is required.</li>
+                    <li>You own your outputs — Krea claims no ownership.</li>
+                    <li>Two conditions apply at every size: implement reasonable content filtering (an open-source classifier, a moderation API, or human review all qualify), and disclose AI generation where legally or platform-required.</li>
+                    <li>Ships as <strong>Raw</strong> (undistilled, for fine-tuning and LoRA training) and <strong>Turbo</strong> (8-step distilled). Gated on Hugging Face — accept the licence and Acceptable Use Policy to download.</li>
+                </ul>
+                <p>For a freelancer or small studio this is currently the most permissive frontier-class image model, and a better default than FLUX.2-dev for anything client-facing.</p>
+
+                <h3>A Clean-for-Hire Configuration</h3>
+                <p>All three restricted components are optional paths, not core infrastructure. The following configuration covers the entire pipeline with no non-commercial component in it:</p>
+                <table class="wiki-table">
+                    <thead>
+                        <tr><th>Stage</th><th>Use</th><th>Instead Of</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>Image generation</td><td>Qwen-Image / Qwen-Image-Edit (Apache 2.0), or Krea 2 (free under $1M revenue)</td><td>FLUX.2-dev</td></tr>
+                        <tr><td>Video generation</td><td>Wan 2.2 (Apache 2.0)</td><td>—</td></tr>
+                        <tr><td>Depth</td><td>Depth-Anything-3 (Apache 2.0)</td><td>—</td></tr>
+                        <tr><td>Normals</td><td>DA3-derived normals (Apache 2.0)</td><td>DSINE</td></tr>
+                        <tr><td>Cryptomattes</td><td>SAM 2.1 (Apache 2.0)</td><td>—</td></tr>
+                        <tr><td>3D reconstruction</td><td>TRELLIS (MIT)</td><td>VGGT</td></tr>
+                        <tr><td>Upscaling</td><td>Real-ESRGAN (BSD-3) / SeedVR2 (Apache 2.0)</td><td>—</td></tr>
+                        <tr><td>Interpolation</td><td>FILM (Apache 2.0)</td><td>—</td></tr>
+                    </tbody>
+                </table>
+                <p>Everything else in the stack — DiffSynth-Studio, the Wan and Qwen weights, the DiffSynth LoRAs, SAM2, TRELLIS, FILM, Real-ESRGAN, SeedVR2 — is Apache 2.0, MIT, or BSD-3-Clause.</p>
+
+                <h3>Unverified</h3>
+                <p>The <code>PAI/Wan2.2-VACE-Fun-A14B</code> and <code>PAI/Wan2.2-Fun-A14B-InP</code> repositories are gated on Hugging Face and could not be read without authentication. They are Alibaba PAI derivatives of Apache-2.0 Wan 2.2 and are expected to inherit those terms, but this has <strong>not been confirmed</strong>. Check the model card before relying on either for paid work.</p>
+
+                <h3>If You Add Models</h3>
+                <p>Record the licence for the <strong>code</strong> and the <strong>weights</strong> separately — they are frequently different, and that is the most common way to get caught out. VGGT is exactly that case: its repository licence carries no non-commercial clause, but its published weights are CC-BY-NC-4.0.</p>
+                <p>The same applies to community upscaler checkpoints. Many models on OpenModelDB are CC-BY-NC despite running on permissively-licensed architectures; the widely-recommended <code>4x-UltraSharp</code> is CC-BY-NC-SA-4.0 and its author has stated the restriction extends to generated outputs. Filter by licence before shortlisting by benchmark score.</p>
+                <div class="wiki-note">
+                    <p>This summary is a good-faith engineering audit of published licence text, not legal advice. Verify anything you intend to rely on commercially, and re-check before shipping client work — upstream projects relicense.</p>
+                </div>
             </div>
 
             <!-- Plugins Overview -->

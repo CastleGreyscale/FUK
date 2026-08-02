@@ -87,10 +87,16 @@ class VideoPreprocessRequest(BaseModel):
 class VideoUpscaleRequest(BaseModel):
     """Request to upscale a video"""
     source_path: str
-    scale: int = 4  # 2, 4, or 8
-    model: str = "realesrgan"
+    scale: int = 2  # 2, 4, or 8
+    model: str = "seedvr2"
     denoise: float = 0.5
     output_mode: VideoOutputMode = VideoOutputMode.MP4
+
+    # SeedVR2 only
+    variant: str = "seedvr2_3b"
+    frame_window: int = 0        # 0 = pick from available VRAM
+    resolution_cap: int = 1920   # longest output edge
+    seed: int = 42
 
 
 class VideoLayersRequest(BaseModel):
@@ -273,7 +279,106 @@ def setup_video_routes(
             return build_sequence_response(output_path, result, gen_dir)
         else:
             return build_video_response(output_path, result)
-    
+
+    async def _upscale_video_seedvr2(request, input_path: Path, gen_dir: Path,
+                                     output_mode, video_info: Dict) -> Dict:
+        """
+        Whole-sequence video restoration via SeedVR2.
+
+        Runs in a worker subprocess under an isolated environment, so this
+        offloads to a thread rather than blocking the event loop for what can
+        be several minutes.
+        """
+        import subprocess as _sp
+
+        # SeedVR2 always writes a video; a frame sequence is derived from it
+        # afterwards if that's what was asked for.
+        video_out = gen_dir / f"upscaled_{request.scale}x.mp4"
+
+        log.info("VideoUpscale", f"Backend: SeedVR2 ({request.variant})")
+        log.info("VideoUpscale", f"Resolution cap: {request.resolution_cap}px")
+
+        start_time = time.time()
+        result = await asyncio.to_thread(
+            postprocessor_manager.upscale_video,
+            input_path=input_path,
+            output_path=video_out,
+            scale=request.scale,
+            model="seedvr2",
+            variant=request.variant,
+            frame_window=request.frame_window,
+            resolution_cap=request.resolution_cap,
+            seed=request.seed,
+        )
+        elapsed = time.time() - start_time
+
+        input_size = result.get("input_size", {})
+        output_size = result.get("output_size", {})
+
+        if output_mode == OutputMode.SEQUENCE:
+            seq_dir = gen_dir / f"upscaled_{request.scale}x"
+            seq_dir.mkdir(parents=True, exist_ok=True)
+            # PNG, not JPEG — this feeds the EXR workflow, and a lossy
+            # intermediate would throw away what SeedVR2 just restored.
+            _sp.run(
+                ["ffmpeg", "-y", "-v", "error", "-i", str(video_out),
+                 "-start_number", "0", str(seq_dir / "frame_%05d.png")],
+                check=True,
+            )
+            output_path = seq_dir
+        else:
+            output_path = video_out
+            _generate_thumbnail(output_path)
+
+        log.timing("VideoUpscale", start_time,
+                   f"SeedVR2 complete - {result.get('frame_count', 0)} frames")
+
+        url_data = _build_response(output_path, result, output_mode, gen_dir)
+
+        save_generation_metadata(
+            gen_dir=gen_dir,
+            prompt=f"Video Restore {result.get('scale', request.scale)}x (SeedVR2)",
+            model=request.variant,
+            seed=request.seed,
+            image_size=(output_size.get("width", 0), output_size.get("height", 0)),
+            source_image=str(request.source_path),
+            parameters={
+                "scale": result.get("scale", request.scale),
+                "model": "seedvr2",
+                "variant": request.variant,
+                "frame_window": result.get("frame_window"),
+                "chunks": result.get("chunks"),
+                "resolution_cap": request.resolution_cap,
+                "output_mode": request.output_mode,
+                "frame_count": result.get("frame_count", 0),
+                "input_size": input_size,
+                "output_size": output_size,
+                "peak_vram_gb": result.get("peak_vram_gb"),
+            },
+        )
+
+        return {
+            "success": True,
+            "output_path": str(output_path),
+            "output_url": url_data["output_url"],
+            "preview_url": url_data.get("preview_url"),
+            "is_sequence": url_data.get("is_sequence", False),
+            "frames": url_data.get("frames", []),
+            "scale": result.get("scale", request.scale),
+            "model": "seedvr2",
+            "variant": request.variant,
+            "output_mode": request.output_mode,
+            "input_size": input_size,
+            "output_size": output_size,
+            "frame_count": result.get("frame_count", 0),
+            "fps": video_info.get("fps", 0),
+            "duration": video_info.get("duration", 0),
+            "elapsed_seconds": elapsed,
+            "peak_vram_gb": result.get("peak_vram_gb"),
+            "errors": [],
+        }
+
+
     # ========================================================================
     # Video Preprocess Endpoint
     # ========================================================================
@@ -590,11 +695,26 @@ def setup_video_routes(
                 output_path = gen_dir / f"upscaled_{request.scale}x"
             
             log.info("VideoUpscale", f"Output path: {output_path}")
-            
+
             # Get video info
             video_info = _get_video_info(input_path)
-            
-            # Frame processor for upscaling
+
+            # ---- SeedVR2 (temporal, whole-sequence) ----
+            # Handled entirely separately from the frame-by-frame path below.
+            # SeedVR2 restores the sequence as a sequence, so there is no
+            # per-frame callback to hand to video_processor.
+            if request.model == "seedvr2":
+                return await _upscale_video_seedvr2(
+                    request=request,
+                    input_path=input_path,
+                    gen_dir=gen_dir,
+                    output_mode=output_mode,
+                    video_info=video_info,
+                )
+
+            # ---- Real-ESRGAN / Lanczos (frame-by-frame, no temporal model) ----
+            # Kept as a fallback and for when SeedVR2 isn't installed. Expect
+            # flicker on generated footage: each frame is enhanced in isolation.
             def frame_processor(inp, out):
                 return postprocessor_manager.upscale_image(
                     input_path=inp,

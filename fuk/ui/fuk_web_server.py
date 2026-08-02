@@ -2659,9 +2659,23 @@ async def get_postprocessor_models():
     """Get available post-processor models and their info"""
     return {
         "upscaling": {
+            "seedvr2": {
+                "name": "SeedVR2",
+                "description": "Temporally-coherent video restoration (video only)",
+                "scales": [2, 4],
+                "video_only": True,
+                "parameters": {
+                    "variant": {"type": "string", "default": "seedvr2_3b",
+                                "options": ["seedvr2_3b", "seedvr2_7b"]},
+                    "resolution_cap": {"type": "int", "default": 1920,
+                                       "options": [1280, 1920, 2560, 3840]},
+                    "frame_window": {"type": "int", "default": 0,
+                                     "description": "0 = auto from VRAM"},
+                }
+            },
             "realesrgan": {
                 "name": "Real-ESRGAN",
-                "description": "AI-based photo-realistic upscaling",
+                "description": "AI-based photo-realistic upscaling (per-frame on video)",
                 "scales": [2, 4, 8],
                 "parameters": {
                     "denoise": {"type": "float", "default": 0.5, "min": 0, "max": 1},
@@ -2675,9 +2689,11 @@ async def get_postprocessor_models():
             }
         },
         "interpolation": {
-            "rife": {
-                "name": "RIFE",
-                "description": "Real-Time Intermediate Flow Estimation",
+            # Was RIFE; swapped to FILM. RIFEInterpolator still exists in
+            # core/postprocessors.py but nothing routes to it.
+            "film": {
+                "name": "FILM",
+                "description": "Frame Interpolation for Large Motion (Google)",
                 "source_fps": [8, 12, 16, 24],
                 "target_fps": [24, 30, 60],
                 "parameters": {}

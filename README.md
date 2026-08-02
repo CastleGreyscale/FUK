@@ -25,16 +25,20 @@ FUK is built as a modular, extensible pipeline that orchestrates specialized AI 
   │      │      │      │      │      │      │
   ▼      ▼      ▼      ▼      ▼      ▼      ▼
 ┌────┐ ┌────┐ ┌────┐ ┌────┐ ┌────┐ ┌────┐ ┌────┐
-│ DS │ │DA3 │ │SAM2│ │DSIN│ │RIFE│ │RE  │ │... │  Vendor Layer
-│    │ │    │ │    │ │ E  │ │    │ │ GAN│ │    │  (External Models)
+│ DS │ │DA3 │ │SAM2│ │DSIN│ │FILM│ │ RE │ │... │  Vendor Layer
+│    │ │    │ │    │ │E ⚠ │ │    │ │GAN │ │    │  (External Models)
 └────┘ └────┘ └────┘ └────┘ └────┘ └────┘ └────┘
 
 DS = DiffSynth-Studio (Qwen, Wan generation)
-DA3 = Depth-Anything-V3 (monocular depth)
+DA3 = Depth-Anything-V3 (monocular depth + normals)
 SAM2 = Segment Anything 2 (cryptomattes)
-DSINE = Surface normals estimation
-RIFE = Frame interpolation
+DSINE = Surface normals estimation      ⚠ non-commercial
+FILM = Frame interpolation (Google FILM)
 REGAN = Real-ESRGAN upscaling
+SeedVR2 = Temporally-coherent video restoration
+
+⚠ = non-commercial licence, see THIRD_PARTY_LICENSES.md
+    (also: VGGT 3D reconstruction, FLUX.2-dev image model)
 ```
 
 **Design Principles:**
@@ -538,7 +542,43 @@ For bug reports and feature requests, use GitHub Issues with detailed logs from 
 
 ## License
 
-MIT License - see LICENSE file for details
+FUK itself is MIT licensed - see LICENSE file for details.
+
+**The models it orchestrates are not all MIT, and some are non-commercial.**
+FUK is a thin layer; the vendor packages and model weights do the actual work
+and carry their own terms. See **[THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)**
+for the full audit.
+
+The short version:
+
+| Component | Used for | Licence | Paid work? |
+|---|---|---|---|
+| **DSINE** | Surface normals preprocessor | Imperial College academic | ❌ No |
+| **VGGT-1B** *(weights)* | 3D reconstruction utility | CC-BY-NC-4.0 | ❌ No |
+| **FLUX.2-dev** | Image generation model | FLUX [dev] Non-Commercial v2.0 | ⚠️ Grey — see below |
+
+For DSINE and VGGT the restriction attaches to *what you use the tool for*, not
+to whether you redistribute FUK. If you are paid for work whose pipeline
+included either, that is commercial use — DSINE's clause 2(b)(4) names the case
+explicitly.
+
+**FLUX is genuinely ambiguous, not a flat no.** Its licence permits commercial
+use of *Outputs* outright, while restricting use of the *Model* to
+non-commercial purposes — and BFL define that to exclude revenue-generating
+activity. Personal work and R&D are fine; paid client deliverables want one of
+BFL's self-serve tiers. See [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)
+for the clauses.
+
+All three are optional. A configuration with no restricted component in it —
+Qwen or **Krea 2** + Wan for generation, DA3 for depth **and** normals, SAM2 for
+mattes, TRELLIS for 3D, Real-ESRGAN / SeedVR2 for upscaling, FILM for
+interpolation — covers the whole pipeline. Everything else in the stack is
+Apache 2.0, MIT, or BSD-3-Clause.
+
+**Krea 2** (Krea's own from-scratch 13B, *not* the FLUX.1 Krea [dev] finetune,
+which carries FLUX's non-commercial terms) is free for commercial use below
+$1M company-wide annual revenue, subject to running a content filter and
+disclosing AI generation where required.
 
 ---
 

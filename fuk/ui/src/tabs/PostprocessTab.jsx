@@ -24,15 +24,23 @@ import Footer from '../components/Footer';
 const API_URL = '/api';
 
 const DEFAULT_SETTINGS = {
-  // Upscaling
+  // Upscaling — images
   upscaleMethod: 'realesrgan',
   upscaleFactor: 4,
 
+  // Upscaling — video. SeedVR2 is the default because Real-ESRGAN has no
+  // temporal model and flickers on generated footage.
+  videoUpscaleMethod: 'seedvr2',
+  videoUpscaleFactor: 2,
+  seedvr2Variant: 'seedvr2_3b',
+  seedvr2ResolutionCap: 1920,
+  seedvr2FrameWindow: 0,   // 0 = auto from VRAM
+
   // Frame Interpolation
-  interpolationMethod: 'rife',
+  interpolationMethod: 'film',
   targetFramerate: 24,
   sourceFramerate: 16,
-  
+
   // Video output mode
   videoOutputMode: 'mp4',
 };
@@ -279,9 +287,12 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
         taskType = 'upscale_video';
         payload = {
           source_path: sourceInput,
-          scale: settings.upscaleFactor,
-          model: settings.upscaleMethod,
+          scale: settings.videoUpscaleFactor,
+          model: settings.videoUpscaleMethod,
           output_mode: settings.videoOutputMode,
+          variant: settings.seedvr2Variant,
+          resolution_cap: settings.seedvr2ResolutionCap,
+          frame_window: settings.seedvr2FrameWindow,
         };
       } else {
         taskType = 'upscale';
@@ -390,6 +401,9 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
       }
     }));
   }, [genResult]);
+
+  const seedvr2Available = capabilities ? !!capabilities.video_restoration?.available : null;
+  const isSeedVR2 = isVideo && settings.videoUpscaleMethod === 'seedvr2';
 
   const canProcess = sourceInput && !generating;
   const inputAspectRatio = inputDimensions.width / inputDimensions.height;
@@ -534,7 +548,11 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                     {generating ? `generating... ${formatTime(elapsedSeconds)}` : 'Result will appear here'}
                   </p>
                   {generating && isVideo && (
-                    <p className="fuk-placeholder-subtext">generating video frame-by-frame</p>
+                    <p className="fuk-placeholder-subtext">
+                      {isSeedVR2
+                        ? 'restoring sequence — SeedVR2'
+                        : 'generating video frame-by-frame'}
+                    </p>
                   )}
                 </div>
               </div>
@@ -571,7 +589,11 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
             {isVideo && activeProcess === 'upscale' && (
               <div className="fuk-alert fuk-alert--info fuk-mt-3">
                 <Film className="fuk-alert-icon" />
-                <span className="fuk-alert-text">Video: generating frame-by-frame</span>
+                <span className="fuk-alert-text">
+                  {isSeedVR2
+                    ? 'Video: restoring whole sequence (temporal)'
+                    : 'Video: generating frame-by-frame'}
+                </span>
               </div>
             )}
             
@@ -648,33 +670,148 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                     Frame Interpolation
                   </span>
                   <span className="fuk-radio-card-desc">
-                    Generate intermediate frames (RIFE)
+                    Generate intermediate frames (FILM)
                   </span>
                 </div>
               </label>
             </div>
             
-            {/* Capability indicators */}
+            {/* Capability indicators.
+                These keys must match PostProcessorManager.get_capabilities().
+                They drifted once — the interpolator moved from RIFE to FILM
+                and this block kept probing interpolation.ncnn_available, which
+                no longer exists, so the badge read as unavailable forever. */}
             {capabilities && (
               <div className="fuk-capability-box">
                 <div className="fuk-capability-label">Available backends:</div>
                 <div className="fuk-capability-list">
+                  <span className={capabilities.video_restoration?.available ? 'fuk-capability-item--active' : 'fuk-capability-item'}>
+                    {capabilities.video_restoration?.available ? '✓' : '○'} SeedVR2
+                  </span>
                   <span className={capabilities.upscaling?.ncnn_available ? 'fuk-capability-item--active' : 'fuk-capability-item'}>
                     {capabilities.upscaling?.ncnn_available ? '✓' : '○'} ESRGAN-NCNN
                   </span>
-                  <span className={capabilities.interpolation?.ncnn_available ? 'fuk-capability-item--active' : 'fuk-capability-item'}>
-                    {capabilities.interpolation?.ncnn_available ? '✓' : '○'} RIFE-NCNN
+                  <span className={capabilities.interpolation?.film_available ? 'fuk-capability-item--active' : 'fuk-capability-item'}>
+                    {capabilities.interpolation?.film_available ? '✓' : '○'} FILM
                   </span>
                 </div>
+                {capabilities.video_restoration?.hint && (
+                  <p className="fuk-help-text">
+                    SeedVR2 unavailable ({capabilities.video_restoration.missing?.join(', ')}).
+                    {' '}{capabilities.video_restoration.hint}
+                  </p>
+                )}
               </div>
             )}
           </div>
 
-          {/* Upscaling Settings */}
-          {activeProcess === 'upscale' && (
+          {/* Upscaling Settings — video */}
+          {activeProcess === 'upscale' && isVideo && (
+            <div className="fuk-card">
+              <h3 className="fuk-card-title fuk-mb-3">Video Upscaling</h3>
+
+              <div className="fuk-form-group-compact">
+                <label className="fuk-label">Model</label>
+                <select
+                  className="fuk-select"
+                  value={settings.videoUpscaleMethod}
+                  onChange={(e) => updateSettings({ videoUpscaleMethod: e.target.value })}
+                  disabled={generating}
+                >
+                  <option value="seedvr2" disabled={seedvr2Available === false}>
+                    SeedVR2 — temporal {seedvr2Available === false ? '(not installed)' : '(Recommended)'}
+                  </option>
+                  <option value="realesrgan">Real-ESRGAN (per-frame, flickers)</option>
+                  <option value="lanczos">Lanczos (Fast, No AI)</option>
+                </select>
+                <p className="fuk-help-text">
+                  {isSeedVR2
+                    ? 'Restores the whole sequence together — no frame-to-frame flicker'
+                    : 'Enhances each frame in isolation — expect detail to crawl between frames'}
+                </p>
+              </div>
+
+              <div className="fuk-form-group-compact">
+                <label className="fuk-label">Scale Factor</label>
+                <div className="fuk-radio-group">
+                  {(isSeedVR2 ? [2, 4] : [2, 4, 8]).map(factor => (
+                    <label key={factor} className="fuk-radio-option">
+                      <input
+                        type="radio"
+                        className="fuk-radio"
+                        checked={settings.videoUpscaleFactor === factor}
+                        onChange={() => updateSettings({ videoUpscaleFactor: factor })}
+                        disabled={generating}
+                      />
+                      <span className="fuk-radio-label">{factor}x</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {isSeedVR2 && (
+                <>
+                  <div className="fuk-form-group-compact">
+                    <label className="fuk-label">Variant</label>
+                    <select
+                      className="fuk-select"
+                      value={settings.seedvr2Variant}
+                      onChange={(e) => updateSettings({ seedvr2Variant: e.target.value })}
+                      disabled={generating}
+                    >
+                      <option value="seedvr2_3b">3B (fits 24GB)</option>
+                      <option value="seedvr2_7b">7B (40GB+)</option>
+                    </select>
+                  </div>
+
+                  <div className="fuk-form-group-compact">
+                    <label className="fuk-label">Resolution Cap</label>
+                    <select
+                      className="fuk-select"
+                      value={settings.seedvr2ResolutionCap}
+                      onChange={(e) => updateSettings({ seedvr2ResolutionCap: parseInt(e.target.value) })}
+                      disabled={generating}
+                    >
+                      <option value="1280">1280px (safest)</option>
+                      <option value="1920">1920px (1080p)</option>
+                      <option value="2560">2560px (1440p)</option>
+                      <option value="3840">3840px (4K — needs 40GB+)</option>
+                    </select>
+                    <p className="fuk-help-text">
+                      Longest output edge. Attention cost scales with resolution — this is
+                      the setting that decides whether a clip fits in VRAM.
+                    </p>
+                  </div>
+
+                  <div className="fuk-form-group-compact">
+                    <label className="fuk-label">Frame Window</label>
+                    <select
+                      className="fuk-select"
+                      value={settings.seedvr2FrameWindow}
+                      onChange={(e) => updateSettings({ seedvr2FrameWindow: parseInt(e.target.value) })}
+                      disabled={generating}
+                    >
+                      <option value="0">Auto (from VRAM)</option>
+                      <option value="49">49 frames (best coherence)</option>
+                      <option value="25">25 frames</option>
+                      <option value="13">13 frames</option>
+                      <option value="5">5 frames (lowest VRAM)</option>
+                    </select>
+                    <p className="fuk-help-text">
+                      Frames restored per pass. Larger windows hold coherence across more
+                      motion; below ~5 frames quality degrades noticeably.
+                    </p>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Upscaling Settings — stills */}
+          {activeProcess === 'upscale' && !isVideo && (
             <div className="fuk-card">
               <h3 className="fuk-card-title fuk-mb-3">Upscaling Settings</h3>
-              
+
               <div className="fuk-form-group-compact">
                 <label className="fuk-label">AI Model</label>
                 <select
@@ -687,7 +824,7 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                   <option value="lanczos">Lanczos (Fast, No AI)</option>
                 </select>
               </div>
-              
+
               <div className="fuk-form-group-compact">
                 <label className="fuk-label">Scale Factor</label>
                 <div className="fuk-radio-group">
@@ -708,7 +845,7 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                   {settings.upscaleFactor}x scale = {settings.upscaleFactor * settings.upscaleFactor}x more pixels
                 </p>
               </div>
-              
+
             </div>
           )}
 
@@ -725,7 +862,7 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                   onChange={(e) => updateSettings({ interpolationMethod: e.target.value })}
                   disabled={generating}
                 >
-                  <option value="rife">RIFE (Recommended)</option>
+                  <option value="film">FILM (Recommended)</option>
                 </select>
               </div>
               
