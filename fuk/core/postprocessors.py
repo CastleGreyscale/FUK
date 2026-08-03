@@ -28,7 +28,6 @@ import tempfile
 import time
 import json
 from core.film_interpolator import FILMInterpolator
-from core import seedvr2_backend
 
 # ============================================================================
 # Upscaler Models
@@ -935,51 +934,6 @@ class PostProcessorManager:
             self._interpolator = FILMInterpolator()
         return self._interpolator
 
-    def upscale_video(
-        self,
-        input_path: Path,
-        output_path: Path,
-        scale: int = 2,
-        model: str = "seedvr2",
-        variant: str = "seedvr2_3b",
-        frame_window: int = 0,
-        resolution_cap: int = 1920,
-        seed: int = 42,
-        progress_callback: Optional[Callable] = None,
-    ) -> Dict[str, Any]:
-        """
-        Upscale a video as a sequence rather than frame by frame.
-
-        SeedVR2 is the only backend here that models time. Real-ESRGAN has no
-        temporal component, so the per-frame path it drives is kept as a
-        fallback (and for stills) but produces flicker on generated footage.
-        Callers wanting the per-frame path should pass model="realesrgan" and
-        go through video_processor, not this method.
-        """
-        if model != "seedvr2":
-            raise ValueError(
-                f"upscale_video handles SeedVR2 only; got model={model!r}. "
-                f"Use the frame-by-frame path for Real-ESRGAN."
-            )
-
-        status = seedvr2_backend.availability()
-        if not status["available"]:
-            raise RuntimeError(
-                "SeedVR2 unavailable: " + ", ".join(status["missing"])
-                + f"\n  {seedvr2_backend.INSTALL_HINT}"
-            )
-
-        return seedvr2_backend.upscale_video(
-            input_path=input_path,
-            output_path=output_path,
-            scale=scale,
-            variant=variant,
-            frame_window=frame_window,
-            resolution_cap=resolution_cap,
-            seed=seed,
-            progress_callback=progress_callback,
-        )
-
     def upscale_image(
         self,
         input_path: Path,
@@ -1019,24 +973,13 @@ class PostProcessorManager:
         `ncnn_available` key that no longer existed and showing the badge as
         permanently unavailable.
         """
-        seedvr2 = seedvr2_backend.availability()
-
         return {
             "upscaling": {
                 "available": True,
                 "ncnn_available": self.upscaler.ncnn_binary is not None,
-                "models": ["seedvr2", "realesrgan", "lanczos"],
+                "models": ["realesrgan", "lanczos"],
                 "scales": [2, 4, 8],
-                "video_models": ["seedvr2", "realesrgan"],
-            },
-            "video_restoration": {
-                "available": seedvr2["available"],
-                "backend": "seedvr2",
-                "variants": seedvr2["variants"],
-                "weights_dir": seedvr2["weights_dir"],
-                "missing": seedvr2["missing"],
-                "hint": seedvr2["hint"],
-                "temporal": True,
+                "video_models": ["realesrgan"],
             },
             "interpolation": {
                 "available": True,
@@ -1057,8 +1000,6 @@ class PostProcessorManager:
         # the DiT weights on the card between generations.
         if self._interpolator is not None:
             self._interpolator.cleanup()
-        # SeedVR2 holds nothing: it runs in a subprocess that exits with the
-        # job, so its VRAM is released by process teardown.
 
 
 # ============================================================================

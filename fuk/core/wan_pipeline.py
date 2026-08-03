@@ -12,6 +12,7 @@ VACE video data loading, tiled inference, dual-DiT boundary switching.
 
 from __future__ import annotations
 
+import os
 import time
 import torch
 from pathlib import Path
@@ -19,6 +20,62 @@ from typing import Optional, Dict, Any, List, Union
 
 from pipeline_base import PipelineRunner, _log
 from perf_monitor import record_timing
+
+
+def attention_backend() -> str:
+    """Report which attention kernel the Wan DiT blocks will actually use.
+
+    The Wan DiT's `flash_attention()` picks a backend purely from which
+    modules imported successfully, with no env override and no runtime log —
+    so a `pip install` alone is not evidence the new kernel is in play. This
+    reads the vendored module's own availability flags and mirrors its
+    priority chain (see `diffsynth/models/wan_video_dit.py`); if a vendor
+    bump reorders that chain, this needs to follow.
+
+    Read live rather than cached: `flash_attention()` re-reads these globals
+    on every call, so a benchmark that flips one to force an A/B must see
+    the change reflected here too.
+    """
+    try:
+        from diffsynth.models import wan_video_dit as _dit
+        if _dit.FLASH_ATTN_3_AVAILABLE:
+            return "flash-attn-3"
+        if _dit.FLASH_ATTN_2_AVAILABLE:
+            return "flash-attn-2"
+        if _dit.SAGE_ATTN_AVAILABLE:
+            return "sage-attn"
+        return "sdpa"
+    except Exception as e:  # noqa: BLE001 - diagnostics must never break generation
+        return f"unknown ({e})"
+
+
+def apply_attention_override() -> None:
+    """Make DIFFSYNTH_ATTENTION_IMPLEMENTATION reach the Wan DiT.
+
+    The Wan DiT has its own availability flags and its own priority chain,
+    separate from `diffsynth/core/attention/attention.py` — and unlike that
+    module it reads no env var, so `--no-sage` alone leaves sage-attn running
+    here. Forcing the chain means clearing the flags for every kernel that
+    outranks the requested one; `flash_attention()` re-reads them per call, so
+    this takes effect on the next denoise regardless of import order.
+
+    Only the kernels FUK actually ships are honoured: 'torch'/'sdpa' clears
+    all three. A value naming a kernel that is not installed is left alone —
+    the chain falls through to whatever is available, and
+    `attention_backend()` reports what really ran.
+    """
+    impl = os.environ.get("DIFFSYNTH_ATTENTION_IMPLEMENTATION", "").lower()
+    if impl not in ("torch", "sdpa", "sage_attention"):
+        return
+    try:
+        from diffsynth.models import wan_video_dit as _dit
+        # Both flash-attn tiers outrank sage, so they clear either way.
+        _dit.FLASH_ATTN_3_AVAILABLE = False
+        _dit.FLASH_ATTN_2_AVAILABLE = False
+        if impl in ("torch", "sdpa"):
+            _dit.SAGE_ATTN_AVAILABLE = False
+    except Exception as e:  # noqa: BLE001 - never break generation over a perf knob
+        _log("wan", f"Could not apply attention override: {e}", "warning")
 
 
 class WanPipelineRunner(PipelineRunner):
@@ -105,6 +162,18 @@ class WanPipelineRunner(PipelineRunner):
         sliding_window_stride = (kwargs.get("sliding_window_stride") if kwargs.get("sliding_window_stride") is not None
                                  else defaults.get("sliding_window_stride"))
 
+        # TeaCache — training-free step skipping. Opt-in per job; stays None
+        # (off) unless a threshold is explicitly passed or set in defaults.
+        tea_cache_thresh = (kwargs.get("tea_cache_l1_thresh") if kwargs.get("tea_cache_l1_thresh") is not None
+                            else defaults.get("tea_cache_l1_thresh"))
+        tea_cache_model_id = kwargs.get("tea_cache_model_id") or defaults.get("tea_cache_model_id")
+        if tea_cache_thresh is not None and not tea_cache_model_id:
+            tea_cache_model_id = self._tea_cache_model_id(model_type, height)
+
+        # Apply before attention_backend() reads the flags, so the logged
+        # backend is the one this run will actually use.
+        apply_attention_override()
+
         # --- Logging ---
         log_params = {
             "prompt": prompt,
@@ -117,12 +186,15 @@ class WanPipelineRunner(PipelineRunner):
             "seed": seed,
             "sigma_shift": sigma_shift,
             "switch_dit_boundary": switch_dit_boundary,
+            "attention": attention_backend(),
             "input_image": image_path,
             "control_path": control_path,
             "pipeline_kwargs": pipe_defaults if pipe_defaults else None,
             "lora": f"{lora} (α={lora_multiplier})" if lora else None,
             "loras": [f"{l.get('name','?')} (α={l.get('alpha', 1.0)})" for l in (loras or [])],
         }
+        if tea_cache_thresh is not None:
+            log_params["tea_cache"] = f"l1_thresh={tea_cache_thresh} (coeffs={tea_cache_model_id})"
         # Add animate inputs if present
         if animate_pose_video:
             log_params["animate_pose_video"] = animate_pose_video
@@ -164,6 +236,9 @@ class WanPipelineRunner(PipelineRunner):
             pipe_kwargs["sliding_window_size"] = sliding_window_size
         if sliding_window_stride is not None:
             pipe_kwargs["sliding_window_stride"] = sliding_window_stride
+        if tea_cache_thresh is not None:
+            pipe_kwargs["tea_cache_l1_thresh"] = tea_cache_thresh
+            pipe_kwargs["tea_cache_model_id"] = tea_cache_model_id
 
         # Negative prompt
         if "negative_prompt" in supports and negative_prompt:
@@ -246,6 +321,13 @@ class WanPipelineRunner(PipelineRunner):
                     "frames": num_frames, "cfg_scale": effective_cfg,
                     "denoising_strength": denoise, "sigma_shift": sigma_shift,
                     "switch_dit_boundary": switch_dit_boundary,
+                    # Speed/quality A/B fields — make the tradeoff readable
+                    # straight from generation history, not just benchmarks.
+                    "tea_cache_l1_thresh": tea_cache_thresh,
+                    "tea_cache_model_id": tea_cache_model_id if tea_cache_thresh is not None else None,
+                    "attention_backend": attention_backend(),
+                    "denoise_seconds": round(_pipe_s, 1),
+                    "sec_per_step": round(_pipe_s / max(1, num_steps), 2),
                 },
             )
         except Exception as e:
@@ -256,6 +338,31 @@ class WanPipelineRunner(PipelineRunner):
             # request completes — a second gc/empty_cache here just adds stalls.
             if cleanup_hook:
                 cleanup_hook()
+
+    # ------------------------------------------------------------------
+    # TeaCache
+    # ------------------------------------------------------------------
+
+    # DiffSynth's TeaCache ships coefficient tables for Wan *2.1* only, and
+    # raises ValueError on any id outside that table — including the "" it
+    # defaults to. Our models are all Wan 2.2 A14B, so there is no exact
+    # match; we pick the nearest 2.1 polynomial as a proxy. This is why
+    # thresholds have to be swept empirically rather than lifted from
+    # published Wan 2.1 numbers.
+    _TEA_CACHE_IDS = {
+        "i2v_480": "Wan2.1-I2V-14B-480P",
+        "i2v_720": "Wan2.1-I2V-14B-720P",
+        "t2v": "Wan2.1-T2V-14B",
+    }
+
+    def _tea_cache_model_id(self, model_type: str, height: int) -> str:
+        """Pick the closest Wan2.1 TeaCache coefficient set for a 2.2 model."""
+        name = (model_type or "").lower()
+        if "i2v" in name or "inp" in name or "animate" in name:
+            key = "i2v_720" if (height or 0) >= 704 else "i2v_480"
+        else:
+            key = "t2v"
+        return self._TEA_CACHE_IDS[key]
 
     # ------------------------------------------------------------------
     # Wan-specific input mapping overrides

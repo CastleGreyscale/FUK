@@ -10,7 +10,11 @@ dependencies = [
     "xformers>=0.0.31",
     "triton>=3.1.0",
     "torchaudio>=2.7.0",
-    
+    # INT8 attention for the Wan DiT. Deliberately NOT accompanied by
+    # flash-attn: FA2 outranks sage-attn in DiffSynth's backend chain, so
+    # installing it would silently take sage-attn out of play.
+    "sageattention>=1.0.6",
+
     # Hugging Face Ecosystem
     "transformers>=4.56.0",
     "diffusers>=0.32.0",

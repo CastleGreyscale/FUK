@@ -85,6 +85,7 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
     switch_dit_boundary: videoDefaults.switch_dit_boundary ?? 0.875,
     sliding_window_size: videoDefaults.sliding_window_size ?? null,
     sliding_window_stride: videoDefaults.sliding_window_stride ?? null,
+    tea_cache_l1_thresh: videoDefaults.tea_cache_l1_thresh ?? null,
     denoising_strength: videoDefaults.denoising_strength ?? 1.0,
     loras: videoDefaults.loras ?? (videoDefaults.lora ? [{ key: videoDefaults.lora, multiplier: videoDefaults.lora_multiplier ?? 1.0, bypass: videoDefaults.lora_bypass ?? false }] : []),
     seed: videoDefaults.seed ?? null,
@@ -598,6 +599,9 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
 if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoising_strength;
       if (meta.sliding_window_size != null)   updates.sliding_window_size   = meta.sliding_window_size;
       if (meta.sliding_window_stride != null) updates.sliding_window_stride = meta.sliding_window_stride;
+      // Restored explicitly rather than via the `!= null` idiom above: null is
+      // the meaningful "cache off" value, so a baseline run must clear it.
+      if ('tea_cache_l1_thresh' in meta) updates.tea_cache_l1_thresh = meta.tea_cache_l1_thresh;
       if (meta.seed != null) {
         updates.seed     = meta.seed;
         updates.seedMode = SEED_MODES.FIXED;
@@ -1001,6 +1005,43 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
               )}
             </div>
 
+            <div className="fuk-form-pair">
+              <div className="fuk-form-group-compact">
+                <label className="fuk-label" title="Number of frames per sliding window chunk. Leave blank to disable.">
+                  Window Size <Info className="fuk-label-info" />
+                </label>
+                <input
+                  type="number"
+                  className="fuk-input"
+                  value={formData.sliding_window_size ?? ''}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    sliding_window_size: e.target.value ? parseInt(e.target.value) : null
+                  })}
+                  placeholder="disabled"
+                  step={1}
+                  min={1}
+                />
+              </div>
+              <div className="fuk-form-group-compact">
+                <label className="fuk-label" title="Step size between sliding windows. Leave blank to disable.">
+                  Window Stride <Info className="fuk-label-info" />
+                </label>
+                <input
+                  type="number"
+                  className="fuk-input"
+                  value={formData.sliding_window_stride ?? ''}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    sliding_window_stride: e.target.value ? parseInt(e.target.value) : null
+                  })}
+                  placeholder="disabled"
+                  step={1}
+                  min={1}
+                />
+              </div>
+            </div>
+
             <div className="fuk-form-group-compact">
               <div className="lora-header">
                 <label className="fuk-label">LoRA</label>
@@ -1157,44 +1198,31 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
                   max={1}
                 />
               </div>
-            </div>
-
-            <div className="fuk-form-pair">
               <div className="fuk-form-group-compact">
-                <label className="fuk-label" title="Number of frames per sliding window chunk. Leave blank to disable.">
-                  Window Size <Info className="fuk-label-info" />
+                <label className="fuk-label" title="TeaCache: skips the DiT forward pass on steps whose timestep embedding is close enough to the previous one. Blank = off. Lower = more conservative, higher = faster but risks motion stutter. Try 0.08–0.15 before going higher. Unvalidated on our shots — A/B against a blank run before trusting it on a final.">
+                  TeaCache Threshold <Info className="fuk-label-info" />
                 </label>
                 <input
                   type="number"
                   className="fuk-input"
-                  value={formData.sliding_window_size ?? ''}
+                  value={formData.tea_cache_l1_thresh ?? ''}
                   onChange={(e) => setFormData({
                     ...formData,
-                    sliding_window_size: e.target.value ? parseInt(e.target.value) : null
+                    tea_cache_l1_thresh: e.target.value ? parseFloat(e.target.value) : null
                   })}
-                  placeholder="disabled"
-                  step={1}
-                  min={1}
-                />
-              </div>
-              <div className="fuk-form-group-compact">
-                <label className="fuk-label" title="Step size between sliding windows. Leave blank to disable.">
-                  Window Stride <Info className="fuk-label-info" />
-                </label>
-                <input
-                  type="number"
-                  className="fuk-input"
-                  value={formData.sliding_window_stride ?? ''}
-                  onChange={(e) => setFormData({
-                    ...formData,
-                    sliding_window_stride: e.target.value ? parseInt(e.target.value) : null
-                  })}
-                  placeholder="disabled"
-                  step={1}
-                  min={1}
+                  placeholder="off"
+                  step={0.01}
+                  min={0}
+                  max={1}
                 />
               </div>
             </div>
+            {formData.tea_cache_l1_thresh != null && (
+              <p className="fuk-help-text fuk-help-text--info">
+                TeaCache on — speed/quality tradeoff is unvalidated on our shots.
+                Watch the DiT switch step for artifacts.
+              </p>
+            )}
 
             <div className="fuk-form-group-compact">
               <label className="fuk-label">VRAM Management</label>

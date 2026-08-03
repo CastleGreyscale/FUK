@@ -685,7 +685,11 @@ class VideoGenerationRequest(BaseModel):
     denoising_strength: Optional[float] = None  # Edit strength when input image/video present
     sliding_window_size: Optional[int] = None  # Sliding window size for tiled inference
     sliding_window_stride: Optional[int] = None  # Sliding window stride for tiled inference
-    
+    # TeaCache — opt-in step skipping. None = off (the default); no UI control
+    # yet, API-only until thresholds are validated on production shots.
+    tea_cache_l1_thresh: Optional[float] = None
+    tea_cache_model_id: Optional[str] = None  # Override the auto-picked coefficient set
+
 class GenerationResponse(BaseModel):
     generation_id: str
     status: str
@@ -1392,8 +1396,10 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
             denoising_strength=request.denoising_strength,
             sliding_window_size=request.sliding_window_size,
             sliding_window_stride=request.sliding_window_stride,
+            tea_cache_l1_thresh=request.tea_cache_l1_thresh,
+            tea_cache_model_id=request.tea_cache_model_id,
         )
-        
+
         # Extract thumbnail from generated video
         if paths["generated_mp4"].exists():
             thumb_path = paths["generated_mp4"].with_suffix('.thumb.jpg')
@@ -1457,6 +1463,14 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
             denoising_strength=request.denoising_strength,
             sliding_window_size=request.sliding_window_size,
             sliding_window_stride=request.sliding_window_stride,
+            # Effective speed/quality settings come from the runner's own
+            # params (auto-picked coefficient set, resolved attention
+            # backend, per-step timing), not the request echo.
+            tea_cache_l1_thresh=result.get("params", {}).get("tea_cache_l1_thresh"),
+            tea_cache_model_id=result.get("params", {}).get("tea_cache_model_id"),
+            attention_backend=result.get("params", {}).get("attention_backend"),
+            sec_per_step=result.get("params", {}).get("sec_per_step"),
+            elapsed=result.get("elapsed"),
             prompt_source=prompt_source,
             prompt_expanded_markers=prompt_provenance["expanded_markers"],
             prompt_unknown_markers=prompt_provenance["unknown_markers"],
@@ -2659,20 +2673,6 @@ async def get_postprocessor_models():
     """Get available post-processor models and their info"""
     return {
         "upscaling": {
-            "seedvr2": {
-                "name": "SeedVR2",
-                "description": "Temporally-coherent video restoration (video only)",
-                "scales": [2, 4],
-                "video_only": True,
-                "parameters": {
-                    "variant": {"type": "string", "default": "seedvr2_3b",
-                                "options": ["seedvr2_3b", "seedvr2_7b"]},
-                    "resolution_cap": {"type": "int", "default": 1920,
-                                       "options": [1280, 1920, 2560, 3840]},
-                    "frame_window": {"type": "int", "default": 0,
-                                     "description": "0 = auto from VRAM"},
-                }
-            },
             "realesrgan": {
                 "name": "Real-ESRGAN",
                 "description": "AI-based photo-realistic upscaling (per-frame on video)",

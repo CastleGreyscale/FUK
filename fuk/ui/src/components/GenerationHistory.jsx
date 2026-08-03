@@ -546,6 +546,9 @@ const SETTING_FIELDS = [
   { key: 'video_length',          label: 'Frames' },
   { key: 'sliding_window_size',   label: 'Window' },
   { key: 'sliding_window_stride', label: 'Stride' },
+  { key: 'tea_cache_l1_thresh',   label: 'TeaCache' },
+  { key: 'attention_backend',     label: 'Attention' },
+  { key: 'sec_per_step',          label: 's/step', fmt: v => `${Number(v).toFixed(2)}s` },
   { key: 'eligen_alpha',          label: 'Eligen α' },
   { key: 'model',                 label: 'Model' },
 ];

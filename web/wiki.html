@@ -341,7 +341,7 @@
             <!-- Video Generation -->
             <div class="wiki-section" id="video-generation">
                 <h2>Video Generation</h2>
-                <div class="wiki-video" data-vimeo="" data-title="Video Generation">
+                <div class="wiki-video" data-vimeo="https://framerate.tv/watch/e5764eaf-7ec6-4fb3-b902-f52ff9704d20" data-title="Video Generation">
                     <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
                 </div>
                 <p>FUK supports video generation from text prompts and image inputs using Wan pipelines. Output is organized under the same project / shot / version hierarchy as images. Generated video can be passed directly to <a href="#interpolation">Frame Interpolation</a> to increase frame rate before delivery.</p>
@@ -354,7 +354,7 @@
                     <tbody>
                         <tr><td>Wan 2.2 I2V-A14B</td><td>Image + text prompt</td><td>Image anchors the first frame; motion is synthesized toward the prompt</td></tr>
                         <tr><td>Wan 2.2 Fun Control</td><td>Control video + optional start/end images</td><td>Uses a reference video as a motion/structure guide</td></tr>
-                        <tr><td>FFLF</td><td>Image + text prompt</td><td>Fast frame generation; optimized for quick iteration and smooth motion synthesis</td></tr>
+                        <tr><td>FFLF (Wan 2.2 Fun-A14B-InP)</td><td>Start image + end image + text prompt</td><td>Interpolates motion between two fixed frames; output lands on both. See <a href="#fflf">FFLF</a></td></tr>
                         <tr><td>Wan Animate</td><td>Image + text prompt</td><td>Animation-focused pipeline with enhanced character and object motion control</td></tr>
                     </tbody>
                 </table>
@@ -382,6 +382,35 @@
                         <tr><td>VRAM Management</td><td>Offloading strategy for VRAM-limited hardware</td><td>—</td></tr>
                     </tbody>
                 </table>
+
+                <h3>Control Video Conditioning</h3>
+                <p>Control-capable pipelines accept a per-frame conditioning sequence instead of (or alongside) a still reference — the same signals used for image ControlNet, extracted across every frame. Generate the sequence in the <a href="#preprocess-panel">Preprocess Panel</a> and load it as the control video. Conditioning must be temporally stable: preprocess the whole range in one pass so the signal doesn't flicker between frames.</p>
+
+                <h4>Canny</h4>
+                <div class="wiki-video" data-vimeo="https://framerate.tv/watch/72a87ad2-a070-415e-9ad2-0267bb4b5c72" data-title="Control Video — Canny">
+                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
+                </div>
+                <p>Edge-map control video — holds silhouette and hard structural lines to the source footage across the sequence. See <a href="#preprocessors">Canny Edge Detection</a>.</p>
+
+                <h4>Depth</h4>
+                <div class="wiki-video" data-vimeo="https://framerate.tv/watch/dff6f224-5971-45f5-a9ad-ee1ccf5fe002" data-title="Control Video — Depth">
+                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
+                </div>
+                <p>Depth control video — preserves camera move and spatial layout without locking edge detail. Normalize depth over the full range rather than per frame, or the sequence will pulse. See <a href="#preprocessors">Depth Estimation</a>.</p>
+
+
+                <h4>OpenPose</h4>
+                <div class="wiki-video" data-vimeo="https://framerate.tv/watch/96824148-bb96-4d1f-810a-18ceb864f091" data-title="Control Video — OpenPose">
+                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
+                </div>
+                <p>Skeletal pose control video — drives body, hand, and facial keypoints frame by frame while appearance comes from the reference image and prompt. See <a href="#preprocessors">OpenPose</a>.</p>
+
+               
+                <h3 id="fflf">FFLF — First Frame / Last Frame</h3>
+                <div class="wiki-video" data-vimeo="https://framerate.tv/watch/79fb82b9-fb36-46ef-96e4-b7af1fd219b7" data-title="FFLF — First Frame / Last Frame">
+                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
+                </div>
+                <p>Give the model a start image and an end image and it generates the motion between them, landing exactly on both. Useful for bridging two locked storyboard frames or holding a specific in and out pose. Frame count sets how long the transition takes — the same move over more frames is slower and smoother.</p>
 
                 <h3>Output Format</h3>
                 <p>Video is saved as a PNG frame sequence plus a composited MP4 for preview. The frame sequence is the primary output — import it directly into Nuke, After Effects, DaVinci Resolve, or any compositing application. EXR passes are generated per-frame when AOV export is enabled via the <a href="#layers-panel">Layers Panel</a>.</p>
@@ -486,7 +515,7 @@
                 <div class="wiki-video" data-vimeo="" data-title="Upscaling">
                     <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
                 </div>
-                <p>FUK has two upscaling paths, and which one you want depends entirely on whether you are working on a still or a sequence. Upscaling runs as a separate pass in the <a href="#postprocess-panel">Postprocess Panel</a> — it does not require re-running the full generation pipeline, and the original output is always preserved.</p>
+                <p>Upscaling runs as a separate pass in the <a href="#postprocess-panel">Postprocess Panel</a> — it does not require re-running the full generation pipeline, and the original output is always preserved.</p>
 
                 <h3>Available Models</h3>
                 <table class="wiki-table">
@@ -494,50 +523,22 @@
                         <tr><th>Model</th><th>Best For</th><th>Scale</th><th>Temporal</th></tr>
                     </thead>
                     <tbody>
-                        <tr><td>SeedVR2 3B</td><td>Video — restores the whole sequence together</td><td>2×, 4×</td><td>Yes</td></tr>
-                        <tr><td>SeedVR2 7B</td><td>Video, 40GB+ cards only</td><td>2×, 4×</td><td>Yes</td></tr>
-                        <tr><td>Real-ESRGAN x4 Plus</td><td>Stills; video fallback</td><td>2×, 4×, 8×</td><td>No</td></tr>
+                        <tr><td>Real-ESRGAN x4 Plus</td><td>Stills and video</td><td>2×, 4×, 8×</td><td>No</td></tr>
                         <tr><td>Lanczos</td><td>Fast, non-AI resize</td><td>2×, 4×, 8×</td><td>No</td></tr>
                     </tbody>
                 </table>
 
-                <h3>Why Two Paths</h3>
-                <p>Real-ESRGAN has no temporal model. Applied to video it enhances each frame in isolation, and because it hallucinates detail independently per frame, that detail crawls and shimmers between frames. On Wan output — where frame-to-frame motion is already slightly irregular — this is very visible.</p>
-                <p>SeedVR2 is a one-step diffusion transformer that restores a sequence as a sequence, so the detail it synthesizes is consistent across frames. It is the default for video and the reason the per-frame path is now labelled as a fallback.</p>
+                <h3>No Temporal Model</h3>
+                <p>Real-ESRGAN has no temporal model. Applied to video it enhances each frame in isolation, and because it hallucinates detail independently per frame, that detail crawls and shimmers between frames. On Wan output — where frame-to-frame motion is already slightly irregular — this is very visible. Treat video upscaling here as a convenience rather than a finishing step.</p>
 
                 <h3>Workflow</h3>
                 <ol>
                     <li>Go to the <a href="#postprocess-panel">Postprocess Panel</a> and select the Upscale tab</li>
                     <li>Load an image or a video</li>
-                    <li>Select a model and scale factor — the model list changes depending on whether the input is a still or a sequence</li>
+                    <li>Select a model and scale factor</li>
                     <li>Run — the result is saved as a new version alongside the original</li>
                 </ol>
 
-                <h3>SeedVR2 Settings</h3>
-                <table class="wiki-table">
-                    <thead>
-                        <tr><th>Setting</th><th>Description</th></tr>
-                    </thead>
-                    <tbody>
-                        <tr><td>Variant</td><td>3B fits a 24GB card. 7B needs 40GB+ and is not the default for that reason.</td></tr>
-                        <tr><td>Resolution Cap</td><td>Longest output edge. SeedVR2's attention cost scales with resolution, so this is the setting that actually decides whether a clip fits in VRAM — an uncapped 4× on a 1080p source will not fit on 24GB.</td></tr>
-                        <tr><td>Frame Window</td><td>Frames restored per forward pass. Larger windows hold coherence across more motion at higher memory cost. Auto picks from detected VRAM. Below roughly 5 frames, quality degrades noticeably.</td></tr>
-                    </tbody>
-                </table>
-
-                <h3>Installation</h3>
-                <p>SeedVR2 runs in an isolated environment, for the same reason TRELLIS does — it needs flash-attn built against its own torch, which would conflict with the main venv's torch used for Qwen and Wan generation. Install it with:</p>
-                <pre><code>bash fuk/core/install_seedvr2_env.sh</code></pre>
-                <p>The script clones the source, builds the environment, and downloads the 3B weights. Set <code>SEEDVR2_VARIANT=7b</code> or <code>SEEDVR2_VARIANT=both</code> to fetch the larger model. Until it is installed the Postprocess Panel shows SeedVR2 as unavailable and falls back to Real-ESRGAN.</p>
-                <p>SeedVR2 is Apache 2.0 for both code and weights — see <a href="#licensing">Licensing</a>.</p>
-
-                <h3>Practical Notes</h3>
-                <ul>
-                    <li>SeedVR2 is video-only. Stills still go through Real-ESRGAN, which is the right tool for a single frame and much faster.</li>
-                    <li>Long clips are processed in chunks and concatenated. Chunk boundaries are the one place coherence can break — raise the frame window if you see a seam.</li>
-                    <li>If the resolution cap is at or below the source resolution, the effective scale drops to 1× and SeedVR2 acts as a restorer rather than an upscaler. This is sometimes what you want on soft footage.</li>
-                    <li>Out-of-memory failures name the fix in the error rather than surfacing a raw CUDA traceback — lower the scale, the cap, or the frame window.</li>
-                </ul>
             </div>
 
             <!-- Frame Interpolation -->
@@ -1218,9 +1219,8 @@
                 <h3>Upscale Tab</h3>
                 <ul>
                     <li><strong>Input</strong> — <a href="#media-input">Media Input</a>; accepts images, videos, or frame sequences</li>
-                    <li><strong>Method</strong> — upscaling model selector. The list changes with the input: video offers SeedVR2 (temporal, default) and Real-ESRGAN (per-frame fallback); stills offer Real-ESRGAN and Lanczos</li>
-                    <li><strong>Factor</strong> — scale multiplier: 2× or 4× for SeedVR2, 2×/4×/8× for Real-ESRGAN</li>
-                    <li><strong>Variant / Resolution Cap / Frame Window</strong> — SeedVR2 only; these govern VRAM use</li>
+                    <li><strong>Method</strong> — upscaling model selector: Real-ESRGAN or Lanczos, for both stills and video</li>
+                    <li><strong>Factor</strong> — scale multiplier: 2×, 4× or 8×</li>
                 </ul>
                 <p>The result preview shows a before/after comparison. For video, the comparison is shown at the current frame. See <a href="#upscaling">Upscaling</a> for available models.</p>
 
@@ -2166,11 +2166,11 @@
                         <tr><td>Normals</td><td>DA3-derived normals (Apache 2.0)</td><td>DSINE</td></tr>
                         <tr><td>Cryptomattes</td><td>SAM 2.1 (Apache 2.0)</td><td>—</td></tr>
                         <tr><td>3D reconstruction</td><td>TRELLIS (MIT)</td><td>VGGT</td></tr>
-                        <tr><td>Upscaling</td><td>Real-ESRGAN (BSD-3) / SeedVR2 (Apache 2.0)</td><td>—</td></tr>
+                        <tr><td>Upscaling</td><td>Real-ESRGAN (BSD-3)</td><td>—</td></tr>
                         <tr><td>Interpolation</td><td>FILM (Apache 2.0)</td><td>—</td></tr>
                     </tbody>
                 </table>
-                <p>Everything else in the stack — DiffSynth-Studio, the Wan and Qwen weights, the DiffSynth LoRAs, SAM2, TRELLIS, FILM, Real-ESRGAN, SeedVR2 — is Apache 2.0, MIT, or BSD-3-Clause.</p>
+                <p>Everything else in the stack — DiffSynth-Studio, the Wan and Qwen weights, the DiffSynth LoRAs, SAM2, TRELLIS, FILM, Real-ESRGAN — is Apache 2.0, MIT, or BSD-3-Clause.</p>
 
                 <h3>Unverified</h3>
                 <p>The <code>PAI/Wan2.2-VACE-Fun-A14B</code> and <code>PAI/Wan2.2-Fun-A14B-InP</code> repositories are gated on Hugging Face and could not be read without authentication. They are Alibaba PAI derivatives of Apache-2.0 Wan 2.2 and are expected to inherit those terms, but this has <strong>not been confirmed</strong>. Check the model card before relying on either for paid work.</p>
