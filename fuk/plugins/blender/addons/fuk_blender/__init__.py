@@ -26,11 +26,13 @@ for _m in (prefs, props, client, shot, render, controls, viewer, ops, ui):
 
 import bpy
 
+# Panel order matters: FUK_PT_main must register before the sub-panels that name it
+# as their bl_parent_id.
 _CLASSES = (
     prefs.FukAddonPreferences,
     props.FukProps,
     *ops.CLASSES,
-    ui.FUK_PT_main,
+    *ui.CLASSES,
 )
 
 

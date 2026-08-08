@@ -40,9 +40,13 @@ Blender scene ─► beauty.png (write_still)
 
 ## Use
 
-1. Open the **FUK** tab in the 3D viewport sidebar (press `N`).
+1. Open the **FUK** tab in the 3D viewport sidebar (press `N`). The shot binding and
+   run status sit on the **FUK** panel itself; *Prompt*, *Generation*, *Control*,
+   *Result*, *Render* and *Video* are collapsible sub-panels beneath it.
 2. Pick your **project folder** (the one holding the shot `.json` files) and press
-   **Connect**, then choose a shot and **Load Shot**.
+   **Connect**, then choose a shot and **Load Shot**. The shot list is a snapshot
+   taken at connect — press the ⟳ button beside the dropdown to re-scan the folder
+   after creating shots in FUK (your current selection is kept).
 3. Edit the prompt / seed / settings, choose a **Control** (depth, normals, openpose,
    canny), frame your camera, and press **Quick Preview** (fast, low-res) or
    **Render Full**.
@@ -105,6 +109,19 @@ Notes: video is slow (minutes) and runs on demand — no live mode. Control must
 native pass (depth/normals/openpose-rig); canny/estimated openpose aren't supported for
 sequences. Requires the **wan_vace_a14b** weights on the server. Esc stops *waiting* but
 video isn't abortable mid-render yet (unlike images).
+
+### Writing prompts
+
+Blender has no multi-line text field — a `StringProperty` is always one line, with no
+wrapping — so the prompt UI works around it two ways:
+
+- The **pencil** button beside either field opens a wide dialog holding both the
+  prompt and the negative. Same single line, roughly three times the width. It edits
+  the scene properties directly, so changes apply as you type and dismissing the
+  dialog does **not** revert them (there's no cancel; it's a bigger window onto the
+  same data, not a buffered editor).
+- Below each field, anything too long to fit is echoed word-wrapped in a read-only
+  box, so you can at least *read* the whole prompt in the sidebar.
 
 ### `#tags` (prompt expansion)
 

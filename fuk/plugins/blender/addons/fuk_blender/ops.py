@@ -12,6 +12,7 @@ from . import shot as shot_mod
 from . import render as render_mod
 from . import controls as controls_mod
 from . import viewer as viewer_mod
+from . import ui as ui_mod
 from .client import FukClient, FukError
 from .prefs import get_server_url
 
@@ -160,6 +161,55 @@ def _create_payload_from_meta(meta):
     }
 
 
+def _apply_shot_list(props, files) -> tuple[int, int]:
+    """Swap SHOT_CACHE for `files`, keeping the current selection if it survived.
+
+    Returns (total, added). The server sorts the list by mtime, so the enum's item
+    order changes every time a shot is saved — the selection has to be re-asserted
+    *by name*, or the dropdown silently points at whatever now occupies that index.
+    """
+    wanted = props.last_shot or props.shot_file
+    previous = {e.get("name") for e in props_mod.SHOT_CACHE}
+
+    props_mod.SHOT_CACHE.clear()
+    props_mod.SHOT_CACHE.extend(files or [])
+    names = [e["name"] for e in props_mod.SHOT_CACHE if e.get("name")]
+
+    # Restore the shot last used in this .blend if it still exists; else first.
+    if wanted and wanted in names:
+        props.shot_file = wanted
+    elif names:
+        props.shot_file = names[0]
+
+    return len(names), sum(1 for n in names if n not in previous)
+
+
+def refresh_shots(context):
+    """Re-list the project's shots, picking up any created since Connect.
+
+    Re-asserts the project folder first: the server holds a single global folder, so
+    the web UI (or another .blend) may have pointed it elsewhere since we connected.
+    Returns (ok: bool, message: str).
+    """
+    props = context.scene.fuk
+    folder = _abs_folder(props)
+    if not folder or not os.path.isdir(folder):
+        return False, "Pick a valid project folder first"
+    client = _client(context)
+    try:
+        client.set_project_folder(folder)
+        resp = client.list_shots()
+    except FukError as e:
+        props.connected = False
+        props.status = "Not connected"
+        return False, str(e)
+
+    total, added = _apply_shot_list(props, resp.get("files", []))
+    props.connected = True
+    props.status = f"{total} shot(s)" + (f" — {added} new" if added else "")
+    return True, props.status
+
+
 def connect_to_server(context):
     """Reach the server, set the project folder, list shots + tags. Sets props.connected
     and props.status. Returns (ok: bool, message: str). Used by the operator and by the
@@ -179,15 +229,7 @@ def connect_to_server(context):
         props.status = "Not connected"
         return False, str(e)
 
-    props_mod.SHOT_CACHE.clear()
-    props_mod.SHOT_CACHE.extend(resp.get("files", []))
-    count = len(props_mod.SHOT_CACHE)
-    names = {e.get("name") for e in props_mod.SHOT_CACHE}
-    # Restore the shot last used in this .blend if it still exists; else first.
-    if props.last_shot and props.last_shot in names:
-        props.shot_file = props.last_shot
-    elif count and props_mod.SHOT_CACHE[0].get("name"):
-        props.shot_file = props_mod.SHOT_CACHE[0]["name"]
+    count, _ = _apply_shot_list(props, resp.get("files", []))
 
     tag_count = 0
     try:
@@ -206,6 +248,18 @@ class FUK_OT_connect(bpy.types.Operator):
 
     def execute(self, context):
         ok, msg = connect_to_server(context)
+        self.report({"INFO"} if ok else {"ERROR"}, msg)
+        return {"FINISHED"} if ok else {"CANCELLED"}
+
+
+class FUK_OT_refresh_shots(bpy.types.Operator):
+    bl_idname = "fuk.refresh_shots"
+    bl_label = "Refresh Shots"
+    bl_description = ("Re-scan the project folder for shot files — picks up shots "
+                      "created in FUK since you connected")
+
+    def execute(self, context):
+        ok, msg = refresh_shots(context)
         self.report({"INFO"} if ok else {"ERROR"}, msg)
         return {"FINISHED"} if ok else {"CANCELLED"}
 
@@ -262,6 +316,52 @@ class FUK_OT_refresh_tags(bpy.types.Operator):
             return {"CANCELLED"}
         self.report({"INFO"}, f"{n} tag(s) available")
         return {"FINISHED"}
+
+
+# Dialog width in Blender UI units. Wrap the echo a little narrower than the dialog
+# so the text can't overrun its box once UI scale is applied.
+_PROMPT_DIALOG_WIDTH = 700
+_PROMPT_WRAP_WIDTH = 660
+
+
+class FUK_OT_edit_prompt(bpy.types.Operator):
+    bl_idname = "fuk.edit_prompt"
+    bl_label = "Edit Prompt"
+    bl_description = ("Edit the prompt and negative prompt in a wide dialog. Blender has "
+                      "no multi-line text field, so this gives the single line much more "
+                      "room — edits apply as you type")
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(
+            self, width=_PROMPT_DIALOG_WIDTH, title="Prompt", confirm_text="Done")
+
+    def draw(self, context):
+        # The scene properties are drawn directly, so edits land live and closing the
+        # dialog (however) never reverts them — it's a wider window onto the same data,
+        # not a buffered editor. No operator buttons here on purpose: invoking a search
+        # popup (Insert #tag) from inside a dialog dismisses the dialog.
+        layout = self.layout
+        props = context.scene.fuk
+
+        layout.label(text="Prompt")
+        layout.prop(props, "prompt", text="")
+        ui_mod.draw_wrapped(layout, props.prompt, _PROMPT_WRAP_WIDTH)
+
+        layout.separator()
+        layout.label(text="Negative")
+        layout.prop(props, "negative_prompt", text="")
+        ui_mod.draw_wrapped(layout, props.negative_prompt, _PROMPT_WRAP_WIDTH)
+
+        if props.resolved_preview:
+            layout.separator()
+            box = layout.box().column(align=True)
+            box.scale_y = 0.85
+            box.label(text="Last resolved to:", icon="SORTALPHA")
+            for line in ui_mod.wrap_text(props.resolved_preview, _PROMPT_WRAP_WIDTH):
+                box.label(text=line)
+
+    def execute(self, context):
+        return {"FINISHED"}  # editing already happened live in draw()
 
 
 class FUK_OT_insert_tag(bpy.types.Operator):
@@ -831,9 +931,11 @@ class FUK_OT_live(bpy.types.Operator):
 
 CLASSES = (
     FUK_OT_connect,
+    FUK_OT_refresh_shots,
     FUK_OT_load_shot,
     FUK_OT_save_shot,
     FUK_OT_refresh_tags,
+    FUK_OT_edit_prompt,
     FUK_OT_insert_tag,
     FUK_OT_resolve_preview,
     FUK_OT_use_last_seed,

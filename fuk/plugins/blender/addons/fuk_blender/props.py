@@ -18,6 +18,12 @@ SHOT_CACHE: list[dict] = []
 # Each: {"marker": "#hero", "name": "...", "expansion": "...", "category": "..."}.
 TOKEN_CACHE: list[dict] = []
 
+# Blender does not keep its own reference to the strings a dynamic enum callback
+# returns, so we must hold them here — otherwise they can be garbage collected and
+# the dropdown renders corrupted labels. Matters more now that the shot list is
+# re-listed on demand (Refresh) rather than only once at Connect.
+_SHOT_ENUM_ITEMS: list[tuple] = []
+
 
 def shot_enum_items(self, context):
     """EnumProperty items from the cached shot list (filenames)."""
@@ -28,7 +34,8 @@ def shot_enum_items(self, context):
             items.append((name, name, entry.get("modifiedAt", "")))
     if not items:
         items = [("", "<no shots — Connect first>", "")]
-    return items
+    _SHOT_ENUM_ITEMS[:] = items
+    return _SHOT_ENUM_ITEMS
 
 
 def _on_shot_change(self, context):
