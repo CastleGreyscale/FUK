@@ -27,6 +27,17 @@ Blender scene ─► beauty.png (write_still)
 - **The shot `.json` is the source of truth.** *Load Shot* mirrors `tabs.image`
   (prompt, seed, model, steps, guidance…) into the panel; *Save to Shot* writes it
   back. Blender-only fields are stored under `tabs.image.blender_*`.
+  - Settings are read from and written to the slot of **the model Blender generates
+    with** (`modelSettings[<control model>]`), not whatever the web UI has active — so
+    the seed Blender sends is the seed recorded against that model. The shot's
+    `activeModel` is never rewritten. A model with no slot yet inherits the active
+    model's prompt/seed on first Load.
+  - Seeds are uint32 (0–4294967295), so the panel's seed is a **text field** —
+    Blender's integer properties top out at 2147483647 and cannot hold half of them.
+  - A full generation writes the seed it actually used (and the control source) back
+    into the shot immediately. Prompt, steps and guidance still need *Save to Shot*.
+  - **Control** and the OpenPose layer persist in the `.blend` and are only overridden
+    by a Load when the shot actually carries a `blender_*` key.
 - Blender and FUK run on the **same machine**, so renders are exchanged by path —
   no uploads. Only Blender's bundled Python is used (`urllib`, `OpenImageIO`, `numpy`).
 

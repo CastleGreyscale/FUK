@@ -84,6 +84,45 @@ CONTROL_SOURCE_ITEMS = [
     ("canny", "Canny", "Edge map derived by FUK from the beauty render"),
 ]
 
+CONTROL_MODELS = {m[0] for m in MODEL_ITEMS}
+CONTROL_SOURCES = {c[0] for c in CONTROL_SOURCE_ITEMS}
+
+# FUK seeds are uint32 (the web UI rolls them with crypto.getRandomValues on a
+# Uint32Array). Blender's IntProperty is a C int — assigning anything above
+# 0x7fffffff raises ValueError, and a max above it won't even register. So seeds
+# live in StringProperty and are parsed on the way in and out; storing them as ints
+# silently dropped over half of all seeds FUK produces.
+SEED_MAX = 2**32 - 1
+_SEED_DIGITS = len(str(SEED_MAX))
+
+
+def parse_seed(value):
+    """Coerce a seed from the shot JSON or a props field to a uint32, or None."""
+    if value is None:
+        return None
+    try:
+        n = int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    return max(0, min(SEED_MAX, n))
+
+
+def seed_text(value) -> str:
+    """Format a seed for a props field ('' when there is no seed)."""
+    n = parse_seed(value)
+    return "" if n is None else str(n)
+
+
+def _sanitize_seed(self, context):
+    """Hold the seed field to digits inside the uint32 range as it is typed."""
+    for field in ("seed", "last_used_seed"):
+        raw = getattr(self, field)
+        digits = "".join(c for c in raw if c.isdigit())[:_SEED_DIGITS]
+        if digits:
+            digits = str(min(int(digits), SEED_MAX))
+        if raw != digits:
+            setattr(self, field, digits)
+
 
 def _update_bg_alpha(self, context):
     """Live-apply the opacity slider to the current camera-background overlay,
@@ -122,10 +161,15 @@ class FukProps(bpy.types.PropertyGroup):
     seed_mode: bpy.props.EnumProperty(
         name="Seed Mode",
         items=[("random", "Random", "New random seed each run"),
-               ("fixed", "Fixed", "Reuse the seed below")],
+               ("fixed", "Fixed", "Reuse the seed below"),
+               ("increment", "Increment", "Seed +1 after each run")],
         default="random",
     )
-    seed: bpy.props.IntProperty(name="Seed", default=0, min=0)
+    # Text, not int — see SEED_MAX above. Empty means "no seed set".
+    seed: bpy.props.StringProperty(
+        name="Seed", default="", update=_sanitize_seed,
+        description=f"Seed value (0–{SEED_MAX}); blank lets FUK roll one",
+    )
     output_format: bpy.props.EnumProperty(
         name="Output",
         items=[("png", "PNG", ""), ("exr", "EXR", ""), ("both", "Both", "")],
@@ -206,8 +250,9 @@ class FukProps(bpy.types.PropertyGroup):
     resolved_preview: bpy.props.StringProperty(name="Resolved", default="")
 
     # The actual seed FUK used last (random or fixed); shown so the panel always
-    # surfaces a concrete number even in random mode.
-    last_used_seed: bpy.props.IntProperty(name="Last Seed", default=0, min=0)
+    # surfaces a concrete number even in random mode. Text, like `seed`.
+    last_used_seed: bpy.props.StringProperty(
+        name="Last Seed", default="", update=_sanitize_seed)
 
     # --- runtime status (not saved) ---
     status: bpy.props.StringProperty(name="Status", default="Not connected")

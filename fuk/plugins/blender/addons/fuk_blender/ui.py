@@ -133,7 +133,8 @@ class FUK_PT_generation(_FukSubPanel, bpy.types.Panel):
         row = layout.row(align=True)
         row.prop(props, "seed_mode", text="")
         sub = row.row(align=True)
-        sub.enabled = props.seed_mode == "fixed"
+        # Increment needs a start value too — only Random has nothing to type.
+        sub.enabled = props.seed_mode != "random"
         sub.prop(props, "seed", text="")
         if props.last_used_seed:
             row = layout.row(align=True)

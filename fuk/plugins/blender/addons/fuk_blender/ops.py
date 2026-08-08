@@ -97,13 +97,30 @@ def _gen_id_from_url(png_url: str) -> str:
     return s.rsplit("/", 1)[0]
 
 
+def _effective_seed(props):
+    """The seed to send to FUK, mirroring the web Image tab's mode resolution.
+
+    None means "roll one" — the server picks, and we read back what it used.
+    """
+    seed = props_mod.parse_seed(props.seed)
+    if props.seed_mode == "random":
+        return None
+    if props.seed_mode == "increment":
+        last_used = props_mod.parse_seed(props.last_used_seed)
+        if last_used is not None:
+            return (last_used + 1) % (props_mod.SEED_MAX + 1)
+    return seed
+
+
 def _resolved_seed(props, seed_used=None):
-    """The concrete seed to record (actual used > fixed value > none for random)."""
-    if seed_used is not None:
-        return int(seed_used)
-    if props.last_used_seed:
-        return int(props.last_used_seed)
-    return None if props.seed_mode == "random" else int(props.seed)
+    """The concrete seed to record (actual used > last used > fixed value)."""
+    used = props_mod.parse_seed(seed_used)
+    if used is not None:
+        return used
+    last_used = props_mod.parse_seed(props.last_used_seed)
+    if last_used is not None:
+        return last_used
+    return None if props.seed_mode == "random" else props_mod.parse_seed(props.seed)
 
 
 def _enrich_payload(props, render, control_path, gen_id):
@@ -537,7 +554,7 @@ class FUK_OT_generate(bpy.types.Operator):
                 "model": props.model,
                 "steps": int(steps),
                 "guidance_scale": float(props.guidance_scale),
-                "seed": None if props.seed_mode == "random" else int(props.seed),
+                "seed": _effective_seed(props),
                 "width": result["width"],
                 "height": result["height"],
                 "output_format": props.output_format,
@@ -633,13 +650,12 @@ class FUK_OT_generate(bpy.types.Operator):
             seed_used = None
             try:
                 meta = self._client.generation_metadata(png_url)
-                sd = meta.get("seed")
-                if sd not in (None, "", "null"):
-                    seed_used = max(0, int(sd))
-                    props.last_used_seed = seed_used
-                    props.seed = seed_used
+                seed_used = props_mod.parse_seed(meta.get("seed"))
             except (FukError, ValueError, TypeError):
                 pass
+            if seed_used is not None:
+                props.last_used_seed = props_mod.seed_text(seed_used)
+                props.seed = props_mod.seed_text(seed_used)
 
             dest = os.path.join(self._out_dir, "result.png")
             try:
@@ -672,6 +688,9 @@ class FUK_OT_generate(bpy.types.Operator):
                     self._client.save_entry(_enrich_payload(props, self._render, self._control_path, gen_id))
                     props.result_persisted = True
                     note = " — saved to history"
+                    # Record the seed FUK rolled (and the control that drove it) in the
+                    # shot, so the file reflects what was actually run.
+                    shot_mod.record_run(self._client, props.shot_file, props, seed_used)
             except FukError as e:
                 self.report({"WARNING"}, f"History update failed: {e}")
 
@@ -754,7 +773,7 @@ class FUK_OT_generate_video(bpy.types.Operator):
                 "height": seq["height"],
                 "steps": int(props.video_steps),
                 "guidance_scale": float(props.video_guidance),
-                "seed": None if props.seed_mode == "random" else int(props.seed),
+                "seed": _effective_seed(props),
             }
             props.status = f"Submitting {seq['frames']}f video to FUK…"
             resp = client.generate_video(payload)
