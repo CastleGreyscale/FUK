@@ -188,6 +188,14 @@ class ThreeDPipelineRunner(PipelineRunner):
 
         elapsed = time.perf_counter() - started
 
+        # The two tiers write the same filename with different contents:
+        # TRELLIS's PLY is the Gaussian splat representation, VGGT's is a
+        # plain XYZ+RGB cloud. Nothing downstream can tell them apart from
+        # the file alone, so say which one it is.
+        ply_kind = None
+        if "ply" in formats:
+            ply_kind = "splat" if kind == "single_image" else "points"
+
         meta_path = self._write_meta(
             output_dir=output_dir,
             input_paths=paths,
@@ -197,6 +205,7 @@ class ThreeDPipelineRunner(PipelineRunner):
             elapsed=elapsed,
             result=result,
             settings=kwargs,
+            ply_kind=ply_kind,
         )
 
         _log(self.log_prefix,
@@ -213,6 +222,7 @@ class ThreeDPipelineRunner(PipelineRunner):
             "vertex_count": result.get("vertex_count", 0),
             "face_count": result.get("face_count", 0),
             "has_mesh": result.get("has_mesh", False),
+            "ply_kind": ply_kind,
             "peak_vram_gb": result.get("peak_vram_gb"),
             "inference_seconds": result.get("inference_seconds"),
             "elapsed": round(elapsed, 1),
@@ -287,6 +297,7 @@ class ThreeDPipelineRunner(PipelineRunner):
         elapsed: float,
         result: dict,
         settings: dict,
+        ply_kind: Optional[str] = None,
     ) -> Path:
         """Record everything needed to reproduce or re-use the reconstruction.
 
@@ -311,6 +322,8 @@ class ThreeDPipelineRunner(PipelineRunner):
             "face_count": result.get("face_count", 0),
             "settings": {k: v for k, v in settings.items() if _jsonable(v)},
         }
+        if ply_kind:
+            meta["ply_kind"] = ply_kind
         if "cameras" in result:
             meta["cameras"] = result["cameras"]
         if "normalization" in result:

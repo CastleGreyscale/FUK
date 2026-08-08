@@ -71,8 +71,7 @@
                         <a href="#video-generation" class="sidebar-link">Video Generation</a>
                         <a href="#preprocessors" class="sidebar-link">Preprocessors</a>
                         <a href="#regional-conditioning" class="sidebar-link">Regional Conditioning</a>
-                        <a href="#upscaling" class="sidebar-link">Upscaling</a>
-                        <a href="#interpolation" class="sidebar-link">Frame Interpolation</a>
+                        <a href="#post-processors" class="sidebar-link">Post-Processors</a>
                         <a href="#aovs" class="sidebar-link">AOVs &amp; Passes</a>
                         <a href="#exr-export" class="sidebar-link">EXR Export</a>
                         <a href="#lora-dataset-builder" class="sidebar-link">LoRA Dataset Builder</a>
@@ -328,12 +327,6 @@
                 </div>
                 <p>Depth-map conditioning — preserves spatial layout and volume without constraining edge detail. See <a href="#preprocessors">Depth Estimation</a>.</p>
 
-                <h4>EliGen</h4>
-                <div class="wiki-video" data-vimeo="https://framerate.tv/watch/850d2526-ac1a-478c-9b51-0845c47861ea" data-title="ControlNet — EliGen">
-                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
-                </div>
-                <p>Regional prompt conditioning — drives separate prompts through masked zones of the frame rather than a reference-derived signal. See <a href="#regional-conditioning">Regional Conditioning (EliGen)</a>.</p>
-
                 <h3>Batch Generation</h3>
                 <p>FUK supports batch generation — queue multiple runs from the same settings in a single pass. Each result is saved as its own versioned output with its own metadata sidecar. Batch jobs run sequentially and can be monitored from the generation modal.</p>
             </div>
@@ -362,6 +355,7 @@
                 <h3>Alternative Models</h3>
                 <p><strong>LTX 2.3</strong> is an available video generation model but is not currently built into FUK's standard pipeline. If you're interested in adding support, it can be integrated via model configuration.</p>
                 <p><strong>Flux Video</strong> is coming soon. Support will be added to FUK upon release.</p>
+                <p><strong>MiniMax Hailuo 3</strong> is also on the table for the other video tools — evaluation is ongoing, subject to the same open-source and commercial-licensing requirements applied to everything else FUK ships.</p>
 
                 <h3>Generation Parameters</h3>
                 <table class="wiki-table">
@@ -478,7 +472,7 @@
             <!-- Regional Conditioning -->
             <div class="wiki-section" id="regional-conditioning">
                 <h2>Regional Conditioning (EliGen)</h2>
-                <div class="wiki-video" data-vimeo="" data-title="Regional Conditioning (EliGen)">
+                <div class="wiki-video" data-vimeo="https://framerate.tv/watch/850d2526-ac1a-478c-9b51-0845c47861ea" data-title="Regional Conditioning (EliGen)">
                     <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
                 </div>
                 <p>EliGen integration brings regional conditioning directly into the generation pipeline. Define compositional zones within the frame and assign independent parameters to each — separate prompts, weights, and conditioning per region. This gives you direct spatial control over composition without relying entirely on prompt engineering.</p>
@@ -509,15 +503,20 @@
                 </ul>
             </div>
 
-            <!-- Upscaling -->
-            <div class="wiki-section" id="upscaling">
-                <h2>Upscaling</h2>
-                <div class="wiki-video" data-vimeo="" data-title="Upscaling">
+            <!-- Post-Processors -->
+            <div class="wiki-section" id="post-processors">
+                <h2>Post-Processors</h2>
+                <div class="wiki-video" data-vimeo="https://framerate.tv/watch/069c6252-8f02-4e5c-a509-e8cd963a8ada" data-title="Post-Processors — Upscaling &amp; Frame Interpolation">
                     <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
                 </div>
-                <p>Upscaling runs as a separate pass in the <a href="#postprocess-panel">Postprocess Panel</a> — it does not require re-running the full generation pipeline, and the original output is always preserved.</p>
+                <p>Two finishing passes — <strong>upscaling</strong> (raise resolution) and <strong>frame interpolation</strong> (raise frame rate). Both run in the <a href="#postprocess-panel">Postprocess Panel</a>, take the same input types (image, video, or frame sequence), and save their result as a new version alongside the original. Neither requires re-running generation.</p>
 
-                <h3>Available Models</h3>
+                <div class="wiki-warning">
+                    <p><strong>Work in progress.</strong> The post-processors are the least mature part of FUK. Both are constrained by what is available under an open-source licence that <em>also</em> permits commercial use — the current models are older, image-only, and have no temporal awareness. Better options exist, but they are either closed, research-only, or non-commercial, and are not shipped here.</p>
+                    <p>In practice results fall short of the dedicated tools in Topaz, Resolve, Nuke, or Twixtor. Use these passes for previews, dailies, and quick turnarounds; for final delivery, take the frame sequence out to a purpose-built tool. New models are added as licensing allows.</p>
+                </div>
+
+                <h3 id="upscaling">Upscaling</h3>
                 <table class="wiki-table">
                     <thead>
                         <tr><th>Model</th><th>Best For</th><th>Scale</th><th>Temporal</th></tr>
@@ -528,10 +527,10 @@
                     </tbody>
                 </table>
 
-                <h3>No Temporal Model</h3>
+                <h4>No Temporal Model</h4>
                 <p>Real-ESRGAN has no temporal model. Applied to video it enhances each frame in isolation, and because it hallucinates detail independently per frame, that detail crawls and shimmers between frames. On Wan output — where frame-to-frame motion is already slightly irregular — this is very visible. Treat video upscaling here as a convenience rather than a finishing step.</p>
 
-                <h3>Workflow</h3>
+                <h4>Workflow</h4>
                 <ol>
                     <li>Go to the <a href="#postprocess-panel">Postprocess Panel</a> and select the Upscale tab</li>
                     <li>Load an image or a video</li>
@@ -539,20 +538,13 @@
                     <li>Run — the result is saved as a new version alongside the original</li>
                 </ol>
 
-            </div>
+                <h3 id="interpolation">Frame Interpolation</h3>
+                <p>FILM (Frame Interpolation for Large Motion) synthesizes intermediate frames to increase the effective frame rate of generated video. Useful for smoothing motion, converting a 12fps generation to a 24fps deliverable, or creating slow-motion sequences from standard-rate output.</p>
 
-            <!-- Frame Interpolation -->
-            <div class="wiki-section" id="interpolation">
-                <h2>Frame Interpolation</h2>
-                <div class="wiki-video" data-vimeo="" data-title="Frame Interpolation">
-                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
-                </div>
-                <p>FILM (Frame Interpolation for Large Motion) synthesizes intermediate frames to increase the effective frame rate of generated video. Useful for smoothing motion, converting a 12fps generation to a 24fps deliverable, or creating slow-motion sequences from standard-rate output. Interpolation runs in the <a href="#postprocess-panel">Postprocess Panel</a>.</p>
+                <h4>How FILM Works</h4>
+                <p>FILM uses a learned model to estimate motion between adjacent frames and synthesize intermediate frames that are temporally consistent. Unlike traditional optical flow methods, it handles large displacements and occlusions more gracefully — making it a better fit for AI-generated content where frame-to-frame motion can be irregular. It is the best-performing interpolator currently available to FUK under a licence that is both open source and commercially usable.</p>
 
-                <h3>How FILM Works</h3>
-                <p>FILM uses a learned model to estimate motion between adjacent frames and synthesize intermediate frames that are temporally consistent. Unlike traditional optical flow methods, it handles large displacements and occlusions more gracefully — making it a better fit for AI-generated content where frame-to-frame motion can be irregular.</p>
-
-                <h3>Parameters</h3>
+                <h4>Parameters</h4>
                 <table class="wiki-table">
                     <thead>
                         <tr><th>Parameter</th><th>Description</th></tr>
@@ -564,7 +556,7 @@
                     </tbody>
                 </table>
 
-                <h3>Practical Notes</h3>
+                <h4>Practical Notes</h4>
                 <ul>
                     <li>FILM performs best with smooth, continuous motion — highly chaotic or flickering content will not interpolate cleanly</li>
                     <li>Generated at 12fps → interpolated to 24fps is the most common workflow</li>
@@ -576,13 +568,15 @@
             <!-- AOVs -->
             <div class="wiki-section" id="aovs">
                 <h2>AOVs &amp; Passes</h2>
-                <div class="wiki-video" data-vimeo="" data-title="AOVs &amp; Passes">
+                <div class="wiki-video" data-vimeo="https://framerate.tv/watch/3a58ce28-698a-4984-843c-8838f8e23680" data-title="AOVs &amp; Passes">
                     <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
                 </div>
                 <p>FUK generates Arbitrary Output Variables (AOVs) alongside the beauty render via the <a href="#layers-panel">Layers Panel</a>. These technical passes enable compositing, grading, and integration with professional DCC tools downstream.</p>
 
                 <div class="wiki-warning">
-                    <p>AOV outputs are currently being refined. Quality and coverage are improving across builds. Feedback on specific issues is appreciated — contributions welcome.</p>
+                    <p><strong>Work in progress.</strong> AOV outputs are being refined and quality is improving across builds, but set expectations accordingly: the passes here are <em>estimated</em> from a finished image by inference models, not rendered from scene geometry. They will not match the mathematically exact passes a 3D renderer writes out.</p>
+                    <p>The constraint is as much licensing as it is quality. FUK only ships models that are open source <em>and</em> carry a licence permitting commercial use, and in the depth / normals / segmentation space that rules out several of the strongest available models. What is left is usable for comp work but is not on par with the equivalent tools in Nuke, Houdini, or a production renderer. Where a pass is critical, treat FUK's output as a starting point to be cleaned up rather than a finished deliverable.</p>
+                    <p>Feedback on specific issues is appreciated — contributions welcome.</p>
                 </div>
 
                 <h3>Available Passes</h3>
@@ -612,7 +606,7 @@
             <!-- EXR Export -->
             <div class="wiki-section" id="exr-export">
                 <h2>EXR Export</h2>
-                <div class="wiki-video" data-vimeo="" data-title="EXR Export">
+                <div class="wiki-video" data-vimeo="https://framerate.tv/watch/a14641df-aada-48ba-ba44-08113a73b1be" data-title="EXR Export">
                     <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
                 </div>
                 <p>FUK exports multi-layer EXR files containing all available AOV passes in a single file via the <a href="#export-panel">Export Panel</a>. EXR is the standard interchange format in professional VFX and compositing pipelines — it preserves full floating-point precision and carries all passes in one file.</p>
@@ -1090,10 +1084,7 @@
             <!-- Image Panel -->
             <div class="wiki-section" id="image-panel">
                 <h2>Image Panel</h2>
-                <div class="wiki-video" data-vimeo="" data-title="Image Panel">
-                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
-                </div>
-                <p>The Image tab is the primary generation interface. Its layout is divided into a preview area on the left and a column of parameter cards on the right.</p>
+                <p>The Image tab is the primary generation interface. Its layout is divided into a preview area on the left and a column of parameter cards on the right. See <a href="#image-generation">Image Generation</a> for the pipeline overview, supported models, and parameter reference.</p>
 
                 <h3>Preview Area</h3>
                 <p>Displays the current generation result in a zoomable, pannable viewer. Shows the output dimensions and generation time. When no result is present, the placeholder displays the configured target dimensions. History items can be dragged from the Generation History panel and dropped here to reload their metadata into all parameter cards.</p>
@@ -1106,6 +1097,7 @@
                     <li><strong>Context Image</strong> (EliGen models) — optional scene-level reference; EliGen alpha (0.0–2.0) controls its influence</li>
                     <li><strong>Entity Masks</strong> (EliGen models) — path to a <code>.psd</code> or <code>.ora</code> file containing per-zone masks; each layer becomes an independent conditioning zone</li>
                 </ul>
+                <p>See <a href="#regional-conditioning">Regional Conditioning (EliGen)</a> for how zones are composited during denoising and how to author the mask files.</p>
 
                 <h3>Model &amp; Style Card</h3>
                 <ul>
@@ -1147,9 +1139,6 @@
             <!-- Video Panel -->
             <div class="wiki-section" id="video-panel">
                 <h2>Video Panel</h2>
-                <div class="wiki-video" data-vimeo="" data-title="Video Panel">
-                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
-                </div>
                 <p>The Video tab drives Wan I2V and Fun Control video generation. Its layout mirrors the Image tab — preview on the left, parameter cards on the right.</p>
 
                 <h3>Preview Area</h3>
@@ -1190,9 +1179,6 @@
             <!-- Preprocess Panel -->
             <div class="wiki-section" id="preprocess-panel">
                 <h2>Preprocess Panel</h2>
-                <div class="wiki-video" data-vimeo="" data-title="Preprocess Panel">
-                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
-                </div>
                 <p>The Preprocess tab converts input images or videos into conditioning maps — depth, pose skeleton, or edge maps — for use as ControlNet inputs in the Image tab. Preprocessing is a separate step from generation so you can reuse a conditioning map across many generations without recomputing it.</p>
 
                 <h3>Layout</h3>
@@ -1211,10 +1197,11 @@
             <!-- Postprocess Panel -->
             <div class="wiki-section" id="postprocess-panel">
                 <h2>Postprocess Panel</h2>
-                <div class="wiki-video" data-vimeo="" data-title="Postprocess Panel">
-                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
-                </div>
                 <p>The Postprocess tab handles upscaling and frame interpolation. Both operations accept the same input types (image, video, or sequence) and save their output as a new versioned result alongside the original.</p>
+
+                <div class="wiki-warning">
+                    <p><strong>Work in progress.</strong> These are the least mature passes in FUK, and the licensing constraint behind that is worth understanding before you rely on them — see <a href="#post-processors">Post-Processors</a>.</p>
+                </div>
 
                 <h3>Upscale Tab</h3>
                 <ul>
@@ -1238,10 +1225,11 @@
             <!-- Layers Panel -->
             <div class="wiki-section" id="layers-panel">
                 <h2>Layers Panel</h2>
-                <div class="wiki-video" data-vimeo="" data-title="Layers Panel">
-                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
-                </div>
                 <p>The Layers tab generates AOV passes — depth maps, surface normals, and Cryptomatte segmentation — from an existing image or video. This is a post-generation step: you bring your finished beauty output here and extract the technical passes needed for compositing.</p>
+
+                <div class="wiki-warning">
+                    <p><strong>Work in progress.</strong> These passes are inferred from a finished image, not rendered from geometry, and the models available under a commercially usable open-source licence do not match the pass quality of a production renderer. See <a href="#aovs">AOVs &amp; Passes</a> for detail on the limitations.</p>
+                </div>
 
                 <h3>Input</h3>
                 <p>A <a href="#media-input">Media Input</a> at the top of the panel accepts a single image, video, or frame sequence. Drop a result from the Generation History to load it automatically.</p>
@@ -1283,10 +1271,7 @@
             <!-- Export Panel -->
             <div class="wiki-section" id="export-panel">
                 <h2>Export Panel</h2>
-                <div class="wiki-video" data-vimeo="" data-title="Export Panel">
-                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
-                </div>
-                <p>The Export tab assembles beauty and AOV pass images into multi-layer EXR files ready for professional compositing pipelines. Each pass is loaded independently — you can mix outputs from different generation runs if needed.</p>
+                <p>The Export tab assembles beauty and AOV pass images into multi-layer EXR files ready for professional compositing pipelines. Each pass is loaded independently — you can mix outputs from different generation runs if needed. See <a href="#exr-export">EXR Export</a> for the layer structure and compatible applications.</p>
 
                 <h3>Layer Inputs Card</h3>
                 <p>Four inline image inputs, one per pass:</p>

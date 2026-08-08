@@ -50,6 +50,78 @@ function createMatcapTexture() {
 }
 
 // ============================================================================
+// Gaussian splat PLY
+// ============================================================================
+
+// Zeroth-order spherical harmonic, the constant 3DGS uses to turn its DC
+// coefficients back into linear colour.
+const SH_C0 = 0.28209479177387814;
+
+/**
+ * Give a 3D Gaussian Splatting PLY a usable `color` attribute.
+ *
+ * TRELLIS writes the standard 3DGS layout: colour lives in `f_dc_0..2` as
+ * spherical-harmonic DC terms and opacity is stored pre-sigmoid. PLYLoader
+ * looks for `red`/`green`/`blue`, finds nothing, and hands back a colourless
+ * cloud — so pull the real properties across and decode them.
+ */
+function decodeSplatColor(geometry) {
+  const sh = geometry.getAttribute('splatSH');
+  if (!sh) return false;
+
+  const opacity = geometry.getAttribute('splatOpacity');
+  const colors = new Float32Array(sh.count * 3);
+
+  for (let i = 0; i < sh.count; i += 1) {
+    // Near-transparent gaussians barely register in a real splat render.
+    // Scaling colour by alpha sinks them toward the dark background rather
+    // than letting them read as solid surface points they aren't.
+    const alpha = opacity ? 1 / (1 + Math.exp(-opacity.getX(i))) : 1;
+    for (let c = 0; c < 3; c += 1) {
+      const value = 0.5 + SH_C0 * sh.getComponent(i, c);
+      colors[i * 3 + c] = Math.min(1, Math.max(0, value)) * alpha;
+    }
+  }
+
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  return true;
+}
+
+// ============================================================================
+// Baked-appearance materials
+// ============================================================================
+
+// Light rig at brightness 1.0, tuned so a white albedo lands just under clip
+// facing the key. The previous 1.6/1.8 pair was compensating for the metalness
+// bug below and blows out once the material is corrected. Only textured meshes
+// see these — matcap and point clouds are unlit.
+const BASE_AMBIENT = 0.35;
+const BASE_KEY = 0.8;
+const BASE_FILL = 0.3;
+
+/**
+ * Make a reconstructed GLB's material renderable without an environment map.
+ *
+ * TRELLIS bakes appearance into a `baseColorTexture` but never writes
+ * `metallicFactor`, and the glTF default is 1.0 — fully metallic. A fully
+ * rough metal has no diffuse response and draws its specular entirely from
+ * the environment, so in a scene with no env map it renders near-black
+ * however hard the lights are driven. The texture is plain baked albedo, so
+ * the mesh is never metal and the fix is to say so.
+ */
+function normaliseBakedMaterial(root) {
+  root.traverse((child) => {
+    if (!child.isMesh || !child.material) return;
+    const materials = Array.isArray(child.material) ? child.material : [child.material];
+    materials.forEach((material) => {
+      if (material.metalness === undefined) return;
+      material.metalness = 0;
+      material.needsUpdate = true;
+    });
+  });
+}
+
+// ============================================================================
 // Scene helpers
 // ============================================================================
 
@@ -95,6 +167,8 @@ function disposeObject(object) {
 export default function MeshViewer({
   url,
   displayMode = 'solid',   // solid | wireframe | points
+  plyKind = 'points',      // points | splat — what a .ply url actually holds
+  brightness = 1,          // preview exposure, cosmetic only
   pointSize = 0.004,
   background = '#15171a',
   className = '',
@@ -138,11 +212,16 @@ export default function MeshViewer({
     };
 
     // Matcap needs no lights, but GLBs carrying their own PBR materials
-    // (TRELLIS bakes a texture) still want something to light them.
-    scene.add(new THREE.AmbientLight(0xffffff, 1.6));
-    const key = new THREE.DirectionalLight(0xffffff, 1.8);
+    // (TRELLIS bakes a texture) still want something to light them. The fill
+    // keeps the side facing away from the key off pure black.
+    const ambient = new THREE.AmbientLight(0xffffff, BASE_AMBIENT);
+    scene.add(ambient);
+    const key = new THREE.DirectionalLight(0xffffff, BASE_KEY);
     key.position.set(3, 5, 4);
     scene.add(key);
+    const fill = new THREE.DirectionalLight(0xffffff, BASE_FILL);
+    fill.position.set(-4, 1, -3);
+    scene.add(fill);
 
     const grid = new THREE.GridHelper(4, 16, 0x3a3f47, 0x24272c);
     grid.material.transparent = true;
@@ -168,7 +247,10 @@ export default function MeshViewer({
     const observer = new ResizeObserver(resize);
     observer.observe(mount);
 
-    stateRef.current = { scene, camera, renderer, controls, matcap, grid, model: null };
+    stateRef.current = {
+      scene, camera, renderer, controls, matcap, grid,
+      ambient, key, fill, model: null,
+    };
 
     return () => {
       cancelAnimationFrame(frameId);
@@ -191,6 +273,25 @@ export default function MeshViewer({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // --- Brightness -----------------------------------------------------------
+  // Textured meshes are lit, so they scale with the rig. Matcap is unlit, so
+  // it scales through its material tint instead — otherwise the control would
+  // do nothing on VGGT's untextured geometry. Purely a preview setting;
+  // nothing here touches the exported file.
+  useEffect(() => {
+    const { ambient, key, fill, model } = stateRef.current;
+    if (!ambient) return;
+
+    ambient.intensity = BASE_AMBIENT * brightness;
+    key.intensity = BASE_KEY * brightness;
+    fill.intensity = BASE_FILL * brightness;
+
+    model?.traverse((child) => {
+      const material = child.userData?.matcapMaterial;
+      if (material) material.color.setScalar(brightness);
+    });
+  }, [brightness, stats]);
 
   // --- Background can change without rebuilding the scene -------------------
   useEffect(() => {
@@ -215,7 +316,15 @@ export default function MeshViewer({
     setStatus({ phase: 'loading', message: 'Loading geometry…' });
 
     const isPly = url.toLowerCase().split('?')[0].endsWith('.ply');
+    const isSplat = isPly && plyKind === 'splat';
     const loader = isPly ? new PLYLoader() : new GLTFLoader();
+
+    if (isSplat) {
+      loader.setCustomPropertyNameMapping({
+        splatSH: ['f_dc_0', 'f_dc_1', 'f_dc_2'],
+        splatOpacity: ['opacity'],
+      });
+    }
 
     const install = (object) => {
       if (cancelled) {
@@ -249,9 +358,12 @@ export default function MeshViewer({
       url,
       (loaded) => {
         if (isPly) {
-          // PLYLoader hands back raw geometry — always a point cloud here,
-          // since the PLY export is the point-cloud deliverable.
+          // PLYLoader hands back raw geometry. VGGT's PLY is a genuine point
+          // cloud; TRELLIS's is a Gaussian splat, and all we can show of it
+          // without a splat rasteriser is the gaussian centres — scales,
+          // rotations and view-dependent SH are not rendered.
           const geometry = loaded;
+          if (isSplat) decodeSplatColor(geometry);
           geometry.computeBoundingBox();
           const material = new THREE.PointsMaterial({
             size: pointSize,
@@ -261,7 +373,9 @@ export default function MeshViewer({
           });
           install(new THREE.Points(geometry, material));
         } else {
-          install(loaded.scene || loaded.scenes?.[0]);
+          const root = loaded.scene || loaded.scenes?.[0];
+          if (root) normaliseBakedMaterial(root);
+          install(root);
         }
       },
       (event) => {
@@ -279,7 +393,7 @@ export default function MeshViewer({
 
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [url]);
+  }, [url, plyKind]);
 
   // --- Display mode ---------------------------------------------------------
   useEffect(() => {
@@ -320,6 +434,7 @@ export default function MeshViewer({
         if (!child.userData.matcapMaterial) {
           child.userData.matcapMaterial = new THREE.MeshMatcapMaterial({
             matcap,
+            color: new THREE.Color().setScalar(brightness),
             vertexColors: !!child.geometry.attributes.color,
             flatShading: false,
           });
@@ -366,6 +481,7 @@ export default function MeshViewer({
     } else if (stateRef.current.pointsProxy) {
       stateRef.current.pointsProxy.visible = false;
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [displayMode, pointSize, stats]);
 
   // Clear the cached points proxy whenever a different asset loads.
@@ -383,6 +499,13 @@ export default function MeshViewer({
     const { model, camera, controls } = stateRef.current;
     if (model) frameObject(model, camera, controls);
   };
+
+  // A splat rendered as bare centres looks sparser and noisier than the file
+  // really is. Say so, or it reads as a failed reconstruction.
+  const showingSplat =
+    plyKind === 'splat'
+    && !!url
+    && url.toLowerCase().split('?')[0].endsWith('.ply');
 
   return (
     <div className={`mesh-viewer ${className}`}>
@@ -405,9 +528,16 @@ export default function MeshViewer({
         </div>
       )}
 
+      {showingSplat && status.phase === 'ready' && (
+        <div className="mesh-viewer-notice">
+          <strong>Gaussian splat</strong> — showing centre points only. Scale,
+          rotation and view-dependent colour need a splat viewer.
+        </div>
+      )}
+
       {stats && status.phase === 'ready' && (
         <div className="mesh-viewer-stats">
-          {stats.vertices.toLocaleString()} verts
+          {stats.vertices.toLocaleString()} {showingSplat ? 'gaussians' : 'verts'}
           {stats.faces > 0 && <> · {stats.faces.toLocaleString()} faces</>}
         </div>
       )}

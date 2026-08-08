@@ -44,6 +44,47 @@
   padding: 0.7rem 0.8rem;
 }
 
+/* Input card doubles as a drop target for history thumbnails. Positioned so
+   the drag overlay can cover it. */
+.threed-input-card { position: relative; }
+
+.threed-input-card--drag-ok {
+  outline: 1px solid var(--color-accent);
+}
+
+.threed-input-card--drag-blocked {
+  outline: 1px solid var(--color-warning-400);
+}
+
+.threed-drag-overlay {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 0.5rem;
+  font-size: 0.72rem;
+  pointer-events: none;
+}
+
+.threed-drag-overlay--ok {
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  color: var(--color-text-primary);
+}
+
+.threed-drag-overlay--blocked {
+  background: color-mix(in srgb, var(--color-warning-400) 15%, transparent);
+  color: var(--color-warning-400);
+}
+
+.threed-drop-hint {
+  font-size: 0.68rem;
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
 .threed-card-header {
   display: flex;
   align-items: center;
@@ -267,6 +308,16 @@
 .threed-format-note {
   font-size: 0.66rem;
   color: var(--color-text-muted);
+}
+
+.threed-format-hint {
+  font-size: 0.68rem;
+  line-height: 1.4;
+  color: var(--color-warning-400);
+  border: 1px solid color-mix(in srgb, var(--color-warning-400) 30%, transparent);
+  background: color-mix(in srgb, var(--color-warning-400) 7%, transparent);
+  padding: 0.35rem 0.45rem;
+  border-radius: 4px;
 }
 
 /* Advanced */
@@ -557,6 +608,32 @@
   gap: 0.3rem;
 }
 
+/* Sits between the display modes and the format switch, so it stays out of
+   the way until the geometry is actually on screen. */
+.threed-brightness {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.threed-brightness input {
+  width: 6.5rem;
+}
+
+.threed-brightness input:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.threed-brightness-value {
+  font-family: monospace;
+  min-width: 2.6rem;
+  text-align: right;
+}
+
 .threed-mode--active {
   border-color: var(--color-primary-500);
   color: var(--color-primary-300);
@@ -653,6 +730,25 @@
 @keyframes mesh-viewer-spin {
   to { transform: rotate(360deg); }
 }
+
+/* Splat preview caveat. Top-left, clear of the stats readout and the
+   reframe button, so it never covers the geometry it describes. */
+.mesh-viewer-notice {
+  position: absolute;
+  left: 0.6rem;
+  top: 0.6rem;
+  max-width: min(24rem, calc(100% - 1.2rem));
+  font-size: 0.68rem;
+  line-height: 1.4;
+  color: var(--color-warning-400);
+  border: 1px solid color-mix(in srgb, var(--color-warning-400) 35%, transparent);
+  background: color-mix(in srgb, #000 65%, transparent);
+  padding: 0.35rem 0.5rem;
+  border-radius: 4px;
+  pointer-events: none;
+}
+
+.mesh-viewer-notice strong { font-weight: 600; }
 
 .mesh-viewer-stats {
   position: absolute;

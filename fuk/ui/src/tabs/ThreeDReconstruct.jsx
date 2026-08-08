@@ -32,7 +32,11 @@ const DISPLAY_MODES = [
 ];
 
 const DEFAULT_SETTINGS = {
-  model: 'vggt',
+  // First run only — the whole settings object is persisted, so whichever
+  // tier was last used is what comes back on the next visit. Picking a
+  // Dataset Builder set still forces VGGT, since orbital views are
+  // inherently multi-view.
+  model: 'trellis',
   export_glb: true,
   export_ply: false,
   export_obj: false,
@@ -95,6 +99,11 @@ export default function ThreeDReconstruct({ config, project }) {
   // Splitter between the filmstrip and the viewport. Persisted so the layout
   // survives a tab switch — the viewer remounts, the chosen width shouldn't
   // reset with it.
+  // Preview exposure — a review convenience, nothing on disk changes. 1.0 is
+  // the tuned rig; the range above it is there because baked albedo varies a
+  // lot between subjects.
+  const [brightness, setBrightness] = useLocalStorage('fuk_threed_brightness', 1);
+
   const [stripWidth, setStripWidth] = useLocalStorage('fuk_threed_strip_width', DEFAULT_STRIP_WIDTH);
   const [thumbSize, setThumbSize] = useLocalStorage('fuk_threed_thumb_size', DEFAULT_THUMB_SIZE);
   const [dragging, setDragging] = useState(false);
@@ -282,6 +291,52 @@ export default function ThreeDReconstruct({ config, project }) {
     if (isSingleImage && dataset.image_count > 1) update({ model: 'vggt' });
   };
 
+  // --- Drag-drop from the history panel (TRELLIS only) ----------------------
+  // TRELLIS takes exactly one image, so a dropped generation is the entire
+  // input and replaces whatever was loaded. VGGT wants a coherent multi-view
+  // set of one subject — dropping a single unrelated frame into it only ever
+  // degrades the solve, so the target stays closed on the multi-view tier.
+  const [dragState, setDragState] = useState(null);   // null | 'ok' | 'blocked'
+
+  const handleHistoryDragOver = useCallback((event) => {
+    if (!event.dataTransfer.types.includes('application/x-fuk-generation')) return;
+    if (!isSingleImage) {
+      // No preventDefault — the browser rejects the drop, and the overlay
+      // explains why rather than leaving a dead zone.
+      setDragState('blocked');
+      return;
+    }
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+    setDragState('ok');
+  }, [isSingleImage]);
+
+  const handleHistoryDrop = useCallback((event) => {
+    setDragState(null);
+    if (!isSingleImage) return;
+
+    const raw = event.dataTransfer.getData('application/x-fuk-generation');
+    if (!raw) return;
+    event.preventDefault();
+
+    let generation;
+    try { generation = JSON.parse(raw); } catch { return; }
+
+    // Video entries thumbnail as a frame but their path is a clip.
+    if (generation.type === 'video' || generation.type === 'interpolate') {
+      setLocalError('That is a video — TRELLIS needs a single still image');
+      return;
+    }
+
+    const path = generation.path || generation.preview;
+    if (!path) return;
+
+    setInputImages([path]);
+    setInputLabel(`${generation.name || path.split('/').pop()} — from history`);
+    setExcluded(new Set());
+    setLocalError(null);
+  }, [isSingleImage]);
+
   const handleClearInput = () => {
     setInputImages([]);
     setInputLabel('');
@@ -343,6 +398,14 @@ export default function ThreeDReconstruct({ config, project }) {
     ? buildImageUrl(result.urls[viewerFormat])
     : null;
 
+  // ply_kind comes from the backend; fall back to the tier for results
+  // produced before it was reported.
+  const plyKind = result?.ply_kind
+    ?? (result?.type === 'single_image' ? 'splat' : 'points');
+
+  const formatLabel = (format) =>
+    (format === 'ply' && plyKind === 'splat' ? 'PLY · SPLAT' : format.toUpperCase());
+
   const canReconstruct =
     !generating && activeImages.length > 0 && exportFormats.length > 0;
 
@@ -355,7 +418,12 @@ export default function ThreeDReconstruct({ config, project }) {
       <div className="threed-controls">
 
         {/* Input */}
-        <div className="fuk-card threed-card">
+        <div
+          className={`fuk-card threed-card threed-input-card ${dragState ? `threed-input-card--drag-${dragState}` : ''}`}
+          onDragOver={handleHistoryDragOver}
+          onDragLeave={() => setDragState(null)}
+          onDrop={handleHistoryDrop}
+        >
           <div className="threed-card-header">
             <span className="fuk-label">Input Images</span>
             {inputImages.length > 0 && (
@@ -413,6 +481,22 @@ export default function ThreeDReconstruct({ config, project }) {
           {coverage && (
             <div className={`threed-coverage threed-coverage--${coverage.level}`}>
               {coverage.text}
+            </div>
+          )}
+
+          {isSingleImage && !inputImages.length && !dragState && (
+            <div className="threed-drop-hint">
+              …or drag an image here from the history panel
+            </div>
+          )}
+
+          {dragState && (
+            <div className={`threed-drag-overlay threed-drag-overlay--${dragState}`}>
+              <span>
+                {dragState === 'ok'
+                  ? 'Drop to use as the TRELLIS input'
+                  : 'History drop is TRELLIS only — VGGT needs a full view set'}
+              </span>
             </div>
           )}
         </div>
@@ -474,7 +558,9 @@ export default function ThreeDReconstruct({ config, project }) {
                 checked={settings.export_ply}
                 onChange={(e) => update({ export_ply: e.target.checked })}
               />
-              PLY <span className="threed-format-note">point cloud</span>
+              PLY <span className="threed-format-note">
+                {isSingleImage ? 'gaussian splat' : 'point cloud'}
+              </span>
             </label>
             <label>
               <input
@@ -485,6 +571,16 @@ export default function ThreeDReconstruct({ config, project }) {
               OBJ <span className="threed-format-note">Nuke / Natron</span>
             </label>
           </div>
+
+          {/* Both tiers write pointcloud.ply, but only VGGT's is a point
+              cloud — TRELLIS reuses the filename for its splat. */}
+          {settings.export_ply && isSingleImage && (
+            <div className="threed-format-hint">
+              TRELLIS writes a 3D Gaussian Splatting PLY, not a point cloud.
+              The preview can only show its centre points — open it in a splat
+              viewer for the real thing.
+            </div>
+          )}
         </div>
 
         {/* Advanced */}
@@ -795,6 +891,20 @@ export default function ThreeDReconstruct({ config, project }) {
             ))}
           </div>
 
+          <label className="threed-brightness" title="Preview exposure — does not affect the exported file">
+            <span>Brightness</span>
+            <input
+              type="range" className="fuk-slider" min="0.25" max="3" step="0.05"
+              value={brightness}
+              disabled={!result}
+              onChange={(e) => setBrightness(Number(e.target.value))}
+              onDoubleClick={() => setBrightness(1)}
+            />
+            <span className="threed-brightness-value">
+              {Math.round(brightness * 100)}%
+            </span>
+          </label>
+
           {result && Object.keys(result.urls || {}).length > 1 && (
             <div className="threed-format-switch">
               {Object.keys(result.urls).map((format) => (
@@ -803,7 +913,7 @@ export default function ThreeDReconstruct({ config, project }) {
                   className={`fuk-btn fuk-btn-secondary threed-btn-sm ${viewerFormat === format ? 'threed-mode--active' : ''}`}
                   onClick={() => setViewerFormat(format)}
                 >
-                  {format.toUpperCase()}
+                  {formatLabel(format)}
                 </button>
               ))}
             </div>
@@ -813,6 +923,8 @@ export default function ThreeDReconstruct({ config, project }) {
         <MeshViewer
           url={viewerUrl}
           displayMode={displayMode}
+          plyKind={plyKind}
+          brightness={brightness}
           className="threed-viewer"
         />
 
@@ -842,7 +954,7 @@ export default function ThreeDReconstruct({ config, project }) {
                   href={buildImageUrl(url)}
                   download
                 >
-                  <Download /> {format.toUpperCase()}
+                  <Download /> {formatLabel(format)}
                 </a>
               ))}
             </div>

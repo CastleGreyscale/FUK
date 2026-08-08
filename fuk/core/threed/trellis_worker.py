@@ -151,7 +151,15 @@ def main():
         # point cloud — the splat viewer is a Phase 3 item, but the file is
         # still the most faithful point export the model can produce.
         path = output_dir / "pointcloud.ply"
-        outputs["gaussian"][0].save_ply(str(path))
+        # Orientation fix. Both TRELLIS export paths claim to rotate z-up to
+        # y-up with the same matrix, but apply it transposed relative to one
+        # another: to_glb does `vertices @ M`, while save_ply does
+        # `xyz @ M.T` (and `M @ rotation`). M is orthogonal, so M.T is its
+        # inverse — the splat lands 180° about X from the GLB, i.e. upside
+        # down. Passing M.T here cancels save_ply's own transpose, so the
+        # PLY comes out in the same frame as the mesh.
+        z_up_to_y_up_T = [[1, 0, 0], [0, 0, 1], [0, -1, 0]]
+        outputs["gaussian"][0].save_ply(str(path), transform=z_up_to_y_up_T)
         result["outputs"]["ply"] = str(path)
         emit(f"wrote {path.name} (gaussian splat)")
 
