@@ -97,19 +97,38 @@ def _gen_id_from_url(png_url: str) -> str:
     return s.rsplit("/", 1)[0]
 
 
-def _effective_seed(props):
-    """The seed to send to FUK, mirroring the web Image tab's mode resolution.
+def _effective_seed(props, fields=props_mod.IMAGE_SEED_FIELDS):
+    """The seed to send to FUK, mirroring the web tabs' mode resolution.
 
     None means "roll one" — the server picks, and we read back what it used.
     """
-    seed = props_mod.parse_seed(props.seed)
-    if props.seed_mode == "random":
+    mode_attr, seed_attr, last_attr = fields
+    mode = getattr(props, mode_attr)
+    if mode == "random":
         return None
-    if props.seed_mode == "increment":
-        last_used = props_mod.parse_seed(props.last_used_seed)
+    if mode == "increment":
+        last_used = props_mod.parse_seed(getattr(props, last_attr))
         if last_used is not None:
             return (last_used + 1) % (props_mod.SEED_MAX + 1)
-    return seed
+    return props_mod.parse_seed(getattr(props, seed_attr))
+
+
+def _record_seed_used(props, client, png_url, fields):
+    """Read back the seed FUK actually used and mirror it into the props.
+
+    Must run BEFORE the entry is touched — previews delete it. Returns the seed, or
+    None if the metadata was unreadable.
+    """
+    _, seed_attr, last_attr = fields
+    try:
+        meta = client.generation_metadata(png_url)
+        seed_used = props_mod.parse_seed(meta.get("seed"))
+    except (FukError, ValueError, TypeError):
+        return None
+    if seed_used is not None:
+        setattr(props, last_attr, props_mod.seed_text(seed_used))
+        setattr(props, seed_attr, props_mod.seed_text(seed_used))
+    return seed_used
 
 
 def _resolved_seed(props, seed_used=None):
@@ -340,6 +359,20 @@ class FUK_OT_refresh_tags(bpy.types.Operator):
 _PROMPT_DIALOG_WIDTH = 700
 _PROMPT_WRAP_WIDTH = 660
 
+# Image and video carry independent prompts and seeds, so the shared operators take a
+# `video` flag naming which set of props to act on. The panels pass it explicitly;
+# invoking from search (F3) gets the image side.
+_VIDEO_FLAG = bpy.props.BoolProperty(
+    name="Video", default=False, options={"SKIP_SAVE"},
+    description="Act on the video prompt/seed instead of the image's")
+
+
+def _prompt_attrs(video: bool):
+    """(prompt, negative, resolved) prop names for the image or video tab."""
+    if video:
+        return "video_prompt", "video_negative_prompt", "video_resolved_preview"
+    return "prompt", "negative_prompt", "resolved_preview"
+
 
 class FUK_OT_edit_prompt(bpy.types.Operator):
     bl_idname = "fuk.edit_prompt"
@@ -348,9 +381,12 @@ class FUK_OT_edit_prompt(bpy.types.Operator):
                       "no multi-line text field, so this gives the single line much more "
                       "room — edits apply as you type")
 
+    video: _VIDEO_FLAG
+
     def invoke(self, context, event):
         return context.window_manager.invoke_props_dialog(
-            self, width=_PROMPT_DIALOG_WIDTH, title="Prompt", confirm_text="Done")
+            self, width=_PROMPT_DIALOG_WIDTH,
+            title="Video Prompt" if self.video else "Prompt", confirm_text="Done")
 
     def draw(self, context):
         # The scene properties are drawn directly, so edits land live and closing the
@@ -359,22 +395,24 @@ class FUK_OT_edit_prompt(bpy.types.Operator):
         # popup (Insert #tag) from inside a dialog dismisses the dialog.
         layout = self.layout
         props = context.scene.fuk
+        prompt_attr, negative_attr, resolved_attr = _prompt_attrs(self.video)
 
         layout.label(text="Prompt")
-        layout.prop(props, "prompt", text="")
-        ui_mod.draw_wrapped(layout, props.prompt, _PROMPT_WRAP_WIDTH)
+        layout.prop(props, prompt_attr, text="")
+        ui_mod.draw_wrapped(layout, getattr(props, prompt_attr), _PROMPT_WRAP_WIDTH)
 
         layout.separator()
         layout.label(text="Negative")
-        layout.prop(props, "negative_prompt", text="")
-        ui_mod.draw_wrapped(layout, props.negative_prompt, _PROMPT_WRAP_WIDTH)
+        layout.prop(props, negative_attr, text="")
+        ui_mod.draw_wrapped(layout, getattr(props, negative_attr), _PROMPT_WRAP_WIDTH)
 
-        if props.resolved_preview:
+        resolved = getattr(props, resolved_attr)
+        if resolved:
             layout.separator()
             box = layout.box().column(align=True)
             box.scale_y = 0.85
             box.label(text="Last resolved to:", icon="SORTALPHA")
-            for line in ui_mod.wrap_text(props.resolved_preview, _PROMPT_WRAP_WIDTH):
+            for line in ui_mod.wrap_text(resolved, _PROMPT_WRAP_WIDTH):
                 box.label(text=line)
 
     def execute(self, context):
@@ -388,6 +426,7 @@ class FUK_OT_insert_tag(bpy.types.Operator):
     bl_property = "token"
 
     token: bpy.props.EnumProperty(name="Tag", items=props_mod.token_enum_items)
+    video: _VIDEO_FLAG
 
     def invoke(self, context, event):
         if not props_mod.TOKEN_CACHE:
@@ -404,8 +443,10 @@ class FUK_OT_insert_tag(bpy.types.Operator):
         marker = self.token
         if not marker:
             return {"CANCELLED"}
-        sep = "" if (not props.prompt or props.prompt.endswith((" ", "\n", ","))) else " "
-        props.prompt = f"{props.prompt}{sep}{marker} "
+        attr = _prompt_attrs(self.video)[0]
+        text = getattr(props, attr)
+        sep = "" if (not text or text.endswith((" ", "\n", ","))) else " "
+        setattr(props, attr, f"{text}{sep}{marker} ")
         return {"FINISHED"}
 
 
@@ -414,14 +455,19 @@ class FUK_OT_resolve_preview(bpy.types.Operator):
     bl_label = "Preview Expansion"
     bl_description = "Resolve #markers (and mood) exactly as generation will — preview the final prompt"
 
+    video: _VIDEO_FLAG
+
     def execute(self, context):
         props = context.scene.fuk
+        prompt_attr, _, resolved_attr = _prompt_attrs(self.video)
+        model = props_mod.VIDEO_TASK if self.video else props.model
         try:
-            res = _client(context).prompt_resolve(props.prompt, model=props.model, apply_mood=True)
+            res = _client(context).prompt_resolve(
+                getattr(props, prompt_attr), model=model, apply_mood=True)
         except FukError as e:
             self.report({"ERROR"}, str(e))
             return {"CANCELLED"}
-        props.resolved_preview = res.get("resolved", "")
+        setattr(props, resolved_attr, res.get("resolved", ""))
         unknown = res.get("unknown_markers", [])
         if unknown:
             self.report({"WARNING"}, f"Unknown markers: {', '.join(unknown)}")
@@ -430,18 +476,37 @@ class FUK_OT_resolve_preview(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class FUK_OT_copy_prompt_to_video(bpy.types.Operator):
+    bl_idname = "fuk.copy_prompt_to_video"
+    bl_label = "Copy from Image"
+    bl_description = "Replace the video prompt and negative with the image tab's"
+
+    def execute(self, context):
+        props = context.scene.fuk
+        props.video_prompt = props.prompt
+        props.video_negative_prompt = props.negative_prompt
+        self.report({"INFO"}, "Copied image prompt to video")
+        return {"FINISHED"}
+
+
 class FUK_OT_use_last_seed(bpy.types.Operator):
     bl_idname = "fuk.use_last_seed"
     bl_label = "Reuse Last Seed"
     bl_description = "Switch to Fixed mode using the last seed FUK actually used"
 
+    video: _VIDEO_FLAG
+
     def execute(self, context):
         props = context.scene.fuk
-        if not props.last_used_seed:
+        fields = (props_mod.VIDEO_SEED_FIELDS if self.video
+                  else props_mod.IMAGE_SEED_FIELDS)
+        mode_attr, seed_attr, last_attr = fields
+        last = getattr(props, last_attr)
+        if not last:
             self.report({"WARNING"}, "No seed recorded yet")
             return {"CANCELLED"}
-        props.seed_mode = "fixed"
-        props.seed = props.last_used_seed
+        setattr(props, mode_attr, "fixed")
+        setattr(props, seed_attr, last)
         return {"FINISHED"}
 
 
@@ -545,7 +610,13 @@ class FUK_OT_generate(bpy.types.Operator):
             props.status = "Preparing control map..."
             control_path = controls_mod.derive_control(client, result, props.control_source)
             if props.control_source not in render_mod.FUK_DERIVED and not control_path:
-                self.report({"WARNING"}, f"No {props.control_source} map produced — running without control")
+                # The compositor wrote no EXR this run. Previously the stale one from
+                # an earlier render was picked up instead, so generation quietly used
+                # an old control map; now it's surfaced.
+                self.report({"WARNING"},
+                            f"No {props.control_source} pass written by the compositor — "
+                            f"generating WITHOUT control. Check the {props.control_source} "
+                            f"pass is available on the current render engine.")
 
             steps = props.preview_steps if preview else props.steps
             payload = {
@@ -562,7 +633,7 @@ class FUK_OT_generate(bpy.types.Operator):
             }
             # Carry the shot's advanced settings (LoRAs, detail bias, EliGen, VRAM
             # preset) that the Blender panel doesn't expose — set in FUK's web UI.
-            payload.update(shot_mod.generation_extras(client, props.shot_file))
+            payload.update(shot_mod.generation_extras(client, props.shot_file, props.model))
             if control_path:
                 payload["control_image_paths"] = [control_path]
 
@@ -647,15 +718,8 @@ class FUK_OT_generate(bpy.types.Operator):
 
             # Capture the seed FUK actually used (esp. for random mode) BEFORE we
             # touch the entry, since previews delete it.
-            seed_used = None
-            try:
-                meta = self._client.generation_metadata(png_url)
-                seed_used = props_mod.parse_seed(meta.get("seed"))
-            except (FukError, ValueError, TypeError):
-                pass
-            if seed_used is not None:
-                props.last_used_seed = props_mod.seed_text(seed_used)
-                props.seed = props_mod.seed_text(seed_used)
+            seed_used = _record_seed_used(props, self._client, png_url,
+                                          props_mod.IMAGE_SEED_FIELDS)
 
             dest = os.path.join(self._out_dir, "result.png")
             try:
@@ -763,9 +827,9 @@ class FUK_OT_generate_video(bpy.types.Operator):
             if not seq["frames"]:
                 raise FukError("No frames rendered — check the scene frame range")
             payload = {
-                "task": "wan_vace_a14b",
-                "prompt": props.prompt,
-                "negative_prompt": props.negative_prompt or None,
+                "task": props_mod.VIDEO_TASK,
+                "prompt": props.video_prompt,
+                "negative_prompt": props.video_negative_prompt or None,
                 "image_path": ref,
                 "control_path": seq["control_dir"],
                 "video_length": seq["frames"],
@@ -773,7 +837,7 @@ class FUK_OT_generate_video(bpy.types.Operator):
                 "height": seq["height"],
                 "steps": int(props.video_steps),
                 "guidance_scale": float(props.video_guidance),
-                "seed": _effective_seed(props),
+                "seed": _effective_seed(props, props_mod.VIDEO_SEED_FIELDS),
             }
             props.status = f"Submitting {seq['frames']}f video to FUK…"
             resp = client.generate_video(payload)
@@ -824,11 +888,18 @@ class FUK_OT_generate_video(bpy.types.Operator):
             mp4 = (st.get("outputs", {}) or {}).get("mp4")
             if not mp4:
                 return self._finish(context, "Complete (no video returned)")
+
+            # metadata.json sits next to generated.mp4 just as it does for stills.
+            seed_used = _record_seed_used(props, self._client, mp4,
+                                          props_mod.VIDEO_SEED_FIELDS)
+            shot_mod.record_run(self._client, props.shot_file, props, seed_used, video=True)
+
             dest = os.path.join(self._out_dir, "result.mp4")
             shown = None
             try:
                 self._client.download(mp4, dest)
-                shown = viewer_mod.show_video(context, dest)
+                shown = viewer_mod.show_video(context, dest, props.result_display,
+                                              props.bg_alpha)
             except (FukError, RuntimeError) as e:
                 self.report({"WARNING"}, f"Video done, display failed: {e}")
             tail = f" — in {shown}" if shown else " (open the mp4 manually)"
@@ -957,6 +1028,7 @@ CLASSES = (
     FUK_OT_edit_prompt,
     FUK_OT_insert_tag,
     FUK_OT_resolve_preview,
+    FUK_OT_copy_prompt_to_video,
     FUK_OT_use_last_seed,
     FUK_OT_save_to_history,
     FUK_OT_generate,

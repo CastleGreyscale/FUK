@@ -32,6 +32,21 @@ def _log(category: str, message: str, level: str = "info"):
     print(f"{color}[{timestamp}] {symbol}[{category}] {message}{colors['end']}", flush=True)
 
 
+def _lora_label(entry: dict) -> str:
+    """Render one LoRA spec for the run header.
+
+    Must mirror DiffSynthBackend._resolve_lora_specs' key precedence exactly: the web
+    UI sends {key, multiplier} while older callers send {name, alpha}. Reading only
+    name/alpha printed every LoRA as "? (α=1.0)" no matter what was really applied —
+    which quietly hid the true weights during quality debugging.
+    """
+    name = entry.get("name") or entry.get("key") or entry.get("path") or "?"
+    alpha = entry.get("alpha")
+    if alpha is None:
+        alpha = entry.get("multiplier", 1.0)
+    return f"{name} (α={alpha})"
+
+
 class PipelineRunner:
     """
     Base class for pipeline-specific generation runners.

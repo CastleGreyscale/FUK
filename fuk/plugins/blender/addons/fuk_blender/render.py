@@ -42,6 +42,26 @@ def _add_exr_output(ng, name, out_dir, socket="FLOAT"):
     return fo
 
 
+def _clear_exr(out_dir, *names):
+    """Delete previous EXRs for `names` so a stale one can't be mistaken for fresh.
+
+    The compositor's File Output node is fire-and-forget: if it doesn't run — the
+    node group failing to evaluate, the pass being unavailable on the active engine,
+    a write erroring — nothing raises. The previous render's EXR is then still sitting
+    in out_dir, and _find_exr would return it as the newest match. Generation would
+    proceed from a control map minutes or hours out of date, which downstream looks
+    exactly like a caching bug: the beauty updates, the control doesn't, and the VAE
+    encode cache correctly reports a hit on unchanged bytes. Clearing first turns that
+    silent wrong result into a visible "no control map produced" warning.
+    """
+    for name in names:
+        for path in glob.glob(os.path.join(out_dir, f"{name}*.exr")):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+
 def _find_exr(out_dir, name):
     matches = sorted(glob.glob(os.path.join(out_dir, f"{name}*.exr")), key=os.path.getmtime)
     return matches[-1] if matches else None
@@ -149,14 +169,24 @@ def render_passes(context, out_dir, control_source, preview=False,
         "cdepth": scene.render.image_settings.color_depth,
         "use_nodes": scene.use_nodes,
         "use_comp": scene.render.use_compositing,
+        "use_seq": scene.render.use_sequencer,
         "comp_group": scene.compositing_node_group,
         "pass_z": view_layer.use_pass_z,
         "pass_n": view_layer.use_pass_normal,
+        "layer_use": view_layer.use,
     }
     temp_group = None
     pose_layer_snap = None
 
     try:
+        # Blender renders Render Layers -> Compositor -> Sequencer. With any strip in
+        # the sequencer, its output REPLACES the render: the compositor is skipped (so
+        # no control EXR is written) and the beauty PNG becomes a frame of the strip.
+        # We add a strip ourselves in viewer.show_video, so generating a video silently
+        # poisoned every later still — stale beauty AND stale control, which looks
+        # exactly like a caching bug. Our renders must never route through it.
+        scene.render.use_sequencer = False
+
         if preview:
             eevee = _eevee_engine()
             if eevee:
@@ -176,8 +206,16 @@ def render_passes(context, out_dir, control_source, preview=False,
         if want_norm:
             view_layer.use_pass_normal = True
 
+        # The active view layer must actually render, or its Render Layers node feeds
+        # the File Output node nothing and no EXR is written — silently. (The pose rig
+        # layer below already gets this treatment; the main layer never did.)
+        if not view_layer.use:
+            view_layer.use = True
+
         # Build a fresh compositor node group for the native passes we need.
         if want_depth or want_norm or want_pose_layer:
+            # Drop last run's EXRs first — see _clear_exr.
+            _clear_exr(out_dir, "ctl_depth", "ctl_normals", "ctl_pose")
             temp_group = bpy.data.node_groups.new("FUK_BLENDER_COMP", "CompositorNodeTree")
             rl = temp_group.nodes.new("CompositorNodeRLayers")
             rl.scene = scene
@@ -259,8 +297,10 @@ def render_passes(context, out_dir, control_source, preview=False,
         scene.compositing_node_group = snap["comp_group"]
         scene.use_nodes = snap["use_nodes"]
         scene.render.use_compositing = snap["use_comp"]
+        scene.render.use_sequencer = snap["use_seq"]
         view_layer.use_pass_z = snap["pass_z"]
         view_layer.use_pass_normal = snap["pass_n"]
+        view_layer.use = snap["layer_use"]
         if pose_layer_snap is not None and openpose_view_layer in scene.view_layers:
             scene.view_layers[openpose_view_layer].use = pose_layer_snap
         if temp_group is not None:
@@ -298,6 +338,11 @@ def render_control_sequence(context, out_dir, control_source, openpose_view_laye
 
     exr_dir = os.path.join(out_dir, "_ctl_exr")
     control_dir = os.path.join(out_dir, "control")
+    # Clear both first. exr_dir is normally removed in the `finally` below, but a run
+    # that died before it (or was force-quit) leaves frames behind — and `frames` is
+    # just len(glob("seq*.exr")), so leftovers would silently inflate the video length
+    # and pair the wrong control frame with each output frame.
+    shutil.rmtree(exr_dir, ignore_errors=True)
     for d in (exr_dir, control_dir):
         os.makedirs(d, exist_ok=True)
     for f in glob.glob(os.path.join(control_dir, "*.png")):
@@ -312,6 +357,7 @@ def render_control_sequence(context, out_dir, control_source, openpose_view_laye
         "ffmt": scene.render.image_settings.file_format,
         "use_nodes": scene.use_nodes,
         "use_comp": scene.render.use_compositing,
+        "use_seq": scene.render.use_sequencer,
         "comp_group": scene.compositing_node_group,
         "pass_z": view_layer.use_pass_z,
         "pass_n": view_layer.use_pass_normal,
@@ -320,6 +366,11 @@ def render_control_sequence(context, out_dir, control_source, openpose_view_laye
     temp_group = None
     pose_layer_snap = None
     try:
+        # A sequencer strip would replace the render and skip the compositor entirely —
+        # see the note in render_passes. Doubly important here: the FUK_result strip we
+        # add after a video generation would otherwise feed the next one its own output.
+        scene.render.use_sequencer = False
+
         scene.render.resolution_percentage = max(10, min(100, int(percentage)))
         if mode == "depth":
             view_layer.use_pass_z = True
@@ -349,6 +400,15 @@ def render_control_sequence(context, out_dir, control_source, openpose_view_laye
         bpy.ops.render.render(animation=True)
 
         exrs = sorted(glob.glob(os.path.join(exr_dir, "seq*.exr")))
+
+        # Wan only runs at 4n+1 frames and rounds UP internally. A control sequence of
+        # any other length lands on a different temporal grid than the latents, and
+        # VaceWanModel silently zero-pads the control tokens to fit — the control then
+        # drifts out of sync instead of erroring. Drop the trailing frames (at most 3)
+        # so what we send is exactly what the model will run.
+        usable = len(exrs) - ((len(exrs) - 1) % 4) if len(exrs) >= 5 else len(exrs)
+        exrs = exrs[:usable]
+
         cam = scene.camera
         far = cam.data.clip_end if (cam and cam.type == "CAMERA") else 1e9
         depth_range = _global_depth_range(exrs, far) if mode == "depth" else None
@@ -373,6 +433,7 @@ def render_control_sequence(context, out_dir, control_source, openpose_view_laye
         scene.compositing_node_group = snap["comp_group"]
         scene.use_nodes = snap["use_nodes"]
         scene.render.use_compositing = snap["use_comp"]
+        scene.render.use_sequencer = snap["use_seq"]
         view_layer.use_pass_z = snap["pass_z"]
         view_layer.use_pass_normal = snap["pass_n"]
         scene.frame_current = snap["frame"]

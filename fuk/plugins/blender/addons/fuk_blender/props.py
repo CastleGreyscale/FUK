@@ -113,15 +113,35 @@ def seed_text(value) -> str:
     return "" if n is None else str(n)
 
 
+SEED_MODE_ITEMS = [
+    ("random", "Random", "New random seed each run"),
+    ("fixed", "Fixed", "Reuse the seed below"),
+    ("increment", "Increment", "Seed +1 after each run"),
+]
+
+# (mode, seed, last_used) prop names per tab, so shot.py and ops.py can drive the
+# image and video seed state through one code path instead of two near-copies.
+IMAGE_SEED_FIELDS = ("seed_mode", "seed", "last_used_seed")
+VIDEO_SEED_FIELDS = ("video_seed_mode", "video_seed", "video_last_used_seed")
+_SEED_TEXT_FIELDS = IMAGE_SEED_FIELDS[1:] + VIDEO_SEED_FIELDS[1:]
+
+# The one video task the Blender control path drives; also the shot's modelSettings key.
+VIDEO_TASK = "wan_vace_a14b"
+
+
 def _sanitize_seed(self, context):
-    """Hold the seed field to digits inside the uint32 range as it is typed."""
-    for field in ("seed", "last_used_seed"):
+    """Hold every seed field to digits inside the uint32 range as it is typed."""
+    for field in _SEED_TEXT_FIELDS:
         raw = getattr(self, field)
         digits = "".join(c for c in raw if c.isdigit())[:_SEED_DIGITS]
         if digits:
             digits = str(min(int(digits), SEED_MAX))
         if raw != digits:
             setattr(self, field, digits)
+
+
+# Artifacts FUK parks in the camera's background slots (mirrors viewer._FUK_ARTIFACTS).
+_OVERLAY_FILES = {"result.png", "preview.png", "result.mp4"}
 
 
 def _update_bg_alpha(self, context):
@@ -131,11 +151,22 @@ def _update_bg_alpha(self, context):
     if cam is None or getattr(cam, "type", None) != "CAMERA":
         return
     for bg in cam.data.background_images:
-        if bg.image and bpy.path.basename(bg.image.filepath) == "result.png":
-            bg.alpha = self.bg_alpha
+        # Covers the still, the live-diffusion preview and the video clip alike.
+        for datablock in (bg.image, bg.clip):
+            if datablock and bpy.path.basename(datablock.filepath) in _OVERLAY_FILES:
+                bg.alpha = self.bg_alpha
 
 
 class FukProps(bpy.types.PropertyGroup):
+    # Which half of the addon the sidebar shows. Image and video carry independent
+    # prompts and seeds, so showing both stacks at once made the N-panel unusable.
+    mode: bpy.props.EnumProperty(
+        name="Mode",
+        items=[("image", "Image", "Still image generation"),
+               ("video", "Video", "Wan-VACE video generation")],
+        default="image",
+    )
+
     # --- connection / shot binding (runtime, not saved to shot) ---
     project_folder: bpy.props.StringProperty(
         name="Project Folder",
@@ -159,12 +190,7 @@ class FukProps(bpy.types.PropertyGroup):
     steps: bpy.props.IntProperty(name="Steps", default=20, min=1, max=200)
     guidance_scale: bpy.props.FloatProperty(name="Guidance", default=2.5, min=0.0, max=30.0)
     seed_mode: bpy.props.EnumProperty(
-        name="Seed Mode",
-        items=[("random", "Random", "New random seed each run"),
-               ("fixed", "Fixed", "Reuse the seed below"),
-               ("increment", "Increment", "Seed +1 after each run")],
-        default="random",
-    )
+        name="Seed Mode", items=SEED_MODE_ITEMS, default="random")
     # Text, not int — see SEED_MAX above. Empty means "no seed set".
     seed: bpy.props.StringProperty(
         name="Seed", default="", update=_sanitize_seed,
@@ -200,7 +226,17 @@ class FukProps(bpy.types.PropertyGroup):
                     "(decodes a few mid-diffusion frames — adds a little time)",
     )
 
-    # --- video (Wan-VACE) ---
+    # --- video (Wan-VACE) — mirrors tabs.video, independent of the image fields ---
+    video_prompt: bpy.props.StringProperty(name="Video Prompt", default="")
+    video_negative_prompt: bpy.props.StringProperty(name="Video Negative", default="")
+    video_seed_mode: bpy.props.EnumProperty(
+        name="Video Seed Mode", items=SEED_MODE_ITEMS, default="random")
+    video_seed: bpy.props.StringProperty(
+        name="Video Seed", default="", update=_sanitize_seed,
+        description=f"Seed value (0–{SEED_MAX}); blank lets FUK roll one",
+    )
+    video_last_used_seed: bpy.props.StringProperty(
+        name="Video Last Seed", default="", update=_sanitize_seed)
     video_percentage: bpy.props.IntProperty(
         name="Video %", default=50, min=10, max=100,
         description="Resolution percentage for the video render (scales the control "
@@ -246,8 +282,9 @@ class FukProps(bpy.types.PropertyGroup):
         update=_update_bg_alpha,
     )
 
-    # --- prompt resolution preview (read-only) ---
+    # --- prompt resolution preview (read-only), one per tab ---
     resolved_preview: bpy.props.StringProperty(name="Resolved", default="")
+    video_resolved_preview: bpy.props.StringProperty(name="Video Resolved", default="")
 
     # The actual seed FUK used last (random or fixed); shown so the panel always
     # surfaces a concrete number even in random mode. Text, like `seed`.

@@ -18,7 +18,7 @@ import torch
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Union
 
-from pipeline_base import PipelineRunner, _log
+from pipeline_base import PipelineRunner, _log, _lora_label
 from perf_monitor import record_timing
 
 
@@ -85,6 +85,27 @@ class WanPipelineRunner(PipelineRunner):
 
     pipeline_family = "video"
 
+    # Mirrors WanVideoPipeline's height/width_division_factor and
+    # time_division_factor/remainder. Kept here so we can apply the same rounding
+    # before loading control media — see the call site in generate().
+    _SPATIAL_DIV = 16
+    _TIME_DIV, _TIME_REM = 4, 1
+
+    def _snap_to_grid(self, width, height, num_frames):
+        """Round size/length up to what the pipeline will actually run at."""
+        def up(v, div):
+            return ((int(v) + div - 1) // div) * div
+
+        w, h = up(width, self._SPATIAL_DIV), up(height, self._SPATIAL_DIV)
+        n = int(num_frames)
+        if n % self._TIME_DIV != self._TIME_REM:
+            n = up(n, self._TIME_DIV) + self._TIME_REM
+        if (w, h, n) != (int(width), int(height), int(num_frames)):
+            _log(self.log_prefix,
+                 f"  Snapped to pipeline grid: {width}x{height}x{num_frames} "
+                 f"-> {w}x{h}x{n} (control media loads at these dims)")
+        return w, h, n
+
     def generate(
         self,
         prompt: str,
@@ -143,6 +164,18 @@ class WanPipelineRunner(PipelineRunner):
         width = width or defaults.get("width") or 832
         height = height or defaults.get("height") or 480
         num_frames = video_length or defaults.get("video_length", 81)
+
+        # Snap to the grid the pipeline itself enforces, BEFORE anything downstream
+        # uses these numbers. WanVideoPipeline rounds height/width up to a multiple of
+        # 16 and num_frames to 4n+1 internally — but the control video and reference
+        # image are loaded at whatever we pass to map_inputs(). If the two disagree,
+        # nothing errors: VaceWanModel.forward truncates or zero-pads the control token
+        # sequence to the latent's length, which silently puts the control on a
+        # different patch grid than the image and shears it across the frame. The
+        # control then reads as noise and the video appears to ignore it entirely.
+        # (Blender hits this constantly: render height x percentage is rarely /16 —
+        # e.g. 720 x 50% = 360, which rounds to 368.)
+        width, height, num_frames = self._snap_to_grid(width, height, num_frames)
         num_steps = steps or infer_steps or defaults.get("steps", 50)
         effective_cfg = cfg_scale or guidance_scale or defaults.get("cfg_scale", 6.0)
         negative_prompt = negative_prompt or defaults.get("negative_prompt", "")
@@ -191,7 +224,7 @@ class WanPipelineRunner(PipelineRunner):
             "control_path": control_path,
             "pipeline_kwargs": pipe_defaults if pipe_defaults else None,
             "lora": f"{lora} (α={lora_multiplier})" if lora else None,
-            "loras": [f"{l.get('name','?')} (α={l.get('alpha', 1.0)})" for l in (loras or [])],
+            "loras": [_lora_label(l) for l in (loras or [])],
         }
         if tea_cache_thresh is not None:
             log_params["tea_cache"] = f"l1_thresh={tea_cache_thresh} (coeffs={tea_cache_model_id})"

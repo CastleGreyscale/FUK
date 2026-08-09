@@ -20,7 +20,7 @@ import torch
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Union
 
-from pipeline_base import PipelineRunner, _log
+from pipeline_base import PipelineRunner, _log, _lora_label
 from perf_monitor import record_timing
 
 
@@ -147,7 +147,10 @@ class QwenPipelineRunner(PipelineRunner):
             "seed": seed,
             "exponential_shift_mu": kwargs.get("exponential_shift_mu"),
             "lora": f"{lora} (α={lora_multiplier})" if lora else None,
-            "loras": [f"{l.get('name','?')} (α={l.get('alpha', 1.0)})" for l in (loras or [])],
+            # Mirror _resolve_lora_specs' own key precedence — the web UI sends
+            # {key, multiplier}, so reading only name/alpha logged every LoRA as
+            # "? (α=1.0)" regardless of what was actually applied.
+            "loras": [_lora_label(l) for l in (loras or [])],
         }
         if eligen_source:
             log_params["eligen_source"] = str(eligen_source)

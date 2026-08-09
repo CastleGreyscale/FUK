@@ -24,13 +24,24 @@ Blender scene ─► beauty.png (write_still)
   from the Normal pass, and OpenPose from a rig view layer you set up. **Canny** is
   the one map FUK derives from the beauty render. (If OpenPose has no rig layer, FUK
   estimates it from the beauty render as a fallback.)
-- **The shot `.json` is the source of truth.** *Load Shot* mirrors `tabs.image`
-  (prompt, seed, model, steps, guidance…) into the panel; *Save to Shot* writes it
-  back. Blender-only fields are stored under `tabs.image.blender_*`.
+  - Renders temporarily force **Sequencer off**. Blender renders Render Layers →
+    Compositor → Sequencer, and *any* strip in the sequencer replaces the render
+    output: the compositor is skipped (no control pass) and the beauty PNG becomes a
+    frame of that strip. Since the video flow parks a `FUK_result` strip there, one
+    video generation would otherwise silently feed every later still a stale beauty
+    and no control. The original setting is restored afterwards.
+- **Image and Video are separate modes.** The toggle under the shot header swaps the
+  whole panel stack. Each mode has its **own prompt, negative and seed** — the video
+  side has a *Copy from Image* button when you want them to match. Connection, shot
+  binding and **Control** are shared; one *Load Shot* / *Save to Shot* covers both.
+- **The shot `.json` is the source of truth.** *Load Shot* mirrors `tabs.image` and
+  `tabs.video` (prompt, seed, model, steps, guidance…) into the panel; *Save to Shot*
+  writes both back. Blender-only fields are stored under `tabs.<tab>.blender_*`.
   - Settings are read from and written to the slot of **the model Blender generates
-    with** (`modelSettings[<control model>]`), not whatever the web UI has active — so
-    the seed Blender sends is the seed recorded against that model. The shot's
-    `activeModel` is never rewritten. A model with no slot yet inherits the active
+    with** — `tabs.image.modelSettings[<control model>]` and
+    `tabs.video.modelSettings["wan_vace_a14b"]` — not whatever the web UI has active,
+    so the seed Blender sends is the seed recorded against that model. Neither tab's
+    `activeModel` is ever rewritten. A model with no slot yet inherits the active
     model's prompt/seed on first Load.
   - Seeds are uint32 (0–4294967295), so the panel's seed is a **text field** —
     Blender's integer properties top out at 2147483647 and cannot hold half of them.
@@ -51,9 +62,11 @@ Blender scene ─► beauty.png (write_still)
 
 ## Use
 
-1. Open the **FUK** tab in the 3D viewport sidebar (press `N`). The shot binding and
-   run status sit on the **FUK** panel itself; *Prompt*, *Generation*, *Control*,
-   *Result*, *Render* and *Video* are collapsible sub-panels beneath it.
+1. Open the **FUK** tab in the 3D viewport sidebar (press `N`). The shot binding, the
+   **Image | Video** toggle and the run status sit on the **FUK** panel itself;
+   *Prompt*, *Generation*, *Control*, *Result* and *Render* are collapsible sub-panels
+   beneath it. Flipping to **Video** swaps in the video's own *Prompt*, *Generation*
+   and *Render* panels — *Control* stays put, since it drives both.
 2. Pick your **project folder** (the one holding the shot `.json` files) and press
    **Connect**, then choose a shot and **Load Shot**. The shot list is a snapshot
    taken at connect — press the ⟳ button beside the dropdown to re-scan the folder
@@ -110,16 +123,30 @@ Animate a still with your scene's motion. Workflow:
 1. Generate a **still** first (image flow) — it becomes the VACE **reference** (the look).
 2. Set the scene **frame range** (the motion) and pick a **depth / normals / openpose**
    control.
-3. Press **Generate Video** (in the *Video (VACE)* panel). The addon renders the control
-   pass over the whole frame range into a folder (depth is normalized over a *global*
-   range so it doesn't flicker) and runs `wan_vace_a14b` with `vace_video` = that
-   sequence and `vace_reference_image` = your still.
-4. The result mp4 loads into Blender's **Video Sequencer** to scrub/play.
+3. Flip the header toggle to **Video** and write the video's **own prompt and seed**
+   (*Copy from Image* if you want the still's). These live in `tabs.video`, so they are
+   completely independent of the image tab's — changing one never disturbs the other.
+4. Press **Generate Video**. The addon renders the control pass over the whole frame
+   range into a folder (depth is normalized over a *global* range so it doesn't
+   flicker) and runs `wan_vace_a14b` with `vace_video` = that sequence and
+   `vace_reference_image` = your still.
+5. The result follows the **Result** mode, same as stills: in *Viewport* the mp4 becomes
+   the camera's background clip, so scrubbing the timeline plays the generated video
+   over your scene and the opacity slider works on it exactly as it does for an image.
+   The other modes load it into the **Video Sequencer**. The seed it used is written
+   straight back into `tabs.video`, as with stills.
 
 Notes: video is slow (minutes) and runs on demand — no live mode. Control must be a
 native pass (depth/normals/openpose-rig); canny/estimated openpose aren't supported for
 sequences. Requires the **wan_vace_a14b** weights on the server. Esc stops *waiting* but
 video isn't abortable mid-render yet (unlike images).
+
+**Frame count is trimmed to 4n+1.** Wan only runs at those lengths and rounds up
+internally; a control sequence of any other length lands on a different temporal grid
+than the latents, and VACE silently zero-pads it rather than erroring. Up to 3 trailing
+frames are dropped so the control matches exactly. The server applies the same rule to
+width/height (multiples of 16) — **50% of 720p is 360, which rounds to 368**, and that
+mismatch used to shear the control across the frame until it read as noise.
 
 ### Writing prompts
 
