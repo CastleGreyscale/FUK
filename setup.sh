@@ -152,6 +152,28 @@ else
     echo "  ✓ DSINE already exists"
 fi
 
+# VGGT (multi-view 3D reconstruction)
+# Source-only: threed/vggt_backend.py puts this directory on sys.path rather
+# than pip-installing it, and the weights come from HuggingFace at first use.
+# Do NOT install its requirements.txt — it pins torch==2.3.1 and would drag
+# the main venv's CUDA torch backwards, breaking Qwen and Wan generation.
+if [ ! -d "fuk/vendor/VGGT" ]; then
+    echo "  → Cloning VGGT..."
+    git clone https://github.com/facebookresearch/vggt.git fuk/vendor/VGGT
+else
+    echo "  ✓ VGGT already exists"
+fi
+
+# TRELLIS (single-image 3D reconstruction) — source only.
+# The runtime lives in an isolated environment built separately; see the
+# 3D reconstruction section below for why it is not built here.
+if [ ! -d "fuk/vendor/TRELLIS" ]; then
+    echo "  → Cloning TRELLIS..."
+    git clone --recurse-submodules https://github.com/microsoft/TRELLIS.git fuk/vendor/TRELLIS
+else
+    echo "  ✓ TRELLIS already exists"
+fi
+
 # ── Vendor packages ───────────────────────────────────────────────────────────
 echo ""
 echo "[5/7] Installing vendor packages..."
@@ -166,6 +188,45 @@ pip install basicsr --no-build-isolation
 pip install -e ./fuk/vendor/DiffSynth-Studio
 pip install -e ./fuk/vendor/Depth-Anything-3
 pip install -e ./fuk/vendor/segment-anything-2
+
+# ── 3D reconstruction ─────────────────────────────────────────────────────────
+# VGGT needs nothing installed: it is plain PyTorch and runs in this venv off
+# the vendored source. TRELLIS is the opposite — it needs torch 2.6/cu126 plus
+# spconv, nvdiffrast and diff_gaussian_rasterization compiled from source,
+# which cannot coexist with the torch this venv runs for Qwen and Wan. It
+# therefore gets a private micromamba environment under fuk/vendor/TRELLIS_ENV
+# and is driven over a subprocess.
+#
+# That build is ~18GB and takes a long while, so it is opt-in rather than part
+# of a default install. Everything else in FUK works without it; only the
+# single-image 3D path goes dark.
+echo ""
+echo "  → 3D reconstruction backends..."
+
+if python -c "import sys; sys.path.insert(0, 'fuk/vendor/VGGT'); import vggt" 2>/dev/null; then
+    echo "    ✓ VGGT ready (runs in this venv, no install needed)"
+else
+    echo "    ⚠  VGGT source missing or unimportable — multi-view 3D will be unavailable"
+fi
+
+if [ -f "fuk/vendor/TRELLIS_ENV/READY" ]; then
+    echo "    ✓ TRELLIS isolated environment already built"
+elif [ "${FUK_INSTALL_TRELLIS_ENV:-0}" = "1" ]; then
+    echo "    → Building TRELLIS isolated environment (~18GB, this takes a while)..."
+    # Never let a TRELLIS build failure abort the rest of the install — the
+    # script exits non-zero when the environment comes out incomplete, and
+    # this whole file runs under `set -e`.
+    if bash fuk/core/threed/install_trellis_env.sh; then
+        echo "    ✓ TRELLIS environment built"
+    else
+        echo "    ⚠  TRELLIS environment incomplete — single-image 3D will show as"
+        echo "       unavailable in the UI. Everything else is unaffected."
+    fi
+else
+    echo "    ○ TRELLIS isolated environment not built (optional, ~18GB)"
+    echo "      Build it with:  bash fuk/core/threed/install_trellis_env.sh"
+    echo "      Or re-run this script with:  FUK_INSTALL_TRELLIS_ENV=1 ./setup.sh"
+fi
 
 # ── Configuration files ───────────────────────────────────────────────────────
 echo ""
@@ -1222,7 +1283,18 @@ echo ""
 echo "   Trim unwanted entries from fuk/config/models.json first —"
 echo "   it downloads everything listed, at roughly 15-30GB per model."
 echo ""
-echo "3. Start FUK:"
+echo "3. Optional — single-image 3D (TRELLIS):"
+if [ -f "fuk/vendor/TRELLIS_ENV/READY" ]; then
+echo "   Already built — nothing to do."
+else
+echo "   bash fuk/core/threed/install_trellis_env.sh"
+echo ""
+echo "   Builds a private environment (~18GB) because TRELLIS needs a torch"
+echo "   and CUDA toolchain that cannot share this venv. Skip it and only"
+echo "   single-image 3D is unavailable; multi-view (VGGT) works regardless."
+fi
+echo ""
+echo "4. Start FUK:"
 echo "   ./start.sh"
 echo ""
 echo "Configuration notes:"
