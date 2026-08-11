@@ -170,7 +170,7 @@ pip install -e ./fuk/vendor/segment-anything-2
 # ── Configuration files ───────────────────────────────────────────────────────
 echo ""
 echo "[6/7] Setting up configuration files..."
-mkdir -p fuk/config
+mkdir -p fuk/config fuk/config/tools
 
 # Initialize .gitignore if it doesn't exist
 if [ ! -f ".gitignore" ]; then
@@ -257,7 +257,7 @@ cat > fuk/config/models.json.template << 'EOL'
     "model_id": "Qwen/Qwen-Image",
     "pipeline": "qwen",
     "category": "image",
-    "description": "Base text-to-image generation",
+    "description": "Qwen text-to-image",
     "aliases": ["qwen", "t2i"],
     "supports": ["negative_prompt"],
     "parameter_map": {},
@@ -273,7 +273,7 @@ cat > fuk/config/models.json.template << 'EOL'
     "model_id": "Qwen/Qwen-Image-2512",
     "pipeline": "qwen",
     "category": "image",
-    "description": "Qwen text-to-image (2512 update, improved quality)",
+    "description": "Qwen 2512 text-to-image",
     "aliases": ["qwen-2512"],
     "supports": ["negative_prompt"],
     "parameter_map": {},
@@ -289,11 +289,14 @@ cat > fuk/config/models.json.template << 'EOL'
     "model_id": "Qwen/Qwen-Image-Edit-2511",
     "pipeline": "qwen",
     "category": "image",
-    "description": "Multi-image editing (supports multiple input images)",
-    "aliases": ["qwen-edit", "edit-2511"],
+    "description": "Qwen Edit 2511 image-editing",
+    "aliases": ["qwen-edit", "edit-2511", "qwen_edit"],
     "supports": ["edit_image", "negative_prompt"],
     "parameter_map": {
       "edit_targets": "edit_image"
+    },
+    "pipeline_kwargs": {
+      "zero_cond_t": true
     },
     "components": [
       {"pattern": "transformer/diffusion_pytorch_model*.safetensors"},
@@ -308,7 +311,7 @@ cat > fuk/config/models.json.template << 'EOL'
     "model_id": "Qwen/Qwen-Image",
     "pipeline": "qwen",
     "category": "image",
-    "description": "In-context control with preprocessed control images",
+    "description": "Qwen Image Control",
     "aliases": ["control-union", "qwen-control"],
     "supports": ["context_image", "negative_prompt"],
     "parameter_map": {
@@ -327,11 +330,35 @@ cat > fuk/config/models.json.template << 'EOL'
     }
   },
 
+  "qwen_image_control_union_2512": {
+    "model_id": "Qwen/Qwen-Image-2512",
+    "pipeline": "qwen",
+    "category": "image",
+    "description": "Qwen Image 2512 Control",
+    "aliases": ["control-union-2512", "qwen-control-2512"],
+    "supports": ["context_image", "negative_prompt"],
+    "parameter_map": {
+      "control_input": "context_image"
+    },
+    "components": [
+      {"pattern": "transformer/diffusion_pytorch_model*.safetensors"},
+      {"pattern": "text_encoder/model*.safetensors", "model_id": "Qwen/Qwen-Image"},
+      {"pattern": "vae/diffusion_pytorch_model.safetensors", "model_id": "Qwen/Qwen-Image"}
+    ],
+    "tokenizer": {"pattern": "tokenizer/", "model_id": "Qwen/Qwen-Image"},
+    "lora": {
+      "model_id": "DiffSynth-Studio/Qwen-Image-In-Context-Control-Union",
+      "pattern": "model.safetensors",
+      "target": "dit"
+    }
+  },
+
+
   "qwen_eligen": {
     "model_id": "Qwen/Qwen-Image",
     "pipeline": "qwen",
     "category": "image",
-    "description": "Entity-level composition control (masks + per-entity prompts)",
+    "description": "Zone composition control",
     "aliases": ["eligen", "eligen-v2"],
     "supports": ["eligen", "negative_prompt"],
     "parameter_map": {},
@@ -344,7 +371,8 @@ cat > fuk/config/models.json.template << 'EOL'
     "lora": {
       "model_id": "DiffSynth-Studio/Qwen-Image-EliGen-V2",
       "pattern": "model.safetensors",
-      "target": "dit"
+      "target": "dit",
+      "alpha": 0.55
     }
   },
 
@@ -352,7 +380,7 @@ cat > fuk/config/models.json.template << 'EOL'
     "model_id": "Wan-AI/Wan2.2-I2V-A14B",
     "pipeline": "wan",
     "category": "video",
-    "description": "Image-to-video (Wan 2.2 A14B - latest)",
+    "description": "Wan 2.2 Image-to-video",
     "aliases": ["i2v-A14B", "i2v-2.2"],
     "supports": ["input_image", "negative_prompt", "tiled"],
     "parameter_map": {
@@ -361,8 +389,8 @@ cat > fuk/config/models.json.template << 'EOL'
     "components": [
       {"pattern": "high_noise_model/diffusion_pytorch_model*.safetensors"},
       {"pattern": "low_noise_model/diffusion_pytorch_model*.safetensors"},
-      {"pattern": "models_t5_umt5-xxl-enc-bf16.pth"},
-      {"pattern": "Wan2.1_VAE.pth"}
+      {"model_id": "DiffSynth-Studio/Wan-Series-Converted-Safetensors", "pattern": "models_t5_umt5-xxl-enc-bf16.safetensors"},
+      {"model_id": "DiffSynth-Studio/Wan-Series-Converted-Safetensors", "pattern": "Wan2.1_VAE.safetensors"}
     ],
     "tokenizer": {
       "model_id": "Wan-AI/Wan2.1-T2V-1.3B",
@@ -377,7 +405,7 @@ cat > fuk/config/models.json.template << 'EOL'
     "model_id": "PAI/Wan2.2-VACE-Fun-A14B",
     "pipeline": "wan",
     "category": "video",
-    "description": "VACE-controlled video (control video + reference image)",
+    "description": "Wan 2.2 VACE-controlled video",
     "aliases": ["vace", "vace-a14b"],
     "supports": ["vace_video", "vace_reference_image", "vace_scale", "negative_prompt", "tiled"],
     "parameter_map": {
@@ -387,8 +415,8 @@ cat > fuk/config/models.json.template << 'EOL'
     "components": [
       {"pattern": "high_noise_model/diffusion_pytorch_model*.safetensors"},
       {"pattern": "low_noise_model/diffusion_pytorch_model*.safetensors"},
-      {"pattern": "models_t5_umt5-xxl-enc-bf16.pth"},
-      {"pattern": "Wan2.1_VAE.pth"}
+      {"model_id": "DiffSynth-Studio/Wan-Series-Converted-Safetensors", "pattern": "models_t5_umt5-xxl-enc-bf16.safetensors"},
+      {"model_id": "DiffSynth-Studio/Wan-Series-Converted-Safetensors", "pattern": "Wan2.1_VAE.safetensors"}
     ],
     "tokenizer": {
       "model_id": "Wan-AI/Wan2.1-T2V-1.3B",
@@ -403,18 +431,44 @@ cat > fuk/config/models.json.template << 'EOL'
     "model_id": "PAI/Wan2.2-Fun-A14B-InP",
     "pipeline": "wan",
     "category": "video",
-    "description": "First+Last frame inpainting (Wan 2.2 A14B)",
+    "description": "Wan 2.2 FirstFrame - LastFrame",
     "aliases": ["inp", "inp-a14b", "inpaint-video"],
     "supports": ["input_image", "end_image", "negative_prompt", "tiled"],
     "parameter_map": {
-      "reference_image": "input_image",
-      "end_image": "end_image"
+        "reference_image": "input_image",
+        "end_image": "end_image"
     },
     "components": [
-      {"pattern": "high_noise_model/diffusion_pytorch_model*.safetensors"},
-      {"pattern": "low_noise_model/diffusion_pytorch_model*.safetensors"},
+        {"pattern": "high_noise_model/diffusion_pytorch_model*.safetensors"},
+        {"pattern": "low_noise_model/diffusion_pytorch_model*.safetensors"},
+        {"model_id": "DiffSynth-Studio/Wan-Series-Converted-Safetensors", "pattern": "models_t5_umt5-xxl-enc-bf16.safetensors"},
+        {"model_id": "DiffSynth-Studio/Wan-Series-Converted-Safetensors", "pattern": "Wan2.1_VAE.safetensors"}
+    ],
+    "tokenizer": {
+        "model_id": "Wan-AI/Wan2.1-T2V-1.3B",
+        "pattern": "google/umt5-xxl/"
+    },
+    "pipeline_kwargs": {
+        "tiled": true
+    }
+  },
+
+  "wan_animate_a14b": {
+    "model_id": "Wan-AI/Wan2.2-Animate-14B",
+    "pipeline": "wan",
+    "category": "video",
+    "description": "Wan 2.2 Animate (pose + face control)",
+    "aliases": ["animate", "animate-a14b"],
+    "supports": ["input_image", "animate_pose_video", "animate_face_video", "negative_prompt", "tiled"],
+    "parameter_map": {
+      "reference_image": "input_image",
+      "control_input": "animate_pose_video"
+    },
+    "components": [
+      {"pattern": "diffusion_pytorch_model*.safetensors"},
       {"pattern": "models_t5_umt5-xxl-enc-bf16.pth"},
-      {"pattern": "Wan2.1_VAE.pth"}
+      {"pattern": "Wan2.1_VAE.pth"},
+      {"pattern": "models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth"}
     ],
     "tokenizer": {
       "model_id": "Wan-AI/Wan2.1-T2V-1.3B",
@@ -425,12 +479,91 @@ cat > fuk/config/models.json.template << 'EOL'
     }
   },
 
+  "wan_animate_replace_a14b": {
+    "model_id": "Wan-AI/Wan2.2-Animate-14B",
+    "pipeline": "wan",
+    "category": "video",
+    "description": "Wan 2.2 Animate Replace (pose + face + inpaint + mask)",
+    "aliases": ["animate-replace", "animate-replace-a14b"],
+    "supports": ["input_image", "animate_pose_video", "animate_face_video", "animate_inpaint_video", "animate_mask_video", "negative_prompt", "tiled"],
+    "parameter_map": {
+      "reference_image": "input_image",
+      "control_input": "animate_pose_video"
+    },
+    "components": [
+      {"pattern": "diffusion_pytorch_model*.safetensors"},
+      {"pattern": "models_t5_umt5-xxl-enc-bf16.pth"},
+      {"pattern": "Wan2.1_VAE.pth"},
+      {"pattern": "models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth"}
+    ],
+    "tokenizer": {
+      "model_id": "Wan-AI/Wan2.1-T2V-1.3B",
+      "pattern": "google/umt5-xxl/"
+    },
+    "lora": {
+      "model_id": "Wan-AI/Wan2.2-Animate-14B",
+      "pattern": "relighting_lora.ckpt",
+      "target": "dit"
+    },
+    "pipeline_kwargs": {
+      "tiled": true
+    }
+  },
+
+  "flux2_dev": {
+    "model_id": "black-forest-labs/FLUX.2-dev",
+    "pipeline": "flux2",
+    "category": "image",
+    "description": "FLUX.2-dev multi-image editing",
+    "aliases": ["flux2", "flux2-dev"],
+    "supports": ["edit_image", "negative_prompt"],
+    "parameter_map": {
+      "edit_targets": "edit_image"
+    },
+    "components": [
+      {"pattern": "text_encoder/*.safetensors"},
+      {"pattern": "transformer/*.safetensors"},
+      {"pattern": "vae/diffusion_pytorch_model.safetensors"}
+    ],
+    "tokenizer": {"pattern": "tokenizer/"}
+  },
+
+  "_threed_comment": "3D reconstruction models. Not DiffSynth pipelines — they load from their own vendored repos (see docs/3D_RECONSTRUCTION_SYSTEM.md). Entries stay flat like every other model so resolve_model_type/aliases keep working; the 'threed' pipeline value is what groups them.",
+
+  "trellis": {
+    "model_id": "microsoft/TRELLIS-image-large",
+    "pipeline": "threed",
+    "category": "threed",
+    "type": "single_image",
+    "name": "TRELLIS",
+    "description": "Single-image 3D — Structured 3D Latents, seconds to a mesh",
+    "aliases": ["trellis-image-large", "single-image-3d"],
+    "path": "/path/to/your/models/threed/TRELLIS-image-large",
+    "supports": ["glb", "ply", "obj"],
+    "vram_gb_estimate": 16,
+    "isolated_env": "fuk/vendor/TRELLIS_ENV/env",
+    "install": "bash fuk/core/threed/install_trellis_env.sh"
+  },
+
+  "vggt": {
+    "model_id": "facebook/VGGT-1B",
+    "pipeline": "threed",
+    "category": "threed",
+    "type": "multi_view",
+    "name": "VGGT",
+    "description": "Multi-view reconstruction — feed-forward transformer, 1 to hundreds of images",
+    "aliases": ["vggt-1b", "multi-view-3d"],
+    "path": "/path/to/your/models/threed/VGGT-1B",
+    "supports": ["glb", "ply", "obj"],
+    "vram_gb_estimate": 14,
+    "max_input_dim": 518
+  },
+
   "_deferred": {
     "_comment": "Complex models deferred for post-launch",
     "wan_t2v_1.3b": "Excluding T2V - not professional use case",
     "wan_t2v_14b": "Excluding T2V - not professional use case",
     "wan_s2v_14b": "Requires: s2v_pose_video + motion_video + audio pipeline",
-    "wan_animate_14b": "Requires: animate_pose_video + animate_face_video + animate_inpaint_video + animate_mask_video",
     "wan_control_camera": "Requires: camera_control_direction parsing + special UI",
     "qwen_blockwise_controlnet": "Requires: preprocessor integration for canny/depth/inpaint"
   }
@@ -469,6 +602,7 @@ cat > fuk/config/defaults.json.template << 'EOL'
     "lastUsedSeed": null,
     "output_format": "png",
     "edit_strength": 1,
+    "detail_bias": 0.9,
     "exponential_shift_mu": null,
     "save_latent": true,
     "control_image_paths": []
@@ -487,9 +621,11 @@ cat > fuk/config/defaults.json.template << 'EOL'
     "cfg_scale": 6.0,
     "denoising_strength": 1.0,
     "sigma_shift": 5.0,
+    "switch_dit_boundary": 0.875,
     "sliding_window_size": null,
     "sliding_window_stride": null,
-    "motion_bucket_id": null,
+    "tea_cache_l1_thresh": null,
+    "tea_cache_model_id": null,
     "lora": null,
     "lora_multiplier": 1.0,
     "seed": null,
@@ -581,6 +717,8 @@ echo "    ✓ fuk/config/defaults.json.template"
 
 cat > fuk/config/defaults_loras.json.template << 'EOL'
 {
+  "_comment": "defined_loras_path is the base directory for the curated 'loras' entries below — their 'path' is resolved relative to it. scanned_loras_path is swept for every .safetensors found and needs no entries here. 'model' accepts a single model key or a list of keys (a LoRA trained on Qwen 2512 usually applies to both the base and control-union 2512 entries in models.json).",
+
   "defined_loras_path": "/path/to/your/models/loras",
   "scanned_loras_path": "/path/to/your/models/loras",
 
@@ -588,10 +726,18 @@ cat > fuk/config/defaults_loras.json.template << 'EOL'
     {
       "name": "example_lora",
       "path": "example.safetensors",
-      "model": "qwen_image",
+      "model": ["qwen_image", "qwen_image_control_union", "qwen_eligen"],
       "default_strength": 1.0,
       "trigger_word": "",
       "inject_text": ""
+    },
+    {
+      "name": "example_lora_2512",
+      "path": "example_2512.safetensors",
+      "model": ["qwen_image_2512", "qwen_image_control_union_2512"],
+      "default_strength": 0.7,
+      "trigger_word": "example_style",
+      "inject_text": "A cinematic still from an example_style movie"
     }
   ]
 }
@@ -602,6 +748,11 @@ cat > fuk/config/defaults_vram.json.template << 'EOL'
 {
   "vram": {
     "preset": "low",
+
+    "_comment_cache": "pipeline_cache_slots — how many loaded pipelines stay resident before the oldest is evicted. 2 lets you flip between (say) an image and a video model without a reload; drop to 1 if RAM is tight. vae_encode_cache reuses VAE encodings of unchanged input images across generations.",
+    "pipeline_cache_slots": 2,
+    "vae_encode_cache": true,
+
     "presets": {
       "none": {
         "label": "None — Full VRAM",
@@ -832,7 +983,7 @@ cat > fuk/config/defaults_dataset.json.template << 'EOL'
           "overhead":           "On a plain neutral grey background, change the lighting to a direct overhead source casting downward shadows that reveal the object's top surface geometry.",
           "under_light":        "On a plain neutral grey background, change the lighting to a source from directly below casting upward shadows that reveal the object's underside geometry.",
           "split":              "On a plain neutral grey background, change the lighting to a hard split with one side of the object fully lit and the opposite side in complete shadow, revealing surface contours.",
-          "rim":                "On a plain neutral grey background, change the lighting to a strong rim light from behind and to one side, creating a bright edge outline around the object's silhouette with the front face in shadow.",
+          "rim":                "On a plain neutral grey background, change the lighting to a single, key light strikes the subject from the left and right sides creating a sharp silhouette with crisp highlights that gently wrap along objects contours.",
           "top_backlit":        "On a plain neutral grey background, change the lighting to a strong backlight from directly above and behind, creating a halo edge on the top surface with the front face in shadow."
         }
       },
@@ -864,6 +1015,126 @@ cat > fuk/config/defaults_dataset.json.template << 'EOL'
 EOL
 echo "    ✓ fuk/config/defaults_dataset.json.template"
 
+# ── Tool configs ──────────────────────────────────────────────────────────────
+# Per-vendor-repo settings, read directly by the preprocessors. Without these
+# the depth preprocessor silently falls back to different inference settings
+# than the ones tuned here, so they are part of a correct install.
+
+cat > fuk/config/tools/depth-anything-v3.json.template << 'EOL'
+{
+  "_comment": "Depth Anything V3 - Repo-specific settings",
+  "_repo": "https://github.com/DepthAnything/Depth-Anything-3",
+
+  "models": {
+    "da3_mono_large": {
+      "model_id": "depth-anything/DA3MONO-LARGE",
+      "description": "Monocular depth, best for single images"
+    },
+    "da3_metric_large": {
+      "model_id": "depth-anything/DA3METRIC-LARGE",
+      "description": "Metric depth in meters"
+    },
+    "da3_large": {
+      "model_id": "depth-anything/DA3-LARGE-1.1",
+      "description": "Multi-view capable"
+    },
+    "da3_giant": {
+      "model_id": "depth-anything/DA3-GIANT-1.1",
+      "description": "Largest model, highest quality"
+    }
+  },
+
+  "inference_defaults": {
+    "process_res": 1280,
+    "process_res_method": "upper_bound_resize"
+  },
+
+  "process_res_methods": {
+    "_comment": "Available resize methods for inference",
+    "available": ["lower_bound_resize", "upper_bound_resize", "exact_resize"],
+    "recommended": "exact_resize"
+  },
+
+  "output": {
+    "dtype": "float32",
+    "range": [0, 1],
+    "normalized": true
+  },
+
+  "fallback": {
+    "_comment": "What to use if DA3 fails to load",
+    "model": "depth_anything_v2",
+    "reason": "DA3 requires separate installation"
+  }
+}
+EOL
+echo "    ✓ fuk/config/tools/depth-anything-v3.json.template"
+
+cat > fuk/config/tools/sam2.json.template << 'EOL'
+{
+  "_comment": "SAM2 (Segment Anything Model 2) - Repo-specific settings",
+  "_repo": "https://github.com/facebookresearch/sam2",
+
+  "models": {
+    "sam2.1_hiera_large": {
+      "config": "sam2.1_hiera_l",
+      "checkpoint": "sam2.1_hiera_large.pt",
+      "description": "Large model, best quality"
+    },
+    "sam2.1_hiera_base": {
+      "config": "sam2.1_hiera_b+",
+      "checkpoint": "sam2.1_hiera_base_plus.pt",
+      "description": "Base+ model, balanced"
+    },
+    "sam2.1_hiera_small": {
+      "config": "sam2.1_hiera_s",
+      "checkpoint": "sam2.1_hiera_small.pt",
+      "description": "Small model, fastest"
+    },
+    "sam2.1_hiera_tiny": {
+      "config": "sam2.1_hiera_t",
+      "checkpoint": "sam2.1_hiera_tiny.pt",
+      "description": "Tiny model, minimal VRAM"
+    }
+  },
+
+  "default_model": "sam2.1_hiera_large",
+
+  "checkpoint_paths": {
+    "search_order": [
+      "{models_dir}/sam/{checkpoint}",
+      "{models_dir}/checkpoints/{checkpoint}",
+      "{vendor_dir}/sam2/checkpoints/{checkpoint}"
+    ]
+  },
+
+  "download": {
+    "base_url": "https://dl.fbaipublicfiles.com/segment_anything_2/092824",
+    "files": {
+      "sam2.1_hiera_large.pt": "sam2.1_hiera_large.pt",
+      "sam2.1_hiera_base_plus.pt": "sam2.1_hiera_base_plus.pt",
+      "sam2.1_hiera_small.pt": "sam2.1_hiera_small.pt",
+      "sam2.1_hiera_tiny.pt": "sam2.1_hiera_tiny.pt"
+    }
+  },
+
+  "auto_mask_generator": {
+    "points_per_side": 32,
+    "pred_iou_thresh": 0.86,
+    "stability_score_thresh": 0.92,
+    "crop_n_layers": 1,
+    "crop_n_points_downscale_factor": 2,
+    "min_mask_region_area": 100
+  },
+
+  "output": {
+    "mask_format": "binary",
+    "cryptomatte_bits": 32
+  }
+}
+EOL
+echo "    ✓ fuk/config/tools/sam2.json.template"
+
 # Copy templates to live configs only if they don't exist yet
 echo ""
 echo "  → Initializing live configuration files..."
@@ -881,6 +1152,15 @@ for fragment in defaults.json defaults_loras.json defaults_vram.json defaults_sp
         echo "    ✓ Created fuk/config/$fragment"
     else
         echo "    ✓ fuk/config/$fragment already exists (not overwriting)"
+    fi
+done
+
+for tool in depth-anything-v3.json sam2.json; do
+    if [ ! -f "fuk/config/tools/$tool" ]; then
+        cp "fuk/config/tools/$tool.template" "fuk/config/tools/$tool"
+        echo "    ✓ Created fuk/config/tools/$tool"
+    else
+        echo "    ✓ fuk/config/tools/$tool already exists (not overwriting)"
     fi
 done
 
@@ -929,19 +1209,26 @@ echo "   fuk/config/defaults_loras.json     — set defined_loras_path, scanned_
 echo "   fuk/config/defaults_vram.json      — set VRAM offload preset"
 echo "   fuk/config/defaults_spec_tool.json — spec tool defaults"
 echo "   fuk/config/defaults_dataset.json   — dataset generation defaults"
+echo "   fuk/config/tools/*.json            — per-tool settings (DA3, SAM2)"
 echo ""
-echo "   Templates (tracked in git):"
+echo "   Reference templates written by this script:"
 echo "   fuk/config/models.json.template"
 echo "   fuk/config/defaults*.json.template"
+echo "   fuk/config/tools/*.json.template"
 echo ""
 echo "2. Download models:"
-echo "   python scripts/download_models.py"
+echo "   ./download_models.sh"
+echo ""
+echo "   Trim unwanted entries from fuk/config/models.json first —"
+echo "   it downloads everything listed, at roughly 15-30GB per model."
 echo ""
 echo "3. Start FUK:"
 echo "   ./start.sh"
 echo ""
 echo "Configuration notes:"
-echo "  • Your config files (fuk/config/*.json) are gitignored"
-echo "  • Templates (fuk/config/*.json.template) are tracked in git"
-echo "  • Templates are always refreshed by setup.sh — edit freely"
+echo "  • Your config files (fuk/config/*.json) are gitignored — edit freely"
+echo "  • Templates (*.json.template) are rewritten on every setup.sh run;"
+echo "    they are the canonical reference, so don't edit them directly"
+echo "  • Live configs are never overwritten once they exist — after an"
+echo "    update, diff yours against the template to pick up new keys"
 echo ""

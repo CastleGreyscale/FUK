@@ -110,8 +110,9 @@ class VideoGenerationManager:
         Export generated video to EXR frame sequence
         
         NOTE: This converts MP4 â†’ EXR which preserves compression artifacts.
-        For lossless output, use export_latent_to_exr() instead.
-        
+        For lossless output, decode from the saved latent instead — see
+        DiffSynthBackend.decode_latent_to_exr().
+
         Args:
             gen_dir: Generation directory
             video_path: Source video file
@@ -137,7 +138,7 @@ class VideoGenerationManager:
         
         print(f"\n=== Exporting MP4 to EXR sequence ===")
         print(f"WARNING: Converting from compressed MP4 - artifacts will be preserved")
-        print(f"For lossless output, use export_latent_to_exr() instead\n")
+        print(f"For lossless output, decode from the saved latent instead\n")
         print(f"Video: {video_path}")
         print(f"Video size: {video_path.stat().st_size / (1024*1024):.2f} MB")
         print(f"Output: {exr_dir}")
@@ -151,59 +152,6 @@ class VideoGenerationManager:
         )
         
         print(f"âœ“ Created {len(exr_frames)} EXR frames")
-        
-        return exr_dir
-    
-    def export_latent_to_exr(self,
-                            gen_dir: Path,
-                            task: str,
-                            config_path: Path,
-                            musubi_path: Path,
-                            linear: bool = True) -> Path:
-        """
-        Export latent tensor directly to EXR frames (LOSSLESS)
-        
-        This is the PROPER workflow for professional output:
-          Generation â†’ Latent â†’ VAE decode â†’ EXR
-        
-        Instead of the lossy path:
-          Generation â†’ Latent â†’ VAE decode â†’ MP4 â†’ Extract â†’ EXR
-        
-        Args:
-            gen_dir: Generation directory
-            task: Wan task type (e.g., "i2v-14B")
-            config_path: Path to models.json
-            musubi_path: Path to musubi-tuner
-            linear: Save in linear color space
-            
-        Returns:
-            Path to EXR sequence directory
-        """
-        from utils.latent_to_exr import LatentToEXRDecoder
-        
-        gen_dir = Path(gen_dir)
-        latent_path = gen_dir / "latent.safetensors"
-        
-        if not latent_path.exists():
-            raise FileNotFoundError(
-                f"No latent file found in {gen_dir}. "
-                "Make sure generation used output_type='both'"
-            )
-        
-        print(f"\n=== Decoding Latent to EXR (LOSSLESS) ===")
-        print(f"Latent: {latent_path}")
-        print(f"Latent size: {latent_path.stat().st_size / (1024*1024):.2f} MB\n")
-        
-        decoder = LatentToEXRDecoder(musubi_path, config_path)
-        
-        exr_dir = decoder.decode_latent_to_exr_sequence(
-            latent_path=latent_path,
-            output_dir=gen_dir,
-            task=task,
-            linear=linear
-        )
-        
-        print(f"âœ“ Decoded latent to {exr_dir}")
         
         return exr_dir
     

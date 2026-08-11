@@ -148,26 +148,7 @@ class FukLogger:
         print(f"{'=' * 70}{cls.COLORS['end']}\n")
     
     @classmethod
-    def musubi_output(cls, line: str):
-        """Log musubi output with special formatting"""
-        line = line.rstrip()
-        if not line:
-            return
-        
-        # Highlight important musubi messages
-        if 'error' in line.lower() or 'exception' in line.lower():
-            print(f"{cls.COLORS['red']}  [MUSUBI] {line}{cls.COLORS['end']}")
-        elif 'warning' in line.lower():
-            print(f"{cls.COLORS['yellow']}  [MUSUBI] {line}{cls.COLORS['end']}")
-        elif 'loading' in line.lower() or 'loaded' in line.lower():
-            print(f"{cls.COLORS['cyan']}  [MUSUBI] {line}{cls.COLORS['end']}")
-        elif '%|' in line:  # tqdm progress bar
-            print(f"  [MUSUBI] {line}")
-        else:
-            print(f"  [MUSUBI] {line}")
-    
-    @classmethod
-    def generation_summary(cls, gen_type: str, gen_id: str, params: Dict[str, Any], 
+    def generation_summary(cls, gen_type: str, gen_id: str, params: Dict[str, Any],
                           output_paths: Dict[str, Any], elapsed: float):
         """Log a complete generation summary"""
         cls.header(f"{gen_type.upper()} COMPLETE: {gen_id}")

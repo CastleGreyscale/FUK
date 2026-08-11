@@ -11,27 +11,21 @@ from .preprocessors import PreprocessorManager, DepthModel
 from .file_browser import MediaType, MediaFile
 from .exr_exporter import EXRCompression, EXRExporter
 from .video_processor import OutputMode, VideoProcessor
-from .latent_decoder import LatentDecoder
 from .latent_manager import LatentManager
 
+# Mirrors the imports above exactly — every name here must be importable,
+# or `from core import *` raises AttributeError.
 __all__ = [
-    'QwenImageGenerator',
-    'QwenModel',
-    'WanVideoGenerator', 
-    'WanTask',
     'ImageGenerationManager',
     'VideoGenerationManager',
     'FormatConverter',
     'PreprocessorManager',
     'DepthModel',
     'MediaType',
-    'MediaType',
-    'MediaType',
+    'MediaFile',
+    'EXRCompression',
     'EXRExporter',
-    'MediaType',
+    'OutputMode',
     'VideoProcessor',
-    'LatentDecoder',
     'LatentManager',
-
-
 ]
