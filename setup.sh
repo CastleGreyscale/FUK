@@ -463,7 +463,7 @@ cat > fuk/config/models.json.template << 'EOL'
   },
 
   "wan_vace_a14b": {
-    "model_id": "PAI/Wan2.2-VACE-Fun-A14B",
+    "model_id": "alibaba-pai/Wan2.2-VACE-Fun-A14B",
     "pipeline": "wan",
     "category": "video",
     "description": "Wan 2.2 VACE-controlled video",
@@ -489,7 +489,7 @@ cat > fuk/config/models.json.template << 'EOL'
   },
 
   "wan_inp_a14b": {
-    "model_id": "PAI/Wan2.2-Fun-A14B-InP",
+    "model_id": "alibaba-pai/Wan2.2-Fun-A14B-InP",
     "pipeline": "wan",
     "category": "video",
     "description": "Wan 2.2 FirstFrame - LastFrame",
