@@ -53,8 +53,17 @@ echo "  ✓ $(python --version) at $(which python)"
 echo ""
 
 # ── Run downloader ────────────────────────────────────────────────────────────
+# DiffSynth defaults to ModelScope. HuggingFace is usually much faster from
+# outside China, but a few repos (PAI/*, DiffSynth-Studio's converted Wan
+# safetensors) exist only on ModelScope — the downloader falls back per
+# component, so either choice completes.
 echo "Starting model downloads..."
 echo "  (Edit fuk/config/models.json to remove models you don't want)"
+echo ""
+echo "  Download source: ${DIFFSYNTH_DOWNLOAD_SOURCE:-modelscope (default)}"
+if [ -z "${DIFFSYNTH_DOWNLOAD_SOURCE:-}" ]; then
+    echo "  Slow or unstable? Try:  DIFFSYNTH_DOWNLOAD_SOURCE=huggingface ./download_models.sh"
+fi
 echo ""
 
 python fuk/utils/download_models.py "$@"
