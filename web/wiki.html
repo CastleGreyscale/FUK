@@ -201,6 +201,20 @@
                     <li>Launch FUK:<br><code>./start.sh</code></li>
                 </ol>
 
+                <h3>If Model Downloads Are Slow</h3>
+                <p>Models come from one of two hosts. DiffSynth defaults to <strong>ModelScope</strong>, which is often slow and prone to dropped connections outside China. Most models are also on <strong>HuggingFace</strong>, which is usually far faster:</p>
+                <pre><code>DIFFSYNTH_DOWNLOAD_SOURCE=huggingface ./download_models.sh</code></pre>
+                <p>A few repositories exist only on ModelScope — the <code>PAI/*</code> models and DiffSynth-Studio's converted Wan safetensors. The downloader falls back per component, so either choice completes; those specific files just come over the slower link.</p>
+
+                <div class="wiki-note">
+                    <p><strong>Downloading by hand.</strong> If the terminal download crawls along at under 1MB/s or keeps failing, fetching the files through a web browser is a perfectly good alternative and is often dramatically faster. The only requirement is that files land where FUK expects them:</p>
+                    <pre><code>&lt;models_root&gt;/&lt;model_id&gt;/&lt;pattern&gt;</code></pre>
+                    <p>So <code>models_t5_umt5-xxl-enc-bf16.safetensors</code> from <code>DiffSynth-Studio/Wan-Series-Converted-Safetensors</code> belongs at:</p>
+                    <pre><code>&lt;models_root&gt;/DiffSynth-Studio/Wan-Series-Converted-Safetensors/models_t5_umt5-xxl-enc-bf16.safetensors</code></pre>
+                    <p>Watch for subdirectories. The Wan A14B models keep their weights in <code>high_noise_model/</code> and <code>low_noise_model/</code>, each split across several shards — recreate those folders rather than flattening everything into one directory.</p>
+                    <p>Re-run <code>./download_models.sh</code> afterwards to check your work. Files already in the right place are detected and skipped, so a run that downloads nothing means the layout is correct.</p>
+                </div>
+
                 <h3>First Launch</h3>
                 <p>On first launch FUK will verify model paths and report any missing files. The server runs at <code>http://localhost:8000</code> by default (easily changed if needed). If a model fails to load it will appear grayed out in the model selector — check the terminal output for the specific error.</p>
 
