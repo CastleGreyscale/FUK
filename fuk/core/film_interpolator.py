@@ -267,7 +267,7 @@ class FILMInterpolator:
         cmd = [
             "ffmpeg", "-y",
             "-i", str(video_path),
-            "-vsync", "0",
+            "-fps_mode", "passthrough",
             "-start_number", "0",
             str(frame_pattern),
         ]

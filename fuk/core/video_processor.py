@@ -217,7 +217,7 @@ class VideoProcessor:
             cmd = [
                 str(self.ffmpeg_path),
                 "-i", str(video_path),
-                "-vsync", "0",
+                "-fps_mode", "passthrough",
                 "-q:v", "2",  # High quality
                 str(output_dir / "frame_%06d.png")
             ]

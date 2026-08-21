@@ -127,7 +127,7 @@ class EXRExporter:
         
         cmd = [
             'ffmpeg', '-y', '-i', str(video_path),
-            '-vsync', '0',
+            '-fps_mode', 'passthrough',
             str(output_pattern)
         ]
         
@@ -345,8 +345,12 @@ class EXRExporter:
             return result
 
         def _tensor_to_frames(decoded):
-            """Convert decoded tensor → list of HWC float32 frames in sRGB [0, 1]."""
-            pixels = decoded.cpu().numpy()
+            """Convert decoded tensor → list of HWC float32 frames in sRGB [0, 1].
+
+            DiffSynth VAEs decode to [-1, 1] — remap before clipping, or the whole
+            lower half of the tonal range collapses to black and contrast doubles.
+            """
+            pixels = (decoded.cpu().numpy() + 1.0) / 2.0
             frames = []
             if is_video and pixels.ndim == 5:
                 for fi in range(pixels.shape[2]):

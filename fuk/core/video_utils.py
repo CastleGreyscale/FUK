@@ -218,7 +218,7 @@ def _extract_frames_ffmpeg(
     cmd = [
         str(ffmpeg),
         "-i", str(video_path),
-        "-vsync", "0",
+        "-fps_mode", "passthrough",
         "-q:v", "2",
         str(output_dir / "frame_%06d.png")
     ]
