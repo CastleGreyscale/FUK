@@ -135,9 +135,13 @@ class NormalsPreprocessor(BasePreprocessor):
         flip_x: bool = False,
         intensity: float = 1.0,
         exact_output: bool = False,
+        # Shared: both methods need an assumed camera
+        fov_deg: float = 60.0,
         # DSINE-specific quality settings
         num_iter: int = 5,
-        fov_deg: float = 60.0,
+        # Depth-derived settings
+        near_ratio: float = 0.5,
+        edge_aware: bool = True,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -149,13 +153,20 @@ class NormalsPreprocessor(BasePreprocessor):
             space: Normal space ('tangent', 'world', 'object')
             flip_y: Flip Y component (for different engine conventions)
             flip_x: Flip X component
-            intensity: Gradient multiplier for depth-derived normals
+            intensity: Relief strength for depth-derived normals. 1.0 is
+                       physically correct; higher exaggerates.
             exact_output: If True, write to exact output_path (for video frames)
+            fov_deg: Assumed camera field-of-view in degrees (default 60). Used
+                     by both methods — it sets the focal length that converts
+                     pixel gradients to surface slope for depth-derived normals,
+                     and DSINE's intrinsics, where a wrong FOV causes blob
+                     artifacts at depth discontinuities.
             num_iter: DSINE GRU refinement iterations (default 5, trained value).
                       The checkpoint was trained with exactly 5 steps — going
                       beyond 7 causes GRU divergence and severe artifacts.
-            fov_deg: DSINE assumed camera field-of-view in degrees (default 60).
-                     Wrong FOV causes blob artifacts at depth discontinuities.
+            near_ratio: Depth-derived only. Near distance / scene depth span;
+                        smaller = deeper scene = stronger relief.
+            edge_aware: Depth-derived only. Suppress silhouette bevels.
 
         Returns:
             Dict with output_path and metadata
@@ -167,7 +178,13 @@ class NormalsPreprocessor(BasePreprocessor):
 
         # Generate normals based on method
         if self.method == NormalsMethod.FROM_DEPTH:
-            normals = self._normals_from_depth(image_path, intensity)
+            normals = self._normals_from_depth(
+                image_path,
+                intensity=intensity,
+                fov_deg=fov_deg,
+                near_ratio=near_ratio,
+                edge_aware=edge_aware,
+            )
         else:
             normals = self._normals_from_dsine(image, num_iter=num_iter, fov_deg=fov_deg)
 
@@ -193,6 +210,8 @@ class NormalsPreprocessor(BasePreprocessor):
             'intensity': intensity,
             'num_iter': num_iter,
             'fov_deg': fov_deg,
+            'near_ratio': near_ratio,
+            'edge_aware': edge_aware,
         }
         final_output = self._make_unique_path(output_path, params, exact_output=exact_output)
         cv2.imwrite(str(final_output), normals_bgr)
@@ -205,46 +224,129 @@ class NormalsPreprocessor(BasePreprocessor):
             "raw_normals": normals,  # float32 [-1, 1] for lossless EXR export
         }
     
-    def _normals_from_depth(self, image_path: Path, intensity: float = 1.0) -> np.ndarray:
+    @staticmethod
+    def _one_sided_gradients(z: np.ndarray, radius: int = 2):
         """
-        Compute normals from depth gradient
-        
-        Uses Sobel operators to find surface gradients, then computes
-        normal vectors from the gradient field.
-        
+        Per-pixel dZ/du and dZ/dv, taking whichever one-sided difference has the
+        smaller magnitude.
+
+        At an object silhouette one side of the pixel spans the depth jump while
+        the other stays on the surface, so picking the smaller keeps the normal
+        on the surface instead of smearing a rim along the boundary. This is the
+        cheap stand-in for DSINE's gamma test, which rejects neighbour pixels
+        whose depth differs from the centre by more than 5%.
+
+        The differences span `radius` pixels rather than one. A one-pixel stencil
+        is the noisiest available, and the focal-length factor in the normal
+        formula amplifies that noise into visible streaking on flat surfaces;
+        radius=2 gives the same 5px support as DSINE's default k=5 while
+        staying one-sided, so it smooths without rounding off silhouettes.
+        """
+        r = max(1, int(radius))
+
+        def axis(z, ax):
+            fwd = np.empty_like(z)
+            bwd = np.empty_like(z)
+            if ax == 1:
+                fwd[:, :-r] = (z[:, r:] - z[:, :-r]) / r
+                fwd[:, -r:] = fwd[:, -r - 1:-r]
+                bwd[:, r:] = fwd[:, :-r]
+                bwd[:, :r] = fwd[:, r:r + 1]
+            else:
+                fwd[:-r, :] = (z[r:, :] - z[:-r, :]) / r
+                fwd[-r:, :] = fwd[-r - 1:-r, :]
+                bwd[r:, :] = fwd[:-r, :]
+                bwd[:r, :] = fwd[r:r + 1, :]
+            return np.where(np.abs(fwd) < np.abs(bwd), fwd, bwd)
+
+        return axis(z, 1), axis(z, 0)
+
+    def _normals_from_depth(
+        self,
+        image_path: Path,
+        intensity: float = 1.0,
+        fov_deg: float = 60.0,
+        near_ratio: float = 0.5,
+        edge_aware: bool = True,
+        radius: int = 2,
+    ) -> np.ndarray:
+        """
+        Compute normals by unprojecting depth into camera space.
+
+        Depth gradients live in pixel units; surface slope lives in world units,
+        and the focal length is what converts between them. Unprojecting
+        P = Z * K^-1 [u, v, 1] and taking cross(dP/du, dP/dv) reduces to a
+        closed form, so no explicit point cloud is needed:
+
+            n  ~  ( f * dZ/du,  f * dZ/dv,  (u-cx)*dZ/du + (v-cy)*dZ/dv + Z )
+
+        The f factor is the whole ballgame: at 1280px and 60 deg FOV it is
+        ~1109, so dropping it (as a plain height-map Sobel does) shrinks the
+        X/Y components by three orders of magnitude, n collapses to (0, 0, 1),
+        and the result is flat lavender with detail only on silhouette edges
+        where depth jumps far enough in one pixel to survive.
+
+        The third term is the perspective correction: away from the principal
+        point, a surface at constant depth is still slanted relative to the view
+        ray. It vanishes at the image centre.
+
+        Output frame is X right, Y down, Z toward camera (DirectX-style green);
+        pass flip_y for OpenGL-style.
+
         Args:
             image_path: Input image path
-            intensity: Multiplier for gradient (higher = more pronounced normals)
-            
+            intensity: Strength multiplier on X/Y, applied after normalisation.
+                       1.0 is physically correct; higher exaggerates relief.
+            fov_deg: Assumed camera field-of-view in degrees, sets focal length
+            near_ratio: Near-plane distance divided by scene depth span. Relative
+                        depth models fix geometry only up to this one ratio —
+                        smaller = deeper scene = stronger relief. Ignored for
+                        metric models, which supply a real Z.
+            edge_aware: Use min-magnitude one-sided differences instead of Sobel,
+                        which stops silhouettes smearing into false bevels.
+            radius: Gradient stencil radius in pixels (edge_aware only). Larger
+                    suppresses depth-model noise at the cost of fine detail.
+
         Returns:
             Normal map as float32 array in [-1, 1] range, shape (H, W, 3)
         """
-        # Get depth map
-        depth = self._depth_processor.get_raw_depth(image_path)
-        
-        # Compute gradients using Sobel
-        # Scale depth for better gradient calculation
-        depth_scaled = depth * intensity
-        
-        # Sobel gradients
-        grad_x = cv2.Sobel(depth_scaled, cv2.CV_32F, 1, 0, ksize=3)
-        grad_y = cv2.Sobel(depth_scaled, cv2.CV_32F, 0, 1, ksize=3)
-        
-        # Normal vector: n = normalize([-dz/dx, -dz/dy, 1])
-        # The Z component is 1 (pointing toward camera)
-        h, w = depth.shape
-        normals = np.zeros((h, w, 3), dtype=np.float32)
-        
-        normals[:, :, 0] = -grad_x  # X component (red)
-        normals[:, :, 1] = -grad_y  # Y component (green)  
-        normals[:, :, 2] = 1.0      # Z component (blue)
-        
-        # Normalize each vector
-        norm = np.sqrt(np.sum(normals ** 2, axis=2, keepdims=True))
-        normals = normals / (norm + 1e-8)
-        
+        import math
+
+        depth, is_metric = self._depth_processor.get_depth_z(image_path)
+        h, w = depth.shape[:2]
+
+        f = (max(h, w) / 2.0) / math.tan(math.radians(fov_deg / 2.0))
+        cx, cy = w / 2.0 - 0.5, h / 2.0 - 0.5
+
+        if edge_aware:
+            z_u, z_v = self._one_sided_gradients(depth, radius=radius)
+        else:
+            # Sobel is an 8x-scaled central difference; divide it back out so
+            # these are true per-pixel derivatives and f means what it should.
+            z_u = cv2.Sobel(depth, cv2.CV_32F, 1, 0, ksize=3) / 8.0
+            z_v = cv2.Sobel(depth, cv2.CV_32F, 0, 1, ksize=3) / 8.0
+
+        # Relative depth is defined up to Z = z0 + s*d. Dividing the closed form
+        # through by s leaves a single free parameter, z0/s = near_ratio, so the
+        # normalised depth can be used directly with that offset added.
+        z = depth if is_metric else depth + near_ratio
+
+        u = np.arange(w, dtype=np.float32)[None, :] - cx
+        v = np.arange(h, dtype=np.float32)[:, None] - cy
+
+        normals = np.empty((h, w, 3), dtype=np.float32)
+        normals[:, :, 0] = f * z_u
+        normals[:, :, 1] = f * z_v
+        normals[:, :, 2] = u * z_u + v * z_v + z
+
+        normals /= np.sqrt((normals ** 2).sum(axis=2, keepdims=True)) + 1e-8
+
+        if intensity != 1.0:
+            normals[:, :, :2] *= intensity
+            normals /= np.sqrt((normals ** 2).sum(axis=2, keepdims=True)) + 1e-8
+
         return normals
-    
+
     @staticmethod
     def _dsine_padding(H: int, W: int):
         """Compute (l, r, t, b) padding to make H and W multiples of 32."""
@@ -324,6 +426,8 @@ class NormalsPreprocessor(BasePreprocessor):
         intensity: float = 1.0,
         num_iter: int = 5,
         fov_deg: float = 60.0,
+        near_ratio: float = 0.5,
+        edge_aware: bool = True,
     ) -> np.ndarray:
         """
         Get raw normal vectors (for EXR export, etc.)
@@ -335,7 +439,13 @@ class NormalsPreprocessor(BasePreprocessor):
         image = self.load_image_bgr(image_path)
 
         if self.method == NormalsMethod.FROM_DEPTH:
-            return self._normals_from_depth(image_path, intensity)
+            return self._normals_from_depth(
+                image_path,
+                intensity=intensity,
+                fov_deg=fov_deg,
+                near_ratio=near_ratio,
+                edge_aware=edge_aware,
+            )
         else:
             return self._normals_from_dsine(image, num_iter=num_iter, fov_deg=fov_deg)
     

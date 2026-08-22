@@ -310,11 +310,13 @@ class PreprocessorManager:
         flip_y: Optional[bool] = None,
         flip_x: Optional[bool] = None,
         intensity: Optional[float] = None,
+        fov_deg: Optional[float] = None,
+        near_ratio: Optional[float] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
         Estimate surface normals
-        
+
         Args:
             image_path: Input image
             output_path: Output path
@@ -323,7 +325,9 @@ class PreprocessorManager:
             space: Normal space ('tangent', 'world', 'object')
             flip_y: Flip Y component
             flip_x: Flip X component
-            intensity: Normal intensity (affects depth-derived)
+            intensity: Relief strength (affects depth-derived; 1.0 = physical)
+            fov_deg: Assumed camera FOV in degrees, used by both methods
+            near_ratio: Near distance / scene depth span (depth-derived only)
         """
         # Apply defaults
         normals_defaults = self._defaults.get("normals", {})
@@ -349,7 +353,9 @@ class PreprocessorManager:
         flip_y = flip_y if flip_y is not None else normals_defaults.get("flip_y", False)
         flip_x = flip_x if flip_x is not None else normals_defaults.get("flip_x", False)
         intensity = intensity if intensity is not None else normals_defaults.get("intensity", 1.0)
-        
+        fov_deg = fov_deg if fov_deg is not None else normals_defaults.get("fov_deg", 60.0)
+        near_ratio = near_ratio if near_ratio is not None else normals_defaults.get("near_ratio", 0.5)
+
         cache_key = f"{method.value}_{depth_model.value}"
         
         if cache_key not in self._normals_cache:
@@ -369,15 +375,18 @@ class PreprocessorManager:
             flip_y=flip_y,
             flip_x=flip_x,
             intensity=intensity,
+            fov_deg=fov_deg,
+            near_ratio=near_ratio,
             **kwargs
         )
-    
+
     def get_raw_normals(
         self,
         image_path: Path,
         method: NormalsMethod = NormalsMethod.FROM_DEPTH,
         depth_model: DepthModel = DepthModel.DA3_MONO_LARGE,
-        intensity: float = 1.0
+        intensity: float = 1.0,
+        **kwargs
     ):
         """Get raw normal vectors as float32 array [-1, 1]"""
         cache_key = f"{method.value}_{depth_model.value}"
@@ -389,7 +398,9 @@ class PreprocessorManager:
                 config_path=self.config_path
             )
         
-        return self._normals_cache[cache_key].get_raw_normals(Path(image_path), intensity)
+        return self._normals_cache[cache_key].get_raw_normals(
+            Path(image_path), intensity, **kwargs
+        )
     
     # =========================================================================
     # Cryptomatte / Instance Segmentation

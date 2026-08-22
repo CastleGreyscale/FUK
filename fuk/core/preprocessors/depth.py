@@ -3,7 +3,9 @@
 Depth Estimation Preprocessor
 
 Handles both single images and video with a unified interface.
-Video uses batch inference with GLOBAL normalization for temporal consistency.
+Video uses chunked batch inference with GLOBAL normalization for temporal
+consistency, streaming raw depth to an on-disk .npy memmap so peak RAM stays
+proportional to the chunk size rather than the frame count.
 
 Models (in order of quality):
 1. Depth Anything V3 - Latest SOTA with multi-view support
@@ -21,10 +23,12 @@ Good for:
 """
 
 from pathlib import Path
-from typing import Dict, Any, Optional, Callable, List
+from typing import Dict, Any, Optional, Callable, List, Tuple
+from collections import deque
 from enum import Enum
 import tempfile
 import shutil
+import gc
 import cv2
 import numpy as np
 from PIL import Image
@@ -51,6 +55,28 @@ class DepthModel(str, Enum):
     ZOEDEPTH = "zoedepth"
 
 
+# Models whose raw inference output is inverse depth (disparity): larger value
+# = NEARER. DA3 and ZoeDepth return true depth, where larger = farther.
+# Anything that reasons about surface geometry has to know which it is holding.
+DISPARITY_MODELS = {
+    DepthModel.MIDAS_SMALL,
+    DepthModel.MIDAS_LARGE,
+    DepthModel.DEPTH_ANYTHING_V2,
+}
+
+# Models that return absolute metric depth (metres) rather than relative depth.
+METRIC_MODELS = {
+    DepthModel.DA3_METRIC_LARGE,
+    DepthModel.ZOEDEPTH,
+}
+
+# Relative disparity carries an unknown shift, so disparity -> depth is only
+# recoverable up to a choice of how far the background sits. This is the ratio
+# of near-plane to far-plane distance used when reciprocating: 0.1 puts the
+# farthest surface at 10x the distance of the nearest. Only affects
+# DISPARITY_MODELS — prefer a DA3 variant, which returns true depth directly.
+DISPARITY_FAR_RATIO = 0.1
+
 # HuggingFace model IDs for DA3 variants
 DA3_MODEL_IDS = {
     DepthModel.DEPTH_ANYTHING_V3: "depth-anything/DA3MONO-LARGE",
@@ -60,11 +86,39 @@ DA3_MODEL_IDS = {
     DepthModel.DA3_GIANT: "depth-anything/DA3-GIANT-1.1",
 }
 
+# DA3 variants that use cross-view (global) attention. Their presets set
+# alt_start >= 0, so every view in a batch attends to every other view and
+# chunking genuinely changes the result — those chunks need overlap + affine
+# alignment. The mono/metric presets use alt_start = -1 (local attention
+# only), so each view is computed independently of the others and chunk size
+# has no mathematical effect there.
+DA3_MULTIVIEW_MODELS = {
+    DepthModel.DA3_LARGE,
+    DepthModel.DA3_GIANT,
+}
+
+# DA3METRIC derives a single least-squares metric scale per inference call, so
+# it also needs overlap alignment to stay consistent across chunk boundaries.
+DA3_GLOBAL_SCALE_MODELS = {
+    DepthModel.DA3_METRIC_LARGE,
+}
+
 # Hardcoded fallback defaults (used if config not found)
 _FALLBACK_DEFAULTS = {
     "process_res": 1344,
     "process_res_method": "lower_bound_resize",
+    "chunk_size": 0,        # 0 = auto-size from free VRAM
+    "chunk_overlap": 2,     # frames re-inferred per chunk (multi-view models only)
 }
+
+# Chunk auto-sizing. Rough per-frame VRAM cost of a DA3 forward pass, in bytes
+# per processed pixel: fp32 input + the four stashed backbone feature layers +
+# DPT head intermediates. Deliberately conservative; an OOM still halves the
+# chunk and retries, so over-estimating only costs a little throughput.
+_VRAM_BYTES_PER_PIXEL = 420
+_VRAM_BUDGET_FRACTION = 0.55
+_MIN_CHUNK = 1
+_MAX_CHUNK = 64
 
 
 class DepthPreprocessor(BasePreprocessor):
@@ -139,6 +193,20 @@ class DepthPreprocessor(BasePreprocessor):
         if self._da3_config and "inference_defaults" in self._da3_config:
             return self._da3_config["inference_defaults"].get("process_res_method", _FALLBACK_DEFAULTS["process_res_method"])
         return _FALLBACK_DEFAULTS["process_res_method"]
+
+    @property
+    def da3_chunk_size(self) -> int:
+        """Frames per inference call for video. 0 = auto-size from free VRAM."""
+        if self._da3_config and "inference_defaults" in self._da3_config:
+            return int(self._da3_config["inference_defaults"].get("chunk_size", _FALLBACK_DEFAULTS["chunk_size"]))
+        return _FALLBACK_DEFAULTS["chunk_size"]
+
+    @property
+    def da3_chunk_overlap(self) -> int:
+        """Frames re-inferred between chunks to align scale (multi-view models)."""
+        if self._da3_config and "inference_defaults" in self._da3_config:
+            return int(self._da3_config["inference_defaults"].get("chunk_overlap", _FALLBACK_DEFAULTS["chunk_overlap"]))
+        return _FALLBACK_DEFAULTS["chunk_overlap"]
     
     # ========================================================================
     # Model Loading
@@ -201,9 +269,10 @@ class DepthPreprocessor(BasePreprocessor):
                 self.model = DepthAnything3.from_pretrained(model_id)
             
             self.model = self.model.to(device=self.device)
+            self._suppress_processed_images()
             self._is_da3 = True
             print(f"✓ Depth Anything 3 loaded: {model_id}")
-            
+
         except ImportError as e:
             print(f"⚠ Depth Anything 3 not available: {e}")
             print("  Falling back to V2...")
@@ -217,6 +286,42 @@ class DepthPreprocessor(BasePreprocessor):
             self._is_da3 = False
             self._load_depth_anything_v2()
     
+    def _suppress_processed_images(self):
+        """
+        Stop DA3 from building Prediction.processed_images.
+
+        The vendor's DepthAnything3._add_processed_images() denormalises the
+        input batch for visualisation. It multiplies the float32 (N,H,W,3)
+        batch by float64 ImageNet constants, which promotes the whole thing to
+        float64 and then makes two more full-size float64 copies for the clip
+        and the *255. That is ~4x the size of the depth output, three times
+        over, and FUK never reads processed_images.
+
+        Overriding it with an instance attribute shadows the bound method
+        without touching vendor code.
+        """
+        if self.model is None:
+            return
+        try:
+            self.model._add_processed_images = lambda prediction, imgs_cpu: prediction
+        except Exception as e:
+            print(f"[Depth] Note: could not disable processed_images allocation: {e}")
+
+    @staticmethod
+    def _release_prediction(prediction) -> None:
+        """
+        Drop the large fields FUK never reads (conf, sky, aux, processed images).
+
+        Without this the whole Prediction stays alive for as long as the caller
+        holds a reference to prediction.depth, pinning a second float32
+        (N,H,W) confidence map plus whatever else the model emitted.
+        """
+        for field in ("conf", "sky", "aux", "processed_images", "gaussians"):
+            try:
+                setattr(prediction, field, None)
+            except Exception:
+                pass
+
     def _load_depth_anything_v2(self):
         try:
             try:
@@ -386,9 +491,278 @@ class DepthPreprocessor(BasePreprocessor):
         }
     
     # ========================================================================
+    # Chunked Inference (bounds peak memory for long videos)
+    # ========================================================================
+
+    @staticmethod
+    def _estimate_processed_size(
+        src_w: int,
+        src_h: int,
+        process_res: int,
+        process_res_method: str,
+        patch: int = 14,
+    ) -> Tuple[int, int]:
+        """
+        Predict the resolution DA3's InputProcessor will produce.
+
+        Mirrors InputProcessor._resize_image + _make_divisible_by_resize so we
+        can size chunks before the first frame is loaded.
+        """
+        if process_res_method.startswith("lower_bound"):
+            scale = process_res / float(min(src_w, src_h))
+        else:
+            scale = process_res / float(max(src_w, src_h))
+
+        w = max(1, int(round(src_w * scale)))
+        h = max(1, int(round(src_h * scale)))
+
+        # Round each dimension to the nearest multiple of the patch size
+        w = max(patch, int(round(w / patch)) * patch)
+        h = max(patch, int(round(h / patch)) * patch)
+        return w, h
+
+    def _auto_chunk_size(self, processed_w: int, processed_h: int) -> int:
+        """Pick a frames-per-inference count that fits in free VRAM."""
+        pixels = processed_w * processed_h
+
+        if self.device == "cuda" and torch.cuda.is_available():
+            try:
+                free_bytes, _total = torch.cuda.mem_get_info()
+            except Exception:
+                free_bytes = 8 * 1024 ** 3
+        else:
+            # CPU inference: bound by system RAM instead
+            try:
+                import psutil
+                free_bytes = psutil.virtual_memory().available
+            except Exception:
+                free_bytes = 8 * 1024 ** 3
+
+        budget = free_bytes * _VRAM_BUDGET_FRACTION
+        per_frame = max(1.0, pixels * _VRAM_BYTES_PER_PIXEL)
+        chunk = int(budget // per_frame)
+        return max(_MIN_CHUNK, min(_MAX_CHUNK, chunk))
+
+    @staticmethod
+    def _is_oom_error(exc: BaseException) -> bool:
+        if isinstance(exc, MemoryError):
+            return True
+        oom_cls = getattr(torch.cuda, "OutOfMemoryError", None)
+        if oom_cls is not None and isinstance(exc, oom_cls):
+            return True
+        text = str(exc).lower()
+        return "out of memory" in text or "cuda error: out of memory" in text
+
+    def _infer_chunk(
+        self,
+        frame_paths: List[str],
+        process_res: int,
+        process_res_method: str,
+    ) -> np.ndarray:
+        """
+        Run DA3 on one chunk of frames and return float32 depth (K, H, W).
+
+        The returned array is detached from the Prediction so the confidence
+        map and friends can be collected immediately.
+        """
+        prediction = self.model.inference(
+            image=frame_paths,
+            process_res=process_res,
+            process_res_method=process_res_method,
+        )
+
+        depths = np.ascontiguousarray(prediction.depth, dtype=np.float32)
+        self._release_prediction(prediction)
+        prediction.depth = None
+        del prediction
+
+        if self.device == "cuda" and torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+        return depths
+
+    @staticmethod
+    def _fit_affine(current: np.ndarray, reference: np.ndarray) -> Tuple[float, float]:
+        """
+        Least-squares scale/shift mapping `current` onto `reference`.
+
+        Used on the overlapping frames between chunks so multi-view and metric
+        models don't drift in scale across chunk boundaries. Returns (a, b) for
+        a * current + b; falls back to identity if the fit is degenerate.
+        """
+        x = current.reshape(-1).astype(np.float64)
+        y = reference.reshape(-1).astype(np.float64)
+
+        # Subsample - a few hundred thousand pixels is plenty for two unknowns
+        max_samples = 200_000
+        if x.size > max_samples:
+            step = x.size // max_samples
+            x = x[::step]
+            y = y[::step]
+
+        finite = np.isfinite(x) & np.isfinite(y)
+        if finite.sum() < 16:
+            return 1.0, 0.0
+        x = x[finite]
+        y = y[finite]
+
+        var = float(np.var(x))
+        if not np.isfinite(var) or var < 1e-12:
+            return 1.0, 0.0
+
+        a = float(np.cov(x, y, bias=True)[0, 1] / var)
+        if not np.isfinite(a) or abs(a) < 1e-8:
+            return 1.0, 0.0
+        b = float(np.mean(y) - a * np.mean(x))
+        if not np.isfinite(b):
+            return 1.0, 0.0
+        return a, b
+
+    def _stream_depth_to_memmap(
+        self,
+        frame_path_strs: List[str],
+        raw_depth_path: Path,
+        process_res: int,
+        process_res_method: str,
+        chunk_size: int,
+        overlap: int,
+        progress_callback: Optional[Callable[[float, str], None]] = None,
+        progress_span: Tuple[float, float] = (0.1, 0.6),
+    ) -> Tuple[np.memmap, float, float]:
+        """
+        Infer depth in chunks, writing each chunk straight to an on-disk .npy.
+
+        Returns (memmap, global_min, global_max). Peak RAM is one chunk of
+        depth plus one chunk of preprocessed input, not the whole video.
+        """
+        n_frames = len(frame_path_strs)
+        mm: Optional[np.memmap] = None
+        global_min = np.inf
+        global_max = -np.inf
+
+        p_start, p_end = progress_span
+        idx = 0
+        written_upto = 0   # frames [0, written_upto) already committed to mm
+        cur_chunk = max(_MIN_CHUNK, chunk_size)
+
+        while idx < n_frames:
+            # Overlap only makes sense if the chunk is strictly bigger than it
+            cur_overlap = min(overlap, max(0, cur_chunk - 1))
+            end = min(n_frames, idx + cur_chunk)
+
+            try:
+                depths = self._infer_chunk(
+                    frame_path_strs[idx:end], process_res, process_res_method
+                )
+            except Exception as e:
+                if not self._is_oom_error(e) or cur_chunk <= _MIN_CHUNK:
+                    raise
+                cur_chunk = max(_MIN_CHUNK, cur_chunk // 2)
+                print(f"[Depth] OOM on chunk at frame {idx}; retrying with chunk_size={cur_chunk}")
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                gc.collect()
+                continue
+
+            if mm is None:
+                h, w = depths.shape[1], depths.shape[2]
+                print(f"[Depth] Raw depth buffer: {n_frames}x{h}x{w} float32 "
+                      f"({n_frames * h * w * 4 / 1024 ** 3:.2f} GB) -> {raw_depth_path}")
+                mm = np.lib.format.open_memmap(
+                    str(raw_depth_path), mode="w+", dtype=np.float32, shape=(n_frames, h, w)
+                )
+            elif depths.shape[1:] != mm.shape[1:]:
+                # Would otherwise surface as an opaque broadcast error
+                raise ValueError(
+                    f"Chunk at frame {idx} returned {depths.shape[1:]} but the buffer "
+                    f"is {mm.shape[1:]}; frames must share a resolution"
+                )
+
+            # Frames before write_from were already committed by the previous
+            # chunk; they exist only to align this chunk's scale to it. Derive
+            # this from the write cursor, not from cur_overlap, which an OOM
+            # retry may have shrunk since the previous chunk.
+            write_from = min(max(idx, written_upto), end)
+
+            if write_from > idx:
+                a, b = self._fit_affine(
+                    depths[: write_from - idx], np.asarray(mm[idx:write_from])
+                )
+                if a != 1.0 or b != 0.0:
+                    depths *= a
+                    depths += b
+
+            new = depths[write_from - idx:]
+            if new.size:
+                mm[write_from:end] = new
+                chunk_min = float(np.nanmin(new))
+                chunk_max = float(np.nanmax(new))
+                global_min = min(global_min, chunk_min)
+                global_max = max(global_max, chunk_max)
+                written_upto = end
+
+            del depths, new
+
+            if progress_callback:
+                frac = end / float(n_frames)
+                progress_callback(
+                    p_start + (p_end - p_start) * frac,
+                    f"Depth inference {end}/{n_frames} frames",
+                )
+            print(f"[Depth]   Inferred {end}/{n_frames} frames (chunk={cur_chunk})")
+
+            if end >= n_frames:
+                break
+            idx = end - cur_overlap
+
+        if mm is None:
+            raise ValueError("No frames were inferred")
+
+        if not np.isfinite(global_min) or not np.isfinite(global_max):
+            raise ValueError("Depth inference produced no finite values")
+
+        return mm, global_min, global_max
+
+    @staticmethod
+    def _temporal_smooth_memmap(mm: np.memmap, window: int) -> None:
+        """
+        In-place temporal median filter over an on-disk depth array.
+
+        Keeps a rolling buffer of the *original* values for the frames still
+        inside the filter window, so writing frame i doesn't corrupt the input
+        for frames i+1 .. i+half. RAM cost is `window` frames.
+        """
+        if window <= 1:
+            return
+
+        n_frames = mm.shape[0]
+        half = window // 2
+        buf: deque = deque()  # (frame_index, original array)
+
+        for i in range(n_frames):
+            hi = min(n_frames - 1, i + half)
+            lo = max(0, i - half)
+
+            # Extend the buffer forward to cover the window
+            while not buf or buf[-1][0] < hi:
+                j = buf[-1][0] + 1 if buf else lo
+                buf.append((j, np.array(mm[j], dtype=np.float32)))
+
+            # Drop frames that have fallen out behind the window
+            while buf and buf[0][0] < lo:
+                buf.popleft()
+
+            if len(buf) == 1:
+                continue
+
+            stack = np.stack([arr for _, arr in buf])
+            mm[i] = np.median(stack, axis=0)
+            del stack
+
+    # ========================================================================
     # Video Batch Processing (overrides BasePreprocessor.process_video)
     # ========================================================================
-    
+
     def process_video(
         self,
         video_path: Path,
@@ -398,14 +772,29 @@ class DepthPreprocessor(BasePreprocessor):
         **kwargs
     ) -> Dict[str, Any]:
         """
-        Process video with batch inference and global normalization.
-        
-        For DA3 models, all frames are inferred in a single batch call,
-        then normalized using the GLOBAL min/max across all frames.
-        This prevents the temporal jitter caused by per-frame normalization.
-        
+        Process video with chunked inference and global normalization.
+
+        For DA3 models, frames are inferred in chunks and streamed to an
+        on-disk float32 .npy memmap, then normalized using the GLOBAL min/max
+        across all frames. Global normalization prevents the temporal jitter
+        caused by per-frame normalization; chunking keeps peak memory
+        proportional to chunk_size instead of the frame count.
+
+        Chunk size has no mathematical effect on the mono presets: their
+        backbone uses local (per-view) attention only, so each frame is
+        computed independently. It is not bit-exact, because the model runs
+        under bfloat16 autocast and is not reproducible run to run even at a
+        fixed batch size — measured drift between chunk sizes is ~1e-3 of the
+        depth range on ~0.4% of pixels, concentrated on depth edges, i.e.
+        below one 8-bit level.
+
+        Multi-view presets (da3_large, da3_giant) and the metric preset do
+        depend on batch composition, so they re-infer `chunk_overlap` frames
+        per chunk and affine-align each chunk to the previous one to keep
+        depth scale continuous across boundaries.
+
         Non-DA3 models fall back to frame-by-frame processing via the base class.
-        
+
         Args:
             video_path: Input video file
             output_path: Output video file or directory
@@ -420,6 +809,8 @@ class DepthPreprocessor(BasePreprocessor):
                 process_res_method: DA3 resize method
                 guided_filter: Apply guided edge refinement per-frame (default False)
                 temporal_smooth: Temporal median filter window (0=off, default 0)
+                chunk_size: Frames per inference call (0/None = auto from free VRAM)
+                chunk_overlap: Frames re-inferred per chunk for scale alignment
         """
         self._ensure_initialized()
         
@@ -445,125 +836,184 @@ class DepthPreprocessor(BasePreprocessor):
         process_res_method = kwargs.get('process_res_method', self.da3_process_res_method)
         temporal_smooth = kwargs.get('temporal_smooth', 0)
         guided_filter = kwargs.get('guided_filter', False)
-        
-        print(f"\n[Depth] ===== BATCH VIDEO DEPTH PROCESSING =====")
-        print(f"[Depth] Model: {self.model_type.value}")
-        print(f"[Depth] Input: {video_path}")
-        print(f"[Depth] Output: {output_path}")
-        print(f"[Depth] Temporal smoothing: {temporal_smooth if temporal_smooth > 0 else 'off'}")
-        print(f"[Depth] Guided filter: {'on' if guided_filter else 'off'}")
-        
+        chunk_size = kwargs.get('chunk_size') or self.da3_chunk_size
+        overlap = kwargs.get('chunk_overlap')
+        if overlap is None:
+            overlap = self.da3_chunk_overlap
+
+        # Chunk composition only matters when the backbone mixes views or a
+        # batch-global scale is fitted. Neither is true for the mono presets,
+        # so they skip the overlap entirely and pay no re-inference cost.
+        needs_alignment = (
+            self.model_type in DA3_MULTIVIEW_MODELS
+            or self.model_type in DA3_GLOBAL_SCALE_MODELS
+        )
+        if not needs_alignment:
+            overlap = 0
+
         video_info = get_video_info(video_path)
         fps = video_info["fps"]
         original_size = (video_info["width"], video_info["height"])
-        
+
+        if chunk_size <= 0:
+            proc_w, proc_h = self._estimate_processed_size(
+                original_size[0], original_size[1], process_res, process_res_method
+            )
+            chunk_size = self._auto_chunk_size(proc_w, proc_h)
+            auto_note = f" (auto, est. {proc_w}x{proc_h} processed)"
+        else:
+            auto_note = " (configured)"
+
+        print(f"\n[Depth] ===== CHUNKED VIDEO DEPTH PROCESSING =====")
+        print(f"[Depth] Model: {self.model_type.value}")
+        print(f"[Depth] Input: {video_path}")
+        print(f"[Depth] Output: {output_path}")
+        print(f"[Depth] Chunk size: {chunk_size} frames{auto_note}")
+        print(f"[Depth] Chunk overlap: {overlap} frames"
+              f"{' (scale alignment)' if overlap else ' (not needed - local attention)'}")
+        print(f"[Depth] Temporal smoothing: {temporal_smooth if temporal_smooth > 0 else 'off'}")
+        print(f"[Depth] Guided filter: {'on' if guided_filter else 'off'}")
+
         print(f"[Depth] Frames: {video_info['frame_count']} @ {fps:.2f}fps, {original_size[0]}x{original_size[1]}")
-        
+
+        # The raw depth buffer is written directly to its final destination so
+        # it never has to live in RAM (and never lands on a tmpfs scratch dir).
+        if output_mode == "sequence":
+            output_path.mkdir(parents=True, exist_ok=True)
+            raw_depth_path = output_path / "depth_raw.npy"
+        else:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            raw_depth_path = output_path.parent / f"{output_path.stem}_raw.npy"
+
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
             input_frames_dir = temp_path / "input_frames"
             output_frames_dir = temp_path / "output_frames"
             input_frames_dir.mkdir()
             output_frames_dir.mkdir()
-            
+
             # Step 1: Extract frames
             if progress_callback:
                 progress_callback(0.0, "Extracting frames...")
-            
+
             frame_paths = extract_frames(video_path, input_frames_dir)
-            
+
             if not frame_paths:
                 raise ValueError("No frames extracted from video")
-            
-            # Step 2: Batch inference
+
+            # Step 2: Chunked inference, streamed to the on-disk raw buffer
             if progress_callback:
-                progress_callback(0.1, f"Running batch inference on {len(frame_paths)} frames...")
-            
-            print(f"[Depth] Running batch inference...")
+                progress_callback(0.1, f"Running inference on {len(frame_paths)} frames...")
+
             frame_path_strs = [str(p) for p in frame_paths]
-            
+            mm = None
+
             try:
-                prediction = self.model.inference(
-                    image=frame_path_strs,
+                mm, global_min, global_max = self._stream_depth_to_memmap(
+                    frame_path_strs=frame_path_strs,
+                    raw_depth_path=raw_depth_path,
                     process_res=process_res,
                     process_res_method=process_res_method,
+                    chunk_size=chunk_size,
+                    overlap=overlap,
+                    progress_callback=progress_callback,
+                    progress_span=(0.1, 0.55),
                 )
-                
-                all_depths = prediction.depth  # [N, H, W]
-                print(f"[Depth] Inference complete - shape: {all_depths.shape}")
-                
-            except Exception as e:
-                print(f"[Depth] ERROR during batch inference: {e}")
-                import traceback
-                traceback.print_exc()
-                raise
-            
-            # Step 3: Global normalization
-            if normalize:
-                global_min = all_depths.min()
-                global_max = all_depths.max()
-                print(f"[Depth] Global depth range: [{global_min:.4f}, {global_max:.4f}]")
-                all_depths = (all_depths - global_min) / (global_max - global_min + 1e-8)
-            
-            # Step 4: Temporal smoothing
-            if temporal_smooth > 1:
-                print(f"[Depth] Applying temporal smoothing (window={temporal_smooth})...")
-                all_depths = self._temporal_smooth(all_depths, window=temporal_smooth)
-            
-            # Step 5: Invert
-            if invert:
-                all_depths = 1.0 - all_depths
-            
-            if progress_callback:
-                progress_callback(0.6, "Post-processing depth maps...")
-            
-            # Step 6: Convert to greyscale (+ optional guided refinement)
-            print(f"[Depth] Post-processing depth maps...")
-            for i, (frame_path, depth_map) in enumerate(zip(frame_paths, all_depths)):
-                output_frame_path = output_frames_dir / frame_path.name
-                
-                # Resize to original dimensions if needed
-                if depth_map.shape[:2] != (original_size[1], original_size[0]):
-                    depth_map = cv2.resize(depth_map, original_size, interpolation=cv2.INTER_LANCZOS4)
-                
-                # Optional guided edge refinement (off by default)
-                if guided_filter:
-                    try:
-                        guide_bgr = self.load_image_bgr(frame_path)
-                        depth_map = self._guided_upsample(depth_map, guide_bgr)
-                    except ValueError:
-                        pass
-                
-                output_image = apply_depth_greyscale(depth_map, range_min=range_min, range_max=range_max)
-                cv2.imwrite(str(output_frame_path), output_image)
-                
-                if (i + 1) % 10 == 0:
-                    print(f"[Depth]   Processed {i+1}/{len(frame_paths)} frames")
+                print(f"[Depth] Inference complete - shape: {mm.shape}")
+
+                # Step 3: Temporal smoothing (in place, on disk)
+                #
+                # Applied before normalization rather than after. A median
+                # commutes with the increasing affine map used for
+                # normalization, so the result is identical to the old
+                # normalize-then-smooth order, but this way the global range is
+                # already known and each frame is touched exactly once.
+                if temporal_smooth > 1:
+                    print(f"[Depth] Applying temporal smoothing (window={temporal_smooth})...")
                     if progress_callback:
-                        progress_callback(
-                            0.6 + 0.3 * ((i + 1) / len(frame_paths)),
-                            f"Processing frame {i+1}/{len(frame_paths)}"
-                        )
-            
-            # Step 7: Assemble output
+                        progress_callback(0.55, "Temporal smoothing...")
+                    self._temporal_smooth_memmap(mm, window=temporal_smooth)
+
+                if normalize:
+                    print(f"[Depth] Global depth range: [{global_min:.4f}, {global_max:.4f}]")
+                    inv_range = 1.0 / (global_max - global_min + 1e-8)
+
+                if progress_callback:
+                    progress_callback(0.6, "Post-processing depth maps...")
+
+                # Step 4: Normalize + invert per frame, then write greyscale.
+                # Each frame is read from disk, finished in place, and written
+                # back, so only one frame is resident at a time.
+                print(f"[Depth] Post-processing depth maps...")
+                for i, frame_path in enumerate(frame_paths):
+                    output_frame_path = output_frames_dir / frame_path.name
+
+                    depth_map = np.array(mm[i], dtype=np.float32)
+
+                    if normalize:
+                        np.subtract(depth_map, global_min, out=depth_map)
+                        np.multiply(depth_map, inv_range, out=depth_map)
+
+                    if invert:
+                        np.subtract(1.0, depth_map, out=depth_map)
+
+                    # Write the finished values back so the .npy matches the
+                    # frames (normalized + smoothed + inverted, as before)
+                    mm[i] = depth_map
+
+                    # Resize to original dimensions if needed
+                    if depth_map.shape[:2] != (original_size[1], original_size[0]):
+                        depth_map = cv2.resize(depth_map, original_size, interpolation=cv2.INTER_LANCZOS4)
+
+                    # Optional guided edge refinement (off by default)
+                    if guided_filter:
+                        try:
+                            guide_bgr = self.load_image_bgr(frame_path)
+                            depth_map = self._guided_upsample(depth_map, guide_bgr)
+                        except ValueError:
+                            pass
+
+                    output_image = apply_depth_greyscale(depth_map, range_min=range_min, range_max=range_max)
+                    cv2.imwrite(str(output_frame_path), output_image)
+
+                    del depth_map
+
+                    if (i + 1) % 10 == 0:
+                        print(f"[Depth]   Processed {i+1}/{len(frame_paths)} frames")
+                        if progress_callback:
+                            progress_callback(
+                                0.6 + 0.3 * ((i + 1) / len(frame_paths)),
+                                f"Processing frame {i+1}/{len(frame_paths)}"
+                            )
+
+                mm.flush()
+                print(f"[Depth] Saved raw depth data: {raw_depth_path}")
+
+            except Exception:
+                # Don't leave a half-written buffer behind for EXR export to find
+                if mm is not None:
+                    del mm
+                    mm = None
+                raw_depth_path.unlink(missing_ok=True)
+                raise
+            finally:
+                if mm is not None:
+                    del mm
+                gc.collect()
+
+            # Step 5: Assemble output
             if progress_callback:
                 progress_callback(0.9, "Assembling output...")
-            
+
             if output_mode == "sequence":
-                output_path.mkdir(parents=True, exist_ok=True)
                 for frame_path in sorted(output_frames_dir.glob("frame_*.png")):
                     shutil.copy(frame_path, output_path / frame_path.name)
-                
-                # Save raw depth data for lossless EXR export
-                raw_depth_path = output_path / "depth_raw.npy"
-                np.save(str(raw_depth_path), all_depths.astype(np.float32))
-                print(f"[Depth] Saved raw depth data: {raw_depth_path}")
-                
+
                 frames = sorted([f.name for f in output_path.glob("*.png")])
-                
+
                 if progress_callback:
                     progress_callback(1.0, "Complete")
-                
+
                 return {
                     "output_path": str(output_path),
                     "is_sequence": True,
@@ -574,17 +1024,11 @@ class DepthPreprocessor(BasePreprocessor):
                     "raw_data_path": str(raw_depth_path),
                 }
             else:
-                output_path.parent.mkdir(parents=True, exist_ok=True)
                 assemble_video(output_frames_dir, output_path, fps)
-                
-                # Save raw depth data alongside MP4
-                raw_depth_path = output_path.parent / f"{output_path.stem}_raw.npy"
-                np.save(str(raw_depth_path), all_depths.astype(np.float32))
-                print(f"[Depth] Saved raw depth data: {raw_depth_path}")
-                
+
                 if progress_callback:
                     progress_callback(1.0, "Complete")
-                
+
                 return {
                     "output_path": str(output_path),
                     "is_sequence": False,
@@ -633,17 +1077,23 @@ class DepthPreprocessor(BasePreprocessor):
                 )
             else:
                 import tempfile as _tempfile
-                with _tempfile.NamedTemporaryFile(suffix='.png', delete=False) as f:
-                    temp_path = f.name
+                fd, temp_path = _tempfile.mkstemp(suffix='.png')
+                import os as _os
+                _os.close(fd)
+                try:
                     Image.fromarray(image_rgb).save(temp_path)
                     prediction = self.model.inference(
                         [temp_path],
                         process_res=process_res,
                         process_res_method=process_res_method,
                     )
-                    Path(temp_path).unlink()
-            
-            depth = prediction.depth[0]
+                finally:
+                    Path(temp_path).unlink(missing_ok=True)
+
+            depth = np.asarray(prediction.depth[0], dtype=np.float32)
+            self._release_prediction(prediction)
+            del prediction
+
             if depth.shape[:2] != image_rgb.shape[:2]:
                 depth = cv2.resize(depth, (image_rgb.shape[1], image_rgb.shape[0]), interpolation=cv2.INTER_LANCZOS4)
             return depth
@@ -675,7 +1125,45 @@ class DepthPreprocessor(BasePreprocessor):
         depth = self._infer_depth(image_rgb, str(image_path))
         depth = (depth - depth.min()) / (depth.max() - depth.min() + 1e-8)
         return depth.astype(np.float32)
-    
+
+    def get_depth_z(self, image_path: Path) -> Tuple[np.ndarray, bool]:
+        """
+        Depth oriented as true Z — near = small, far = large.
+
+        For anything that reconstructs surface geometry (normals, point clouds,
+        meshing) rather than just displaying a depth image. get_raw_depth()
+        min-max normalises and hands back whatever orientation the model
+        happened to use, so DA3 comes out near=0 while MiDaS/DAv2 come out
+        near=1; consuming that as if it were Z silently inverts the geometry on
+        half the model list. Here disparity models are reciprocated back to
+        depth first, so every model returns the same convention.
+
+        Returns:
+            (depth, is_metric)
+            is_metric=True  - depth is absolute, in metres
+            is_metric=False - depth is relative, rescaled to [0, 1], 0 = nearest
+        """
+        self._ensure_initialized()
+
+        image = self.load_image_bgr(image_path)
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+        raw = self._infer_depth(image_rgb, str(image_path)).astype(np.float32)
+
+        if self.model_type in METRIC_MODELS:
+            return raw, True
+
+        if self.model_type in DISPARITY_MODELS:
+            # Disparity -> depth. Normalise first (1 = nearest), then
+            # reciprocate across the assumed near/far ratio.
+            disp = (raw - raw.min()) / (raw.max() - raw.min() + 1e-8)
+            raw = 1.0 / (disp * (1.0 - DISPARITY_FAR_RATIO) + DISPARITY_FAR_RATIO)
+
+        # Relative depth: only the shape matters, so rescale to [0, 1].
+        # The consumer supplies the missing near-distance/depth-span ratio.
+        z = (raw - raw.min()) / (raw.max() - raw.min() + 1e-8)
+        return z.astype(np.float32), False
+
     # ========================================================================
     # Utilities
     # ========================================================================
@@ -730,29 +1218,6 @@ class DepthPreprocessor(BasePreprocessor):
 
         return np.clip(mean_a * guide + mean_b, 0.0, 1.0)
 
-    @staticmethod
-    def _temporal_smooth(depths: np.ndarray, window: int = 3) -> np.ndarray:
-        """
-        Temporal median filter to reduce frame-to-frame noise.
-        
-        Args:
-            depths: [N, H, W] depth array
-            window: Window size (must be odd, e.g., 3, 5)
-        """
-        if window <= 1:
-            return depths
-        
-        n_frames = len(depths)
-        half_window = window // 2
-        smoothed = np.zeros_like(depths)
-        
-        for i in range(n_frames):
-            start = max(0, i - half_window)
-            end = min(n_frames, i + half_window + 1)
-            smoothed[i] = np.median(depths[start:end], axis=0)
-        
-        return smoothed
-    
     def unload(self):
         """Unload depth model from VRAM"""
         if self.model is not None:
