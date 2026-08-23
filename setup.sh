@@ -174,6 +174,21 @@ else
     echo "  ✓ TRELLIS already exists"
 fi
 
+# SeedVR2 (temporal video restoration / upscaling) — source only, runs in this
+# venv like VGGT does. It reimplements the SeedVR2 architecture with VAE tiling,
+# block swapping and quantized weights, which is what makes it fit a 24GB card;
+# ByteDance's own inference path does not and was removed from FUK for that
+# reason. Do NOT install its requirements.txt — it lists an unpinned torch and
+# would fight the venv's cu130 build. Its only two extra deps (gguf,
+# rotary_embedding_torch) are in pyproject.toml instead. Weights download on
+# first use, SHA256-validated, into {models_root}/seedvr2.
+if [ ! -d "fuk/vendor/SeedVR2" ]; then
+    echo "  → Cloning SeedVR2..."
+    git clone https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler.git fuk/vendor/SeedVR2
+else
+    echo "  ✓ SeedVR2 already exists"
+fi
+
 # ── Vendor packages ───────────────────────────────────────────────────────────
 echo ""
 echo "[5/7] Installing vendor packages..."
@@ -207,6 +222,16 @@ if python -c "import sys; sys.path.insert(0, 'fuk/vendor/VGGT'); import vggt" 2>
     echo "    ✓ VGGT ready (runs in this venv, no install needed)"
 else
     echo "    ⚠  VGGT source missing or unimportable — multi-view 3D will be unavailable"
+fi
+
+# ── Video restoration ─────────────────────────────────────────────────────────
+echo ""
+echo "  → Video restoration backend..."
+
+if python -c "import sys; sys.path.insert(0, 'fuk'); from core import seedvr2_backend as s; import sys as _s; _s.exit(0 if s.availability()['available'] else 1)" 2>/dev/null; then
+    echo "    ✓ SeedVR2 ready (runs in this venv, weights fetch on first use)"
+else
+    echo "    ⚠  SeedVR2 unavailable — video upscaling falls back to per-frame Real-ESRGAN"
 fi
 
 if [ -f "fuk/vendor/TRELLIS_ENV/READY" ]; then
@@ -622,6 +647,7 @@ cat > fuk/config/models.json.template << 'EOL'
 
   "_deferred": {
     "_comment": "Complex models deferred for post-launch",
+    "seedvr2": "Not a DiffSynth pipeline. Video restoration runs through fuk/core/seedvr2_backend.py against the vendored engine in fuk/vendor/SeedVR2; its weights are fetched by download_models.sh into {models_root}/seedvr2. Same arrangement as trellis and vggt.",
     "wan_t2v_1.3b": "Excluding T2V - not professional use case",
     "wan_t2v_14b": "Excluding T2V - not professional use case",
     "wan_s2v_14b": "Requires: s2v_pose_video + motion_video + audio pipeline",
@@ -750,15 +776,26 @@ cat > fuk/config/defaults.json.template << 'EOL'
     }
   },
 
+  "_postprocess_comment": "Seeds tabs.postprocess for new projects. Keys must match PostprocessTab.jsx DEFAULT_SETTINGS exactly — the tab spreads this over its own defaults, so a key spelled differently here is silently ignored rather than reported.",
   "postprocess": {
-    "upscale": {
-      "model": "real_esrgan_x4",
-      "scale": 4
-    },
-    "interpolate": {
-      "model": "rife",
-      "multiplier": 2
-    }
+    "upscaleMethod": "realesrgan",
+    "upscaleFactor": 4,
+
+    "videoUpscaleMethod": "seedvr2",
+    "videoUpscaleFactor": 2,
+
+    "seedvr2Variant": "seedvr2_7b_fp8",
+    "seedvr2FrameWindow": 13,
+    "seedvr2ResolutionCap": 1920,
+    "seedvr2MemoryMode": "auto",
+    "seedvr2TemporalOverlap": -1,
+    "seedvr2MotionProtection": 0.7,
+
+    "interpolationMethod": "film",
+    "targetFramerate": 24,
+    "sourceFramerate": 16,
+
+    "videoOutputMode": "mp4"
   },
 
   "project": {
@@ -814,6 +851,8 @@ cat > fuk/config/defaults_vram.json.template << 'EOL'
     "pipeline_cache_slots": 2,
     "vae_encode_cache": true,
 
+    "_buffer_gb_comment": "Headroom left free after resident weights. It must cover the largest single ACTIVATION the model allocates, not just slack \u2014 Wan 2.2's rope_apply asks for one contiguous 4.16GB tensor at 720p, which is why 2GB OOM'd at the first step. Activations are bf16 in every preset regardless of offload dtype, so this value does not shrink for the fp8 or disk presets.",
+
     "presets": {
       "none": {
         "label": "None — Full VRAM",
@@ -834,7 +873,7 @@ cat > fuk/config/defaults_vram.json.template << 'EOL'
           "computation_dtype": "bfloat16",
           "computation_device": "cuda"
         },
-        "buffer_gb": 2
+        "buffer_gb": 6
       },
       "medium": {
         "label": "Medium — CPU Offload (fp8)",
@@ -849,7 +888,7 @@ cat > fuk/config/defaults_vram.json.template << 'EOL'
           "computation_dtype": "bfloat16",
           "computation_device": "cuda"
         },
-        "buffer_gb": 2
+        "buffer_gb": 6
       },
       "high": {
         "label": "High — Disk Offload",
@@ -864,7 +903,7 @@ cat > fuk/config/defaults_vram.json.template << 'EOL'
           "computation_dtype": "bfloat16",
           "computation_device": "cuda"
         },
-        "buffer_gb": 2
+        "buffer_gb": 6
       }
     }
   }

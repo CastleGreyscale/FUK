@@ -63,6 +63,12 @@ from encode_cache import install_encode_cache
 PIPELINE_CLASSES = {}
 
 
+# Both spellings of the CUDA allocator config variable. torch 2.9 warns that
+# the first is deprecated but is still the only one it actually parses; see the
+# evidence in _setup_diffsynth_env. Set both, trust neither warning.
+ALLOC_CONF_VARS = ("PYTORCH_CUDA_ALLOC_CONF", "PYTORCH_ALLOC_CONF")
+
+
 def _log(category: str, message: str, level: str = "info"):
     """Logging helper matching FUK server style."""
     from datetime import datetime
@@ -228,8 +234,30 @@ class DiffSynthBackend:
         # Setup environment
         os.environ["DIFFSYNTH_MODEL_BASE_PATH"] = models_root
         os.environ["DIFFSYNTH_SKIP_DOWNLOAD"] = "TRUE"
-        # Reduce CUDA allocator fragmentation across repeated generations
-        os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+        # Reduce CUDA allocator fragmentation across repeated generations.
+        # This is what keeps a Wan 2.2 expert swap from leaving the pool too
+        # fragmented to serve the next large activation.
+        #
+        # BOTH names are set on purpose. Do not "clean this up" to just the new
+        # one on the strength of torch's deprecation warning — the warning is
+        # misleading on torch 2.9.1+cu130. Verified empirically:
+        #
+        #   PYTORCH_CUDA_ALLOC_CONF=bogus:True  -> RuntimeError: Unrecognized
+        #                                          CachingAllocator option
+        #                                          (parsed and honoured)
+        #   PYTORCH_ALLOC_CONF=bogus:True       -> no error at all
+        #                                          (not parsed by this build)
+        #
+        # and via torch.cuda.memory_snapshot()[i]["is_expandable"]:
+        #   PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True -> True
+        #   PYTORCH_ALLOC_CONF=expandable_segments:True      -> False
+        #
+        # So the deprecated spelling is still the one that works here; the new
+        # spelling is set alongside it so this keeps working when a future torch
+        # really does drop the old name. The only cost is the deprecation
+        # warning on startup, which is cosmetic.
+        for _var in ALLOC_CONF_VARS:
+            os.environ.setdefault(_var, "expandable_segments:True")
         
         _log("BACKEND", f"Models base path: {models_root}")
         
@@ -765,12 +793,33 @@ class DiffSynthBackend:
             redirect_common_files=False,
         )
 
-        # VRAM limit — only set when offloading is active
+        # VRAM limit — only set when offloading is active.
+        #
+        # This budget is what DiffSynth fills with resident weights; activations
+        # land on top of it, so buffer_gb has to cover the largest single
+        # activation the model produces (Wan 2.2's rope_apply wants >4GB at
+        # 720p) plus whatever other processes hold.
+        #
+        # Memory held by *other* processes is subtracted, but this process's own
+        # reserved pool is added back: it is cached weights we are about to
+        # evict or reuse, not a constraint. Reading mem_get_info()[0] alone
+        # would make the budget depend on whatever happens to be cached at call
+        # time — with a Wan pipeline resident, free is under 1GB and the limit
+        # would come out near zero.
         if vram_config is not None and torch.cuda.is_available():
-            total_vram = torch.cuda.mem_get_info("cuda")[1] / (1024 ** 3)
-            vram_limit = total_vram - buffer_gb
+            free_b, total_b = torch.cuda.mem_get_info("cuda")
+            gib = 1024 ** 3
+            total_vram = total_b / gib
+            reclaimable = torch.cuda.memory_reserved() / gib
+            other_procs = max(total_vram - free_b / gib - reclaimable, 0.0)
+
+            # Floor at 4GB: a hostile desktop should degrade into heavy
+            # offloading, not hand DiffSynth a negative or absurd budget.
+            vram_limit = max(total_vram - other_procs - buffer_gb, 4.0)
             kwargs["vram_limit"] = vram_limit
-            _log("BACKEND", f"  VRAM: {total_vram:.1f}GB total − {buffer_gb}GB buffer = {vram_limit:.1f}GB limit")
+            _log("BACKEND",
+                 f"  VRAM: {total_vram:.1f}GB total − {other_procs:.1f}GB other procs "
+                 f"− {buffer_gb}GB buffer = {vram_limit:.1f}GB limit")
         else:
             _log("BACKEND", f"  VRAM: no limit (preset={active_preset})")
 

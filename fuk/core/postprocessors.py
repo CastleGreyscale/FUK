@@ -28,6 +28,7 @@ import tempfile
 import time
 import json
 from core.film_interpolator import FILMInterpolator
+from core import seedvr2_backend
 
 # ============================================================================
 # Upscaler Models
@@ -955,11 +956,77 @@ class PostProcessorManager:
         source_fps: int = 16,
         target_fps: int = 24,
         model: str = "rife",
+        output_mode: str = "mp4",
+        bit_depth: int = 8,
+        sequence_dir: Optional[Path] = None,
         progress_callback: Optional[Callable] = None
     ) -> Dict[str, Any]:
-        """Interpolate video frames"""
+        """
+        Interpolate video frames.
+
+        Keyword-only delegation on purpose: this used to forward positionally,
+        which silently bound progress_callback to whatever new parameter was
+        inserted ahead of it.
+        """
         return self.interpolator.interpolate_video(
-            input_path, output_path, source_fps, target_fps, model, progress_callback
+            input_path=input_path,
+            output_path=output_path,
+            source_fps=source_fps,
+            target_fps=target_fps,
+            model=model,
+            output_mode=output_mode,
+            bit_depth=bit_depth,
+            sequence_dir=sequence_dir,
+            progress_callback=progress_callback,
+        )
+
+    def upscale_video(
+        self,
+        input_path: Path,
+        output_path: Path,
+        scale: int = 2,
+        model: str = "seedvr2",
+        variant: str = seedvr2_backend.DEFAULT_VARIANT,
+        frame_window: int = 0,
+        seed: int = 42,
+        resolution_cap: int = 1920,
+        memory_mode: str = "auto",
+        temporal_overlap: int = -1,
+        motion_protection: float = 0.7,
+        progress_callback: Optional[Callable] = None,
+    ) -> Dict[str, Any]:
+        """
+        Restore and upscale a whole video sequence.
+
+        Only SeedVR2 is routed here. Real-ESRGAN video upscaling stays on the
+        frame-by-frame path in video_endpoints, because it has no temporal model
+        and nothing here would improve that.
+        """
+        if model != "seedvr2":
+            raise ValueError(
+                f"upscale_video does not handle model {model!r}; "
+                "per-frame models go through the frame extraction path"
+            )
+
+        status = seedvr2_backend.availability()
+        if not status["available"]:
+            raise RuntimeError(
+                "SeedVR2 is not available: " + ", ".join(status["missing"])
+                + f"\n  {status['hint']}"
+            )
+
+        return seedvr2_backend.upscale_video(
+            input_path=input_path,
+            output_path=output_path,
+            scale=scale,
+            variant=variant,
+            frame_window=frame_window,
+            seed=seed,
+            resolution_cap=resolution_cap,
+            memory_mode=memory_mode,
+            temporal_overlap=temporal_overlap,
+            motion_protection=motion_protection,
+            progress_callback=progress_callback,
         )
     
     def get_capabilities(self) -> Dict[str, Any]:
@@ -973,13 +1040,25 @@ class PostProcessorManager:
         `ncnn_available` key that no longer existed and showing the badge as
         permanently unavailable.
         """
+        seedvr2 = seedvr2_backend.availability()
+
         return {
             "upscaling": {
                 "available": True,
                 "ncnn_available": self.upscaler.ncnn_binary is not None,
                 "models": ["realesrgan", "lanczos"],
                 "scales": [2, 4, 8],
-                "video_models": ["realesrgan"],
+                "video_models": (["seedvr2"] if seedvr2["available"] else []) + ["realesrgan"],
+            },
+            "video_restoration": {
+                "available": seedvr2["available"],
+                "backend": "seedvr2",
+                "temporal": True,
+                "variants": seedvr2["variants"],
+                "downloaded": seedvr2["downloaded"],
+                "weights_dir": seedvr2["weights_dir"],
+                "missing": seedvr2["missing"],
+                "hint": seedvr2["hint"],
             },
             "interpolation": {
                 "available": True,

@@ -35,6 +35,7 @@ SAM2 = Segment Anything 2 (cryptomattes)
 DSINE = Surface normals estimation      ⚠ non-commercial
 FILM = Frame interpolation (Google FILM)
 REGAN = Real-ESRGAN upscaling
+SVR2 = SeedVR2 temporal video restoration
 
 ⚠ = non-commercial licence, see THIRD_PARTY_LICENSES.md
     (also: VGGT 3D reconstruction, FLUX.2-dev image model)
@@ -570,8 +571,8 @@ for the clauses.
 
 All three are optional. A configuration with no restricted component in it —
 Qwen-Image for generation, Qwen-Image-Edit 2511 for editing, Wan for video, DA3
-for depth **and** normals, SAM2 for mattes, TRELLIS for 3D, Real-ESRGAN for
-upscaling, FILM for interpolation — covers the whole pipeline.
+for depth **and** normals, SAM2 for mattes, TRELLIS for 3D, Real-ESRGAN and
+SeedVR2 for upscaling, FILM for interpolation — covers the whole pipeline.
 Everything else in the stack is Apache 2.0, MIT, or BSD-3-Clause.
 
 FLUX.2-dev is carried as an *alternative* to Qwen-Image-Edit rather than as the

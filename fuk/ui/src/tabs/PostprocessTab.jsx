@@ -28,10 +28,22 @@ const DEFAULT_SETTINGS = {
   upscaleMethod: 'realesrgan',
   upscaleFactor: 4,
 
-  // Upscaling — video. Per-frame only: there is no temporal model here, so
-  // expect flicker on generated footage.
-  videoUpscaleMethod: 'realesrgan',
+  // Upscaling — video. SeedVR2 is the temporal option and the default when
+  // it is installed; realesrgan/lanczos remain available and are per-frame,
+  // which visibly flickers on generated footage.
+  videoUpscaleMethod: 'seedvr2',
   videoUpscaleFactor: 2,
+
+  // SeedVR2 (ignored by the per-frame models)
+  seedvr2Variant: 'seedvr2_7b_fp8',
+  seedvr2FrameWindow: 13,
+  seedvr2ResolutionCap: 1920,
+  seedvr2MemoryMode: 'auto',
+  // -1 = derive from the frame window. 0 disables batch blending, which shows
+  // up as the picture stepping every frame-window frames.
+  seedvr2TemporalOverlap: -1,
+  // 0..1. Blends moving pixels back toward the source to keep motion blur.
+  seedvr2MotionProtection: 0.7,
 
   // Frame Interpolation
   interpolationMethod: 'film',
@@ -105,7 +117,13 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
   
   // Detect if input is video
   const isVideo = useMemo(() => isVideoFile(sourceInput), [sourceInput]);
-  
+
+  // These key names have to stay in step with PostProcessorManager
+  // .get_capabilities() — they drifted once already when the interpolator was
+  // swapped from RIFE to FILM, leaving the badge permanently dark.
+  const seedvr2Available = capabilities?.video_restoration?.available ?? false;
+  const isSeedVR2 = isVideo && settings.videoUpscaleMethod === 'seedvr2';
+
 
   // Reset restoration flag when leaving the tab
   useEffect(() => {
@@ -183,6 +201,14 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
       .then(data => {
         console.log('[PostProcess] Capabilities:', data);
         setCapabilities(data);
+
+        // SeedVR2 is the default video model, but it is only present when the
+        // vendored engine is installed. Fall back rather than letting the user
+        // submit a request that is guaranteed to 500.
+        if (!data?.video_restoration?.available &&
+            settingsRef.current.videoUpscaleMethod === 'seedvr2') {
+          updateSettings({ videoUpscaleMethod: 'realesrgan' });
+        }
       })
       .catch(err => {
         console.warn('[PostProcess] Could not fetch capabilities:', err);
@@ -288,6 +314,14 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
           model: settings.videoUpscaleMethod,
           output_mode: settings.videoOutputMode,
         };
+        if (isSeedVR2) {
+          payload.variant = settings.seedvr2Variant;
+          payload.frame_window = settings.seedvr2FrameWindow;
+          payload.resolution_cap = settings.seedvr2ResolutionCap;
+          payload.memory_mode = settings.seedvr2MemoryMode;
+          payload.temporal_overlap = settings.seedvr2TemporalOverlap;
+          payload.motion_protection = settings.seedvr2MotionProtection;
+        }
       } else {
         taskType = 'upscale';
         payload = {
@@ -675,6 +709,9 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                   <span className={capabilities.upscaling?.ncnn_available ? 'fuk-capability-item--active' : 'fuk-capability-item'}>
                     {capabilities.upscaling?.ncnn_available ? '✓' : '○'} ESRGAN-NCNN
                   </span>
+                  <span className={capabilities.video_restoration?.available ? 'fuk-capability-item--active' : 'fuk-capability-item'}>
+                    {capabilities.video_restoration?.available ? '✓' : '○'} SeedVR2
+                  </span>
                   <span className={capabilities.interpolation?.film_available ? 'fuk-capability-item--active' : 'fuk-capability-item'}>
                     {capabilities.interpolation?.film_available ? '✓' : '○'} FILM
                   </span>
@@ -696,18 +733,32 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                   onChange={(e) => updateSettings({ videoUpscaleMethod: e.target.value })}
                   disabled={generating}
                 >
-                  <option value="realesrgan">Real-ESRGAN (Recommended)</option>
+                  <option value="seedvr2" disabled={!seedvr2Available}>
+                    SeedVR2 — temporal{seedvr2Available ? ' (Recommended)' : ' (unavailable)'}
+                  </option>
+                  <option value="realesrgan">Real-ESRGAN (per-frame)</option>
                   <option value="lanczos">Lanczos (Fast, No AI)</option>
                 </select>
                 <p className="fuk-help-text">
-                  Enhances each frame in isolation — expect detail to crawl between frames
+                  {isSeedVR2
+                    ? 'Restores the sequence as a sequence, so detail stays put between frames'
+                    : 'Enhances each frame in isolation — expect detail to crawl between frames'}
                 </p>
+                {!seedvr2Available && capabilities.video_restoration?.hint && (
+                  <p className="fuk-help-text">
+                    SeedVR2 unavailable: {(capabilities.video_restoration.missing || []).join(', ')}.
+                    {' '}{capabilities.video_restoration.hint}
+                  </p>
+                )}
               </div>
 
               <div className="fuk-form-group-compact">
                 <label className="fuk-label">Scale Factor</label>
                 <div className="fuk-radio-group">
-                  {[2, 4, 8].map(factor => (
+                  {/* SeedVR2 targets an absolute resolution rather than a
+                      multiple, and 8x on any real source overshoots every
+                      sensible cap. */}
+                  {(isSeedVR2 ? [2, 4] : [2, 4, 8]).map(factor => (
                     <label key={factor} className="fuk-radio-option">
                       <input
                         type="radio"
@@ -721,6 +772,129 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                   ))}
                 </div>
               </div>
+
+              {isSeedVR2 && (
+                <>
+                  <div className="fuk-form-group-compact">
+                    <label className="fuk-label">Quality</label>
+                    <select
+                      className="fuk-select"
+                      value={settings.seedvr2Variant}
+                      onChange={(e) => updateSettings({ seedvr2Variant: e.target.value })}
+                      disabled={generating}
+                    >
+                      <option value="seedvr2_7b_fp8">7B fp8 — best quality, slowest</option>
+                      <option value="seedvr2_7b_sharp_fp8">7B Sharp fp8 — more detail</option>
+                      <option value="seedvr2_7b_q4">7B Q4 — 7B on a tight budget</option>
+                      <option value="seedvr2_3b_fp8">3B fp8 — fast, good quality</option>
+                      <option value="seedvr2_3b_q8">3B Q8 — fastest, lowest VRAM</option>
+                    </select>
+                  </div>
+
+                  <div className="fuk-form-group-compact">
+                    <label className="fuk-label">Frame Window</label>
+                    <select
+                      className="fuk-select"
+                      value={settings.seedvr2FrameWindow}
+                      onChange={(e) => updateSettings({ seedvr2FrameWindow: Number(e.target.value) })}
+                      disabled={generating}
+                    >
+                      {/* 4n+1 only — the VAE compresses time 4x plus a key frame */}
+                      {[5, 9, 13, 17, 21].map(n => (
+                        <option key={n} value={n}>
+                          {n} frames{n === 9 || n === 13 ? ' (recommended)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="fuk-help-text">
+                      Frames restored together. 9–13 measures best; both narrower
+                      and wider increase stepping, so this is not a "more is
+                      better" control. Also the dominant VRAM cost.
+                    </p>
+                  </div>
+
+                  <div className="fuk-form-group-compact">
+                    <label className="fuk-label">Batch Blending</label>
+                    <select
+                      className="fuk-select"
+                      value={settings.seedvr2TemporalOverlap}
+                      onChange={(e) => updateSettings({ seedvr2TemporalOverlap: Number(e.target.value) })}
+                      disabled={generating}
+                    >
+                      <option value={-1}>Auto — scale to frame window</option>
+                      <option value={0}>Off — fastest, visible seams</option>
+                      <option value={2}>2 frames</option>
+                      <option value={4}>4 frames</option>
+                      <option value={6}>6 frames</option>
+                      <option value={8}>8 frames</option>
+                    </select>
+                    <p className="fuk-help-text">
+                      Frames shared and crossfaded between batches. Each batch is
+                      restored independently, so with this off the picture visibly
+                      steps every frame-window frames. More costs proportionally
+                      more time.
+                    </p>
+                  </div>
+
+                  <div className="fuk-form-group-compact">
+                    <label className="fuk-label">Resolution Cap</label>
+                    <select
+                      className="fuk-select"
+                      value={settings.seedvr2ResolutionCap}
+                      onChange={(e) => updateSettings({ seedvr2ResolutionCap: Number(e.target.value) })}
+                      disabled={generating}
+                    >
+                      <option value={1280}>1280px</option>
+                      <option value={1920}>1920px (HD)</option>
+                      <option value={2560}>2560px</option>
+                      <option value={3840}>3840px (4K)</option>
+                    </select>
+                    <p className="fuk-help-text">Upper bound on the longest output edge</p>
+                  </div>
+
+                  <div className="fuk-form-group-compact">
+                    <label className="fuk-label">Motion Protection</label>
+                    <select
+                      className="fuk-select"
+                      value={settings.seedvr2MotionProtection}
+                      onChange={(e) => updateSettings({ seedvr2MotionProtection: Number(e.target.value) })}
+                      disabled={generating}
+                    >
+                      <option value={0}>Off — full restoration</option>
+                      <option value={0.4}>0.4 — light</option>
+                      <option value={0.7}>0.7 — recommended</option>
+                      <option value={1.0}>1.0 — maximum</option>
+                    </select>
+                    <p className="fuk-help-text">
+                      SeedVR2 removes motion blur, and motion blur is what makes
+                      24fps read as smooth — so fast-moving subjects come back
+                      stepping and ghosting. This blends moving pixels back
+                      toward the source to keep their blur; still areas keep the
+                      full sharpening. Does nothing on a static shot.
+                    </p>
+                  </div>
+
+                  <div className="fuk-form-group-compact">
+                    <label className="fuk-label">Memory Mode</label>
+                    <select
+                      className="fuk-select"
+                      value={settings.seedvr2MemoryMode}
+                      onChange={(e) => updateSettings({ seedvr2MemoryMode: e.target.value })}
+                      disabled={generating}
+                    >
+                      <option value="auto">Auto — retry lower on OOM</option>
+                      <option value="0">Balanced</option>
+                      <option value="1">Narrow window</option>
+                      <option value="2">Minimum window + block swap</option>
+                      <option value="3">Quantized + everything</option>
+                    </select>
+                    <p className="fuk-help-text">
+                      Auto starts fast and steps down until the clip fits. Pinning
+                      a mode reports the out-of-memory error instead of retrying.
+                    </p>
+                  </div>
+                </>
+              )}
 
             </div>
           )}

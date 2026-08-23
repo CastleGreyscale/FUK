@@ -66,4 +66,17 @@ if [ -z "${DIFFSYNTH_DOWNLOAD_SOURCE:-}" ]; then
 fi
 echo ""
 
+# SeedVR2 is fetched at the end of the same run. It is not in models.json —
+# it is not a DiffSynth pipeline — and it comes from HuggingFace regardless of
+# DIFFSYNTH_DOWNLOAD_SOURCE. Skipped automatically if setup.sh has not vendored
+# the engine, in which case video upscaling falls back to per-frame Real-ESRGAN.
+if [ -d "fuk/vendor/SeedVR2" ]; then
+    echo "  Also fetching: SeedVR2 video restoration weights (~20GB, HuggingFace)"
+    echo "                 3B + 7B, each at fp8 and quantized. The 7B Sharp"
+    echo "                 variants are not pulled here — they download on first use."
+else
+    echo "  Skipping SeedVR2 — engine not vendored (run setup.sh to enable)"
+fi
+echo ""
+
 python fuk/utils/download_models.py "$@"

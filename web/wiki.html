@@ -536,13 +536,98 @@
                         <tr><th>Model</th><th>Best For</th><th>Scale</th><th>Temporal</th></tr>
                     </thead>
                     <tbody>
+                        <tr><td>SeedVR2 7B</td><td>Video — best temporal coherence</td><td>2×, 4×</td><td><strong>Yes</strong></td></tr>
+                        <tr><td>SeedVR2 3B</td><td>Video — faster, still temporal</td><td>2×, 4×</td><td><strong>Yes</strong></td></tr>
                         <tr><td>Real-ESRGAN x4 Plus</td><td>Stills and video</td><td>2×, 4×, 8×</td><td>No</td></tr>
                         <tr><td>Lanczos</td><td>Fast, non-AI resize</td><td>2×, 4×, 8×</td><td>No</td></tr>
                     </tbody>
                 </table>
 
-                <h4>No Temporal Model</h4>
-                <p>Real-ESRGAN has no temporal model. Applied to video it enhances each frame in isolation, and because it hallucinates detail independently per frame, that detail crawls and shimmers between frames. On Wan output — where frame-to-frame motion is already slightly irregular — this is very visible. Treat video upscaling here as a convenience rather than a finishing step.</p>
+                <h4>SeedVR2 — the temporal option</h4>
+                <p><strong>Status: under evaluation.</strong> SeedVR2 is wired up, measured and usable, but it has not yet been signed off as part of the finishing pipeline. The open question is whether the detail it invents is acceptable on clean generated footage — see the two caveats below before committing a shot to it. It is deliberately kept out of the latent → EXR path for the reasons under <em>Bit depth</em>.</p>
+
+                <p>SeedVR2 restores a clip as a sequence rather than as a stack of unrelated frames, so detail stays put instead of crawling. It is the default for video and the only upscaler here worth calling a finishing step. Weights download with <code>download_models.sh</code>, or automatically on first use, into <code>{models_root}/seedvr2</code>.</p>
+
+                <p><strong>A caveat worth setting expectations on.</strong> SeedVR2 is a <em>restoration</em> model — it was trained to recover detail from degraded footage. Pointed at already-clean output it has little real detail to recover, so it invents some, and what it invents varies between frames. Measured on a clean 640×360 clip, frame-to-frame correlation dropped from 0.65 in the source to about 0.25 after restoration, with a period-4 component appearing that matches the VAE's 4× temporal compression. In practice that reads as motion stepping or fine detail shimmering. The 7B model and a wider frame window both reduce it; neither eliminates it. It pays off most on genuinely soft or compressed source.</p>
+
+                <h4>SeedVR2 settings</h4>
+                <table class="wiki-table">
+                    <thead>
+                        <tr><th>Setting</th><th>What it does</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>Quality</td><td>7B fp8 is the best available and the slowest; 7B Sharp trades neutrality for detail; 3B fp8 is roughly twice as fast and noticeably less stable in motion. The Q4/Q8 entries are the same models quantized, for when VRAM is tight.</td></tr>
+                        <tr><td>Frame Window</td><td>Frames restored together — 5, 9, 13, 17 or 21. <strong>9–13 is the usable band; wider is not better.</strong> It is also the dominant VRAM cost. See the measurements below.</td></tr>
+                        <tr><td>Batch Blending</td><td>Frames shared and crossfaded between consecutive batches. Leave on Auto. Set to Off and the picture visibly steps every frame-window frames, because each batch is restored as an independent diffusion problem and invents its own fine detail.</td></tr>
+                        <tr><td>Motion Protection</td><td>Blends moving pixels back toward the source to keep their motion blur. 0.7 by default. See below — on footage with fast movement this matters more than every other setting combined.</td></tr>
+                        <tr><td>Resolution Cap</td><td>Upper bound on the longest output edge</td></tr>
+                        <tr><td>Memory Mode</td><td>Auto starts fast and steps down until the clip fits. Pinning a mode reports the out-of-memory error instead of retrying.</td></tr>
+                    </tbody>
+                </table>
+
+                <p>On a 24GB card the VAE, not the transformer, is what runs you out of memory — measured peaks for a 1080p output were 14.5GB in the encode and 11.3GB in the decode against just 6.2GB for the DiT. That is why the frame window and the resolution cap matter far more than any model-offloading setting, and why Auto lowers the window first when a clip does not fit.</p>
+
+                <h4>Motion blur, stepping and ghosting</h4>
+                <p>The most common complaint about SeedVR2 output — that fast-moving subjects look like they are stepping, with detail ghosting between frames — has one cause, and it is not a bug. <strong>SeedVR2 removes motion blur, because that is what a restoration model does.</strong> Measured on a Wan clip, the fast-moving region of frame came back roughly <strong>10× sharper</strong> (variance of Laplacian 19–28 in the source, 185–266 restored), consistently on every frame.</p>
+                <p>Motion blur is what makes 24fps read as smooth motion. Strip it out and each frame becomes a crisp snapshot at a distinct position, so the same displacement now reads as stepping — and because the restored detail is hallucinated independently per frame, its shape shifts slightly between frames, which reads as ghosting.</p>
+                <p><strong>Motion Protection</strong> is the fix. It blends each pixel back toward the source in proportion to how fast that pixel is moving, so moving subjects keep their blur while still areas keep the full sharpening. Measured on the same clip at the default 0.7:</p>
+                <table class="wiki-table">
+                    <thead>
+                        <tr><th>Region</th><th>SeedVR2 sharpening retained</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>Fast-moving hand</td><td><strong>19%</strong> — keeps its motion blur</td></tr>
+                        <tr><td>Subject / chair</td><td>37%</td></tr>
+                        <tr><td>Still background</td><td><strong>78%</strong> — keeps the sharpening</td></tr>
+                    </tbody>
+                </table>
+                <p>The mask comes from the source, not the restored frames, since the source is what still carries honest motion blur. A static shot produces a near-zero mask and passes through untouched, so there is no reason to turn this off unless you specifically want the full de-blurred look. It costs a few seconds per clip.</p>
+
+                <h4>Choosing a frame window</h4>
+                <p>The obvious assumption — that a wider window is always more coherent — does not hold. Measured with the 7B on a 45-frame clip, scoring how much detail the model invents (mean frame-to-frame delta) and how much it steps in fours (lag-4 autocorrelation; the source scores 0.08):</p>
+                <table class="wiki-table">
+                    <thead>
+                        <tr><th>Window</th><th>Invented detail</th><th>4-frame stepping</th><th>Time</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>5</td><td>1.469</td><td>0.47</td><td>82s</td></tr>
+                        <tr><td><strong>9</strong></td><td><strong>1.367</strong></td><td><strong>−0.16</strong></td><td>49s</td></tr>
+                        <tr><td><strong>13</strong> (default)</td><td><strong>1.388</strong></td><td><strong>0.05</strong></td><td>54s</td></tr>
+                        <tr><td>17</td><td>1.674</td><td>0.33</td><td>38s</td></tr>
+                        <tr><td>21</td><td>1.715</td><td>0.36</td><td>45s</td></tr>
+                    </tbody>
+                </table>
+                <p>Both ends are bad. Too narrow and each batch has too little context to place detail consistently. Too wide and the VAE's 4× temporal compression has to carry more motion than it can represent, so the stepping comes back and the model invents more. These figures are from one 45-frame clip — treat 9–13 as the starting point rather than a law, and re-check if your shots are much longer.</p>
+
+                <h4>Bit depth, and why SeedVR2 is not in the EXR path</h4>
+                <p><strong>SeedVR2 is 8-bit display-referred at both ends.</strong> This is not a setting — it is fixed in the engine:</p>
+                <ul>
+                    <li>Input is divided by 255 on load, so a 16-bit PNG is <em>misread</em> rather than merely truncated</li>
+                    <li>Internals run at fp16</li>
+                    <li>Output is multiplied by 255 and cast to uint8, on every write path</li>
+                </ul>
+                <p>There is no float path, no linear-light path, and no way to carry values above 1.0 through it. Patching the engine would take only a few lines, but it would not help: the model was <em>trained</em> on display-referred video, so linear HDR is out of distribution for it. SeedVR2 belongs in display space — that is where it is correct, not a limitation to route around.</p>
+
+                <p>This matters because the <a href="#exr-export">latent → EXR</a> path does real work that 8-bit throws away. It decodes the latent in float32 rather than bf16, optionally decodes several times with scale or noise bracketing and fuses them with Mertens exposure fusion to recover range a single decode cannot give, then converts sRGB → linear. All of that happens <em>at decode</em>, before any quantisation. Put SeedVR2 downstream of it and the result is crushed to 8-bit immediately — you would be writing float32 EXR containers holding round-tripped 8-bit sRGB, with the bracketing entirely wasted.</p>
+
+                <p>Note also that there is no latent-space option: SeedVR2 carries its own VAE and cannot consume Wan latents. The latent must be decoded to pixels first, whatever route you take.</p>
+
+                <p>Four ways to sit the two together, in rough order of preference:</p>
+                <table class="wiki-table">
+                    <thead>
+                        <tr><th>Approach</th><th>Trade-off</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td><strong>Keep SeedVR2 out of the EXR path</strong> (current behaviour)</td><td>EXR stays the clean linear master at native resolution; SeedVR2 serves delivery and preview. Loses nothing.</td></tr>
+                        <tr><td><strong>Clean resample</strong> — lanczos-upscale the float32 linear decode</td><td>Larger EXR, full range preserved, nothing invented. Often preferable for VFX: hallucinated detail is not real information and will not match across shots or against plates.</td></tr>
+                        <tr><td><strong>Detail transfer</strong> — composite SeedVR2's detail as a ratio</td><td>Upscale the HDR cleanly, run SeedVR2 on a tonemapped copy, then multiply the HDR by <code>enhanced / unenhanced</code>. Transfers detail without replacing pixels, so highlights above 1.0 survive. Standard practice for folding an LDR-only enhancement into a linear pipeline. Costs real complexity, and the ratio needs guarding in near-black.</td></tr>
+                        <tr><td><strong>Patch the engine for float I/O</strong></td><td>Not recommended. A few lines, but you would carry a patch on a vendored repo and still have the out-of-distribution problem.</td></tr>
+                    </tbody>
+                </table>
+                <p>The general principle: the EXR is the master and should stay clean, linear and full-range. AI enhancement is a look decision, and look decisions are better applied downstream where they can be judged and reverted than baked into the master.</p>
+
+                <h4>Real-ESRGAN Has No Temporal Model</h4>
+                <p>Real-ESRGAN has no temporal model. Applied to video it enhances each frame in isolation, and because it hallucinates detail independently per frame, that detail crawls and shimmers between frames. On Wan output — where frame-to-frame motion is already slightly irregular — this is very visible. Use SeedVR2 for video and keep Real-ESRGAN for stills.</p>
 
                 <h4>Workflow</h4>
                 <ol>
@@ -569,6 +654,21 @@
                         <tr><td>Video Output Mode</td><td>Whether to produce an MP4 preview alongside the output frame sequence</td></tr>
                     </tbody>
                 </table>
+
+                <h4>Bit depth, and the EXR route</h4>
+                <p>FILM sits differently from <a href="#upscaling">SeedVR2</a> here, and the distinction is worth understanding.</p>
+
+                <p><strong>The 8-bit limit is FUK's, not the model's.</strong> FILM is a plain PyTorch module in our own code and its interpolation call takes arbitrary float tensors. Everything restricting it to 8-bit lives in our wrapper: frames are loaded with <code>cv2.IMREAD_COLOR</code> (which forces 8-bit) and divided by 255, and saved clamped to [0,1] as uint8. On CUDA it also runs at fp16, not float32. A 16-bit save path exists but is currently unused, and clamps to [0,1] regardless. Raising this to float32 linear would therefore be a change to two methods, not a patch against a vendored repo — the open question is behavioural rather than structural, since FILM was trained on display-referred images. It should tolerate linear light better than a restoration model would, because interpolation is mostly geometric — estimate motion, warp, blend — but this is untested.</p>
+
+                <p><strong>Bit depth is the smaller problem, though.</strong> Interpolation <em>changes the frame count</em>, and in a VFX sequence the beauty EXR has to stay in lockstep with its AOVs:</p>
+                <ul>
+                    <li><strong>Cryptomattes cannot be interpolated at all.</strong> They are object ID maps — a blend of two IDs is not a third object, it is a meaningless value</li>
+                    <li><strong>Depth</strong> blends across occlusion edges, producing surfaces that never existed</li>
+                    <li><strong>Normals</strong> need renormalising after any blend, and interpolated normals drift off the unit sphere</li>
+                </ul>
+                <p><strong>The fix is ordering, not precision.</strong> Interpolate the beauty first, then generate depth, normals and crypto <em>from the interpolated sequence</em>. Every layer then derives from the same frames, and crypto is regenerated by SAM2 on real images rather than blended. Interpolating after AOV generation desynchronises the sequence and silently corrupts the mattes — silently being the dangerous part, since a corrupted crypto matte still looks like a crypto matte.</p>
+
+                <p>There is no latent-space shortcut either, for a different reason than SeedVR2's: Wan's VAE is 4× temporally compressed, so latent frames are not video frames and interpolating them would interpolate groups of four.</p>
 
                 <h4>Practical Notes</h4>
                 <ul>
@@ -1220,7 +1320,7 @@
                 <h3>Upscale Tab</h3>
                 <ul>
                     <li><strong>Input</strong> — <a href="#media-input">Media Input</a>; accepts images, videos, or frame sequences</li>
-                    <li><strong>Method</strong> — upscaling model selector: Real-ESRGAN or Lanczos, for both stills and video</li>
+                    <li><strong>Method</strong> — upscaling model selector. Video offers SeedVR2 (temporal, the default), Real-ESRGAN and Lanczos; stills offer Real-ESRGAN and Lanczos. Choosing SeedVR2 reveals its quality, frame window, resolution cap and memory mode controls.</li>
                     <li><strong>Factor</strong> — scale multiplier: 2×, 4× or 8×</li>
                 </ul>
                 <p>The result preview shows a before/after comparison. For video, the comparison is shown at the current frame. See <a href="#upscaling">Upscaling</a> for available models.</p>
@@ -2165,11 +2265,11 @@
                         <tr><td>Normals</td><td>DA3-derived normals (Apache 2.0)</td><td>DSINE</td></tr>
                         <tr><td>Cryptomattes</td><td>SAM 2.1 (Apache 2.0)</td><td>—</td></tr>
                         <tr><td>3D reconstruction</td><td>TRELLIS (MIT)</td><td>VGGT</td></tr>
-                        <tr><td>Upscaling</td><td>Real-ESRGAN (BSD-3)</td><td>—</td></tr>
+                        <tr><td>Upscaling</td><td>Real-ESRGAN (BSD-3), SeedVR2 (Apache 2.0)</td><td>—</td></tr>
                         <tr><td>Interpolation</td><td>FILM (Apache 2.0)</td><td>—</td></tr>
                     </tbody>
                 </table>
-                <p>Everything else in the stack — DiffSynth-Studio, the Wan and Qwen weights, the DiffSynth LoRAs, SAM2, TRELLIS, FILM, Real-ESRGAN — is Apache 2.0, MIT, or BSD-3-Clause.</p>
+                <p>Everything else in the stack — DiffSynth-Studio, the Wan and Qwen weights, the DiffSynth LoRAs, SAM2, TRELLIS, FILM, Real-ESRGAN, SeedVR2 — is Apache 2.0, MIT, or BSD-3-Clause. SeedVR2 is clear for paid work on both counts: the engine code (<code>numz/ComfyUI-SeedVR2_VideoUpscaler</code>) and the weights (re-quantized from <code>ByteDance-Seed/SeedVR2-3B</code>) are both Apache 2.0.</p>
 
                 <h3>Unverified</h3>
                 <p>The <code>PAI/Wan2.2-VACE-Fun-A14B</code> and <code>PAI/Wan2.2-Fun-A14B-InP</code> repositories are gated on Hugging Face and could not be read without authentication. They are Alibaba PAI derivatives of Apache-2.0 Wan 2.2 and are expected to inherit those terms, but this has <strong>not been confirmed</strong>. Check the model card before relying on either for paid work.</p>

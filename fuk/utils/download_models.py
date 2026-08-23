@@ -157,6 +157,51 @@ def download_all_models(models_config: dict):
     return succeeded, failures
 
 
+def download_seedvr2(models_root: str):
+    """
+    Pre-fetch SeedVR2 video-restoration weights.
+
+    Returns the backend's result dict, or None when SeedVR2 is not installed —
+    it is an optional vendor dependency, and a missing engine is a reason to
+    skip quietly, not to fail a download run that otherwise succeeded.
+    """
+    print(f"\n\n{'#'*80}")
+    print("# Processing: SeedVR2 (video restoration)")
+    print(f"{'#'*80}")
+
+    # core/ is not on sys.path for this script; add it the same way the
+    # config search does, relative to this file.
+    fuk_dir = Path(__file__).resolve().parent.parent
+    if str(fuk_dir) not in sys.path:
+        sys.path.insert(0, str(fuk_dir))
+
+    try:
+        from core import seedvr2_backend
+    except ImportError as exc:
+        print(f"\n  (SeedVR2 backend unavailable: {exc} — skipping)")
+        return None
+
+    status = seedvr2_backend.availability()
+    if not status["available"]:
+        print(f"\n  (not installed: {', '.join(status['missing'])} — skipping)")
+        print(f"  {status['hint']}")
+        return None
+
+    # Honour models_root even if defaults.json was overridden on the command
+    # line: the backend reads config itself, so point it at the same place.
+    os.environ.setdefault("FUK_SEEDVR2_WEIGHTS", str(Path(models_root) / "seedvr2"))
+
+    try:
+        result = seedvr2_backend.download_weights()
+    except Exception as exc:
+        print(f"\n  ✗ SeedVR2 download failed: {exc}")
+        return None
+
+    if result["failed"]:
+        print(f"\n  ⚠ Could not fetch: {', '.join(result['failed'])}")
+    return result
+
+
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
@@ -246,12 +291,21 @@ def main():
     # Download all models
     succeeded, failures = download_all_models(models)
 
+    # SeedVR2 is not a DiffSynth pipeline and carries no models.json components,
+    # so the loop above cannot reach it. Fetch it here instead — otherwise the
+    # first video upscale stalls on a silent 3.4GB download.
+    seedvr2_result = download_seedvr2(models_root)
+
     # Summary
     print(f"\n\n{'='*80}")
     print("Download Complete!" if not failures else "Download Finished — With Failures")
     print(f"{'='*80}")
     print(f"Components downloaded: {succeeded}")
     print(f"Models location: {models_root}")
+    if seedvr2_result is not None:
+        fetched = len(seedvr2_result["fetched"])
+        total = fetched + len(seedvr2_result["failed"])
+        print(f"SeedVR2 variants ready: {fetched}/{total} in {seedvr2_result['weights_dir']}")
 
     if failures:
         print(f"\nFailed on every source ({len(failures)}):")

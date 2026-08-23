@@ -49,6 +49,7 @@ from file_browser_endpoints import setup_file_browser_routes
 from video_endpoints import setup_video_routes
 from core.diffsynth_backend import DiffSynthBackend
 from core.video_processor import VideoProcessor
+from core import seedvr2_backend
 # [LAYER STACK DISABLED] from layer_stack_endpoints import setup_layer_routes, initialize_layer_endpoints
 from lora_dataset_endpoints import setup_dataset_routes
 import json
@@ -706,6 +707,11 @@ class InterpolateRequest(BaseModel):
     source_fps: int = 16
     target_fps: int = 24
     model: str = "rife"
+    # "mp4", "sequence" or "both". A sequence skips the H.264 generation, which
+    # matters for anything continuing down the pipeline rather than being viewed.
+    output_mode: str = "mp4"
+    # 8 or 16, for the PNG sequence only.
+    bit_depth: int = 8
 
 class GenerationStatus(BaseModel):
     generation_id: str
@@ -2613,8 +2619,11 @@ async def interpolate_video(request: InterpolateRequest):
             source_fps=request.source_fps,
             target_fps=request.target_fps,
             model=request.model,
+            output_mode=request.output_mode,
+            bit_depth=request.bit_depth,
+            sequence_dir=gen_dir / f"interpolated_{request.target_fps}fps",
         )
-        
+
         # Extract thumbnail from interpolated video
         if output_path.exists():
             thumb_path = output_path.with_suffix('.thumb.jpg')
@@ -2634,6 +2643,11 @@ async def interpolate_video(request: InterpolateRequest):
                 "target_fps": request.target_fps,
                 "multiplier": result.get("multiplier", 0),
                 "method": result.get("method", "unknown"),
+                "output_mode": request.output_mode,
+                "bit_depth": result.get("bit_depth"),
+                "source_frames": result.get("source_frames"),
+                "interpolated_frames": result.get("interpolated_frames"),
+                "sequence_dir": result.get("sequence_dir"),
             },
         )
         
@@ -2671,8 +2685,42 @@ async def get_postprocess_capabilities():
 @app.get("/api/postprocess/models")
 async def get_postprocessor_models():
     """Get available post-processor models and their info"""
+    seedvr2 = seedvr2_backend.availability()
+
     return {
         "upscaling": {
+            "seedvr2": {
+                "name": "SeedVR2",
+                "description": "Temporal video restoration — upscales the sequence "
+                               "as a sequence, so it does not flicker like per-frame models",
+                "scales": [2, 4],
+                "video_only": True,
+                "available": seedvr2["available"],
+                "missing": seedvr2["missing"],
+                "hint": seedvr2["hint"],
+                "weights_dir": seedvr2["weights_dir"],
+                # Anything not yet downloaded is fetched on first use.
+                "downloaded": seedvr2["downloaded"],
+                "variants": {
+                    key: {
+                        "label": spec["label"],
+                        "family": spec["family"],
+                        "precision": spec["precision"],
+                    }
+                    for key, spec in seedvr2_backend.VARIANTS.items()
+                },
+                "memory_modes": ["auto"] + [r["name"] for r in seedvr2_backend.LADDER],
+                "parameters": {
+                    "variant": {"type": "enum", "default": seedvr2_backend.DEFAULT_VARIANT},
+                    # 4n+1 lattice; the backend snaps anything else.
+                    "frame_window": {"type": "int", "default": 5,
+                                     "options": [5, 9, 13, 17, 21]},
+                    "resolution_cap": {"type": "int", "default": 1920,
+                                       "options": [1280, 1920, 2560, 3840]},
+                    "memory_mode": {"type": "enum", "default": "auto"},
+                    "seed": {"type": "int", "default": 42},
+                }
+            },
             "realesrgan": {
                 "name": "Real-ESRGAN",
                 "description": "AI-based photo-realistic upscaling (per-frame on video)",
