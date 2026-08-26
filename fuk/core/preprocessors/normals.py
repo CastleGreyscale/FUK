@@ -140,8 +140,10 @@ class NormalsPreprocessor(BasePreprocessor):
         # DSINE-specific quality settings
         num_iter: int = 5,
         # Depth-derived settings
-        near_ratio: float = 0.5,
+        near_ratio: float = 0.10,
         edge_aware: bool = True,
+        denoise: float = 0.05,
+        edge_gamma: float = 0.05,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -167,6 +169,9 @@ class NormalsPreprocessor(BasePreprocessor):
             near_ratio: Depth-derived only. Near distance / scene depth span;
                         smaller = deeper scene = stronger relief.
             edge_aware: Depth-derived only. Suppress silhouette bevels.
+            denoise: Depth-derived only. Bilateral range sigma as a fraction of
+                     the depth span (default 0.05), removing the depth ringing
+                     that speckles subject outlines. 0 disables.
 
         Returns:
             Dict with output_path and metadata
@@ -184,6 +189,8 @@ class NormalsPreprocessor(BasePreprocessor):
                 fov_deg=fov_deg,
                 near_ratio=near_ratio,
                 edge_aware=edge_aware,
+                denoise=denoise,
+                edge_gamma=edge_gamma,
             )
         else:
             normals = self._normals_from_dsine(image, num_iter=num_iter, fov_deg=fov_deg)
@@ -212,6 +219,8 @@ class NormalsPreprocessor(BasePreprocessor):
             'fov_deg': fov_deg,
             'near_ratio': near_ratio,
             'edge_aware': edge_aware,
+            'denoise': denoise,
+            'edge_gamma': edge_gamma,
         }
         final_output = self._make_unique_path(output_path, params, exact_output=exact_output)
         cv2.imwrite(str(final_output), normals_bgr)
@@ -224,6 +233,44 @@ class NormalsPreprocessor(BasePreprocessor):
             "raw_normals": normals,  # float32 [-1, 1] for lossless EXR export
         }
     
+    @staticmethod
+    def _denoise_depth(z: np.ndarray, sigma: float, radius: int = 2) -> np.ndarray:
+        """
+        Bilateral filter on depth, to strip ringing without rounding silhouettes.
+
+        The normal formula multiplies depth gradients by the focal length, so at
+        1280px/60deg a slope of just 1/f = 0.0009 per pixel already tilts the
+        normal 45 degrees. Depth models are nowhere near that clean at an object
+        boundary: measured on a DA3 frame, depth deviates from its local median
+        by 0.00012 on open surfaces but 0.0079 within a few pixels of a
+        silhouette — sixty times noisier, and nine times past the point of
+        saturating the normal. That ringing, not the depth step itself, is what
+        renders as the speckled outline traced around every subject. It flips
+        sign pixel to pixel as the sub-pixel edge position wanders along the
+        contour, so it reads as dithered noise rather than as shading.
+
+        Ringing and real geometry are far enough apart in amplitude that
+        separating them is easy: the ringing sits near 0.008 while the depth
+        step across the silhouette is ~0.5, so a range sigma anywhere in the
+        middle keeps the cliff intact and flattens the wobble around it. The
+        step comes out sharper than before, not softer, because the overshoot
+        that used to straddle it is gone.
+
+        Args:
+            z:      depth, near = small
+            sigma:  range sigma as a fraction of the scene's depth span.
+                    Percentile span, not min/max — for a metric model one sky
+                    pixel at 1000m would otherwise set the scale for everything.
+            radius: spatial sigma in pixels; matches the gradient stencil so the
+                    filter cleans exactly the support the gradient will read.
+        """
+        span = float(np.percentile(z, 99) - np.percentile(z, 1))
+        if span <= 0 or sigma <= 0:
+            return z
+        return cv2.bilateralFilter(
+            np.ascontiguousarray(z, dtype=np.float32), -1, sigma * span, float(radius)
+        )
+
     @staticmethod
     def _one_sided_gradients(z: np.ndarray, radius: int = 2):
         """
@@ -266,9 +313,11 @@ class NormalsPreprocessor(BasePreprocessor):
         image_path: Path,
         intensity: float = 1.0,
         fov_deg: float = 60.0,
-        near_ratio: float = 0.5,
+        near_ratio: float = 0.10,
         edge_aware: bool = True,
         radius: int = 2,
+        denoise: float = 0.05,
+        edge_gamma: float = 0.05,
     ) -> np.ndarray:
         """
         Compute normals by unprojecting depth into camera space.
@@ -298,14 +347,20 @@ class NormalsPreprocessor(BasePreprocessor):
             intensity: Strength multiplier on X/Y, applied after normalisation.
                        1.0 is physically correct; higher exaggerates relief.
             fov_deg: Assumed camera field-of-view in degrees, sets focal length
-            near_ratio: Near-plane distance divided by scene depth span. Relative
-                        depth models fix geometry only up to this one ratio —
-                        smaller = deeper scene = stronger relief. Ignored for
-                        metric models, which supply a real Z.
+            near_ratio: Near-plane distance divided by scene depth span. Only
+                        used by scale-and-shift ambiguous models (MiDaS, DAv2),
+                        which fix geometry up to this one ratio — smaller =
+                        deeper scene = stronger relief. Ignored by the DA3
+                        family, whose depth is shift-free and needs no guess.
             edge_aware: Use min-magnitude one-sided differences instead of Sobel,
                         which stops silhouettes smearing into false bevels.
             radius: Gradient stencil radius in pixels (edge_aware only). Larger
                     suppresses depth-model noise at the cost of fine detail.
+            denoise: Bilateral range sigma as a fraction of the scene depth
+                     span, applied before differentiating. Removes the depth
+                     ringing that draws speckled outlines around subjects.
+                     0 disables it; above ~0.1 genuine shallow relief starts
+                     flattening into the silhouette.
 
         Returns:
             Normal map as float32 array in [-1, 1] range, shape (H, W, 3)
@@ -314,6 +369,9 @@ class NormalsPreprocessor(BasePreprocessor):
 
         depth, is_metric = self._depth_processor.get_depth_z(image_path)
         h, w = depth.shape[:2]
+
+        if denoise > 0:
+            depth = self._denoise_depth(depth, sigma=denoise, radius=radius)
 
         f = (max(h, w) / 2.0) / math.tan(math.radians(fov_deg / 2.0))
         cx, cy = w / 2.0 - 0.5, h / 2.0 - 0.5
@@ -326,10 +384,49 @@ class NormalsPreprocessor(BasePreprocessor):
             z_u = cv2.Sobel(depth, cv2.CV_32F, 1, 0, ksize=3) / 8.0
             z_v = cv2.Sobel(depth, cv2.CV_32F, 0, 1, ksize=3) / 8.0
 
-        # Relative depth is defined up to Z = z0 + s*d. Dividing the closed form
-        # through by s leaves a single free parameter, z0/s = near_ratio, so the
-        # normalised depth can be used directly with that offset added.
+        # Width of the corrupted band either side of an occlusion boundary.
+        # Measured on a 960x576 DA3 frame, depth ringing runs 9-12x the slope
+        # that fully saturates a normal at 0-2px from the silhouette, 3.9x at
+        # 3px, and reaches the open-surface noise floor by 5px. Tied to the
+        # gradient stencil so it scales together if radius is raised for
+        # larger frames.
+        edge_band = max(3, int(round(2.5 * radius)))
+
+        # Relative depth arrives as [0, 1] where 0 is the NEAREST surface in
+        # frame, not the camera. Used as Z that puts the closest subject at
+        # zero distance, which is where the formula degenerates: the +Z term
+        # that keeps a normal pointing at the camera vanishes, the perspective
+        # term takes over unopposed, and the foreground shatters into saturated
+        # noise while the background — far from zero — still looks right.
+        #
+        # near_ratio restores the near plane. Formally it is z0/s for
+        # Z = z0 + s*d, which divides out of the formula leaving one free
+        # parameter; in practice it reads as a relief control, since a model's
+        # relative depth is not linear enough in true depth for a physically
+        # derived value to be worth computing.
         z = depth if is_metric else depth + near_ratio
+
+        # Reach the gradient stencil past the ringing where a boundary was
+        # detected. The min-magnitude rule already prefers whichever side stays
+        # on the surface; the only problem is that within the band BOTH sides
+        # are corrupted, so the choice is between two wrong answers. A stencil
+        # that lands outside the band gets a clean surface slope instead, and
+        # picking per-pixel keeps the tight stencil — and its fine detail —
+        # everywhere else.
+        band = None
+        if edge_gamma > 0 and edge_aware:
+            band = (np.abs(z_u) > edge_gamma * np.abs(z)) | \
+                   (np.abs(z_v) > edge_gamma * np.abs(z))
+            band = cv2.dilate(
+                band.astype(np.uint8),
+                np.ones((2 * edge_band + 1, 2 * edge_band + 1), np.uint8),
+            ) > 0
+            if band.any():
+                z_u_far, z_v_far = self._one_sided_gradients(
+                    depth, radius=radius + 2 * edge_band
+                )
+                z_u = np.where(band, z_u_far, z_u)
+                z_v = np.where(band, z_v_far, z_v)
 
         u = np.arange(w, dtype=np.float32)[None, :] - cx
         v = np.arange(h, dtype=np.float32)[:, None] - cy
@@ -340,6 +437,23 @@ class NormalsPreprocessor(BasePreprocessor):
         normals[:, :, 2] = u * z_u + v * z_v + z
 
         normals /= np.sqrt((normals ** 2).sum(axis=2, keepdims=True)) + 1e-8
+
+        if band is not None and band.any():
+            # What remains inside the band is sign-flipping pixel to pixel as
+            # the sub-pixel edge position wanders along the contour, which reads
+            # as a dithered chain of beads rather than as shading. Averaging the
+            # normals along the contour turns it back into a coherent rounded
+            # edge, which is what a silhouette should look like anyway.
+            #
+            # Averaging DIRECTIONS, though — blurring each channel independently
+            # and renormalising is the spherical mean, which stays on the unit
+            # sphere. A per-channel median does not: it takes x, y and z from
+            # three different pixels and can return a direction present nowhere
+            # in the window. It is also capped at a 5x5 kernel for float32,
+            # which cannot reach past a band this wide.
+            smoothed = cv2.GaussianBlur(normals, (0, 0), edge_band / 2.0)
+            smoothed /= np.sqrt((smoothed ** 2).sum(axis=2, keepdims=True)) + 1e-8
+            normals = np.where(band[:, :, None], smoothed, normals)
 
         if intensity != 1.0:
             normals[:, :, :2] *= intensity
@@ -418,6 +532,22 @@ class NormalsPreprocessor(BasePreprocessor):
             pred = pred[:, :, t:t + h, l:l + w]                      # unpad
 
         normals = pred[0].permute(1, 2, 0).cpu().numpy()  # (H, W, 3)
+
+        # DSINE emits the AWAY-from-camera normal in camera coords (X right,
+        # Y down, Z into scene). Its own training targets are built that way:
+        # utils/d2n/plane_svd.py ends with
+        #     flip = sign(sum(normal * points)); normal = normal * flip
+        # which forces normal . P > 0, and RayReLU likewise holds the component
+        # along the view ray positive.
+        #
+        # A normal map wants the toward-camera normal with Z out of the screen,
+        # so T = -A and D = (T_x, T_y, -T_z) = (-A_x, -A_y, A_z). Without this
+        # the DSINE output is rotated 180 degrees in the image plane against
+        # both the depth-derived path and every other normal map in a comp:
+        # measured over 5 frames of real footage, applying it drops the
+        # disagreement between the two methods from 115 deg to 45 deg.
+        normals[:, :, 0] = -normals[:, :, 0]
+        normals[:, :, 1] = -normals[:, :, 1]
         return normals.astype(np.float32)
     
     def get_raw_normals(
@@ -426,8 +556,10 @@ class NormalsPreprocessor(BasePreprocessor):
         intensity: float = 1.0,
         num_iter: int = 5,
         fov_deg: float = 60.0,
-        near_ratio: float = 0.5,
+        near_ratio: float = 0.10,
         edge_aware: bool = True,
+        denoise: float = 0.05,
+        edge_gamma: float = 0.05,
     ) -> np.ndarray:
         """
         Get raw normal vectors (for EXR export, etc.)
@@ -445,6 +577,8 @@ class NormalsPreprocessor(BasePreprocessor):
                 fov_deg=fov_deg,
                 near_ratio=near_ratio,
                 edge_aware=edge_aware,
+                denoise=denoise,
+                edge_gamma=edge_gamma,
             )
         else:
             return self._normals_from_dsine(image, num_iter=num_iter, fov_deg=fov_deg)

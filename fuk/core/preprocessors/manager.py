@@ -312,6 +312,8 @@ class PreprocessorManager:
         intensity: Optional[float] = None,
         fov_deg: Optional[float] = None,
         near_ratio: Optional[float] = None,
+        denoise: Optional[float] = None,
+        edge_gamma: Optional[float] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -328,6 +330,12 @@ class PreprocessorManager:
             intensity: Relief strength (affects depth-derived; 1.0 = physical)
             fov_deg: Assumed camera FOV in degrees, used by both methods
             near_ratio: Near distance / scene depth span (depth-derived only)
+            edge_gamma: Relative depth jump treated as an occlusion boundary,
+                        whose normals are median-filtered from neighbours
+                        (depth-derived only). 0 disables.
+            denoise: Depth bilateral range sigma as a fraction of the depth
+                     span (depth-derived only). Suppresses the depth ringing
+                     that speckles subject outlines; 0 disables.
         """
         # Apply defaults
         normals_defaults = self._defaults.get("normals", {})
@@ -354,7 +362,9 @@ class PreprocessorManager:
         flip_x = flip_x if flip_x is not None else normals_defaults.get("flip_x", False)
         intensity = intensity if intensity is not None else normals_defaults.get("intensity", 1.0)
         fov_deg = fov_deg if fov_deg is not None else normals_defaults.get("fov_deg", 60.0)
-        near_ratio = near_ratio if near_ratio is not None else normals_defaults.get("near_ratio", 0.5)
+        near_ratio = near_ratio if near_ratio is not None else normals_defaults.get("near_ratio", 0.10)
+        denoise = denoise if denoise is not None else normals_defaults.get("denoise", 0.05)
+        edge_gamma = edge_gamma if edge_gamma is not None else normals_defaults.get("edge_gamma", 0.05)
 
         cache_key = f"{method.value}_{depth_model.value}"
         
@@ -377,6 +387,8 @@ class PreprocessorManager:
             intensity=intensity,
             fov_deg=fov_deg,
             near_ratio=near_ratio,
+            denoise=denoise,
+            edge_gamma=edge_gamma,
             **kwargs
         )
 

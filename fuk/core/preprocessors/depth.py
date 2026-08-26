@@ -64,9 +64,19 @@ DISPARITY_MODELS = {
     DepthModel.DEPTH_ANYTHING_V2,
 }
 
-# Models that return absolute metric depth (metres) rather than relative depth.
+# Models that return absolute depth in metres, usable as Z with no further
+# assumption. Everything else — including the DA3 mono/large/giant series — is
+# relative, and needs a near-plane offset before it means anything geometrically.
+#
+# Do NOT extend this set from documentation alone. DA3's README says the mono
+# series "directly predicts depth" rather than disparity, which is true and yet
+# does not make the output usable as Z: measured on real footage its near plane
+# lands at ~0 (a 960x576 theatre frame returned -0.515 .. 4.162, with the
+# foreground subject spanning -0.068 .. 0.167). Z~0 on the nearest subject is
+# the worst case for the normal formula — the stabilising +Z term vanishes,
+# the perspective term takes over, and the closest thing in frame, the one the
+# eye goes to first, is exactly what falls apart.
 METRIC_MODELS = {
-    DepthModel.DA3_METRIC_LARGE,
     DepthModel.ZOEDEPTH,
 }
 
@@ -1135,13 +1145,20 @@ class DepthPreprocessor(BasePreprocessor):
         min-max normalises and hands back whatever orientation the model
         happened to use, so DA3 comes out near=0 while MiDaS/DAv2 come out
         near=1; consuming that as if it were Z silently inverts the geometry on
-        half the model list. Here disparity models are reciprocated back to
-        depth first, so every model returns the same convention.
+        half the model list.
+
+        Relative models are rescaled to [0, 1] against ROBUST percentiles rather
+        than min/max. A single blown highlight or a sliver of negative depth on
+        a silhouette would otherwise set the scale for the whole frame, and the
+        subject that matters is usually the one crushed by it.
 
         Returns:
             (depth, is_metric)
-            is_metric=True  - depth is absolute, in metres
-            is_metric=False - depth is relative, rescaled to [0, 1], 0 = nearest
+            is_metric=True  - absolute metres, usable as Z directly
+            is_metric=False - relative, rescaled to [0, 1] with 0 = nearest; the
+                              caller must add a near-plane offset before using
+                              it as Z, because 0 means "nearest thing in frame",
+                              not "at the camera"
         """
         self._ensure_initialized()
 
@@ -1150,19 +1167,19 @@ class DepthPreprocessor(BasePreprocessor):
 
         raw = self._infer_depth(image_rgb, str(image_path)).astype(np.float32)
 
-        if self.model_type in METRIC_MODELS:
+        if self.model_type in METRIC_MODELS and raw.min() > 0:
             return raw, True
 
         if self.model_type in DISPARITY_MODELS:
-            # Disparity -> depth. Normalise first (1 = nearest), then
-            # reciprocate across the assumed near/far ratio.
+            # Scale-and-shift-invariant disparity: the shift is genuinely
+            # unrecoverable, so reciprocating across an assumed near/far ratio
+            # is the best available reconstruction.
             disp = (raw - raw.min()) / (raw.max() - raw.min() + 1e-8)
             raw = 1.0 / (disp * (1.0 - DISPARITY_FAR_RATIO) + DISPARITY_FAR_RATIO)
 
-        # Relative depth: only the shape matters, so rescale to [0, 1].
-        # The consumer supplies the missing near-distance/depth-span ratio.
-        z = (raw - raw.min()) / (raw.max() - raw.min() + 1e-8)
-        return z.astype(np.float32), False
+        lo, hi = np.percentile(raw, 0.5), np.percentile(raw, 99.5)
+        z = (raw - lo) / (hi - lo + 1e-8)
+        return np.clip(z, -0.1, 1.1).astype(np.float32), False
 
     # ========================================================================
     # Utilities
