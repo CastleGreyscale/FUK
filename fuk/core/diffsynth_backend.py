@@ -1039,6 +1039,34 @@ class DiffSynthBackend:
         _log("BACKEND", f"Latent tensor saved: {output_path} (shape: {latent.shape})")
         return output_path
 
+    # Where the video latent gets decoded, per pipeline family. Both halves
+    # matter: the attribute differs (vae / video_vae / video_vae_decoder) and so
+    # does the method — MiniMax's pipeline calls decode_video(), not decode(),
+    # so hooking `decode` there would install cleanly and then never fire.
+    # Ordered most-specific first; `vae` is last because it is the generic name.
+    _VIDEO_DECODER_CANDIDATES = (
+        ("video_vae", "decode_video"),        # MiniMax-H3
+        ("video_vae_decoder", "decode"),      # LTX-2
+        ("vae", "decode"),                    # Qwen, Wan, FLUX.2
+    )
+
+    def _resolve_video_decoder(self, pipe):
+        """Find (decoder_module, method_name) for the pipeline's video decode.
+
+        Returns None when the pipeline exposes none of them — audio-only or
+        future families — so latent capture can be skipped rather than raising
+        mid-generation. getattr is guarded because these are nn.Modules, whose
+        __getattr__ raises AttributeError rather than returning None.
+        """
+        for attr, method in self._VIDEO_DECODER_CANDIDATES:
+            try:
+                decoder = getattr(pipe, attr, None)
+            except AttributeError:
+                continue
+            if decoder is not None and callable(getattr(decoder, method, None)):
+                return decoder, method
+        return None
+
     def _capture_latent_hook(self, pipe, save_path: Path):
         """
         Install a hook to capture latent before VAE decode.
@@ -1054,9 +1082,22 @@ class DiffSynthBackend:
         Returns:
             Function to remove the hook and save latent
         """
-        original_decode = pipe.vae.decode
+        target = self._resolve_video_decoder(pipe)
+        if target is None:
+            _log("BACKEND",
+                 f"No video decoder found on {type(pipe).__name__} — "
+                 f"skipping latent capture", "warning")
+            return lambda: None
+        decoder, method_name = target
+
+        original_decode = getattr(decoder, method_name)
+        # Whether the decoder already had its own attribute, or was inheriting
+        # the method from its class. Restoring by assignment either way would
+        # leave a bound method sitting on the instance, shadowing the class
+        # method and holding a reference cycle back to the instance.
+        had_own_attr = method_name in decoder.__dict__
         captured = {}  # Will hold {'latent': cpu_tensor, ...} after first decode
-        
+
         def hooked_decode(latent, *args, **kwargs):
             if not captured:  # Only capture once
                 # non_blocking=True overlaps the PCIe transfer with decode
@@ -1068,13 +1109,19 @@ class DiffSynthBackend:
                 captured['shape'] = list(latent.shape)
                 captured['dtype'] = str(latent.dtype)
             return original_decode(latent, *args, **kwargs)
-        
+
         # Install hook
-        pipe.vae.decode = hooked_decode
-        
+        setattr(decoder, method_name, hooked_decode)
+
         # Return cleanup function — saves to disk AFTER generation
         def cleanup():
-            pipe.vae.decode = original_decode
+            if had_own_attr:
+                setattr(decoder, method_name, original_decode)
+            else:
+                try:
+                    delattr(decoder, method_name)   # fall back to the class method
+                except AttributeError:
+                    setattr(decoder, method_name, original_decode)
             if captured:
                 _t0 = time.perf_counter()
                 # Synchronize to ensure non-blocking copy completed
@@ -1135,14 +1182,24 @@ class DiffSynthBackend:
         # Get pipeline for its VAE
         pipe = self.get_pipeline(model_type)
         
-        # Move to GPU and decode
-        device = next(pipe.vae.parameters()).device
+        # Move to GPU and decode. Resolved rather than assuming `pipe.vae`,
+        # because the audio-video families name theirs differently — and say so
+        # plainly instead of surfacing a bare AttributeError from deep in the
+        # pipeline object.
+        target = self._resolve_video_decoder(pipe)
+        if target is None:
+            raise RuntimeError(
+                f"'{model_type}' exposes no video decoder this path recognises, "
+                f"so its latents cannot be decoded here."
+            )
+        decoder, method_name = target
+        device = next(decoder.parameters()).device
         latent = latent.to(device)
-        
-        _log("BACKEND", f"Decoding latent with {model_type} VAE...")
-        
+
+        _log("BACKEND", f"Decoding latent with {model_type} VAE ({method_name})...")
+
         with torch.no_grad():
-            decoded = pipe.vae.decode(latent)
+            decoded = getattr(decoder, method_name)(latent)
         
         # Save based on output format
         if output_path.suffix.lower() in ['.png', '.jpg', '.jpeg']:
