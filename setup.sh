@@ -625,7 +625,7 @@ cat > fuk/config/models.json.template << 'EOL'
     "category": "image",
     "description": "FLUX.2-dev multi-image editing",
     "aliases": ["flux2", "flux2-dev"],
-    "supports": ["edit_image", "negative_prompt"],
+    "supports": ["edit_image", "inpaint", "negative_prompt"],
     "parameter_map": {
       "edit_targets": "edit_image"
     },
@@ -643,7 +643,7 @@ cat > fuk/config/models.json.template << 'EOL'
     "category": "image",
     "description": "FLUX.2-klein 4B — small, fast FLUX.2; Apache-2.0 so it is the commercially usable one",
     "aliases": ["klein", "klein-4b", "flux2-klein"],
-    "supports": ["edit_image", "negative_prompt"],
+    "supports": ["edit_image", "inpaint", "negative_prompt"],
     "parameter_map": {
       "edit_targets": "edit_image"
     },

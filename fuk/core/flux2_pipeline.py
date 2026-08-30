@@ -47,6 +47,13 @@ class Flux2PipelineRunner(PipelineRunner):
         loras: Optional[List[Dict[str, Any]]] = None,
         # Edit inputs (multiple images, same as Qwen edit)
         control_image: Optional[Union[Path, List[Path]]] = None,
+        # Inpainting. Distinct from edit_image: input_image is the picture being
+        # repainted and supplies the latents the mask blends against, where
+        # edit_image is reference material. Both can be present.
+        input_image: Optional[Path] = None,
+        mask_path: Optional[Path] = None,
+        inpaint_blur_size: Optional[int] = None,
+        inpaint_blur_sigma: Optional[float] = None,
         # VRAM
         vram_preset: Optional[str] = None,
         # Misc
@@ -143,6 +150,28 @@ class Flux2PipelineRunner(PipelineRunner):
         # We pre-resize images ourselves, so disable FLUX.2's internal auto-resize
         if "edit_image" in pipe_kwargs:
             pipe_kwargs["edit_image_auto_resize"] = False
+
+        # Inpainting. The mask is resized to the latent grid by the pipeline's
+        # own unit, but the base image is loaded at the target size here so its
+        # latents line up with the noise.
+        if "inpaint" in supports and input_image:
+            base = self.load_image(input_image, width=width, height=height)
+            if base is not None:
+                pipe_kwargs["input_image"] = base
+            mask = self.load_image(mask_path, width=width, height=height) if mask_path else None
+            if mask is not None:
+                pipe_kwargs["inpaint_mask"] = mask
+                if inpaint_blur_size is not None:
+                    pipe_kwargs["inpaint_blur_size"] = inpaint_blur_size
+                if inpaint_blur_sigma is not None:
+                    pipe_kwargs["inpaint_blur_sigma"] = inpaint_blur_sigma
+                _log(self.log_prefix,
+                     f"  Inpaint → mask {mask.size}"
+                     + (f", blur {inpaint_blur_size}/{inpaint_blur_sigma}"
+                        if inpaint_blur_size else ""))
+            elif mask_path:
+                _log(self.log_prefix,
+                     f"Inpaint mask could not be loaded: {mask_path}", "warning")
 
         # Merge pipeline_kwargs from models.json
         pipe_kwargs.update(pipe_defaults)
