@@ -637,6 +637,26 @@ cat > fuk/config/models.json.template << 'EOL'
     "tokenizer": {"pattern": "tokenizer/"}
   },
 
+  "flux2_klein_4b": {
+    "model_id": "black-forest-labs/FLUX.2-klein-4B",
+    "pipeline": "flux2",
+    "category": "image",
+    "description": "FLUX.2-klein 4B — small, fast FLUX.2; Apache-2.0 so it is the commercially usable one",
+    "aliases": ["klein", "klein-4b", "flux2-klein"],
+    "supports": ["edit_image", "negative_prompt"],
+    "parameter_map": {
+      "edit_targets": "edit_image"
+    },
+    "components": [
+      {"pattern": "text_encoder/*.safetensors"},
+      {"pattern": "transformer/*.safetensors"},
+      {"pattern": "vae/diffusion_pytorch_model.safetensors"}
+    ],
+    "tokenizer": {"pattern": "tokenizer/"}
+  },
+
+  "_klein_comment": "Klein reuses Flux2ImagePipeline — no runner needed. It differs from FLUX.2-dev in its text encoder: klein carries a Qwen3 encoder (loaded as z_image_text_encoder) rather than dev's Mistral3, and flux2_image.py branches on that to pick AutoTokenizer over AutoProcessor. All three klein-4B components are already registered in DiffSynth 2.1.5, so this entry needs no vendor patch. FLUX.2-klein-9B is deliberately absent: it is gated on HuggingFace and ships under a non-Apache 'other' licence, so it needs a licence review before use on paid work. Its DiffSynth entries exist upstream if you add it.",
+
   "_threed_comment": "3D reconstruction models. Not DiffSynth pipelines — they load from their own vendored repos (see docs/3D_RECONSTRUCTION_SYSTEM.md). Entries stay flat like every other model so resolve_model_type/aliases keep working; the 'threed' pipeline value is what groups them.",
 
   "trellis": {
