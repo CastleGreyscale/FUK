@@ -9,6 +9,7 @@ import Footer from '../components/Footer';
 import LoraDatasetBuilder from './LoraDatasetBuilder';
 import ImageDescribeTool from './ImageDescribeTool';
 import ThreeDReconstruct from './ThreeDReconstruct';
+import ModelManager from './ModelManager';
 
 // ============================================================================
 // Helpers
@@ -537,6 +538,7 @@ function SpecTool({ config }) {
 // ============================================================================
 
 const SUB_TABS = [
+  { key: 'models', label: 'Models' },
   { key: 'spec', label: 'Spec Tool' },
   { key: 'lora', label: 'LoRA Dataset Builder' },
   { key: 'describe', label: 'Describe & Tag' },
@@ -566,6 +568,7 @@ export default function UtilitiesTab({ activeTab, setActiveTab, config, project 
 
       {/* Sub-tab content */}
       <div className="utilities-subtab-content">
+        {subTab === 'models' && <ModelManager />}
         {subTab === 'spec' && <SpecTool config={config} />}
         {subTab === 'lora' && <LoraDatasetBuilder config={config} />}
         {subTab === 'describe' && <ImageDescribeTool />}

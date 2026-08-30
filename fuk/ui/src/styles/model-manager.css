@@ -1,0 +1,277 @@
+/* ===========================================================================
+   Model Manager — Utilities → Models
+
+   Status colours reuse the shared success/error tokens so a green row here
+   means the same thing as a green row anywhere else in the app.
+   =========================================================================== */
+
+.mm-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding-bottom: 1.5rem;
+}
+
+/* Icons in this panel carry no intrinsic size — same constraint threed.css
+   works around. Anything not inside a button gets sized here. */
+.mm-panel :not(.fuk-btn) > svg:not([class*="fuk-icon--"]) {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.mm-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.mm-sub {
+  font-size: var(--font-size-sm);
+  color: var(--color-gray-400);
+  margin-top: 0.15rem;
+}
+
+.mm-sub--card {
+  margin-bottom: 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.mm-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.mm-loading,
+.mm-error {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: var(--font-size-sm);
+  padding: 0.75rem;
+}
+
+.mm-error {
+  color: var(--color-error-400);
+  border: var(--border-width) solid var(--color-error-600);
+  border-radius: var(--radius-md);
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.mm-spin { animation: spin 1s linear infinite; }
+
+/* --- Tools ---------------------------------------------------------------- */
+
+.mm-tools {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 0.5rem;
+}
+
+.mm-tool {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.55rem 0.65rem;
+  border: var(--border-width) solid var(--color-gray-700);
+  border-radius: var(--radius-md);
+  background: var(--color-gray-900);
+}
+
+.mm-tool--ok  { border-left: 3px solid var(--color-success-500); }
+.mm-tool--bad { border-left: 3px solid var(--color-error-500); }
+
+.mm-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  margin-top: 0.35rem;
+  flex-shrink: 0;
+}
+
+.mm-dot--ok  { background: var(--color-success-500); }
+.mm-dot--bad { background: var(--color-error-500); }
+
+.mm-tool-body { min-width: 0; flex: 1; }
+
+.mm-tool-head {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  justify-content: space-between;
+}
+
+.mm-tool-name {
+  font-size: var(--font-size-base);
+  font-weight: 600;
+}
+
+.mm-tool-desc,
+.mm-tool-detail,
+.mm-tool-missing {
+  font-size: var(--font-size-sm);
+  line-height: 1.35;
+}
+
+.mm-tool-desc    { color: var(--color-gray-400); margin-top: 0.15rem; }
+.mm-tool-detail  { color: var(--color-success-400); margin-top: 0.2rem; }
+.mm-tool-missing { color: var(--color-error-400);   margin-top: 0.2rem; }
+.mm-tool-missing code {
+  background: var(--color-gray-800);
+  padding: 0.05rem 0.3rem;
+  border-radius: var(--radius-sm);
+}
+
+.mm-link { color: var(--color-gray-500); display: inline-flex; }
+.mm-link:hover { color: var(--color-primary-400); }
+
+/* --- Models --------------------------------------------------------------- */
+
+.mm-models { display: flex; flex-direction: column; gap: 0.35rem; }
+
+.mm-model {
+  border: var(--border-width) solid var(--color-gray-700);
+  border-radius: var(--radius-md);
+  background: var(--color-gray-900);
+  padding: 0.55rem 0.65rem;
+}
+
+/* Unregistered: visibly dimmed, but still fully operable — turning one back on
+   must never require hunting for it. */
+.mm-model--off { opacity: 0.55; }
+
+.mm-model-main { display: flex; align-items: flex-start; gap: 0.6rem; }
+.mm-check { display: flex; align-items: center; padding-top: 0.15rem; }
+.mm-model-body { flex: 1; min-width: 0; }
+
+.mm-model-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.mm-model-name {
+  font-size: var(--font-size-base);
+  font-weight: 600;
+  font-family: ui-monospace, monospace;
+}
+
+.mm-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: var(--font-size-xs);
+  padding: 0.1rem 0.4rem;
+  border-radius: var(--radius-full);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.mm-state--complete { color: var(--color-success-400); background: rgba(34, 197, 94, 0.12); }
+.mm-state--partial  { color: var(--color-warning-400); background: rgba(245, 158, 11, 0.12); }
+.mm-state--missing  { color: var(--color-gray-400);    background: var(--color-gray-800); }
+.mm-state--na       { color: var(--color-info-400);    background: rgba(59, 130, 246, 0.12); }
+
+.mm-size {
+  font-size: var(--font-size-xs);
+  color: var(--color-gray-500);
+}
+
+.mm-model-desc {
+  font-size: var(--font-size-sm);
+  color: var(--color-gray-400);
+  margin-top: 0.15rem;
+  line-height: 1.35;
+}
+
+.mm-model-missing {
+  font-size: var(--font-size-sm);
+  color: var(--color-warning-400);
+  margin-top: 0.25rem;
+}
+
+.mm-dl { flex-shrink: 0; white-space: nowrap; }
+
+/* --- Progress ------------------------------------------------------------- */
+
+.mm-progress {
+  position: relative;
+  height: 18px;
+  margin-top: 0.35rem;
+  border-radius: var(--radius-sm);
+  background: var(--color-gray-800);
+  overflow: hidden;
+}
+
+.mm-progress-bar {
+  height: 100%;
+  background: var(--color-primary-600);
+  transition: width 0.3s ease;
+}
+
+.mm-progress-text {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 0.4rem;
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* --- Disclosure ----------------------------------------------------------- */
+
+.mm-disclose {
+  background: none;
+  border: none;
+  padding: 0.2rem 0;
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  color: var(--color-primary-400);
+}
+
+.mm-disclose:hover { text-decoration: underline; }
+
+.mm-detail {
+  margin-top: 0.35rem;
+  padding: 0.5rem;
+  border-radius: var(--radius-sm);
+  background: var(--color-gray-800);
+  font-size: var(--font-size-sm);
+}
+
+.mm-repo { margin-bottom: 0.45rem; }
+.mm-repo-id { font-weight: 600; font-family: ui-monospace, monospace; }
+.mm-repo-links { display: flex; gap: 0.6rem; margin: 0.15rem 0; }
+.mm-repo-links a { color: var(--color-primary-400); }
+
+.mm-path {
+  display: block;
+  color: var(--color-gray-400);
+  word-break: break-all;
+}
+
+.mm-parts { width: 100%; border-collapse: collapse; margin-top: 0.35rem; }
+.mm-parts td { padding: 0.12rem 0.35rem 0.12rem 0; vertical-align: top; }
+.mm-parts td:first-child { width: 1rem; color: var(--color-success-400); }
+.mm-parts code { color: var(--color-gray-400); word-break: break-all; }
+.mm-part--missing td:first-child { color: var(--color-gray-600); }
+
+.mm-footnote {
+  font-size: var(--font-size-sm);
+  color: var(--color-gray-500);
+  line-height: 1.4;
+}
+
+.mm-footnote code,
+.mm-sub code {
+  background: var(--color-gray-800);
+  padding: 0.05rem 0.3rem;
+  border-radius: var(--radius-sm);
+}

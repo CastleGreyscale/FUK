@@ -1831,8 +1831,19 @@ async def get_models():
     image_models = []
     video_models = []
 
+    # Which pipeline families land in which dropdown. ltx2 and minimax_h3 both
+    # generate video with a synchronized soundtrack, so they belong with the
+    # video models; threed has its own UI and is deliberately absent.
+    IMAGE_PIPELINES = ("qwen", "flux2")
+    VIDEO_PIPELINES = ("wan", "ltx2", "minimax_h3")
+
     for key, entry in config.items():
         if key.startswith("_") or not isinstance(entry, dict) or "pipeline" not in entry:
+            continue
+
+        # Unregistered by the Utilities → Models panel. Absent means enabled,
+        # so registries written before that panel existed keep working.
+        if not entry.get("enabled", True):
             continue
 
         model_info = {
@@ -1843,15 +1854,21 @@ async def get_models():
             "aliases": entry.get("aliases", []),
         }
 
-        if entry["pipeline"] in ("qwen", "flux2"):
+        if entry["pipeline"] in IMAGE_PIPELINES:
             image_models.append(model_info)
-        elif entry["pipeline"] == "wan":
+        elif entry["pipeline"] in VIDEO_PIPELINES:
             video_models.append(model_info)
 
     # VRAM presets
     vram_section = defaults_vram.get("vram", {})
     vram_presets = []
     for key, preset in vram_section.get("presets", {}).items():
+        # Comment keys sit alongside the presets they describe, following the
+        # same leading-underscore convention as models.json. Skipping them by
+        # shape as well as by name keeps one stray string from 500-ing the
+        # whole endpoint and emptying every model dropdown.
+        if key.startswith("_") or not isinstance(preset, dict):
+            continue
         vram_presets.append({
             "key": key,
             "label": preset.get("label", key),
@@ -4081,6 +4098,15 @@ setup_threed_routes(
     active_generations=active_generations,
     clear_vram=clear_vram,
     datasets_root=OUTPUT_ROOT / "lora_datasets",
+    log=log,
+)
+
+from model_manager_endpoints import setup_model_manager_routes
+
+setup_model_manager_routes(
+    app,
+    config_dir=CONFIG_DIR,
+    generation_backend=generation_backend,
     log=log,
 )
 

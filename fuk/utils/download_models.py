@@ -53,9 +53,15 @@ def preferred_source() -> str:
     return "modelscope"
 
 
-def download_model_component(model_id: str, pattern: str, component_name: str = None):
+def download_model_component(model_id: str, pattern: str, component_name: str = None,
+                             prefer: str = None):
     """
     Download one component, trying the preferred source then the other.
+
+    `prefer` overrides the source order for this call. The Models panel passes
+    it explicitly rather than setting DIFFSYNTH_DOWNLOAD_SOURCE, because that
+    env var is process-global and the panel downloads on a worker thread while
+    the rest of the server is live.
 
     Returns the local path on success, or None if every source failed. A
     failure is reported and skipped rather than raised — one unreachable
@@ -66,7 +72,7 @@ def download_model_component(model_id: str, pattern: str, component_name: str = 
     print(f"Downloading: {display_name}")
     print(f"{'='*80}")
 
-    first = preferred_source()
+    first = prefer if prefer in SOURCES else preferred_source()
     order = [first] + [s for s in SOURCES if s != first]
 
     errors = {}
@@ -76,8 +82,22 @@ def download_model_component(model_id: str, pattern: str, component_name: str = 
                 model_id=model_id,
                 origin_file_pattern=pattern,
                 download_source=source,
+                # Explicit, because DIFFSYNTH_SKIP_DOWNLOAD is set process-wide
+                # by DiffSynthBackend so that *generation* can never stall on a
+                # surprise multi-GB fetch. When the Models panel runs this in
+                # the server process, that env var would otherwise turn every
+                # download into a silent no-op.
+                skip_download=False,
             )
             config.download_if_necessary()
+            # An empty path means the source resolved but produced no files —
+            # a wrong pattern, or a repo that exists on this host without the
+            # file. That is a failure, not a success: returning it would count
+            # the component as fetched and skip the other source entirely.
+            if not config.path:
+                raise FileNotFoundError(
+                    f"{source} matched no files for pattern '{pattern}'"
+                )
             print(f"✓ Downloaded from {source}: {config.path}")
             return config.path
         except KeyboardInterrupt:

@@ -298,6 +298,36 @@ class DiffSynthBackend:
     # Config helpers
     # ------------------------------------------------------------------
 
+    def reload_config(self) -> dict:
+        """Re-read models.json and the defaults fragments from disk.
+
+        The Models panel writes `enabled` into models.json and needs the change
+        reflected in the generation dropdowns immediately. Only the config and
+        the derived lookups are rebuilt — loaded pipelines are left alone, since
+        toggling a model's visibility says nothing about the weights already
+        resident in RAM, and dropping them would cost a multi-minute reload.
+
+        Returns a small summary so callers can log what changed.
+        """
+        self.models_config = self._load_config("models.json")
+        self.defaults_config = self._load_defaults()
+
+        self._alias_map = {}
+        for key, entry in self.models_config.items():
+            if key.startswith("_") or not isinstance(entry, dict):
+                continue
+            for alias in entry.get("aliases", []):
+                self._alias_map[alias] = key
+
+        self._scan_lora_dirs()
+
+        keys = [k for k in self.models_config
+                if not k.startswith("_") and isinstance(self.models_config[k], dict)]
+        enabled = [k for k in keys if self.models_config[k].get("enabled", True)]
+        _log("BACKEND", f"Config reloaded: {len(enabled)}/{len(keys)} models enabled")
+        return {"models": len(keys), "enabled": len(enabled),
+                "loras": len(self._lora_registry)}
+
     def _load_config(self, filename: str) -> dict:
         path = self.config_dir / filename
         if not path.exists():
