@@ -609,8 +609,12 @@ class DiffSynthBackend:
         
         if config is None:
             _log("BACKEND", f"VRAM preset: {name} — no offloading")
-            return None, buffer
-        
+            # A preset may quantize without offloading — shrinking the weights
+            # can be enough on its own. Return a config carrying only that, so
+            # the caller still treats the preset as active.
+            quantize = self._build_quantize_config(preset, name)
+            return ({"quantize": quantize} if quantize is not None else None), buffer
+
         _log("BACKEND", f"VRAM preset: {name} — {preset.get('label', name)}")
         
         # Map string dtype names to torch dtypes
@@ -637,7 +641,46 @@ class DiffSynthBackend:
             "computation_dtype":  resolve(config["computation_dtype"]),
             "computation_device": config["computation_device"],
         }
+        quantize = self._build_quantize_config(preset, name)
+        if quantize is not None:
+            resolved["quantize"] = quantize
         return resolved, buffer
+
+    def _build_quantize_config(self, preset: dict, preset_name: str):
+        """Build a DiffSynth QuantizeConfig from a preset's optional `quantize` block.
+
+        Quantization is orthogonal to the 4-state offload system: it shrinks the
+        weights themselves, where offloading only moves them. The two compose,
+        so any preset may carry a `quantize` block alongside its `config`.
+
+        Returns None when the preset does not ask for quantization. Raises with
+        an actionable message when it does but the backend package is missing —
+        silently falling back to full precision would look like a mysterious
+        OOM rather than a missing dependency.
+        """
+        spec = preset.get("quantize")
+        if not spec:
+            return None
+
+        from diffsynth.core.quant import QuantizeConfig
+
+        kwargs = {k: v for k, v in spec.items() if k != "_comment"}
+        method = kwargs.get("method")
+        try:
+            quantize = QuantizeConfig(**kwargs)
+        except ImportError as e:
+            # QuantizeConfig imports its backend lazily, so a missing torchao /
+            # comfy-kitchen / bitsandbytes surfaces here rather than at startup.
+            pkg = {"torchao": "torchao", "comfy_kitchen": "comfy-kitchen",
+                   "bitsandbytes": "bitsandbytes"}.get(str(method).split("_")[0], method)
+            raise RuntimeError(
+                f"VRAM preset '{preset_name}' asks for quantization method '{method}', "
+                f"but its backend is not installed ({e}). Install it with: "
+                f"pip install {pkg}"
+            ) from e
+
+        _log("BACKEND", f"  Quantization: {method} (mode={kwargs.get('mode', 'dynamic')})")
+        return quantize
 
     # ------------------------------------------------------------------
     # Model resolution
@@ -699,6 +742,15 @@ class DiffSynthBackend:
         primary_id = entry["model_id"]
         ConfigCls = self._get_model_config_class(entry)
 
+        # `quantize` rides in on vram_config but is not an offload field and is
+        # not applied to every component — split it out. Copy rather than pop,
+        # since the caller reuses the dict.
+        quantize = None
+        offload = None
+        if vram_config is not None:
+            quantize = vram_config.get("quantize")
+            offload = {k: v for k, v in vram_config.items() if k != "quantize"}
+
         configs = []
         for comp in entry.get("components", []):
             mid = comp.get("model_id", primary_id)
@@ -707,10 +759,36 @@ class DiffSynthBackend:
                 origin_file_pattern=comp["pattern"],
             )
             # Only apply offload config when a preset is active
-            if vram_config is not None:
-                kwargs.update(vram_config)
+            if offload:
+                kwargs.update(offload)
+            if quantize is not None and self._should_quantize(comp):
+                kwargs["quantize"] = quantize
             configs.append(ConfigCls(**kwargs))
         return configs
+
+    # Pattern fragments that identify a denoiser (DiT) component. Quantization
+    # is applied to these only. VAEs and text encoders are far more sensitive to
+    # weight quantization — a 4-bit VAE decoder speckles every frame at pixel
+    # level, which is visually much worse than anything the DiT does — and
+    # upstream's own examples quantize the transformer alone.
+    _DENOISER_PATTERN_MARKERS = (
+        "transformer",        # Qwen-Image, FLUX.2
+        "high_noise_model",   # Wan 2.2 dual-DiT
+        "low_noise_model",
+        "dit",
+    )
+
+    def _should_quantize(self, comp: dict) -> bool:
+        """True if this component is a denoiser and should be quantized.
+
+        A registry entry can override the pattern heuristic explicitly with
+        "quantize": true/false on the component.
+        """
+        override = comp.get("quantize")
+        if override is not None:
+            return bool(override)
+        pattern = comp.get("pattern", "").lower()
+        return any(m in pattern for m in self._DENOISER_PATTERN_MARKERS)
 
     def _build_extra_config(self, entry: dict, key: str):
         """Build a tokenizer_config or processor_config from entry."""

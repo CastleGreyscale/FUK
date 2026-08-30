@@ -947,6 +947,35 @@ cat > fuk/config/defaults_vram.json.template << 'EOL'
           "computation_device": "cuda"
         },
         "buffer_gb": 6
+      },
+
+      "_quantize_comment": "Presets below add DiffSynth 2.1.5's quantization framework. Quantization is orthogonal to the four-state offload system above: offloading only moves weights between devices, quantization shrinks them, and the two compose — so a 'quantize' block can sit on any preset alongside its 'config'. FUK applies it to the denoiser only (see _should_quantize in diffsynth_backend.py); quantizing the VAE speckles every frame at pixel level. Method names come from diffsynth.core.quant; describe_quant_method(name) prints what each accepts.",
+
+      "_quantize_torchao_comment": "There is deliberately no torchao preset. torchao_int8_w8a16 loads, but its tensor subclass does not survive the .to(device=...) move in DiffSynth's AutoWrappedQuantizedModule.preparing(), raising 'Attempted to set the storage of a tensor on device cuda:0 to a storage on different device cpu'. So torchao quantization and CPU offload are mutually exclusive here, and on a 24GB card the models that need quantizing are exactly the ones that also need offload. Revisit if torchao or DiffSynth fixes the interaction. torchao is still a dependency because DiffSynth imports it — pinned <0.18, see pyproject.toml.",
+
+      "_quant_nf4_measured_comment": "Measured on Qwen-Image, 8 steps, RTX 4090, seed 0: peak VRAM 13.21GB with NF4 vs 13.70GB on 'low' — a 0.5GB saving, because CPU offload already streams weights per layer, so peak is dominated by activations rather than resident weights. Output showed heavy pixel-level speckle. That is the quantization error itself, not an offload interaction: re-running with mode='dequant_once' (quantize, then restore plain fp Linears carrying the error) produced identical speckle. Excluding time_embedder/proj_out and restricting quantization to the denoiser did not help either. Conclusion: do not use this preset for Qwen-Image. It is kept because the plumbing it exercises is what pre-quantized checkpoints need — see _quant_prequantized_comment.",
+
+      "_quant_prequantized_comment": "The path that actually matters for large models is load_prequantized, not online quantization. Checkpoints such as DiffSynth-Studio/MiniMax-H3-NF4 ship weights the model authors quantized with proper calibration, and are loaded by adding \"load_prequantized\": true to a preset's quantize block with a matching method. That avoids both the quality loss measured above and the cost of quantizing on every load. Expect to need it for MiniMax-H3 on a 24GB card.",
+
+      "quant_nf4": {
+        "label": "Quantized — NF4 4-bit + CPU offload (last resort)",
+        "description": "4-bit denoiser weights via bitsandbytes on top of bf16 CPU offload. Measured on Qwen-Image it saves only ~0.5GB peak and badly degrades output — see _quant_nf4_measured_comment. Use only for a model that will not otherwise load at all, and check the result before trusting it.",
+        "config": {
+          "offload_dtype": "bfloat16",
+          "offload_device": "cpu",
+          "onload_dtype": "bfloat16",
+          "onload_device": "cpu",
+          "preparing_dtype": "bfloat16",
+          "preparing_device": "cuda",
+          "computation_dtype": "bfloat16",
+          "computation_device": "cuda"
+        },
+        "quantize": {
+          "method": "bitsandbytes_nf4",
+          "mode": "dynamic",
+          "exclude_modules": ["time_embedder.proj_in", "time_embedder.proj_out", "proj_out"]
+        },
+        "buffer_gb": 6
       }
     }
   }

@@ -30,6 +30,22 @@ dependencies = [
     "sentencepiece>=0.2.0",
     "protobuf>=4.25.0",
 
+    # Backend for the quant_nf4 VRAM preset (DiffSynth 2.1.5's
+    # diffsynth.core.quant). Weight-only, so it shrinks resident weights
+    # without changing the bf16 compute path.
+    #
+    # torchao is deliberately NOT listed. DiffSynth's `quant` extra asks for
+    # torchao>=0.16 with no ceiling, but 0.18 imports
+    # torch.nn.functional.ScalingType, which needs torch>=2.11 — and since
+    # accelerate imports torchao eagerly, an incompatible torchao breaks
+    # *every* FUK import, not just quantization. FUK has no torchao preset
+    # anyway (its tensor subclass cannot survive DiffSynth's offload device
+    # move), so the dependency is pure risk. If you install it for other
+    # reasons, pin it: torchao>=0.16,<0.18 on torch 2.9.
+    # comfy-kitchen is likewise omitted — it only matters for loading
+    # ComfyUI-format pre-quantized checkpoints, which FUK does not do.
+    "bitsandbytes>=0.49.0",
+
     # Preprocessors & Control
     "controlnet_aux>=0.0.10",
     "geffnet>=1.0.2",
