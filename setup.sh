@@ -655,6 +655,38 @@ cat > fuk/config/models.json.template << 'EOL'
     "tokenizer": {"pattern": "tokenizer/"}
   },
 
+  "_ltx2_comment": "LTX-2 is a 19B audio-video model — one denoise yields picture and matching sound, so output is muxed via write_video_audio_ltx2 rather than save_video. Only image-to-video is registered: text-to-video works (omit the first frame) but is not exposed, since a VFX first frame is normally already in hand. Weights come from DiffSynth-Studio/LTX-2-Repackage on ModelScope, which splits the official monolithic 40GB checkpoint into separately-loadable submodules. Base download is roughly 63GB: transformer 35.2GB, Gemma-3-12B text encoder 22.7GB, text_encoder_post_modules 2.7GB, the two video VAEs 2.3GB, audio VAE + vocoder 0.2GB. Swap 'transformer.safetensors' for 'transformer_distilled.safetensors' to run the few-step distilled schedule instead. The point of that large shared base is that every function variant is then a LoRA: see the ltx2_* entries in defaults_loras.json, 0.3-2.4GB each, rather than another 35GB fused model per camera move.",
+
+  "ltx2": {
+    "model_id": "DiffSynth-Studio/LTX-2-Repackage",
+    "pipeline": "ltx2",
+    "category": "video",
+    "description": "LTX-2 19B — image-to-video with synchronized audio; camera moves and control come from LoRAs",
+    "aliases": ["ltx", "ltx2", "ltx-2", "i2av"],
+    "supports": ["input_images", "in_context_videos", "negative_prompt", "tiled"],
+    "parameter_map": {
+      "reference_image": "input_images",
+      "control_input": "in_context_videos"
+    },
+    "audio_sample_rate": 24000,
+    "components": [
+      {"pattern": "transformer.safetensors"},
+      {"pattern": "text_encoder_post_modules.safetensors"},
+      {"pattern": "video_vae_encoder.safetensors"},
+      {"pattern": "video_vae_decoder.safetensors"},
+      {"pattern": "audio_vae_encoder.safetensors"},
+      {"pattern": "audio_vae_decoder.safetensors"},
+      {"pattern": "audio_vocoder.safetensors"},
+      {"model_id": "google/gemma-3-12b-it-qat-q4_0-unquantized", "pattern": "model-*.safetensors"},
+      {"model_id": "Lightricks/LTX-2", "pattern": "ltx-2-spatial-upscaler-x2-1.0.safetensors"}
+    ],
+    "tokenizer": {"model_id": "google/gemma-3-12b-it-qat-q4_0-unquantized", "pattern": ""},
+    "stage2_lora": {"model_id": "Lightricks/LTX-2", "pattern": "ltx-2-19b-distilled-lora-384.safetensors"},
+    "pipeline_kwargs": {
+      "tiled": true
+    }
+  },
+
   "_klein_comment": "Klein reuses Flux2ImagePipeline — no runner needed. It differs from FLUX.2-dev in its text encoder: klein carries a Qwen3 encoder (loaded as z_image_text_encoder) rather than dev's Mistral3, and flux2_image.py branches on that to pick AutoTokenizer over AutoProcessor. All three klein-4B components are already registered in DiffSynth 2.1.5, so this entry needs no vendor patch. FLUX.2-klein-9B is deliberately absent: it is gated on HuggingFace and ships under a non-Apache 'other' licence, so it needs a licence review before use on paid work. Its DiffSynth entries exist upstream if you add it.",
 
   "_threed_comment": "3D reconstruction models. Not DiffSynth pipelines — they load from their own vendored repos (see docs/3D_RECONSTRUCTION_SYSTEM.md). Entries stay flat like every other model so resolve_model_type/aliases keep working; the 'threed' pipeline value is what groups them.",
@@ -779,6 +811,19 @@ cat > fuk/config/defaults.json.template << 'EOL'
     "negative_prompt": ""
   },
 
+  "_ltx2_comment": "LTX-2 defaults. Sizes snap to a 32px spatial grid and 8n+1 frames; 121 frames at 24fps is roughly 5 seconds. The long negative prompt is upstream's — it covers audio faults (off-sync, robotic voice, mismatched lip sync) as well as picture, because one denoise produces both.",
+  "ltx2": {
+    "task": "ltx2",
+    "width": 1536,
+    "height": 1024,
+    "video_length": 121,
+    "frame_rate": 24,
+    "steps": 30,
+    "cfg_scale": 3.0,
+    "denoising_strength": 1.0,
+    "negative_prompt": "blurry, out of focus, overexposed, underexposed, low contrast, washed out colors, excessive noise, grainy texture, poor lighting, flickering, motion blur, distorted proportions, unnatural skin tones, deformed facial features, extra limbs, disfigured hands, inconsistent perspective, camera shake, color banding, cartoonish rendering, 3D CGI look, unrealistic materials, uncanny valley effect, jittery movement, unnatural transitions, tilted camera, flat lighting, stylized filters, AI artifacts, silent or muted audio, distorted voice, robotic voice, echo, background noise, off-sync audio, mismatched lip sync"
+  },
+
   "export": {
     "prefer_latent": true,
     "exr_compression": "ZIP",
@@ -879,7 +924,20 @@ cat > fuk/config/defaults_loras.json.template << 'EOL'
       "default_strength": 0.7,
       "trigger_word": "example_style",
       "inject_text": "A cinematic still from an example_style movie"
-    }
+    },
+
+    {
+      "_ltx2_comment": "The ltx2 entries below are the point of LTX-2's design: one 35GB base transformer plus a small LoRA per function, instead of a separate fused checkpoint for every camera move. Camera_* come from Lightricks/LTX-2-19b-LoRA-Camera-Control-* (0.3GB for the dolly moves, 2.1GB for jib and static). IC_* are the in-context LoRAs and additionally need a driving video passed as control_path: IC_Union_Control takes a depth/pose/edge video to steer structure, IC_Detailer re-renders a low-detail video with more detail. download_models.sh fetches all nine into <defined_loras_path>/ltx2/ and symlinks them, so delete the ones you do not want first."
+    },
+    {"name": "Camera_Dolly_In",    "path": "ltx2/ltx-2-19b-lora-camera-control-dolly-in.safetensors",    "model": ["ltx2"], "default_strength": 1.0, "trigger_word": "dolly in",    "inject_text": "Dolly-in shot: the camera smoothly moves closer to the subject."},
+    {"name": "Camera_Dolly_Out",   "path": "ltx2/ltx-2-19b-lora-camera-control-dolly-out.safetensors",   "model": ["ltx2"], "default_strength": 1.0, "trigger_word": "dolly out",   "inject_text": "Dolly-out shot: the camera smoothly pulls back away from the subject."},
+    {"name": "Camera_Dolly_Left",  "path": "ltx2/ltx-2-19b-lora-camera-control-dolly-left.safetensors",  "model": ["ltx2"], "default_strength": 1.0, "trigger_word": "dolly left",  "inject_text": "Dolly-left shot: the camera tracks smoothly to the left."},
+    {"name": "Camera_Dolly_Right", "path": "ltx2/ltx-2-19b-lora-camera-control-dolly-right.safetensors", "model": ["ltx2"], "default_strength": 1.0, "trigger_word": "dolly right", "inject_text": "Dolly-right shot: the camera tracks smoothly to the right."},
+    {"name": "Camera_Jib_Up",      "path": "ltx2/ltx-2-19b-lora-camera-control-jib-up.safetensors",      "model": ["ltx2"], "default_strength": 1.0, "trigger_word": "jib up",      "inject_text": "Jib-up shot: the camera cranes smoothly upward."},
+    {"name": "Camera_Jib_Down",    "path": "ltx2/ltx-2-19b-lora-camera-control-jib-down.safetensors",    "model": ["ltx2"], "default_strength": 1.0, "trigger_word": "jib down",    "inject_text": "Jib-down shot: the camera cranes smoothly downward."},
+    {"name": "Camera_Static",      "path": "ltx2/ltx-2-19b-lora-camera-control-static.safetensors",      "model": ["ltx2"], "default_strength": 1.0, "trigger_word": "static",      "inject_text": "Static shot: the camera is locked off and does not move."},
+    {"name": "IC_Union_Control",   "path": "ltx2/ltx-2-19b-ic-lora-union-control-ref0.5.safetensors",    "model": ["ltx2"], "default_strength": 1.0, "trigger_word": "", "inject_text": ""},
+    {"name": "IC_Detailer",        "path": "ltx2/ltx-2-19b-ic-lora-detailer.safetensors",                "model": ["ltx2"], "default_strength": 1.0, "trigger_word": "", "inject_text": ""}
   ]
 }
 EOL

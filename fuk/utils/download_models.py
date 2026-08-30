@@ -10,6 +10,7 @@ Sets DIFFSYNTH_MODEL_BASE_PATH from defaults.json to control download location.
 import argparse
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 from diffsynth.core import ModelConfig
@@ -202,6 +203,87 @@ def download_seedvr2(models_root: str):
     return result
 
 
+def download_ltx2_loras(loras_config: dict):
+    """
+    Fetch the LTX-2 function LoRAs into the curated LoRA directory.
+
+    These cannot ride the models.json loop: they are LoRAs, not pipeline
+    components, and FUK's LoRA registry resolves them by filesystem path under
+    defined_loras_path rather than by model_id. Each lives in its own upstream
+    repo, so the repo is derived from the filename declared in
+    defaults_loras.json.
+
+    Downloads land in the shared model cache and are symlinked into the LoRA
+    directory — the files are up to 2.4GB each and there is no reason to hold
+    two copies. Falls back to copying where symlinks are unavailable.
+
+    Returns (fetched, failed) counts, or None when nothing is configured.
+    """
+    entries = [
+        e for e in loras_config.get("loras", [])
+        if "ltx2" in (e.get("model") or []) and str(e.get("path", "")).startswith("ltx2/")
+    ]
+    if not entries:
+        return None
+
+    base = loras_config.get("defined_loras_path")
+    if not base:
+        print("\n  (defined_loras_path not set — skipping LTX-2 LoRAs)")
+        return None
+
+    print(f"\n\n{'#'*80}")
+    print(f"# Processing: LTX-2 function LoRAs ({len(entries)})")
+    print(f"{'#'*80}")
+    print("# One 35GB base transformer, one small LoRA per camera move or control mode.")
+
+    dest_dir = Path(base).expanduser() / "ltx2"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    # Repo names follow the filenames, which is why they are derived rather
+    # than listed twice: camera moves live in LTX-2-19b-LoRA-Camera-Control-*,
+    # in-context LoRAs in LTX-2-19b-IC-LoRA-*.
+    fetched, failed = 0, 0
+    for entry in entries:
+        filename = Path(entry["path"]).name
+        dest = dest_dir / filename
+        if dest.exists():
+            print(f"\n  ✓ already present: {filename}")
+            fetched += 1
+            continue
+
+        stem = filename.replace("ltx-2-19b-", "").replace(".safetensors", "")
+        if stem.startswith("lora-camera-control-"):
+            move = stem[len("lora-camera-control-"):]
+            repo = "Lightricks/LTX-2-19b-LoRA-Camera-Control-" + "-".join(
+                p.capitalize() for p in move.split("-"))
+        elif stem.startswith("ic-lora-union-control"):
+            repo = "Lightricks/LTX-2-19b-IC-LoRA-Union-Control"
+        elif stem.startswith("ic-lora-detailer"):
+            repo = "Lightricks/LTX-2-19b-IC-LoRA-Detailer"
+        else:
+            print(f"\n  ⚠ no known repo for {filename} — skipping")
+            failed += 1
+            continue
+
+        path = download_model_component(repo, filename, component_name=entry.get("name"))
+        if path is None:
+            failed += 1
+            continue
+
+        src = Path(path)
+        if src.is_dir():
+            src = src / filename
+        try:
+            dest.symlink_to(src)
+            print(f"  ✓ linked → {dest}")
+        except OSError:
+            shutil.copy2(src, dest)
+            print(f"  ✓ copied → {dest}")
+        fetched += 1
+
+    return fetched, failed
+
+
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
@@ -296,6 +378,17 @@ def main():
     # first video upscale stalls on a silent 3.4GB download.
     seedvr2_result = download_seedvr2(models_root)
 
+    # LTX-2's function LoRAs are likewise invisible to the models.json loop —
+    # they are LoRAs resolved by path, not pipeline components. defaults_loras
+    # lives beside defaults.json, so read it from the same directory.
+    ltx2_lora_result = None
+    loras_path = defaults_path.parent / "defaults_loras.json"
+    if loras_path.exists():
+        try:
+            ltx2_lora_result = download_ltx2_loras(load_config(loras_path))
+        except Exception as exc:
+            print(f"\n  ✗ LTX-2 LoRA download failed: {exc}")
+
     # Summary
     print(f"\n\n{'='*80}")
     print("Download Complete!" if not failures else "Download Finished — With Failures")
@@ -306,6 +399,9 @@ def main():
         fetched = len(seedvr2_result["fetched"])
         total = fetched + len(seedvr2_result["failed"])
         print(f"SeedVR2 variants ready: {fetched}/{total} in {seedvr2_result['weights_dir']}")
+    if ltx2_lora_result is not None:
+        got, bad = ltx2_lora_result
+        print(f"LTX-2 function LoRAs ready: {got}/{got + bad}")
 
     if failures:
         print(f"\nFailed on every source ({len(failures)}):")

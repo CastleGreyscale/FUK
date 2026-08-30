@@ -165,6 +165,12 @@ class DiffSynthBackend:
             _log("BACKEND", f"Flux2PipelineRunner not available: {e}", "warning")
 
         try:
+            from ltx2_pipeline import LTX2PipelineRunner
+            self.runners["ltx2"] = LTX2PipelineRunner(self)
+        except ImportError as e:
+            _log("BACKEND", f"LTX2PipelineRunner not available: {e}", "warning")
+
+        try:
             from threed_pipeline import ThreeDPipelineRunner
             self.runners["threed"] = ThreeDPipelineRunner(self)
         except ImportError as e:
@@ -265,16 +271,19 @@ class DiffSynthBackend:
         from diffsynth.pipelines.qwen_image import QwenImagePipeline, ModelConfig
         from diffsynth.pipelines.wan_video import WanVideoPipeline, ModelConfig as WanModelConfig
         from diffsynth.pipelines.flux2_image import Flux2ImagePipeline, ModelConfig as Flux2ModelConfig
+        from diffsynth.pipelines.ltx2_audio_video import LTX2AudioVideoPipeline, ModelConfig as LTX2ModelConfig
 
         # Store ModelConfig classes as instance attributes for use in other methods
         self.ModelConfig = ModelConfig
         self.WanModelConfig = WanModelConfig
         self.Flux2ModelConfig = Flux2ModelConfig
+        self.LTX2ModelConfig = LTX2ModelConfig
 
         # Populate pipeline registry
         PIPELINE_CLASSES["qwen"] = QwenImagePipeline
         PIPELINE_CLASSES["wan"] = WanVideoPipeline
         PIPELINE_CLASSES["flux2"] = Flux2ImagePipeline
+        PIPELINE_CLASSES["ltx2"] = LTX2AudioVideoPipeline
 
     # ------------------------------------------------------------------
     # Config helpers
@@ -730,6 +739,8 @@ class DiffSynthBackend:
             return self.WanModelConfig
         if pipeline_type == "flux2":
             return self.Flux2ModelConfig
+        if pipeline_type == "ltx2":
+            return self.LTX2ModelConfig
         return self.ModelConfig
 
     def _build_model_configs(self, entry: dict, vram_config: dict = None) -> list:
@@ -908,6 +919,12 @@ class DiffSynthBackend:
         proc = self._build_extra_config(entry, "processor")
         if proc:
             kwargs["processor_config"] = proc
+        # LTX-2's two-stage sampling needs a distilled LoRA merged at construction
+        # time — it is a from_pretrained argument, not a runtime LoRA. Pipelines
+        # that do not accept it drop it in the signature filter below.
+        stage2 = self._build_extra_config(entry, "stage2_lora")
+        if stage2:
+            kwargs["stage2_lora_config"] = stage2
 
         import inspect as _inspect
         valid_params = _inspect.signature(PipelineCls.from_pretrained).parameters
