@@ -285,11 +285,21 @@ export default function ModelManager() {
     }
   };
 
+  // Wrapped in .mm-panel so these inherit the same padding and scroll container
+  // as the loaded state — otherwise they render flush against the tab edge.
   if (error && !data) {
-    return <div className="mm-error"><AlertCircle className="fuk-icon--sm" /> {error}</div>;
+    return (
+      <div className="mm-panel">
+        <div className="mm-error"><AlertCircle className="fuk-icon--sm" /> {error}</div>
+      </div>
+    );
   }
   if (!data) {
-    return <div className="mm-loading"><Loader2 className="fuk-icon--sm mm-spin" /> Loading…</div>;
+    return (
+      <div className="mm-panel">
+        <div className="mm-loading"><Loader2 className="fuk-icon--sm mm-spin" /> Loading…</div>
+      </div>
+    );
   }
 
   const grouped = data.models.reduce((acc, m) => {
