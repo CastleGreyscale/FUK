@@ -99,6 +99,7 @@
                         <a href="#layers-panel" class="sidebar-link">Layers Panel</a>
                         <a href="#export-panel" class="sidebar-link">Export Panel</a>
                         <a href="#spec-tool" class="sidebar-link">Spec Tool</a>
+                        <a href="#model-manager" class="sidebar-link">Model Manager</a>
                         <a href="#prompt-panel" class="sidebar-link">Prompt Panel</a>
                         <a href="#describe-tag" class="sidebar-link">Describe &amp; Tag</a>
                         <a href="#generation-history" class="sidebar-link">Generation History</a>
@@ -282,13 +283,15 @@
                         <tr><td>Qwen Image 2512</td><td>High-resolution variant</td></tr>
                         <tr><td>Qwen Image Edit 2511</td><td>Image-to-image editing</td></tr>
                         <tr><td>Flux 2 Dev</td><td>Image-to-image editing</td></tr>
+                        <tr><td>FLUX.2-klein 4B</td><td>Small, fast FLUX.2. Apache-2.0, so it is the commercially usable one of the family</td></tr>
+                        <tr><td>Krea-2 Raw</td><td>Text-to-image, 52 steps at CFG 4.5 — the quality option. Gated, non-Apache licence</td></tr>
+                        <tr><td>Krea-2 Turbo</td><td>Distilled Krea-2, 8 steps at CFG 1.0 — roughly 6× faster. Shares Raw's text encoder and reuses the Qwen-Image VAE</td></tr>
                     </tbody>
                 </table>
 
                 <h3>Easily Added Models</h3>
                 <p>FUK's pipeline architecture supports additional model families with minimal configuration. The following have been tested or are known to be compatible:</p>
                 <ul>
-                    <li><a href="https://huggingface.co/krea/Krea-2-Turbo" target="_blank">Krea 2</a></li>
                     <li><a href="https://huggingface.co/Tongyi-MAI/Z-Image-Turbo" target="_blank">Z-Image Turbo</a></li>
                     <li><a href="https://www.modelscope.cn/models/PaddlePaddle/ERNIE-Image" target="_blank">ERNIE-Image</a></li>
                     <li><a href="https://joyaiimage.com/" target="_blank">JoyAI Image Edit</a></li>
@@ -363,13 +366,28 @@
                         <tr><td>Wan 2.2 Fun Control</td><td>Control video + optional start/end images</td><td>Uses a reference video as a motion/structure guide</td></tr>
                         <tr><td>FFLF (Wan 2.2 Fun-A14B-InP)</td><td>Start image + end image + text prompt</td><td>Interpolates motion between two fixed frames; output lands on both. See <a href="#fflf">FFLF</a></td></tr>
                         <tr><td>Wan Animate</td><td>Image + text prompt</td><td>Animation-focused pipeline with enhanced character and object motion control</td></tr>
+                        <tr><td>LTX-2</td><td>First frame + text prompt</td><td>19B audio-video — one denoise produces picture and a synchronized soundtrack. Camera moves and control come from LoRAs on one shared base rather than separate checkpoints; see <a href="#ltx2-loras">LTX-2 Function LoRAs</a></td></tr>
+                        <tr><td>MiniMax-H3 FL2VA</td><td>First and/or last frame + text prompt</td><td>Joint audio-video at 32kHz. Generates from a prompt alone, or interpolates between two fixed frames</td></tr>
+                        <tr><td>MiniMax-H3 Ref2VA</td><td>Reference image / video / audio + text prompt</td><td>Same model family, conditioned on reference media the prompt addresses positionally as &lt;Subject 1&gt;, &lt;Video 1&gt;, &lt;Audio 1&gt;</td></tr>
+                    </tbody>
+                </table>
+
+                <h3 id="ltx2-loras">LTX-2 Function LoRAs</h3>
+                <p>LTX-2's variants are LoRAs on one shared 35GB base, not separate fused checkpoints — nine functions for about 10GB of LoRA against 35GB apiece the other way. They load through the same path as every other FUK LoRA, so adding a tenth camera move is a download and a config line.</p>
+                <table class="wiki-table">
+                    <thead>
+                        <tr><th>LoRA</th><th>Size</th><th>Notes</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>Camera — Dolly In / Out / Left / Right</td><td>0.3 GB each</td><td>Camera move baked into the generation</td></tr>
+                        <tr><td>Camera — Jib Up / Down, Static</td><td>2.1 GB each</td><td>Static locks the camera off</td></tr>
+                        <tr><td>IC Union Control</td><td>0.6 GB</td><td>Depth / pose / edge video steers structure. Needs a driving video in the In-Context Video slot</td></tr>
+                        <tr><td>IC Detailer</td><td>2.4 GB</td><td>Re-renders a low-detail clip with more detail. Also driven by the In-Context Video slot</td></tr>
                     </tbody>
                 </table>
 
                 <h3>Alternative Models</h3>
-                <p><strong>LTX 2.3</strong> is an available video generation model but is not currently built into FUK's standard pipeline. If you're interested in adding support, it can be integrated via model configuration.</p>
                 <p><strong>Flux Video</strong> is coming soon. Support will be added to FUK upon release.</p>
-                <p><strong>MiniMax Hailuo 3</strong> is also on the table for the other video tools — evaluation is ongoing, subject to the same open-source and commercial-licensing requirements applied to everything else FUK ships.</p>
 
                 <h3>Generation Parameters</h3>
                 <table class="wiki-table">
@@ -937,7 +955,7 @@
                         <tr><td>Postprocess</td><td>Upscaling and frame interpolation</td></tr>
                         <tr><td>Layers</td><td>Generate AOV passes — depth, normals, Cryptomatte — from an existing image or video</td></tr>
                         <tr><td>Export</td><td>Assemble AOV passes into multi-layer EXR files</td></tr>
-                        <tr><td>Utilities</td><td>Spec Tool and LoRA Dataset Builder</td></tr>
+                        <tr><td>Utilities</td><td><a href="#model-manager">Model Manager</a>, <a href="#spec-tool">Spec Tool</a>, <a href="#lora-dataset-builder">LoRA Dataset Builder</a>, <a href="#describe-tag">Describe &amp; Tag</a> and <a href="#threed-reconstruction">3D Reconstruct</a></td></tr>
                     </tbody>
                 </table>
 
@@ -1457,6 +1475,49 @@
                 <p>When enabled, frame numbers are rendered onto each frame of the Blender template output — useful for editorial reference when working with a delivery spec that has a specific frame count.</p>
             </div>
 
+            <!-- Model Manager -->
+            <div class="wiki-section" id="model-manager">
+                <h2>Model Manager</h2>
+                <div class="wiki-video" data-vimeo="" data-title="Model Manager">
+                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
+                </div>
+                <p>Lives in <strong>Utilities → Models</strong>. It replaces <code>download_models.sh</code> as the normal way to acquire and enable models — the script stays for headless runs, and both agree on what "complete" means because the panel reuses its target list.</p>
+                <p>The panel has two halves that behave differently on purpose.</p>
+
+                <h3>Tools</h3>
+                <p>Read-only status, green or red. Each row reports through the same availability check the feature itself uses, so the panel cannot drift from what the feature believes. These are installed by <code>setup.sh</code>, not from here — a red row tells you what is missing and the command that fixes it.</p>
+                <table class="wiki-table">
+                    <thead>
+                        <tr><th>Tool</th><th>Backs</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>Ollama</td><td><a href="#describe-tag">Describe &amp; Tag</a> and the prompt LLM features</td></tr>
+                        <tr><td>SeedVR2</td><td>Temporal video restoration in <a href="#postprocess-panel">Postprocess</a></td></tr>
+                        <tr><td>TRELLIS</td><td>Single-image <a href="#threed-reconstruction">3D reconstruction</a></td></tr>
+                        <tr><td>VGGT</td><td>Multi-view 3D reconstruction</td></tr>
+                        <tr><td>SAM2</td><td>Mask and cryptomatte <a href="#preprocessors">preprocessors</a></td></tr>
+                        <tr><td>Depth Anything 3</td><td>Depth control passes and the depth AOV</td></tr>
+                        <tr><td>DSINE</td><td>Surface normals. Non-commercial weights</td></tr>
+                    </tbody>
+                </table>
+
+                <h3>Models</h3>
+                <p>Every entry in <a href="#config-models">models.json</a>, with a download button and an active checkbox.</p>
+                <ul>
+                    <li><strong>Active checkbox</strong> — unchecking unregisters the model. It disappears from the generation dropdowns immediately but stays listed here, so turning it back on is one click and never needs a re-download. This writes <code>enabled</code> into models.json; entries without that field are treated as enabled, so nothing predating the panel changed behaviour.</li>
+                    <li><strong>Download</strong> — runs in the background with per-component progress. HuggingFace is preferred because it is faster and steadier, with a per-component fallback to ModelScope for the repos HF does not carry. Already-present files are skipped, so an interrupted download resumes by re-running it.</li>
+                    <li><strong>Projected size</strong> — what a download would actually pull, which is not the same as the model's total. Anything sharing files with a model you already have pulls less: Krea-2 reports about 32.8 GB to fetch of 33.0 GB total, because the Qwen-Image VAE is already on disk.</li>
+                    <li><strong>Where the weights go</strong> — expands to the HuggingFace and ModelScope links, the exact install path, and a per-component present/missing breakdown, for when fetching something by hand is easier.</li>
+                </ul>
+
+                <h3>Deleting weights</h3>
+                <p>Models can be removed from disk from the same row. Deletion is share-aware, and that matters more than it sounds: the Qwen-Image VAE backs eight models and the Wan T5 encoder five, so removing a model naively would take shared components with it and break most of the registry. <strong>A component used by any other entry is never deleted</strong>, and the panel names the models keeping it.</p>
+                <p>It is a two-step action. The first click asks for a plan — what goes, what is kept and why, how much is reclaimed — and removes nothing. Only confirming that plan deletes anything, and nothing is recoverable except by re-downloading. Any pipeline currently loaded for the model is evicted first, so weights never vanish underneath a live pipeline.</p>
+
+                <h3>Adding a model</h3>
+                <p>The panel lists what is in the registry; it does not invent entries. Adding a new model is still a <a href="#config-models">models.json</a> edit, after which it appears here ready to download.</p>
+            </div>
+
             <!-- Prompt Panel -->
             <div class="wiki-section" id="prompt-panel">
                 <h2>Prompt Panel</h2>
@@ -1766,9 +1827,10 @@
                 <h2>models.json</h2>
                 <p>The model registry. Defines every AI model FUK knows about — what pipeline runs it, what files it needs, what parameters it accepts, and what features it supports. Located at <code>fuk/config/models.json</code>.</p>
                 <p>Only models listed here appear in the UI. Removing an entry hides the model without deleting any files. Adding an entry makes a model available — but you must have the model files downloaded first.</p>
+                <p>Most day-to-day work on this file is better done from the <a href="#model-manager">Model Manager</a>, which downloads, enables, disables and deletes models without hand-editing JSON. Hiding a model no longer means deleting its entry: the panel writes an <code>enabled</code> field instead, so it can be turned back on in one click. Entries without that field are treated as enabled.</p>
 
                 <div class="wiki-warning">
-                    <p>Each model is typically 15–30GB. Review this file before running <code>download_models.sh</code> and remove entries for models you don't need. The download script fetches everything listed.</p>
+                    <p>Each model is typically 15–30GB. Review this file before running <code>download_models.sh</code> and remove entries for models you don't need. The download script fetches everything listed. The <a href="#model-manager">Model Manager</a> downloads one model at a time instead, and shows what each would actually pull before you commit to it.</p>
                 </div>
 
                 <h3>Model Entry Structure</h3>
