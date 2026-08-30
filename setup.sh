@@ -687,6 +687,56 @@ cat > fuk/config/models.json.template << 'EOL'
     }
   },
 
+  "_minimax_h3_comment": "MiniMax-H3 is a joint audio-video model — one denoise produces picture and synchronized sound at 32kHz (LTX-2 uses 24kHz, hence audio_sample_rate being per-model). Two DiT checkpoints are registered as separate models because they take different conditioning and ship their own processors: fl2va takes a first and/or last frame, ref2va takes reference media that the prompt addresses positionally as <Subject 1>, <Video 1>, <Audio 1>. They share the text encoder and both VAEs, so the second model costs only its own DiT. Sizes below are the NF4 pruned weights: fl2va or ref2va DiT 9.76GB each, text encoder 14.27GB, video VAE 1.50GB, audio VAE 0.26GB — about 25.8GB for the first model and +9.76GB for the second. Unpruned NF4 DiTs (15.98GB) and bf16/fp8/int8-convrot variants also exist upstream if you have the headroom.",
+
+  "_minimax_h3_quant_comment": "These are pre-quantized checkpoints, not online quantization. DiffSynth resolves them by hash and applies the authors' own quant_config — bitsandbytes NF4 with load_prequantized and a calibrated exclude list covering time_embedder, the patch projections and the final layers — so quality is nothing like the online NF4 measured in defaults_vram.json. Do NOT also select a quant_* VRAM preset for these: the _should_quantize pattern heuristic in diffsynth_backend.py deliberately does not match these filenames, and forcing it with a component-level \"quantize\": true would quantize already-quantized weights.",
+
+  "minimax_h3_fl2va": {
+    "model_id": "DiffSynth-Studio/MiniMax-H3-NF4",
+    "pipeline": "minimax_h3",
+    "category": "video",
+    "description": "MiniMax-H3 FL2VA (NF4 pruned) — first/last frame to video with synchronized audio",
+    "aliases": ["minimax", "minimax-h3", "fl2va", "h3"],
+    "supports": ["keyframes", "negative_prompt", "tiled"],
+    "parameter_map": {
+      "reference_image": "keyframes"
+    },
+    "audio_sample_rate": 32000,
+    "fps": 24,
+    "components": [
+      {"pattern": "minimax-h3-fl2va-pruned-nf4.safetensors"},
+      {"pattern": "minimax-h3-text-encoder-nf4.safetensors"},
+      {"pattern": "video_vae_nf4.safetensors"},
+      {"pattern": "audio_vae_nf4.safetensors"}
+    ],
+    "processor": {"model_id": "MiniMax/MiniMax-H3", "pattern": "FL2VA/processor/"},
+    "pipeline_kwargs": {
+      "tiled": true
+    }
+  },
+
+  "minimax_h3_ref2va": {
+    "model_id": "DiffSynth-Studio/MiniMax-H3-NF4",
+    "pipeline": "minimax_h3",
+    "category": "video",
+    "description": "MiniMax-H3 Ref2VA (NF4 pruned) — reference image/video/audio to video with synchronized audio",
+    "aliases": ["ref2va", "minimax-ref"],
+    "supports": ["references", "negative_prompt", "tiled"],
+    "parameter_map": {},
+    "audio_sample_rate": 32000,
+    "fps": 24,
+    "components": [
+      {"pattern": "minimax-h3-ref2va-pruned-nf4.safetensors"},
+      {"pattern": "minimax-h3-text-encoder-nf4.safetensors"},
+      {"pattern": "video_vae_nf4.safetensors"},
+      {"pattern": "audio_vae_nf4.safetensors"}
+    ],
+    "processor": {"model_id": "MiniMax/MiniMax-H3", "pattern": "Ref2VA/processor/"},
+    "pipeline_kwargs": {
+      "tiled": true
+    }
+  },
+
   "_klein_comment": "Klein reuses Flux2ImagePipeline — no runner needed. It differs from FLUX.2-dev in its text encoder: klein carries a Qwen3 encoder (loaded as z_image_text_encoder) rather than dev's Mistral3, and flux2_image.py branches on that to pick AutoTokenizer over AutoProcessor. All three klein-4B components are already registered in DiffSynth 2.1.5, so this entry needs no vendor patch. FLUX.2-klein-9B is deliberately absent: it is gated on HuggingFace and ships under a non-Apache 'other' licence, so it needs a licence review before use on paid work. Its DiffSynth entries exist upstream if you add it.",
 
   "_threed_comment": "3D reconstruction models. Not DiffSynth pipelines — they load from their own vendored repos (see docs/3D_RECONSTRUCTION_SYSTEM.md). Entries stay flat like every other model so resolve_model_type/aliases keep working; the 'threed' pipeline value is what groups them.",
@@ -809,6 +859,19 @@ cat > fuk/config/defaults.json.template << 'EOL'
     "embedded_guidance": 4.0,
     "denoising_strength": 1.0,
     "negative_prompt": ""
+  },
+
+  "_minimax_h3_comment": "MiniMax-H3 defaults. Sizes snap to a 16px spatial grid and 17n+5 frames; 124 frames at 24fps is roughly 5 seconds. cfg_scale 1.0 means CFG is off, which is what the upstream examples use — the negative prompt is a single space rather than empty, because an empty string disables the negative branch entirely.",
+  "minimax_h3": {
+    "task": "minimax_h3_fl2va",
+    "width": 832,
+    "height": 480,
+    "video_length": 124,
+    "steps": 50,
+    "cfg_scale": 1.0,
+    "flow_shift": 12.0,
+    "audio_flow_shift": 3.0,
+    "negative_prompt": " "
   },
 
   "_ltx2_comment": "LTX-2 defaults. Sizes snap to a 32px spatial grid and 8n+1 frames; 121 frames at 24fps is roughly 5 seconds. The long negative prompt is upstream's — it covers audio faults (off-sync, robotic voice, mismatched lip sync) as well as picture, because one denoise produces both.",

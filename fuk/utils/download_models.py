@@ -126,9 +126,13 @@ def download_all_models(models_config: dict):
                 component.get('model_id', base_model_id),
                 component['pattern'],
             ))
+        # stage2_lora is LTX-2's distilled refine LoRA. It is merged at
+        # from_pretrained time rather than loaded at runtime, but it still has
+        # to be on disk before the first two-stage generation.
         for section, label in (('tokenizer', 'Tokenizer'),
                                ('processor', 'Processor'),
-                               ('lora', 'LoRA')):
+                               ('lora', 'LoRA'),
+                               ('stage2_lora', 'Stage-2 LoRA')):
             if section in model_spec:
                 spec = model_spec[section]
                 targets.append((
