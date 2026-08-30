@@ -116,63 +116,91 @@ mkdir -p fuk/vendor
 echo ""
 echo "[4/7] Cloning vendor dependencies..."
 
-# DiffSynth-Studio
-if [ ! -d "fuk/vendor/DiffSynth-Studio" ]; then
-    echo "  → Cloning DiffSynth-Studio..."
-    git clone https://github.com/modelscope/DiffSynth-Studio.git fuk/vendor/DiffSynth-Studio
-else
-    echo "  ✓ DiffSynth-Studio already exists"
+# Every vendor repo is pinned to an exact commit. These used to be bare clones
+# of the default branch, which meant a fresh install silently got whatever
+# upstream HEAD happened to be that day — that is how this tree ended up running
+# a DiffSynth seven months newer than the one its patches were written against.
+# Bump these deliberately, and re-run the regression matrix when you do.
+DIFFSYNTH_SHA=102fe9980b9375ecb6436d360297a00327472535   # 2.1.5, 2026-08-28
+DEPTH_ANYTHING_3_SHA=2c21ea849ceec7b469a3e62ea0c0e270afc3281a
+SAM2_SHA=2b90b9f5ceec907a1c18123530e92e794ad901a4
+DSINE_SHA=ef0c2afa32b4dd19cb8ca4567c652802cd92591c
+VGGT_SHA=a288dd0f14786c93483e45524328726ab7b1b4ce
+TRELLIS_SHA=442aa1e1afb9014e80681d3bf604e8d728a86ee7
+SEEDVR2_SHA=4490bd1f482e026674543386bb2a4d176da245b9
+
+# clone_pinned <dir-name> <url> <sha> [extra git-clone args...]
+# Clones at the pinned commit. If the directory already exists it is left alone,
+# but a mismatched HEAD is reported loudly rather than ignored — a stale vendor
+# tree produces bugs that look like FUK bugs.
+clone_pinned() {
+    local name="$1" url="$2" sha="$3"
+    shift 3
+    local dir="fuk/vendor/$name"
+
+    if [ ! -d "$dir" ]; then
+        echo "  → Cloning $name @ ${sha:0:8}..."
+        git clone "$@" "$url" "$dir"
+        git -C "$dir" checkout --quiet --detach "$sha"
+        return 0
+    fi
+
+    local current
+    current="$(git -C "$dir" rev-parse HEAD 2>/dev/null || echo unknown)"
+    if [ "$current" = "$sha" ]; then
+        echo "  ✓ $name already at pinned ${sha:0:8}"
+    else
+        echo "  ⚠ $name is at ${current:0:8} but the pin is ${sha:0:8}"
+        echo "    Leaving it untouched. To adopt the pin (discards local edits):"
+        echo "      git -C $dir fetch origin $sha && git -C $dir checkout --detach $sha"
+    fi
+    return 1
+}
+
+# DiffSynth-Studio — patched; see fuk/vendor/patches/README.md for what and why.
+if clone_pinned DiffSynth-Studio https://github.com/modelscope/DiffSynth-Studio.git "$DIFFSYNTH_SHA"; then
+    echo "  → Applying FUK patches to DiffSynth-Studio..."
+    for patch in "$(pwd)"/fuk/vendor/patches/0*.patch; do
+        [ -e "$patch" ] || continue
+        if git -C fuk/vendor/DiffSynth-Studio apply "$patch"; then
+            echo "    ✓ $(basename "$patch")"
+        else
+            echo "    ✗ FAILED to apply $(basename "$patch")"
+            echo "      DiffSynth is unpatched. Expect VACE OOM at 720p and ring"
+            echo "      artifacts on reference-image renders. See fuk/vendor/patches/README.md"
+            exit 1
+        fi
+    done
 fi
 
 # Depth Anything V3
-if [ ! -d "fuk/vendor/Depth-Anything-3" ]; then
-    echo "  → Cloning Depth-Anything-3..."
-    git clone https://github.com/ByteDance-Seed/Depth-Anything-3.git fuk/vendor/Depth-Anything-3
-else
-    echo "  ✓ Depth-Anything-3 already exists"
-fi
+clone_pinned Depth-Anything-3 https://github.com/ByteDance-Seed/Depth-Anything-3.git "$DEPTH_ANYTHING_3_SHA" || true
 
 # SAM2
-if [ ! -d "fuk/vendor/segment-anything-2" ]; then
-    echo "  → Cloning SAM2..."
-    git clone https://github.com/facebookresearch/segment-anything-2 fuk/vendor/segment-anything-2
+clone_pinned segment-anything-2 https://github.com/facebookresearch/segment-anything-2 "$SAM2_SHA" || true
+# Checkpoint presence is checked separately from the clone so an interrupted
+# first run can be resumed without deleting the repo.
+if ! ls fuk/vendor/segment-anything-2/checkpoints/*.pt >/dev/null 2>&1; then
     echo "  → Downloading SAM2 checkpoints..."
-    cd fuk/vendor/segment-anything-2/checkpoints
-    bash download_ckpts.sh
-    cd ../../../..
+    (cd fuk/vendor/segment-anything-2/checkpoints && bash download_ckpts.sh)
 else
-    echo "  ✓ segment-anything-2 already exists"
+    echo "  ✓ SAM2 checkpoints already present"
 fi
 
 # DSINE (normals)
-if [ ! -d "fuk/vendor/DSINE" ]; then
-    echo "  → Cloning DSINE..."
-    git clone https://github.com/baegwangbin/DSINE.git fuk/vendor/DSINE
-else
-    echo "  ✓ DSINE already exists"
-fi
+clone_pinned DSINE https://github.com/baegwangbin/DSINE.git "$DSINE_SHA" || true
 
 # VGGT (multi-view 3D reconstruction)
 # Source-only: threed/vggt_backend.py puts this directory on sys.path rather
 # than pip-installing it, and the weights come from HuggingFace at first use.
 # Do NOT install its requirements.txt — it pins torch==2.3.1 and would drag
 # the main venv's CUDA torch backwards, breaking Qwen and Wan generation.
-if [ ! -d "fuk/vendor/VGGT" ]; then
-    echo "  → Cloning VGGT..."
-    git clone https://github.com/facebookresearch/vggt.git fuk/vendor/VGGT
-else
-    echo "  ✓ VGGT already exists"
-fi
+clone_pinned VGGT https://github.com/facebookresearch/vggt.git "$VGGT_SHA" || true
 
 # TRELLIS (single-image 3D reconstruction) — source only.
 # The runtime lives in an isolated environment built separately; see the
 # 3D reconstruction section below for why it is not built here.
-if [ ! -d "fuk/vendor/TRELLIS" ]; then
-    echo "  → Cloning TRELLIS..."
-    git clone --recurse-submodules https://github.com/microsoft/TRELLIS.git fuk/vendor/TRELLIS
-else
-    echo "  ✓ TRELLIS already exists"
-fi
+clone_pinned TRELLIS https://github.com/microsoft/TRELLIS.git "$TRELLIS_SHA" --recurse-submodules || true
 
 # SeedVR2 (temporal video restoration / upscaling) — source only, runs in this
 # venv like VGGT does. It reimplements the SeedVR2 architecture with VAE tiling,
@@ -182,12 +210,7 @@ fi
 # would fight the venv's cu130 build. Its only two extra deps (gguf,
 # rotary_embedding_torch) are in pyproject.toml instead. Weights download on
 # first use, SHA256-validated, into {models_root}/seedvr2.
-if [ ! -d "fuk/vendor/SeedVR2" ]; then
-    echo "  → Cloning SeedVR2..."
-    git clone https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler.git fuk/vendor/SeedVR2
-else
-    echo "  ✓ SeedVR2 already exists"
-fi
+clone_pinned SeedVR2 https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler.git "$SEEDVR2_SHA" || true
 
 # ── Vendor packages ───────────────────────────────────────────────────────────
 echo ""

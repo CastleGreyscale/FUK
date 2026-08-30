@@ -40,7 +40,14 @@ fuk/testing/
 **/Cache/
 **/*password*
 **/*secret*
-fuk/vendor/
+# Vendor source trees are cloned by setup.sh and stay untracked, but the patches
+# FUK applies on top of them must be version-controlled — they are the only
+# record of our local fixes, and setup.sh replays them onto a pinned clone.
+# Note the glob: `fuk/vendor/` would exclude the directory itself, and git
+# cannot re-include anything beneath an excluded directory.
+fuk/vendor/*
+!fuk/vendor/patches/
+fuk/vendor/patches/.orig-*/
 **/outputs/
 **/venv/
 __pycache__/

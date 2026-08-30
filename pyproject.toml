@@ -1,6 +1,6 @@
 [project]
 name = "fuk"
-version = "0.1.0"
+version = "0.2.0"
 description = "Framework for Unified Kreation - Professional VFX AI Pipeline"
 requires-python = ">=3.10"
 dependencies = [

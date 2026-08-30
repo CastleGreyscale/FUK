@@ -1,0 +1,22 @@
+diff --git a/diffsynth/models/wan_video_vace.py b/diffsynth/models/wan_video_vace.py
+index 0e13183..6e5e35c 100644
+--- a/diffsynth/models/wan_video_vace.py
++++ b/diffsynth/models/wan_video_vace.py
+@@ -57,9 +57,15 @@ class VaceWanModel(torch.nn.Module):
+     ):
+         c = [self.vace_patch_embedding(u.unsqueeze(0)) for u in vace_context]
+         c = [u.flatten(2).transpose(1, 2) for u in c]
++        # FUK patch: the upstream line assumes the vace context is never longer
++        # than the latent sequence and blindly right-pads by the difference. When
++        # a reference image pushes u past x, new_zeros() gets a negative length
++        # and the cat blows up. Clamp instead of assuming.
++        seq_len = x.shape[1]
+         c = torch.cat([
+-            torch.cat([u, u.new_zeros(1, x.shape[1] - u.size(1), u.size(2))],
+-                      dim=1) for u in c
++            u[:, :seq_len] if u.size(1) >= seq_len
++            else torch.cat([u, u.new_zeros(1, seq_len - u.size(1), u.size(2))], dim=1)
++            for u in c
+         ])
+         
+         for block in self.vace_blocks:

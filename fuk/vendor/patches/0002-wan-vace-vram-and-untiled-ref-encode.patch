@@ -1,0 +1,62 @@
+diff --git a/diffsynth/pipelines/wan_video.py b/diffsynth/pipelines/wan_video.py
+index e2ab76f..c5c09b2 100644
+--- a/diffsynth/pipelines/wan_video.py
++++ b/diffsynth/pipelines/wan_video.py
+@@ -700,13 +700,24 @@ class WanVideoUnit_VACE(PipelineUnit):
+             
+             inactive = vace_video * (1 - vace_video_mask) + 0 * vace_video_mask
+             reactive = vace_video * vace_video_mask + 0 * (1 - vace_video_mask)
+-            inactive = pipe.vae.encode(inactive, device=pipe.device, tiled=tiled, tile_size=tile_size, tile_stride=tile_stride).to(dtype=pipe.torch_dtype, device=pipe.device)
+-            reactive = pipe.vae.encode(reactive, device=pipe.device, tiled=tiled, tile_size=tile_size, tile_stride=tile_stride).to(dtype=pipe.torch_dtype, device=pipe.device)
+-            vace_video_latents = torch.concat((inactive, reactive), dim=1)
+-            
++            # FUK patch: free each intermediate as soon as it is consumed. At 720p
++            # the full-resolution vace_video/inactive/reactive tensors and their
++            # latents are all live at once upstream, which is what pushes a 24GB
++            # card into OOM before denoising even starts.
++            del vace_video
++            inactive_latents = pipe.vae.encode(inactive, device=pipe.device, tiled=tiled, tile_size=tile_size, tile_stride=tile_stride).to(dtype=pipe.torch_dtype, device=pipe.device)
++            del inactive
++            reactive_latents = pipe.vae.encode(reactive, device=pipe.device, tiled=tiled, tile_size=tile_size, tile_stride=tile_stride).to(dtype=pipe.torch_dtype, device=pipe.device)
++            del reactive
++            vace_video_latents = torch.concat((inactive_latents, reactive_latents), dim=1)
++            del inactive_latents, reactive_latents
++            torch.cuda.empty_cache()
++
+             vace_mask_latents = rearrange(vace_video_mask[0,0], "T (H P) (W Q) -> 1 (P Q) T H W", P=8, Q=8)
++            del vace_video_mask
+             vace_mask_latents = torch.nn.functional.interpolate(vace_mask_latents, size=((vace_mask_latents.shape[2] + 3) // 4, vace_mask_latents.shape[3], vace_mask_latents.shape[4]), mode='nearest-exact')
+-            
++
++
+             if vace_reference_image is None:
+                 pass
+             else:
+@@ -719,13 +730,23 @@ class WanVideoUnit_VACE(PipelineUnit):
+                 new_vace_ref_images = []
+                 for j in range(f):
+                     new_vace_ref_images.append(vace_reference_image[0, :, j:j+1])
+-                vace_reference_image = new_vace_ref_images
+-                
+-                vace_reference_latents = pipe.vae.encode(vace_reference_image, device=pipe.device, tiled=tiled, tile_size=tile_size, tile_stride=tile_stride).to(dtype=pipe.torch_dtype, device=pipe.device)
+-                vace_reference_latents = torch.concat((vace_reference_latents, torch.zeros_like(vace_reference_latents)), dim=1)
++                del vace_reference_image
++
++                # FUK patch: reference frames are typically 1-2 images — encode
++                # without tiling to avoid tile-boundary artifacts being baked into
++                # the conditioning latent. A tiled encode of a single 832x480 frame
++                # creates grid seams that the DiT then reinforces over every
++                # denoising step, showing up as concentric rings on curved
++                # surfaces. Single-frame encode costs negligible extra VRAM.
++                vace_reference_latents = pipe.vae.encode(new_vace_ref_images, device=pipe.device, tiled=False).to(dtype=pipe.torch_dtype, device=pipe.device)
++                del new_vace_ref_images
++                ref_zeros = torch.zeros_like(vace_reference_latents)
++                vace_reference_latents = torch.concat((vace_reference_latents, ref_zeros), dim=1)
++                del ref_zeros
+                 vace_reference_latents = [u.unsqueeze(0) for u in vace_reference_latents]
+ 
+                 vace_video_latents = torch.concat((*vace_reference_latents, vace_video_latents), dim=2)
++                del vace_reference_latents
+                 vace_mask_latents = torch.concat((torch.zeros_like(vace_mask_latents[:, :, :f]), vace_mask_latents), dim=2)
+             
+             vace_context = torch.concat((vace_video_latents, vace_mask_latents), dim=1)
