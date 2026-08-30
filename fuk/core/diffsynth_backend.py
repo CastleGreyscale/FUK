@@ -1010,9 +1010,12 @@ class DiffSynthBackend:
         
         # Save based on output format
         if output_path.suffix.lower() in ['.png', '.jpg', '.jpeg']:
-            # Image output
-            from diffsynth.utils.data import save_image
-            save_image(decoded, str(output_path))
+            # Image output. This used to call a `save_image` from
+            # diffsynth.utils.data that has never existed in any DiffSynth we
+            # have vendored, so this branch always raised ImportError. Use the
+            # pipeline's own tensor->PIL helper, the same one the live preview
+            # path uses in qwen_pipeline.py.
+            pipe.vae_output_to_image(decoded).save(str(output_path))
         elif output_path.suffix.lower() in ['.mp4', '.avi', '.mov']:
             # Video output
             from diffsynth.utils.data import save_video

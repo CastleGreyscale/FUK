@@ -22,7 +22,14 @@ dependencies = [
     "safetensors>=0.4.5",
     "huggingface-hub>=0.34.0",
     "timm>=1.0.0",
-    
+    # DiffSynth 2.1.5 dropped these from its own dependency list, but its
+    # tokenizers still need them: Wan's UMT5 encoder loads a SentencePiece
+    # model, and protobuf backs the slow-tokenizer conversion path. They were
+    # only ever present transitively, so a fresh install loses them silently
+    # and fails at first text-encode rather than at install time.
+    "sentencepiece>=0.2.0",
+    "protobuf>=4.25.0",
+
     # Preprocessors & Control
     "controlnet_aux>=0.0.10",
     "geffnet>=1.0.2",
