@@ -100,6 +100,7 @@ def _update_job(job_id: str, **fields):
 _CATEGORY_BY_PIPELINE = {
     "qwen": "image",
     "flux2": "image",
+    "krea2": "image",
     "wan": "video",
     "ltx2": "video",
     "minimax_h3": "video",

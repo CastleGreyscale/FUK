@@ -177,6 +177,12 @@ class DiffSynthBackend:
             _log("BACKEND", f"MiniMaxH3PipelineRunner not available: {e}", "warning")
 
         try:
+            from krea2_pipeline import Krea2PipelineRunner
+            self.runners["krea2"] = Krea2PipelineRunner(self)
+        except ImportError as e:
+            _log("BACKEND", f"Krea2PipelineRunner not available: {e}", "warning")
+
+        try:
             from threed_pipeline import ThreeDPipelineRunner
             self.runners["threed"] = ThreeDPipelineRunner(self)
         except ImportError as e:
@@ -279,6 +285,7 @@ class DiffSynthBackend:
         from diffsynth.pipelines.flux2_image import Flux2ImagePipeline, ModelConfig as Flux2ModelConfig
         from diffsynth.pipelines.ltx2_audio_video import LTX2AudioVideoPipeline, ModelConfig as LTX2ModelConfig
         from diffsynth.pipelines.minimax_h3_audio_video import MiniMaxH3Pipeline, ModelConfig as MiniMaxH3ModelConfig
+        from diffsynth.pipelines.krea2 import Krea2Pipeline, ModelConfig as Krea2ModelConfig
 
         # Store ModelConfig classes as instance attributes for use in other methods
         self.ModelConfig = ModelConfig
@@ -286,6 +293,7 @@ class DiffSynthBackend:
         self.Flux2ModelConfig = Flux2ModelConfig
         self.LTX2ModelConfig = LTX2ModelConfig
         self.MiniMaxH3ModelConfig = MiniMaxH3ModelConfig
+        self.Krea2ModelConfig = Krea2ModelConfig
 
         # Populate pipeline registry
         PIPELINE_CLASSES["qwen"] = QwenImagePipeline
@@ -293,6 +301,7 @@ class DiffSynthBackend:
         PIPELINE_CLASSES["flux2"] = Flux2ImagePipeline
         PIPELINE_CLASSES["ltx2"] = LTX2AudioVideoPipeline
         PIPELINE_CLASSES["minimax_h3"] = MiniMaxH3Pipeline
+        PIPELINE_CLASSES["krea2"] = Krea2Pipeline
 
     # ------------------------------------------------------------------
     # Config helpers
@@ -782,6 +791,8 @@ class DiffSynthBackend:
             return self.LTX2ModelConfig
         if pipeline_type == "minimax_h3":
             return self.MiniMaxH3ModelConfig
+        if pipeline_type == "krea2":
+            return self.Krea2ModelConfig
         return self.ModelConfig
 
     def _build_model_configs(self, entry: dict, vram_config: dict = None) -> list:

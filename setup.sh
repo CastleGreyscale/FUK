@@ -687,6 +687,51 @@ cat > fuk/config/models.json.template << 'EOL'
     }
   },
 
+  "_krea2_comment": "Krea-2 is a straight text-to-image model — no edit images, no control inputs. Two variants with very different sampling: raw is 52 steps at cfg 4.5, turbo is 8 steps at cfg 1.0 with mu=1.15, so their step and cfg defaults live in pipeline_kwargs rather than the family defaults. They share the Qwen3-VL-4B text encoder (8.3GB, Apache-2.0) and reuse Qwen-Image's VAE, which is already on disk for anyone running the Qwen models — so the first variant costs about 33GB and the second only its own 24.5GB DiT. The repos carry both a single-file checkpoint and a diffusers-format transformer/ directory; the patterns below take the single file so you do not fetch 57GB to use 24GB of it. LICENCE: both krea/Krea-2-* repos are gated on HuggingFace and published under a non-Apache 'other' licence whose text is not publicly fetchable — read it before using output on paid work.",
+
+  "krea2_raw": {
+    "model_id": "krea/Krea-2-Raw",
+    "pipeline": "krea2",
+    "category": "image",
+    "description": "Krea-2 Raw — text-to-image, 52 steps at cfg 4.5 (quality)",
+    "aliases": ["krea", "krea2", "krea-2", "krea2-raw"],
+    "supports": ["negative_prompt"],
+    "parameter_map": {},
+    "size_gb": 33,
+    "components": [
+      {"pattern": "raw.safetensors"},
+      {"model_id": "Qwen/Qwen3-VL-4B-Instruct", "pattern": "*.safetensors"},
+      {"model_id": "Qwen/Qwen-Image", "pattern": "vae/diffusion_pytorch_model.safetensors"}
+    ],
+    "tokenizer": {"model_id": "Qwen/Qwen3-VL-4B-Instruct", "pattern": ""},
+    "pipeline_kwargs": {
+      "num_inference_steps": 52,
+      "cfg_scale": 4.5
+    }
+  },
+
+  "krea2_turbo": {
+    "model_id": "krea/Krea-2-Turbo",
+    "pipeline": "krea2",
+    "category": "image",
+    "description": "Krea-2 Turbo — distilled text-to-image, 8 steps at cfg 1.0 (~6x faster)",
+    "aliases": ["krea-turbo", "krea2-turbo"],
+    "supports": ["negative_prompt"],
+    "parameter_map": {},
+    "size_gb": 33,
+    "components": [
+      {"pattern": "turbo.safetensors"},
+      {"model_id": "Qwen/Qwen3-VL-4B-Instruct", "pattern": "*.safetensors"},
+      {"model_id": "Qwen/Qwen-Image", "pattern": "vae/diffusion_pytorch_model.safetensors"}
+    ],
+    "tokenizer": {"model_id": "Qwen/Qwen3-VL-4B-Instruct", "pattern": ""},
+    "pipeline_kwargs": {
+      "num_inference_steps": 8,
+      "cfg_scale": 1.0,
+      "mu": 1.15
+    }
+  },
+
   "_minimax_h3_comment": "MiniMax-H3 is a joint audio-video model — one denoise produces picture and synchronized sound at 32kHz (LTX-2 uses 24kHz, hence audio_sample_rate being per-model). Two DiT checkpoints are registered as separate models because they take different conditioning and ship their own processors: fl2va takes a first and/or last frame, ref2va takes reference media that the prompt addresses positionally as <Subject 1>, <Video 1>, <Audio 1>. They share the text encoder and both VAEs, so the second model costs only its own DiT. Sizes below are the NF4 pruned weights: fl2va or ref2va DiT 9.76GB each, text encoder 14.27GB, video VAE 1.50GB, audio VAE 0.26GB — about 25.8GB for the first model and +9.76GB for the second. Unpruned NF4 DiTs (15.98GB) and bf16/fp8/int8-convrot variants also exist upstream if you have the headroom.",
 
   "_minimax_h3_quant_comment": "These are pre-quantized checkpoints, not online quantization. DiffSynth resolves them by hash and applies the authors' own quant_config — bitsandbytes NF4 with load_prequantized and a calibrated exclude list covering time_embedder, the patch projections and the final layers — so quality is nothing like the online NF4 measured in defaults_vram.json. Do NOT also select a quant_* VRAM preset for these: the _should_quantize pattern heuristic in diffsynth_backend.py deliberately does not match these filenames, and forcing it with a component-level \"quantize\": true would quantize already-quantized weights.",
@@ -858,6 +903,16 @@ cat > fuk/config/defaults.json.template << 'EOL'
     "cfg_scale": 1.0,
     "embedded_guidance": 4.0,
     "denoising_strength": 1.0,
+    "negative_prompt": ""
+  },
+
+  "_krea2_comment": "Krea-2 defaults. Steps and cfg are deliberately absent per-variant here — raw and turbo differ so sharply (52/4.5 vs 8/1.0) that a shared default would be wrong for one of them, so each carries its own in models.json pipeline_kwargs. These are the fallbacks used only if a variant declares none. Krea-2 needs ~24GB VRAM; the 'high' disk-offload preset is what upstream documents for a 24GB card.",
+  "krea2": {
+    "model": "krea2_raw",
+    "width": 1024,
+    "height": 1024,
+    "steps": 52,
+    "cfg_scale": 4.5,
     "negative_prompt": ""
   },
 

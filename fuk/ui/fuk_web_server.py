@@ -1834,7 +1834,7 @@ async def get_models():
     # Which pipeline families land in which dropdown. ltx2 and minimax_h3 both
     # generate video with a synchronized soundtrack, so they belong with the
     # video models; threed has its own UI and is deliberately absent.
-    IMAGE_PIPELINES = ("qwen", "flux2")
+    IMAGE_PIPELINES = ("qwen", "flux2", "krea2")
     VIDEO_PIPELINES = ("wan", "ltx2", "minimax_h3")
 
     for key, entry in config.items():
