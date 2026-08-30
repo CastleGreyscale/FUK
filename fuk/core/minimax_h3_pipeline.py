@@ -143,8 +143,15 @@ class MiniMaxH3PipelineRunner(PipelineRunner):
                 pipe_kwargs["keyframe_indices"] = indices
 
         if "references" in supports:
+            # The video tab has one image slot and posts it as image_path, so on
+            # a Ref2VA model that is the subject reference. An explicit
+            # reference_image (from the API or a chained call) still wins.
+            ref_img = reference_image or image_path
+            # control_path is the tab's video slot; for Ref2VA it is a reference
+            # clip rather than a control signal.
+            ref_vid = reference_video or kwargs.get("control_path")
             references = self._build_references(
-                reference_image, reference_video, reference_audio,
+                ref_img, ref_vid, reference_audio,
                 width, height, num_frames, fps, pipe)
             if references:
                 pipe_kwargs["references"] = references

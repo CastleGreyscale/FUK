@@ -540,19 +540,67 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
   // name so neither source alone can cause a false negative during config load or key mismatches.
   const selectedModel = videoModels.find(m => m.key === formData.task);
   const modelSupports = selectedModel?.supports || [];
-  const requiresControlVideo = modelSupports.includes('vace_video') || formData.task?.includes('-FC');
-  const isFunControl = requiresControlVideo;
+  // Each pipeline family names its conditioning differently, but they all
+  // arrive over the same three form fields (image_path, end_image_path,
+  // control_path), so the gating maps every family's vocabulary onto those:
+  //   Wan      input_image / vace_reference_image / vace_video / end_image
+  //   LTX-2    input_images (first frame) / in_context_videos (IC-LoRA driver)
+  //   MiniMax  keyframes (first+last) / references (Ref2VA subject)
+  const requiresControlVideo = modelSupports.includes('vace_video')
+    || modelSupports.includes('in_context_videos')
+    || modelSupports.includes('references')
+    || formData.task?.includes('-FC');
+  const isFunControl = modelSupports.includes('vace_video') || formData.task?.includes('-FC');
+
+  // The video slot means something different per family, and only Wan's is
+  // actually required, so it is labelled from the model rather than assumed.
+  const videoSlot = modelSupports.includes('in_context_videos')
+    ? {
+        label: 'In-Context Video',
+        required: false,
+        help: 'Driving video for the IC-LoRAs — depth/pose/edge for Union-Control, '
+            + 'or a low-detail clip for Detailer. Only used when one is loaded.',
+      }
+    : modelSupports.includes('references')
+    ? {
+        label: 'Reference Video',
+        required: false,
+        help: 'Reference clip the prompt can address as <Video 1>. Its own '
+            + 'soundtrack comes along as <Audio 1> when it has one.',
+      }
+    : {
+        label: 'Control Video',
+        required: true,
+        help: 'Video or image sequence for pose/motion control',
+      };
   const requiresStartImage = modelSupports.includes('input_image')
     || modelSupports.includes('vace_reference_image')
+    || modelSupports.includes('input_images')
+    || modelSupports.includes('keyframes')
+    || modelSupports.includes('references')
     || formData.task?.includes('i2v')
     || formData.task?.includes('flf2v')
     || formData.task?.includes('inp')
     || modelSupports.includes('animate_pose_video');
-  const requiresEndImage = modelSupports.includes('end_image') || formData.task?.includes('flf2v');
+  // MiniMax FL2VA interpolates between a first and last frame, the same shape
+  // as Wan's flf2v.
+  const requiresEndImage = modelSupports.includes('end_image')
+    || modelSupports.includes('keyframes')
+    || formData.task?.includes('flf2v');
+
   const requiresAnimatePoseVideo = modelSupports.includes('animate_pose_video');
   const requiresAnimateFaceVideo = modelSupports.includes('animate_face_video');
   const requiresAnimateInpaintVideo = modelSupports.includes('animate_inpaint_video');
   const requiresAnimateMaskVideo = modelSupports.includes('animate_mask_video');
+
+  // Showing a slot is not the same as demanding it. MiniMax generates happily
+  // from a prompt alone — keyframes and references are both optional — so
+  // gating Generate on an image would block valid work.
+  const imageInputsOptional = modelSupports.includes('keyframes')
+    || modelSupports.includes('references');
+  const startImageLabel = (modelSupports.includes('references') || requiresAnimatePoseVideo)
+    ? 'Reference Image'
+    : 'Start Image';
   
   // Calculate whether current frame input is valid
   const currentFrameValid = (parseInt(frameInput) - 1) % 4 === 0;
@@ -756,11 +804,14 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
               {requiresAnimatePoseVideo ? 'Animate Inputs' : isFunControl ? 'Control Inputs' : 'Input Images'}
             </h3>
 
-            {/* Control Video for Fun Control mode */}
+            {/* Control Video — Wan VACE/Fun-Control, or an LTX-2 in-context driver */}
             {requiresControlVideo && (
               <div className="fuk-form-group-compact">
                 <label className="fuk-label">
-                  Control Video <span className="fuk-label-required">(Required)</span>
+                  {videoSlot.label}{' '}
+                  {videoSlot.required
+                    ? <span className="fuk-label-required">(Required)</span>
+                    : <span className="fuk-label-description">(Optional)</span>}
                 </label>
                 <MediaUploader
                   images={formData.control_path ? [formData.control_path] : []}
@@ -770,9 +821,7 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
                   accept="all"
                   label="Drop video or click to browse"
                 />
-                <p className="fuk-help-text">
-                  Video or image sequence for pose/motion control
-                </p>
+                <p className="fuk-help-text">{videoSlot.help}</p>
               </div>
             )}
 
@@ -861,9 +910,10 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
               <>
                 <div className={`fuk-form-group-compact ${(requiresControlVideo || requiresAnimatePoseVideo) ? 'fuk-mt-4' : ''}`}>
                   <label className="fuk-label">
-                    {requiresAnimatePoseVideo ? 'Reference Image' : 'Start Image'}
-                    {(requiresAnimatePoseVideo || (!isFunControl && !requiresAnimatePoseVideo)) && <span className="fuk-label-required">(Required)</span>}
-                    {isFunControl && !requiresAnimatePoseVideo && <span className="fuk-label-description">(Optional)</span>}
+                    {startImageLabel}
+                    {(isFunControl || imageInputsOptional)
+                      ? <span className="fuk-label-description">(Optional)</span>
+                      : <span className="fuk-label-required">(Required)</span>}
                   </label>
                   <MediaUploader
                     images={formData.image_path ? [formData.image_path] : []}
@@ -882,7 +932,10 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
                 {requiresEndImage && (
                   <div className="fuk-form-group-compact fuk-mt-4">
                     <label className="fuk-label">
-                      End Image <span className="fuk-label-required">(Required for FLF2V)</span>
+                      End Image{' '}
+                      {imageInputsOptional
+                        ? <span className="fuk-label-description">(Optional)</span>
+                        : <span className="fuk-label-required">(Required for FLF2V)</span>}
                     </label>
                     <MediaUploader
                       images={formData.end_image_path ? [formData.end_image_path] : []}
@@ -899,7 +952,7 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
               <div className="fuk-empty-state">
                 <Film className="fuk-empty-state-icon" />
                 <p className="fuk-empty-state-text">
-                  Select an I2V, FLF2V, Animate, or Fun Control model<br />to enable control inputs
+                  Select an I2V, FLF2V, Animate, Fun Control, LTX-2<br />or MiniMax-H3 model to enable control inputs
                 </p>
               </div>
             )}
@@ -1272,7 +1325,11 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
         elapsedSeconds={elapsedSeconds}
         onGenerate={handleGenerate}
         onCancel={cancel}
-        canGenerate={!!formData.prompt && (!requiresStartImage || !!formData.image_path) && (!requiresEndImage || !!formData.end_image_path) && (!requiresAnimatePoseVideo || !!formData.animate_pose_video) && (!requiresAnimateFaceVideo || !!formData.animate_face_video)}
+        canGenerate={!!formData.prompt
+          && (imageInputsOptional || !requiresStartImage || !!formData.image_path)
+          && (imageInputsOptional || !requiresEndImage || !!formData.end_image_path)
+          && (!requiresAnimatePoseVideo || !!formData.animate_pose_video)
+          && (!requiresAnimateFaceVideo || !!formData.animate_face_video)}
         generateLabel="Generate Video"
         generatingLabel={batchProgress ? `Generating ${batchProgress.current}/${batchProgress.total}...` : 'Generating...'}
         batchCount={formData.batchCount}
