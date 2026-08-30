@@ -28,6 +28,7 @@ from __future__ import annotations
 import glob
 import json
 import os
+import shutil
 import sys
 import threading
 import time
@@ -51,6 +52,14 @@ class DownloadRequest(BaseModel):
     # Omitted means "everything this model needs". Named components let the UI
     # retry only the pieces that failed rather than re-walking a 60GB model.
     patterns: Optional[List[str]] = None
+
+
+class DeleteRequest(BaseModel):
+    # Deletion is two-step on purpose. Without confirm the endpoint returns the
+    # plan — what would go, what is shared and therefore kept, how much is
+    # reclaimed — and touches nothing. The UI shows that, then re-posts with
+    # confirm=true. Nothing here is recoverable except by re-downloading.
+    confirm: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -163,14 +172,36 @@ def _target_status(models_root: Path, model_id: str, pattern: str) -> dict:
     return {"present": bool(matches), "files": len(matches), "size_bytes": size}
 
 
+def _on_disk_bytes(models_root: Path, entry: dict) -> int:
+    """Bytes this model occupies locally, counting each file once.
+
+    Deduplicated for the same reason as the remote estimate: a model's patterns
+    overlap, so summing per pattern reports more than the disk actually holds.
+    """
+    seen: Dict[Path, int] = {}
+    for _, model_id, pattern in _entry_targets(entry):
+        root = models_root / model_id
+        if not root.exists():
+            continue
+        for m in glob.glob(_expand_pattern(pattern), root_dir=str(root)):
+            p = root / m
+            if p.is_file():
+                seen[p] = p.stat().st_size
+            elif p.is_dir():
+                for f in p.rglob("*"):
+                    if f.is_file():
+                        seen[f] = f.stat().st_size
+    return sum(seen.values())
+
+
 def _model_status(models_root: Path, key: str, entry: dict) -> dict:
     """Full panel row for one registry entry."""
     targets = _entry_targets(entry)
-    parts, present_count, total_bytes = [], 0, 0
+    parts, present_count = [], 0
+    total_bytes = _on_disk_bytes(models_root, entry)
     for label, model_id, pattern in targets:
         st = _target_status(models_root, model_id, pattern)
         present_count += bool(st["present"])
-        total_bytes += st["size_bytes"]
         parts.append({
             "label": label,
             "model_id": model_id,
@@ -215,6 +246,155 @@ def _model_status(models_root: Path, key: str, entry: dict) -> dict:
         # install_trellis_env.sh or on first use.
         "downloadable": bool(targets),
         "notes": entry.get("notes"),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Remote size estimates
+#
+# The panel can only show on-disk size for what is already downloaded, which is
+# exactly backwards from what you need when deciding whether to download. These
+# ask the hub how big a model would be. Cached in-process because a cold lookup
+# is a network round trip per repo and the answer does not change.
+# ---------------------------------------------------------------------------
+
+_repo_cache: Dict[str, Optional[List[dict]]] = {}
+_repo_cache_lock = threading.Lock()
+
+
+def _fetch_repo_files(model_id: str) -> Optional[List[dict]]:
+    """List a repo's files as [{path, size}], HuggingFace first then ModelScope.
+
+    Returns None when neither host can be reached or the repo is gated — the
+    caller reports "unknown" rather than guessing, because a wrong number here
+    would be worse than no number.
+    """
+    with _repo_cache_lock:
+        if model_id in _repo_cache:
+            return _repo_cache[model_id]
+
+    import urllib.request
+
+    def _get(url, timeout=12):
+        req = urllib.request.Request(url, headers={"User-Agent": "FUK-ModelManager"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read())
+
+    files = None
+    try:
+        d = _get(f"https://huggingface.co/api/models/{model_id}?blobs=true")
+        files = [{"path": s["rfilename"], "size": s.get("size") or 0}
+                 for s in d.get("siblings", [])]
+    except Exception:
+        try:
+            d = _get("https://www.modelscope.cn/api/v1/models/"
+                     f"{model_id}/repo/files?Revision=master")
+            files = [{"path": f["Path"], "size": f.get("Size") or 0}
+                     for f in d.get("Data", {}).get("Files", [])
+                     if f.get("Type") != "tree"]
+        except Exception:
+            files = None
+
+    with _repo_cache_lock:
+        _repo_cache[model_id] = files
+    return files
+
+
+def _pattern_matches(model_id: str, pattern: str) -> Optional[Dict[str, int]]:
+    """{path: size} for the files one pattern matches, or None if unknown."""
+    files = _fetch_repo_files(model_id)
+    if files is None:
+        return None
+    import fnmatch
+    expanded = _expand_pattern(pattern)
+    return {f["path"]: f["size"] for f in files
+            if fnmatch.fnmatch(f["path"], expanded)}
+
+
+def _estimate_model_size(entry: dict) -> dict:
+    """Remote download size for a model, and how much is already local.
+
+    Sizes are accumulated per unique (repo, file) rather than summed per
+    pattern, because a model's patterns routinely overlap: a tokenizer entry
+    with an empty pattern expands to "*" and re-matches the very safetensors
+    the component pattern already counted. Summing naively inflated Krea-2 by
+    the whole 8.3GB text encoder and LTX-2 by the 22.7GB Gemma encoder.
+
+    `remaining_bytes` is the honest number for a download button: the total
+    minus whatever is already on disk, which for anything sharing the Qwen VAE
+    or a Wan text encoder is a meaningfully smaller figure.
+    """
+    seen: Dict[tuple, int] = {}
+    unknown = []
+    for label, model_id, pattern in _entry_targets(entry):
+        matches = _pattern_matches(model_id, pattern)
+        if matches is None:
+            unknown.append(f"{model_id} → {pattern}")
+            continue
+        for path, size in matches.items():
+            seen[(model_id, path)] = size
+    return {
+        "total_bytes": sum(seen.values()),
+        "file_count": len(seen),
+        "unknown_targets": unknown,
+        "complete": not unknown,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Deletion
+# ---------------------------------------------------------------------------
+
+def _shared_targets(models_config: dict, model_key: str) -> Dict[tuple, List[str]]:
+    """Map every (model_id, pattern) this model uses to the OTHER models using it.
+
+    Sharing is not an edge case here: the Qwen-Image VAE backs eight models and
+    the Wan T5 encoder five, so deleting a model's files naively would quietly
+    break most of the registry.
+    """
+    entry = models_config[model_key]
+    mine = {(mid, pat) for _, mid, pat in _entry_targets(entry)}
+    others: Dict[tuple, List[str]] = {t: [] for t in mine}
+    for key, other in _iter_models(models_config):
+        if key == model_key:
+            continue
+        for _, mid, pat in _entry_targets(other):
+            if (mid, pat) in others:
+                others[(mid, pat)].append(key)
+    return others
+
+
+def _delete_plan(models_root: Path, models_config: dict, model_key: str) -> dict:
+    """What deleting this model would remove, and what it would leave alone."""
+    entry = models_config[model_key]
+    shared = _shared_targets(models_config, model_key)
+
+    removable, kept, files = [], [], []
+    reclaim = 0
+    for label, model_id, pattern in _entry_targets(entry):
+        st = _target_status(models_root, model_id, pattern)
+        sharers = shared.get((model_id, pattern), [])
+        row = {
+            "label": label, "model_id": model_id, "pattern": pattern,
+            "present": st["present"], "size_bytes": st["size_bytes"],
+        }
+        if sharers:
+            kept.append({**row, "shared_with": sharers})
+            continue
+        if not st["present"]:
+            continue
+        removable.append(row)
+        reclaim += st["size_bytes"]
+        root = models_root / model_id
+        for m in glob.glob(_expand_pattern(pattern), root_dir=str(root)):
+            files.append(str(root / m))
+
+    return {
+        "key": model_key,
+        "removable": removable,
+        "kept_shared": kept,
+        "files": files,
+        "reclaim_bytes": reclaim,
     }
 
 
@@ -482,6 +662,130 @@ def setup_model_manager_routes(
         threading.Thread(target=worker, name=f"dl-{model_key}", daemon=True).start()
         log.info("ModelManager", f"{model_key} download started ({len(targets)} targets)")
         return {"success": True, "job_id": job_id, "total": len(targets)}
+
+    @app.get("/api/models/manage/sizes")
+    async def model_sizes(keys: str = ""):
+        """Remote download sizes for the named models (comma-separated).
+
+        Separate from the main listing because it costs a network round trip per
+        repo — the panel loads instantly, then fills sizes in for the models that
+        are not downloaded yet.
+        """
+        models_config = _load_models()
+        root = _models_root()
+        wanted = [k.strip() for k in keys.split(",") if k.strip()] or \
+                 [k for k, _ in _iter_models(models_config)]
+
+        out = {}
+        for key in wanted:
+            entry = models_config.get(key)
+            if not isinstance(entry, dict) or "pipeline" not in entry:
+                continue
+            est = _estimate_model_size(entry)
+            on_disk = _on_disk_bytes(root, entry)
+            out[key] = {
+                **est,
+                "on_disk_bytes": on_disk,
+                # What a download would actually pull, given what is already
+                # shared with models you have.
+                "remaining_bytes": max(est["total_bytes"] - on_disk, 0),
+            }
+        return {"sizes": out}
+
+    @app.post("/api/models/manage/{model_key}/delete")
+    async def delete_model(model_key: str, request: DeleteRequest):
+        """Remove a model's weights from disk.
+
+        Two-step: without confirm it returns the plan and deletes nothing.
+        Components shared with any other registry entry are never deleted, and
+        every path is checked to be inside models_root before it is unlinked.
+        """
+        models_config = _load_models()
+        entry = models_config.get(model_key)
+        if not isinstance(entry, dict) or "pipeline" not in entry:
+            raise HTTPException(status_code=404, detail=f"Unknown model '{model_key}'")
+
+        root = _models_root().resolve()
+        plan = _delete_plan(root, models_config, model_key)
+
+        if not request.confirm:
+            return {"success": True, "dry_run": True, **plan}
+
+        # Drop any loaded pipeline first — deleting the weights under a live
+        # pipeline leaves it working until the next load, then failing oddly.
+        try:
+            for cache_key in [k for k in generation_backend.pipelines
+                              if k.startswith(f"{model_key}:")]:
+                generation_backend._evict_pipeline(cache_key)
+                log.info("ModelManager", f"Evicted loaded pipeline {cache_key} before delete")
+        except Exception as e:
+            log.warning("ModelManager", f"Could not evict pipelines for {model_key}: {e}")
+
+        removed, failed, freed = [], [], 0
+        for path_str in plan["files"]:
+            p = Path(path_str)
+            try:
+                # Refuse anything that resolves outside models_root, whatever
+                # the registry claimed — a stray "../" in a pattern must not be
+                # able to reach the rest of the filesystem.
+                rp = p.resolve()
+                rp.relative_to(root)
+            except (ValueError, OSError):
+                failed.append({"path": path_str, "error": "outside models_root"})
+                continue
+            try:
+                if rp.is_dir():
+                    size = sum(f.stat().st_size for f in rp.rglob("*") if f.is_file())
+                    shutil.rmtree(rp)
+                elif rp.exists():
+                    size = rp.stat().st_size
+                    rp.unlink()
+                else:
+                    continue
+                freed += size
+                removed.append(str(rp))
+            except Exception as e:
+                failed.append({"path": path_str, "error": f"{type(e).__name__}: {e}"})
+
+        # Prune directories the deletion emptied, stopping at models_root.
+        # Bottom-up over the whole subtree, not just the repo root: deleting a
+        # "tokenizer/" pattern removes the files inside but leaves the directory,
+        # and that leftover then keeps its parent looking non-empty forever.
+        def _prune(start: Path):
+            if not start.is_dir():
+                return
+            for d in sorted((p for p in start.rglob("*") if p.is_dir()),
+                            key=lambda p: len(p.parts), reverse=True):
+                try:
+                    d.rmdir()          # only succeeds when empty
+                except OSError:
+                    pass
+            d = start.resolve()
+            while d != root and d.is_relative_to(root) and d.is_dir():
+                try:
+                    d.rmdir()
+                    d = d.parent
+                except OSError:
+                    break              # not empty — leave it and everything above
+
+        for mid in {c["model_id"] for c in plan["removable"]}:
+            _prune((root / mid).resolve())
+
+        log.info("ModelManager",
+                 f"{model_key}: removed {len(removed)} path(s), "
+                 f"{freed / 1024**3:.1f}GB freed"
+                 + (f", {len(failed)} failed" if failed else "")
+                 + (f", {len(plan['kept_shared'])} kept (shared)" if plan["kept_shared"] else ""))
+
+        return {
+            "success": not failed,
+            "dry_run": False,
+            "key": model_key,
+            "removed": removed,
+            "failed": failed,
+            "freed_bytes": freed,
+            "kept_shared": plan["kept_shared"],
+        }
 
     @app.get("/api/models/manage/jobs/{job_id}")
     async def download_job_status(job_id: str):

@@ -20,7 +20,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  Download, CheckCircle, AlertCircle, Loader2, RefreshCw, Link, Info,
+  Download, CheckCircle, AlertCircle, Loader2, RefreshCw, Link, Info, Trash2,
 } from '../components/Icons';
 
 const API_URL = '/api';
@@ -75,8 +75,12 @@ function ToolRow({ tool }) {
 // Models — download + active
 // ============================================================================
 
-function ModelRow({ model, job, onToggle, onDownload, busy }) {
+function ModelRow({ model, job, size, sizesLoading, onToggle, onDownload, onDelete, busy }) {
   const [open, setOpen] = useState(false);
+  // Delete is two-step: the server returns a plan, the row shows it, and only
+  // an explicit second click removes anything.
+  const [plan, setPlan] = useState(null);
+  const [planning, setPlanning] = useState(false);
 
   const state = !model.downloadable ? 'na'
     : model.downloaded ? 'complete'
@@ -110,10 +114,21 @@ function ModelRow({ model, job, onToggle, onDownload, busy }) {
               {state === 'na' && 'installed separately'}
             </span>
             {model.size_on_disk_bytes > 0 && (
-              <span className="mm-size">{fmtBytes(model.size_on_disk_bytes)}</span>
+              <span className="mm-size">{fmtBytes(model.size_on_disk_bytes)} on disk</span>
             )}
-            {state === 'missing' && model.size_gb_estimate && (
-              <span className="mm-size">~{model.size_gb_estimate} GB</span>
+            {/* Projected download. `remaining` rather than `total` is the number
+                that matters: a model sharing the Qwen VAE or a Wan encoder with
+                something you already have pulls far less than its full size. */}
+            {size && !model.downloaded && size.remaining_bytes > 0 && (
+              <span className="mm-size mm-size--fetch">
+                {fmtBytes(size.remaining_bytes)} to fetch
+                {size.remaining_bytes !== size.total_bytes &&
+                  ` of ${fmtBytes(size.total_bytes)}`}
+                {!size.complete && ' +unknown'}
+              </span>
+            )}
+            {sizesLoading && !size && !model.downloaded && model.downloadable && (
+              <span className="mm-size">sizing…</span>
             )}
           </div>
 
@@ -173,17 +188,81 @@ function ModelRow({ model, job, onToggle, onDownload, busy }) {
         </div>
 
         {model.downloadable && (
-          <button
-            className="fuk-btn fuk-btn-secondary fuk-btn-sm mm-dl"
-            disabled={running || busy}
-            onClick={() => onDownload(model.key)}
-          >
-            {running
-              ? <><Loader2 className="fuk-icon--sm mm-spin" /> downloading</>
-              : <><Download className="fuk-icon--sm" /> {model.downloaded ? 'Verify' : 'Download'}</>}
-          </button>
+          <div className="mm-actions">
+            <button
+              className="fuk-btn fuk-btn-secondary fuk-btn-sm mm-dl"
+              disabled={running || busy}
+              onClick={() => onDownload(model.key)}
+            >
+              {running
+                ? <><Loader2 className="fuk-icon--sm mm-spin" /> downloading</>
+                : <><Download className="fuk-icon--sm" /> {model.downloaded ? 'Verify' : 'Download'}</>}
+            </button>
+            {(model.downloaded || model.partial) && (
+              <button
+                className="fuk-btn fuk-btn-secondary fuk-btn-sm mm-del"
+                disabled={running || busy || planning}
+                onClick={async () => {
+                  if (plan) { setPlan(null); return; }   // second click on "Cancel"
+                  setPlanning(true);
+                  setPlan(await onDelete(model.key, false));
+                  setPlanning(false);
+                }}
+              >
+                <Trash2 className="fuk-icon--sm" /> {plan ? 'Cancel' : 'Delete'}
+              </button>
+            )}
+          </div>
         )}
       </div>
+
+      {/* Deletion plan — shown before anything is removed. Shared components
+          are never deleted, and saying so here is the whole point: otherwise
+          removing Krea-2 looks like it would take the Qwen VAE with it. */}
+      {plan && (
+        <div className="mm-delete-plan">
+          <div className="mm-delete-head">
+            <AlertCircle className="fuk-icon--sm" />
+            Delete {fmtBytes(plan.reclaim_bytes)} from disk? This cannot be undone —
+            only re-downloaded.
+          </div>
+          {plan.removable.length > 0 && (
+            <ul className="mm-delete-list">
+              {plan.removable.map((r) => (
+                <li key={`${r.model_id}:${r.pattern}`}>
+                  <code>{r.model_id} → {r.pattern}</code> <span>{fmtBytes(r.size_bytes)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {plan.kept_shared.length > 0 && (
+            <div className="mm-delete-kept">
+              Kept — shared with other models:
+              <ul className="mm-delete-list">
+                {plan.kept_shared.map((k) => (
+                  <li key={`${k.model_id}:${k.pattern}`}>
+                    <code>{k.pattern}</code>{' '}
+                    <span>{fmtBytes(k.size_bytes)} · used by {k.shared_with.join(', ')}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {plan.removable.length === 0 ? (
+            <div className="mm-delete-kept">
+              Nothing to remove — every component is shared with another model.
+            </div>
+          ) : (
+            <button
+              className="fuk-btn fuk-btn-sm mm-del-confirm"
+              disabled={busy}
+              onClick={async () => { await onDelete(model.key, true); setPlan(null); }}
+            >
+              <Trash2 className="fuk-icon--sm" /> Confirm delete {fmtBytes(plan.reclaim_bytes)}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -198,6 +277,10 @@ export default function ModelManager() {
   const [busy, setBusy] = useState(false);
   // model key -> job. Kept out of `data` so a refresh cannot drop live progress.
   const [jobs, setJobs] = useState({});
+  // model key -> remote size. Fetched separately because each one is a network
+  // round trip to the hub; the panel renders immediately and fills these in.
+  const [sizes, setSizes] = useState({});
+  const [sizesLoading, setSizesLoading] = useState(false);
   const pollRef = useRef(null);
 
   const load = useCallback(async () => {
@@ -211,7 +294,30 @@ export default function ModelManager() {
     }
   }, []);
 
+  const loadSizes = useCallback(async (keys) => {
+    if (!keys.length) return;
+    setSizesLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/models/manage/sizes?keys=${keys.join(',')}`);
+      if (res.ok) {
+        const { sizes: fresh } = await res.json();
+        setSizes((prev) => ({ ...prev, ...fresh }));
+      }
+    } catch { /* sizes are advisory — a failure just leaves them blank */ }
+    finally { setSizesLoading(false); }
+  }, []);
+
   useEffect(() => { load(); }, [load]);
+
+  // Size anything not fully downloaded. Downloaded models already report their
+  // real on-disk size, so asking the hub about them would be a wasted request.
+  useEffect(() => {
+    if (!data) return;
+    const need = data.models
+      .filter((m) => m.downloadable && !m.downloaded && !sizes[m.key])
+      .map((m) => m.key);
+    if (need.length) loadSizes(need);
+  }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Poll only while something is downloading, then refresh the listing once so
   // the newly-present files show up as downloaded.
@@ -264,6 +370,36 @@ export default function ModelManager() {
       load();   // rewind the optimistic change to whatever the server actually has
     } finally {
       setBusy(false);
+    }
+  };
+
+  // confirm=false returns the plan and deletes nothing; confirm=true executes.
+  const handleDelete = async (key, confirm) => {
+    if (confirm) setBusy(true);
+    try {
+      const res = await fetch(`${API_URL}/models/manage/${key}/delete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm }),
+      });
+      if (!res.ok) throw new Error((await res.json()).detail || `HTTP ${res.status}`);
+      const result = await res.json();
+      if (confirm) {
+        if (result.failed?.length) {
+          setError(`${key}: ${result.failed.length} path(s) could not be removed — `
+            + result.failed.map((f) => f.error).join('; '));
+        }
+        // The freed space changes both the on-disk figure and, for anything
+        // that shared files with it, the projected download.
+        setSizes({});
+        await load();
+      }
+      return result;
+    } catch (e) {
+      setError(`Delete failed for ${key}: ${e}`);
+      return null;
+    } finally {
+      if (confirm) setBusy(false);
     }
   };
 
@@ -357,8 +493,11 @@ export default function ModelManager() {
                 key={m.key}
                 model={m}
                 job={jobs[m.key]}
+                size={sizes[m.key]}
+                sizesLoading={sizesLoading}
                 onToggle={handleToggle}
                 onDownload={handleDownload}
+                onDelete={handleDelete}
                 busy={busy}
               />
             ))}

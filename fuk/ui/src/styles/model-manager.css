@@ -281,3 +281,71 @@
   padding: 0.05rem 0.3rem;
   border-radius: var(--radius-sm);
 }
+
+/* --- Actions + deletion --------------------------------------------------- */
+
+.mm-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  flex-shrink: 0;
+}
+
+.mm-size--fetch { color: var(--color-info-400); }
+
+.mm-del:hover:not(:disabled) {
+  border-color: var(--color-error-600);
+  color: var(--color-error-400);
+}
+
+/* The plan sits below the row rather than in a modal: it lists what goes and
+   what is kept, and both lists need room to be read before confirming. */
+.mm-delete-plan {
+  margin-top: 0.5rem;
+  padding: 0.6rem 0.7rem;
+  border: var(--border-width) solid var(--color-error-600);
+  border-radius: var(--radius-md);
+  background: rgba(239, 68, 68, 0.06);
+  font-size: var(--font-size-sm);
+}
+
+.mm-delete-head {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--color-error-400);
+  font-weight: 600;
+  margin-bottom: 0.4rem;
+}
+
+.mm-delete-list {
+  list-style: none;
+  margin: 0.2rem 0;
+  padding: 0;
+}
+
+.mm-delete-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.1rem 0;
+}
+
+.mm-delete-list code { color: var(--color-gray-300); word-break: break-all; }
+.mm-delete-list span { color: var(--color-gray-500); white-space: nowrap; }
+
+.mm-delete-kept {
+  margin-top: 0.45rem;
+  padding-top: 0.4rem;
+  border-top: var(--border-width) solid var(--color-gray-700);
+  color: var(--color-gray-400);
+}
+
+.mm-del-confirm {
+  margin-top: 0.5rem;
+  background: var(--color-error-600);
+  color: #fff;
+  border: none;
+}
+
+.mm-del-confirm:hover:not(:disabled) { background: var(--color-error-500); }
