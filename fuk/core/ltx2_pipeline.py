@@ -240,6 +240,9 @@ class LTX2PipelineRunner(PipelineRunner):
             )
         except Exception as e:
             _log(self.log_prefix, f"Video generation failed: {e}", "error")
+            # pipe.__call__ never reached its own load_models_to_device([]) —
+            # without this the promoted weights stay on the GPU for good.
+            self.release_pipeline_vram(pipe)
             raise
         finally:
             if cleanup_hook:

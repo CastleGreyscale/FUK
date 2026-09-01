@@ -778,6 +778,35 @@ class ProgressCallback:
 # VRAM Management
 # ============================================================================
 
+def _offload_cached_pipelines():
+    """Push every cached pipeline's VRAM-managed weights back to CPU.
+
+    The safety net behind PipelineRunner.release_pipeline_vram(): under the
+    offload presets DiffSynth promotes layers to the GPU as it denoises and only
+    demotes them at the end of pipe.__call__, so anything that raises past that
+    point strands them there for the life of the cached pipeline. The runners
+    handle their own aborts; this catches failures raised outside a runner
+    (input prep, the EXR/metadata tail, a cancel between stages of a chained
+    call), where nothing else would.
+
+    empty_cache() cannot substitute for this — the stranded weights are live
+    parameters, not allocator cache. Never raises: it runs on failing paths.
+
+    Skipped while a generation is still running: offload() reassigns parameter
+    data in place, which is not safe to do underneath a live forward pass. The
+    abort paths flip status to cancelled/failed before calling clear_vram(), so
+    the case this exists for is never the one skipped.
+    """
+    if any(gen.get("status") == "running" for gen in active_generations.values()):
+        return
+    for cache_key, pipe in list(generation_backend.pipelines.items()):
+        try:
+            if getattr(pipe, "vram_management_enabled", False):
+                pipe.load_models_to_device([])
+        except Exception as e:
+            print(f"Could not offload cached pipeline {cache_key}: {e}")
+
+
 def clear_vram(full: bool = False):
     """Release generation memory.
 
@@ -785,14 +814,17 @@ def clear_vram(full: bool = False):
     cache intact so the next same-model generation reuses pooled memory
     instead of re-paying cudaMalloc (expandable_segments is enabled, so
     reserved memory stays reusable and fragmentation is contained).
-    full: also empty_cache + synchronize — for failures, cancellations and
-    pipeline evictions, where actually returning memory to the driver matters.
+    full: also demote every cached pipeline's weights back to CPU, then
+    empty_cache + synchronize — for failures, cancellations and pipeline
+    evictions, where actually returning memory to the driver matters.
     """
     try:
         import torch
         import gc
 
         _t0 = time.perf_counter()
+        if full:
+            _offload_cached_pipelines()
         # GC first — release Python objects that hold GPU tensor refs
         gc.collect()
 

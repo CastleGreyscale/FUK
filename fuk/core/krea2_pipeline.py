@@ -159,9 +159,13 @@ class Krea2PipelineRunner(PipelineRunner):
             )
         except GenerationCancelled:
             _log(self.log_prefix, "Generation cancelled", "warning")
+            # pipe.__call__ never reached its own load_models_to_device([]) —
+            # without this the promoted weights stay on the GPU for good.
+            self.release_pipeline_vram(pipe)
             raise
         except Exception as e:
             _log(self.log_prefix, f"Image generation failed: {e}", "error")
+            self.release_pipeline_vram(pipe)
             raise
         finally:
             if preview_cleanup:

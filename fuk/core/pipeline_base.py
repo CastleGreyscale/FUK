@@ -127,6 +127,50 @@ class PipelineRunner:
             self.backend._clear_user_loras(pipe, cache_key)
 
     # ------------------------------------------------------------------
+    # Abort recovery
+    # ------------------------------------------------------------------
+
+    def release_pipeline_vram(self, pipe):
+        """Demote every VRAM-managed weight back to its offload device.
+
+        Under the offload presets DiffSynth promotes layers from CPU to GPU as
+        it denoises (AutoWrappedLinear.forward -> preparing(), gated on
+        vram_limit) and that promotion is sticky: the only thing that undoes it
+        is load_models_to_device(). Each pipeline calls that at the very END of
+        __call__, so an abort — a user cancellation, or an OOM — raises past it
+        and leaves the promoted weights resident for the life of the cached
+        pipeline. Every later generation then starts that much VRAM down, which
+        is self-perpetuating: its OOM leaves its own residency behind.
+
+        gc + torch.cuda.empty_cache() cannot recover this. Those weights are
+        live parameters owned by the pipeline, not allocator cache; empty_cache
+        only returns blocks nothing references. This call is the only fix short
+        of evicting the pipeline entirely.
+
+        No-op when VRAM management is off ("none" preset — nothing was ever
+        promoted), and never raises: it runs on paths that are already failing.
+        """
+        if pipe is None:
+            return
+        try:
+            if not getattr(pipe, "vram_management_enabled", False):
+                return
+            _t0 = time.perf_counter()
+            pipe.load_models_to_device([])
+            if torch.cuda.is_available():
+                _resv = torch.cuda.memory_reserved() / (1024 ** 3)
+                _alloc = torch.cuda.memory_allocated() / (1024 ** 3)
+                _vram = f" — VRAM alloc {_alloc:.2f}GB resv {_resv:.2f}GB"
+            else:
+                _vram = ""
+            _log(self.log_prefix,
+                 f"Offloaded pipeline weights after abort "
+                 f"({time.perf_counter() - _t0:.1f}s){_vram}")
+        except Exception as e:
+            _log(self.log_prefix,
+                 f"Could not offload pipeline weights after abort: {e}", "warning")
+
+    # ------------------------------------------------------------------
     # Per-step hook: live diffusion preview + cancellation
     # ------------------------------------------------------------------
 
