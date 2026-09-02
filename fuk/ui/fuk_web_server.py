@@ -679,9 +679,14 @@ class VideoGenerationRequest(BaseModel):
     input_video_path: Optional[str] = None  # init-video for HD-proxy conform
     lora: Optional[str] = None
     lora_multiplier: float = 1.0
+    loras: Optional[List[Dict[str, Any]]] = None  # Multi-LoRA stack (LTX-2 camera moves, IC-LoRAs)
     export_exr: bool = False
     vram_preset: Optional[str] = None  # none, low, medium, high
-    sigma_shift: Optional[float] = None  # Timestep control (default 5.0)
+    # Generic noise-schedule shift. Wan spells it sigma_shift, MiniMax-H3 spells
+    # it flow_shift; the runners alias it. LTX-2 has no shift knob at all — its
+    # schedule is derived from sequence length — so the UI hides the control.
+    sigma_shift: Optional[float] = None
+    audio_flow_shift: Optional[float] = None  # MiniMax-H3 audio branch shift (default 3.0)
     switch_dit_boundary: Optional[float] = None  # Dual-DiT high→low noise switch point (default 0.875)
     denoising_strength: Optional[float] = None  # Edit strength when input image/video present
     sliding_window_size: Optional[int] = None  # Sliding window size for tiled inference
@@ -1427,9 +1432,11 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
             input_video_path=input_video_path_abs,
             lora=request.lora,
             lora_multiplier=request.lora_multiplier,
+            loras=request.loras,
             progress_callback=progress_cb,
             vram_preset=request.vram_preset,
             sigma_shift=request.sigma_shift,
+            audio_flow_shift=request.audio_flow_shift,
             switch_dit_boundary=request.switch_dit_boundary,
             denoising_strength=request.denoising_strength,
             sliding_window_size=request.sliding_window_size,
@@ -1478,6 +1485,22 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
 
             outputs["exr_sequence"] = get_project_relative_url(exr_dir)
         
+        # Size, frame count, cfg and shift are all resolved against per-model
+        # defaults and snapped to the model's latent grid inside the runner, so
+        # the request echo is often not what ran (a 720-high MiniMax job runs at
+        # 736; an omitted cfg becomes the family default). Record what the model
+        # actually used, falling back to the request only if the runner is silent.
+        eff = result.get("params", {})
+        eff_w, eff_h = request.width, request.height
+        if isinstance(eff.get("size"), str) and "x" in eff["size"]:
+            try:
+                eff_w, eff_h = (int(v) for v in eff["size"].split("x", 1))
+            except ValueError:
+                pass
+        # Wan reports the shift as sigma_shift, MiniMax-H3 as flow_shift; LTX-2
+        # has no shift and reports neither.
+        eff_shift = eff.get("sigma_shift", eff.get("flow_shift", request.sigma_shift))
+
         # Save metadata. `prompt` is the resolved string; `prompt_source` is
         # the raw draft so the history view can show provenance and audit
         # what each marker stood for at generation time.
@@ -1486,17 +1509,20 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
             prompt=prompt,
             model=request.task,
             seed=result.get("seed_used") or request.seed or 0,
-            image_size=(request.width, request.height),
-            video_length=request.video_length,
+            image_size=(eff_w, eff_h),
+            video_length=eff.get("frames", request.video_length),
             negative_prompt=request.negative_prompt or "",
-            guidance_scale=request.guidance_scale,
-            infer_steps=request.steps,
+            guidance_scale=eff.get("cfg_scale", request.guidance_scale),
+            infer_steps=eff.get("steps", request.steps),
             lora=request.lora,
             lora_multiplier=request.lora_multiplier,
+            loras=request.loras,
             start_image=request.image_path,
             end_image=request.end_image_path,
             control_path=request.control_path,
-            sigma_shift=request.sigma_shift,
+            sigma_shift=eff_shift,
+            audio_flow_shift=eff.get("audio_flow_shift"),
+            fps=eff.get("fps"),
             switch_dit_boundary=request.switch_dit_boundary,
             denoising_strength=request.denoising_strength,
             sliding_window_size=request.sliding_window_size,
@@ -1869,6 +1895,13 @@ async def get_models():
     IMAGE_PIPELINES = ("qwen", "flux2", "krea2")
     VIDEO_PIPELINES = ("wan", "ltx2", "minimax_h3")
 
+    # models.json `pipeline` -> the defaults.json section holding that family's
+    # sampling defaults and `constraints`. The names match for every family
+    # except Wan, whose runner declares pipeline_family = "video"
+    # (wan_pipeline.py). The UI needs both: `constraints` to range and validate
+    # its controls, `defaults_section` to seed them from the right block.
+    DEFAULTS_SECTION = {"wan": "video", "ltx2": "ltx2", "minimax_h3": "minimax_h3"}
+
     for key, entry in config.items():
         if key.startswith("_") or not isinstance(entry, dict) or "pipeline" not in entry:
             continue
@@ -1889,6 +1922,13 @@ async def get_models():
         if entry["pipeline"] in IMAGE_PIPELINES:
             image_models.append(model_info)
         elif entry["pipeline"] in VIDEO_PIPELINES:
+            section = DEFAULTS_SECTION.get(entry["pipeline"], entry["pipeline"])
+            # Family constraints overlaid with any per-model override, matching
+            # how the runners resolve them (PipelineRunner.get_constraints).
+            constraints = dict(defaults.get(section, {}).get("constraints", {}))
+            constraints.update(entry.get("constraints", {}))
+            model_info["defaults_section"] = section
+            model_info["constraints"] = constraints
             video_models.append(model_info)
 
     # VRAM presets

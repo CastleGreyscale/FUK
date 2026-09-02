@@ -4,19 +4,37 @@
  * Sub-tabs: Spec Tool, (more coming)
  */
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import Footer from '../components/Footer';
 import LoraDatasetBuilder from './LoraDatasetBuilder';
 import ImageDescribeTool from './ImageDescribeTool';
 import ThreeDReconstruct from './ThreeDReconstruct';
 import ModelManager from './ModelManager';
+import { snapFrames, snapDimension } from '../utils/helpers.js';
 
 // ============================================================================
 // Helpers
 // ============================================================================
 
-const snapTo16  = (v) => Math.ceil(v / 16) * 16;
-const snapTo4m1 = (v) => Math.ceil((Math.max(1, v) - 1) / 4) * 4 + 1;
+// Fallback when config hasn't loaded yet — Wan's grid, matching what the Spec
+// Tool used before it became model-aware.
+const FALLBACK_CONSTRAINTS = {
+  family_label: 'Wan',
+  spatial_multiple: 16,
+  frame_factor: 4,
+  frame_remainder: 1,
+  min_frames: 5,
+  fps: 24,
+};
+
+// Every defaults.json section carrying a `constraints` block is a video family
+// the spec can target. Reading it this way means a fourth model shows up here
+// the moment it is registered, with no change to this file.
+function videoFamilies(defaults) {
+  return Object.entries(defaults || {})
+    .filter(([, v]) => v && typeof v === 'object' && v.constraints?.family_label)
+    .map(([key, v]) => ({ key, label: v.constraints.family_label, constraints: v.constraints }));
+}
 
 const hexToRgba = (hex, alpha) => {
   const r = parseInt(hex.slice(1, 3), 16);
@@ -248,31 +266,64 @@ function SpecTool({ config }) {
   const [blendFps,    setBlendFps]    = useState(d.blend_fps        ?? 24);
   const [blendSaving, setBlendSaving] = useState(false);
   const [blendResult, setBlendResult] = useState(null); // { ok, msg }
+  const [familyKey,   setFamilyKey]   = useState(d.target_family    ?? 'video');
+  const [twoStage,    setTwoStage]    = useState(d.two_stage        ?? false);
 
   const canvasRef = useRef(null);
   const PREVIEW_W = 420;
+
+  // Target model family — the whole point of the spec is that it lands on a
+  // grid the model will actually accept, and the three families disagree:
+  // Wan /16 + 4n+1, LTX-2 /32 + 8n+1 (/64 in two-stage), MiniMax-H3 /32 + 17n+5.
+  const families   = useMemo(() => videoFamilies(config?.defaults), [config?.defaults]);
+  const family     = families.find(f => f.key === familyKey) || families[0];
+  const constraints = family?.constraints ?? FALLBACK_CONSTRAINTS;
+  const twoStageAvailable = constraints.spatial_multiple_two_stage != null;
+  const useTwoStage = twoStageAvailable && twoStage;
+  const spatial = useTwoStage
+    ? constraints.spatial_multiple_two_stage
+    : (constraints.spatial_multiple ?? 16);
+  const modelFps = constraints.fps ?? 24;
+
+  // Switching family re-snaps the spec onto that model's grid: the frame count
+  // moves to its lattice (41 on Wan becomes 56 on MiniMax-H3) and the scene
+  // rate follows its fps. Skipped on mount so a saved blend_fps — a 25fps
+  // delivery, say — survives a reload.
+  const familyMounted = useRef(false);
+  useEffect(() => {
+    if (!familyMounted.current) { familyMounted.current = true; return; }
+    setBlendFps(modelFps);
+    setFrameStr(prev => {
+      const n = parseInt(prev);
+      return !isNaN(n) && n > 0 ? String(snapFrames(n, constraints)) : prev;
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [family?.key, useTwoStage]);
 
   const ratio  = ASPECT_RATIOS[ratioIdx];
   const ratioW = ratio.w ?? customW;
   const ratioH = ratio.h ?? customH;
 
-  const snapW      = snapTo16(rawW);
-  const snapH      = snapTo16((snapW / ratioW) * ratioH);
+  const snapW      = snapDimension(rawW, spatial);
+  const snapH      = snapDimension((snapW / ratioW) * ratioH, spatial);
   const parsedF    = parseInt(frameStr);
-  const snapFrames = !isNaN(parsedF) && parsedF > 0 ? snapTo4m1(parsedF) : null;
+  const snappedFrames = !isNaN(parsedF) && parsedF > 0 ? snapFrames(parsedF, constraints) : null;
   const previewH   = Math.round((PREVIEW_W / ratioW) * ratioH);
+  const frameDuration = snappedFrames != null
+    ? (snappedFrames / (blendFps || modelFps)).toFixed(2)
+    : null;
 
-  const drawParams = { guides, guideColor, bgColor, bgAlpha, frameCount: burnIn ? snapFrames : null };
+  const drawParams = { guides, guideColor, bgColor, bgAlpha, frameCount: burnIn ? snappedFrames : null };
 
   useEffect(() => {
     drawGuides(canvasRef.current, PREVIEW_W, previewH, drawParams);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ratioIdx, customW, customH, guides, guideColor, bgColor, bgAlpha, burnIn, snapFrames, previewH]);
+  }, [ratioIdx, customW, customH, guides, guideColor, bgColor, bgAlpha, burnIn, snappedFrames, previewH]);
 
   const toggleGuide = (key) => setGuides(prev => ({ ...prev, [key]: !prev[key] }));
 
   const handleFrameBlur = () => {
-    if (snapFrames !== null) setFrameStr(String(snapFrames));
+    if (snappedFrames !== null) setFrameStr(String(snappedFrames));
   };
 
   const handleBrowseBlendDir = async () => {
@@ -298,7 +349,9 @@ function SpecTool({ config }) {
         body: JSON.stringify({
           width:       snapW,
           height:      snapH,
-          frame_count: snapFrames ?? 25,
+          // Fall back to the family's shortest valid clip rather than a fixed
+          // number — 25 is fine for Wan but off-lattice for MiniMax-H3.
+          frame_count: snappedFrames ?? (constraints.min_frames ?? 25),
           fps:         blendFps,
           save_dir:    blendDir,
           filename:    blendName || 'template',
@@ -315,7 +368,7 @@ function SpecTool({ config }) {
     } finally {
       setBlendSaving(false);
     }
-  }, [snapW, snapH, snapFrames, blendFps, blendDir, blendName]);
+  }, [snapW, snapH, snappedFrames, blendFps, blendDir, blendName, constraints]);
 
   const handleDownloadPNG = useCallback(() => {
     const offscreen = document.createElement('canvas');
@@ -323,21 +376,52 @@ function SpecTool({ config }) {
     offscreen.height = snapH;
     drawGuides(offscreen, snapW, snapH, drawParams);
     const link = document.createElement('a');
-    const fSuffix = snapFrames != null ? `_${snapFrames}f` : '';
-    link.download = `template_${snapW}x${snapH}${fSuffix}.png`;
+    const fSuffix = snappedFrames != null ? `_${snappedFrames}f` : '';
+    // Name the family into the file — a 1920×816 Wan plate and a 1920×832
+    // LTX-2 one are easy to mix up once they are sitting in the same folder.
+    const mSuffix = family ? `_${family.label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}` : '';
+    link.download = `template${mSuffix}_${snapW}x${snapH}${fSuffix}.png`;
     link.href = offscreen.toDataURL('image/png');
     link.click();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [snapW, snapH, snapFrames, guides, guideColor, bgColor, bgAlpha, burnIn]);
+  }, [snapW, snapH, snappedFrames, guides, guideColor, bgColor, bgAlpha, burnIn, family]);
 
   const widthAdjusted  = rawW !== snapW;
-  const framesAdjusted = snapFrames !== null && parsedF !== snapFrames;
+  const framesAdjusted = snappedFrames !== null && parsedF !== snappedFrames;
 
   return (
     <div className="spec-tool">
 
       {/* ── Left panel: two-column grid of controls ── */}
       <div className="spec-tool-controls">
+
+        {/* Target Model — full width. Drives every snap below. */}
+        <div className="fuk-card spec-tool-card spec-tool-card-full">
+          <div className="spec-tool-resolution-header">
+            <span className="spec-tool-label">Target Model</span>
+            <span className="spec-tool-snapped">
+              /{spatial} · {constraints.frame_factor}n+{constraints.frame_remainder} · {modelFps}fps
+            </span>
+          </div>
+          <div className="spec-tool-preset-chips">
+            {families.map(f => (
+              <button
+                key={f.key}
+                className={`fuk-btn ${f.key === family?.key ? 'fuk-btn-primary' : 'fuk-btn-secondary'} ${CHIP_CLASS}`}
+                onClick={() => setFamilyKey(f.key)}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+          {twoStageAvailable && (
+            <label className="spec-tool-burn-in-label">
+              <input type="checkbox" className="fuk-checkbox" checked={twoStage}
+                onChange={e => setTwoStage(e.target.checked)} />
+              Two-stage (needs a 64px grid)
+            </label>
+          )}
+        </div>
 
         {/* Aspect Ratio — full width */}
         <div className="fuk-card spec-tool-card spec-tool-card-full">
@@ -362,7 +446,7 @@ function SpecTool({ config }) {
             <span className="spec-tool-label">Resolution</span>
             <span className={`spec-tool-snapped ${widthAdjusted ? 'spec-tool-snapped--adjusted' : ''}`}>
               {snapW} × {snapH}
-              {widthAdjusted && <span className="spec-tool-snapped-badge">↑×16</span>}
+              {widthAdjusted && <span className="spec-tool-snapped-badge">↑×{spatial}</span>}
             </span>
           </div>
           <div className="spec-tool-preset-chips">
@@ -394,17 +478,23 @@ function SpecTool({ config }) {
         <div className="fuk-card spec-tool-card">
           <div className="spec-tool-resolution-header">
             <span className="spec-tool-label">Frame Count</span>
-            {snapFrames !== null && (
+            {snappedFrames !== null && (
               <span className={`spec-tool-snapped ${framesAdjusted ? 'spec-tool-snapped--adjusted' : ''}`}>
-                {snapFrames}f
-                {framesAdjusted && <span className="spec-tool-snapped-badge">↑4m+1</span>}
+                {snappedFrames}f
+                {frameDuration && <span className="spec-tool-snapped-badge">{frameDuration}s</span>}
+                {framesAdjusted && (
+                  <span className="spec-tool-snapped-badge">
+                    ↑{constraints.frame_factor}n+{constraints.frame_remainder}
+                  </span>
+                )}
               </span>
             )}
           </div>
           <input
-            type="number" min="1" max="99999"
+            type="number" min={constraints.min_frames ?? 1} max="99999"
             className="fuk-input spec-tool-input-center"
-            placeholder="e.g. 25"
+            step={constraints.frame_factor ?? 1}
+            placeholder={`e.g. ${constraints.min_frames ?? 25}`}
             value={frameStr}
             onChange={e => setFrameStr(e.target.value)}
             onBlur={handleFrameBlur}
@@ -460,7 +550,8 @@ function SpecTool({ config }) {
           <button className="fuk-btn fuk-btn-primary fuk-btn-full" onClick={handleDownloadPNG}>
             Download Template PNG
             <span className="spec-tool-download-info">
-              {snapW}×{snapH}{snapFrames != null ? ` · ${snapFrames}f` : ''}
+              {snapW}×{snapH}{snappedFrames != null ? ` · ${snappedFrames}f` : ''}
+              {family ? ` · ${family.label}` : ''}
             </span>
           </button>
         </div>
@@ -477,9 +568,13 @@ function SpecTool({ config }) {
             <div className="spec-tool-blend-fps">
               <span className="spec-tool-label">FPS</span>
               <select className="fuk-select" value={blendFps} onChange={e => setBlendFps(Number(e.target.value))}>
-                {[23.976, 24, 25, 29.97, 30, 48, 60].map(f => (
-                  <option key={f} value={f}>{f}</option>
-                ))}
+                {/* Include the model's own rate even if it isn't one of the
+                    standard delivery rates, so the scene can match it. */}
+                {[...new Set([23.976, 24, 25, 29.97, 30, 48, 60, modelFps])]
+                  .sort((a, b) => a - b)
+                  .map(f => (
+                    <option key={f} value={f}>{f}{f === modelFps ? ` (${family?.label ?? 'model'})` : ''}</option>
+                  ))}
               </select>
             </div>
           </div>
@@ -516,7 +611,7 @@ function SpecTool({ config }) {
         <div className="spec-tool-preview-header">
           <span className="fuk-label">Preview</span>
           <span className="spec-tool-preview-meta">
-            {snapW} × {snapH}{snapFrames != null ? ` · ${snapFrames}f` : ''} &nbsp;|&nbsp; {ratioW}:{ratioH}
+            {snapW} × {snapH}{snappedFrames != null ? ` · ${snappedFrames}f` : ''} &nbsp;|&nbsp; {ratioW}:{ratioH}
           </span>
         </div>
 

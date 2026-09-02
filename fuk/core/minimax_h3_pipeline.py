@@ -57,9 +57,11 @@ class MiniMaxH3PipelineRunner(PipelineRunner):
         seed: Optional[int] = None,
         steps: Optional[int] = None,
         cfg_scale: Optional[float] = None,
+        guidance_scale: Optional[float] = None,
         negative_prompt: Optional[str] = None,
         flow_shift: Optional[float] = None,
         audio_flow_shift: Optional[float] = None,
+        sigma_shift: Optional[float] = None,
         # FL2VA: keyframes
         image_path: Optional[Path] = None,
         end_image_path: Optional[Path] = None,
@@ -92,8 +94,16 @@ class MiniMaxH3PipelineRunner(PipelineRunner):
         height = height or defaults.get("height") or 480
         num_frames = video_length or defaults.get("video_length") or 124
         num_steps = steps or infer_steps or defaults.get("steps", 50)
-        effective_cfg = cfg_scale if cfg_scale is not None else defaults.get("cfg_scale", 1.0)
-        shift = flow_shift if flow_shift is not None else defaults.get("flow_shift", 12.0)
+        # `is not None` rather than `or`: cfg_scale=1.0 is meaningful here (it is
+        # the upstream default and means CFG off), and 0 must not fall through.
+        effective_cfg = (cfg_scale if cfg_scale is not None
+                         else guidance_scale if guidance_scale is not None
+                         else defaults.get("cfg_scale", 1.0))
+        # The video tab posts one generic shift field named sigma_shift, the name
+        # Wan uses. Same remap mathematically, different upstream spelling.
+        shift = (flow_shift if flow_shift is not None
+                 else sigma_shift if sigma_shift is not None
+                 else defaults.get("flow_shift", 12.0))
         a_shift = (audio_flow_shift if audio_flow_shift is not None
                    else defaults.get("audio_flow_shift", 3.0))
         # The pipeline treats " " and "" differently — its own default is a single
@@ -101,7 +111,7 @@ class MiniMaxH3PipelineRunner(PipelineRunner):
         negative_prompt = (negative_prompt if negative_prompt is not None
                            else defaults.get("negative_prompt", " ")) or " "
 
-        width, height, num_frames = self._snap_to_grid(width, height, num_frames)
+        width, height, num_frames = self.snap_to_grid(width, height, num_frames, entry)
         audio_sample_rate = entry.get("audio_sample_rate", 32000)
         fps = entry.get("fps", 24)
 
@@ -218,23 +228,6 @@ class MiniMaxH3PipelineRunner(PipelineRunner):
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
-
-    def _snap_to_grid(self, width, height, num_frames):
-        """Snap to MiniMax-H3's latent grid: 16px spatially, 17n+5 frames.
-
-        The pipeline snaps num_frames itself and every downstream shape follows
-        the aligned value, so a request for 100 frames silently returns 107.
-        Snapping here instead makes the returned length match what was logged,
-        and gets keyframes resized onto the canvas the DiT actually uses.
-        """
-        w = max(16, (int(width) // 16) * 16)
-        h = max(16, (int(height) // 16) * 16)
-        n = int(num_frames)
-        n = max(22, ((n - 5 + 16) // 17) * 17 + 5)
-        if (w, h, n) != (int(width), int(height), int(num_frames)):
-            _log(self.log_prefix,
-                 f"  Snapped to pipeline grid: {width}x{height}x{num_frames} -> {w}x{h}x{n}")
-        return w, h, n
 
     def _build_keyframes(self, image_path, end_image_path, width, height):
         """FL2VA conditioning: first frame at index 0, last frame at index -1.

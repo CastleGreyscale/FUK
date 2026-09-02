@@ -59,6 +59,7 @@ class LTX2PipelineRunner(PipelineRunner):
         seed: Optional[int] = None,
         steps: Optional[int] = None,
         cfg_scale: Optional[float] = None,
+        guidance_scale: Optional[float] = None,
         denoising_strength: Optional[float] = None,
         negative_prompt: Optional[str] = None,
         # Image-to-video: the first frame
@@ -100,18 +101,15 @@ class LTX2PipelineRunner(PipelineRunner):
         num_frames = video_length or defaults.get("video_length") or 121
         fps = frame_rate or defaults.get("frame_rate") or 24
         num_steps = steps or infer_steps or defaults.get("steps", 30)
-        effective_cfg = cfg_scale if cfg_scale is not None else defaults.get("cfg_scale", 3.0)
+        effective_cfg = (cfg_scale if cfg_scale is not None
+                         else guidance_scale if guidance_scale is not None
+                         else defaults.get("cfg_scale", 3.0))
         negative_prompt = negative_prompt or defaults.get("negative_prompt", "")
         denoise = (denoising_strength if denoising_strength is not None
                    else defaults.get("denoising_strength", 1.0))
 
-        # LTX-2's VAE is 8x spatial / 8x temporal with a 32-pixel patch grid, and
-        # num_frames must land on 8n+1. Snapping here rather than letting the
-        # pipeline do it keeps the control video and first frame loaded at the
-        # same dimensions the DiT will actually use.
-        width, height, num_frames = self._snap_to_grid(width, height, num_frames)
-
         # Sampling mode: explicit arg wins, else the model entry's default.
+        # Resolved before snapping because two-stage needs a coarser grid.
         two_stage = (use_two_stage_pipeline if use_two_stage_pipeline is not None
                      else pipe_defaults.pop("use_two_stage_pipeline", False))
         distilled = (use_distilled_pipeline if use_distilled_pipeline is not None
@@ -122,6 +120,20 @@ class LTX2PipelineRunner(PipelineRunner):
             _log(self.log_prefix,
                  "both two-stage and distilled requested — using two-stage", "warning")
             distilled = False
+
+        # LTX-2's VAE is 8x spatial / 8x temporal with a 32-pixel patch grid, and
+        # num_frames must land on 8n+1. Snapping here rather than letting the
+        # pipeline do it keeps the control video and first frame loaded at the
+        # same dimensions the DiT will actually use.
+        #
+        # Two-stage halves the size before running its own /32 check, so the
+        # request has to be /64 or stage 1 gets rounded up underneath us and the
+        # final clip comes back a different size than was logged.
+        constraints = self.get_constraints(entry)
+        spatial = (constraints.get("spatial_multiple_two_stage", 64) if two_stage
+                   else constraints.get("spatial_multiple", 32))
+        width, height, num_frames = self.snap_to_grid(
+            width, height, num_frames, entry, spatial=spatial)
 
         log_params = {
             "prompt": prompt,
@@ -251,16 +263,6 @@ class LTX2PipelineRunner(PipelineRunner):
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
-
-    def _snap_to_grid(self, width, height, num_frames):
-        """Snap to LTX-2's latent grid: 32px spatially, 8n+1 temporally."""
-        w = max(32, (int(width) // 32) * 32)
-        h = max(32, (int(height) // 32) * 32)
-        n = max(9, ((int(num_frames) - 1) // 8) * 8 + 1)
-        if (w, h, n) != (int(width), int(height), int(num_frames)):
-            _log(self.log_prefix,
-                 f"  Snapped to pipeline grid: {width}x{height}x{num_frames} -> {w}x{h}x{n}")
-        return w, h, n
 
     def _load_control_video(self, path, width, height, num_frames, downsample_factor):
         """Load an in-context driving video for the IC-LoRAs.

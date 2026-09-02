@@ -395,11 +395,11 @@
                         <tr><th>Parameter</th><th>Description</th><th>Notes</th></tr>
                     </thead>
                     <tbody>
-                        <tr><td>Frame Count</td><td>Total number of frames to generate</td><td>Must satisfy the 4n+1 pattern (e.g. 5, 9, 13, 17…); longer sequences require significantly more VRAM</td></tr>
-                        <tr><td>Scale Factor</td><td>Output resolution as a percentage of the input image dimensions</td><td>100%, 75%, 50%, or 25%; dimensions round to nearest 64px</td></tr>
-                        <tr><td>Steps</td><td>Denoising steps</td><td>20–40 typical; presets available</td></tr>
-                        <tr><td>Guidance Scale</td><td>Prompt adherence</td><td>—</td></tr>
-                        <tr><td>Sigma Shift</td><td>Adjusts the noise schedule — higher values shift more denoising toward early steps</td><td>Range 0.0–10.0</td></tr>
+                        <tr><td>Frame Count</td><td>Total number of frames to generate</td><td>Must land on the selected model's frame lattice — Wan 4n+1, LTX-2 8n+1, MiniMax-H3 17n+5. Out-of-lattice values round <em>up</em>; longer sequences require significantly more VRAM</td></tr>
+                        <tr><td>Scale Factor</td><td>Output resolution as a percentage of the input image dimensions</td><td>100%, 75%, 50%, or 25%; dimensions round up to the model's latent grid — 16px for Wan, 32px for LTX-2 and MiniMax-H3 (64px for LTX-2 two-stage)</td></tr>
+                        <tr><td>Steps</td><td>Denoising steps</td><td>20–40 typical; presets available. Model defaults are Wan 40, LTX-2 30, MiniMax-H3 50</td></tr>
+                        <tr><td>Guidance Scale</td><td>Prompt adherence</td><td>Range varies by model. 1.0 disables CFG entirely — along with the negative prompt — which is MiniMax-H3's shipped default</td></tr>
+                        <tr><td>Sigma Shift</td><td>Adjusts the noise schedule — higher values shift more denoising toward early steps</td><td>Wan: range 1.0–10.0, default 5.0. MiniMax-H3 calls it Flow Shift: range 1.0–20.0, default 12.0 (Turbo variants use 6.0), with a separate Audio Shift (default 3.0) for its audio branch. LTX-2 has no shift control — its schedule is derived from sequence length — so the field is hidden for it</td></tr>
                         <tr><td>DiT Switch Boundary</td><td>Timestep (×1000) where dual-DiT Wan 2.2 models hand off from the high-noise DiT (global composition) to the low-noise DiT (detail) — higher values give the high-noise expert more steps</td><td>Range 0.0–1.0; default 0.875; A14B (dual-DiT) models only</td></tr>
                         <tr><td>Motion Bucket ID</td><td>Controls baseline motion amount in supported pipelines</td><td>Optional; leave blank to use model default</td></tr>
                         <tr><td>Denoising Strength</td><td>How much the model deviates from the input image (img2vid modes)</td><td>Range 0.0–1.0; lower values stay closer to the input</td></tr>
@@ -408,6 +408,21 @@
                         <tr><td>VRAM Management</td><td>Offloading strategy for VRAM-limited hardware</td><td>—</td></tr>
                     </tbody>
                 </table>
+
+                <h3>Per-Model Constraints</h3>
+                <p>The three video families disagree on nearly every hard limit, so the sampling controls are model-driven rather than fixed. Each model declares a <code>constraints</code> block — the family block lives in <code>defaults.json</code>, and any model may override individual keys in <code>models.json</code>. The server applies it when snapping sizes and frame counts, and the Video tab reads the same block over <code>/api/config/models</code> to range, label, and hide its controls, so both sides validate identically. Adding a fourth video model is a config entry, not a UI change.</p>
+                <table class="wiki-table">
+                    <thead>
+                        <tr><th>Model</th><th>Frame lattice</th><th>Min frames</th><th>Latent grid</th><th>FPS</th><th>Shift control</th><th>Default CFG</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>Wan</td><td>4n+1</td><td>5</td><td>16px</td><td>24</td><td>Sigma Shift, 1.0–10.0, default 5.0</td><td>4.0</td></tr>
+                        <tr><td>LTX-2</td><td>8n+1</td><td>9</td><td>32px (64px in two-stage)</td><td>24</td><td>None — schedule is derived from sequence length, so the control is hidden</td><td>3.0</td></tr>
+                        <tr><td>MiniMax-H3</td><td>17n+5</td><td>22</td><td>32px</td><td>24</td><td>Flow Shift, 1.0–20.0, default 12.0, plus Audio Shift default 3.0</td><td>1.0 (CFG off)</td></tr>
+                    </tbody>
+                </table>
+                <p>Sizes and frame counts always round <strong>up</strong> onto the grid, matching what the pipelines enforce internally — a request never silently yields a smaller or shorter clip than asked. Rounding happens before conditioning media is loaded, so the first frame, keyframes and control video land on the same canvas the model actually runs at, and the generation history records the effective values rather than the requested ones. At 24fps the ~5-second point is 121 frames for Wan and LTX-2, 124 for MiniMax-H3.</p>
+                <p>Controls that a model has no use for are hidden rather than left inert: LTX-2 and MiniMax-H3 both drop DiT Switch Boundary, Sliding Window and TeaCache, and MiniMax-H3 additionally drops the LoRA stack, which its pipeline does not support. Values for a hidden control are not posted either, so the generation history never records a setting the model did not apply.</p>
 
                 <h3>Control Video Conditioning</h3>
                 <p>Control-capable pipelines accept a per-frame conditioning sequence instead of (or alongside) a still reference — the same signals used for image ControlNet, extracted across every frame. Generate the sequence in the <a href="#preprocess-panel">Preprocess Panel</a> and load it as the control video. Conditioning must be temporally stable: preprocess the whole range in one pass so the signal doesn't flicker between frames.</p>
@@ -1286,7 +1301,7 @@
 
                 <h3>Frame Settings Card</h3>
                 <ul>
-                    <li><strong>Frame Count</strong> — total frames to generate; must satisfy the 4n+1 pattern (minimum 5); invalid values are flagged inline</li>
+                    <li><strong>Frame Count</strong> — total frames to generate; must land on the selected model's frame lattice (Wan 4n+1 from 5, LTX-2 8n+1 from 9, MiniMax-H3 17n+5 from 22). The input's step size and label follow the chosen model, and out-of-lattice values are flagged inline with the count they will round up to</li>
                     <li><strong>Frame Inherit</strong> — when enabled and a control video is loaded, frame count is set automatically to match the control video's length</li>
                     <li><strong>Trim Frames</strong> — optional upper limit; clips the output at this frame count even if more were generated</li>
                     <li><strong>Frame Duration display</strong> — shows the calculated duration in seconds and milliseconds based on frame count and the global playback FPS setting</li>
@@ -1448,10 +1463,12 @@
 
                 <h3>Spec Configuration</h3>
                 <ul>
+                    <li><strong>Target Model</strong> — which video family the spec has to be valid for: Wan, LTX-2 or MiniMax-H3. This drives every snap below, because the three disagree on both the latent grid and the frame lattice — see <a href="#video-generation">Per-Model Constraints</a>. The header shows the active grid, lattice and frame rate at a glance. LTX-2 adds a <strong>Two-stage</strong> checkbox, since that mode halves the size before its own alignment check and so needs a 64px grid rather than 32px. Switching family re-snaps the frame count and follows that model's frame rate, so a 41-frame Wan spec becomes 56 frames on MiniMax-H3</li>
                     <li><strong>Aspect Ratio</strong> — preset dropdown (1:1, 4:3, 16:9, 1.85:1, 2.35:1, 2.39:1, 21:9) or custom W:H input</li>
-                    <li><strong>Resolution Width</strong> — input in pixels; height is calculated from the aspect ratio; snaps to 16px alignment automatically</li>
-                    <li><strong>Frame Count</strong> — for video specs; snaps to the 4n+1 pattern required by Wan video pipelines</li>
+                    <li><strong>Resolution Width</strong> — input in pixels; height is calculated from the aspect ratio, then both round <em>up</em> to the target model's grid. The badge names the multiple that was applied. A 1.85:1 plate at 1920 wide lands at 1920×1040 for Wan, 1920×1056 for LTX-2 and MiniMax-H3, and 1920×1088 for LTX-2 two-stage</li>
+                    <li><strong>Frame Count</strong> — for video specs; snaps up to the target model's lattice (Wan 4n+1 from 5, LTX-2 8n+1 from 9, MiniMax-H3 17n+5 from 22), with the resulting duration shown beside it at the model's frame rate</li>
                 </ul>
+                <p>The family list is read from the model registry rather than hardcoded, so registering a fourth video family makes it selectable here with no UI change. The exported PNG and the .blend scene both carry the target model in their filename and settings, so specs cut for different models don't get mixed up in the same folder.</p>
 
                 <h3>Composition Guides</h3>
                 <p>Overlay composition guides on the canvas preview and burn them into the downloadable template:</p>
@@ -1774,7 +1791,7 @@
                     <thead><tr><th>Key</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
                     <tbody>
                         <tr><td><code>task</code></td><td>string</td><td><code>"wan_i2v_a14b"</code></td><td>Active pipeline; must match a task in models.json</td></tr>
-                        <tr><td><code>video_length</code></td><td>integer</td><td><code>41</code></td><td>Frame count; must satisfy 4n+1 (5, 9, 13… 41…)</td></tr>
+                        <tr><td><code>video_length</code></td><td>integer</td><td><code>41</code></td><td>Frame count; must land on the model's lattice — Wan 4n+1 (5, 9, 13… 41…), LTX-2 8n+1 (9, 17… 121…), MiniMax-H3 17n+5 (22, 39… 124…). Out-of-lattice values round up</td></tr>
                         <tr><td><code>scale_factor</code></td><td>float</td><td><code>1.0</code></td><td>Output resolution as fraction of input image (0.25–1.0)</td></tr>
                         <tr><td><code>steps</code></td><td>integer</td><td><code>20</code></td><td>Denoising steps</td></tr>
                         <tr><td><code>guidance_scale</code></td><td>float</td><td><code>5.0</code></td><td>Prompt adherence</td></tr>

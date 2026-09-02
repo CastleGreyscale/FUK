@@ -1,14 +1,21 @@
 /**
  * Video Generation Tab
- * Wan video generation with I2V, FLF2V support
- * 
- * Defaults flow: config.defaults.video -> project state overwrites
- * 
+ * Wan (I2V, FLF2V, VACE, Animate), LTX-2 and MiniMax-H3 video generation
+ *
+ * Defaults flow: config.defaults.video (shared UI shape)
+ *                -> config.defaults[model.defaults_section] (per-family sampling)
+ *                -> project state / localStorage overwrites
+ *
+ * Every hard limit — frame lattice, latent grid, fps, which shift knob exists,
+ * which controls are relevant at all — comes from the selected model's
+ * `constraints` block, served alongside the model list by /api/config/models
+ * and applied identically on the server. Nothing here assumes Wan's numbers.
+ *
  * Features:
- * - Auto-reads dimensions from input image
+ * - Auto-reads dimensions from input image, snapped to the model's latent grid
  * - Scale factor for VRAM management
- * - Manual frame entry with 4n+1 validation
- * - Duration feedback
+ * - Manual frame entry validated against the model's frame lattice
+ * - Duration feedback at the model's own frame rate
  */
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
@@ -21,7 +28,7 @@ import { useLocalStorage } from '../../src/hooks/useLocalStorage';
 import { useSavedSeeds } from '../hooks/useSavedSeeds';
 import { useVideoPlayback } from '../hooks/useVideoPlayback';
 import { startVideoGeneration } from '../../src/utils/api';
-import { formatTime } from '../utils/helpers.js';
+import { formatTime, snapFrames, snapDimension, frameLattice } from '../utils/helpers.js';
 import { 
   buildImageUrl, 
   SEED_MODES, 
@@ -40,20 +47,31 @@ const SCALE_FACTORS = [
   { label: '25%', value: 0.25 },
 ];
 
-// Round to nearest valid 4n+1 frame count
-function roundToValid4n1(frames) {
-  // Find n such that 4n+1 is closest to frames
-  const n = Math.round((frames - 1) / 4);
-  return Math.max(5, 4 * n + 1); // Minimum 5 frames
-}
+// The frame lattice, latent grid and shift knob all differ per model — Wan is
+// 4n+1 on a /16 grid with sigma_shift, LTX-2 is 8n+1 on /32 with no shift knob
+// at all, MiniMax-H3 is 17n+5 on /32 with flow_shift plus a separate audio
+// shift. Everything below reads the selected model's `constraints` block
+// (served by /api/config/models) rather than assuming Wan's numbers.
+const DEFAULT_CONSTRAINTS = {
+  spatial_multiple: 16,
+  frame_factor: 4,
+  frame_remainder: 1,
+  min_frames: 5,
+  fps: 24,
+  shift_param: 'sigma_shift',
+  shift_label: 'Sigma Shift',
+  shift_default: 5.0,
+  shift_min: 1.0,
+  shift_max: 10.0,
+  shift_step: 0.5,
+  cfg_min: 1,
+  cfg_max: 15,
+  supports_denoise: true,
+  supports_lora: true,
+  hidden_controls: [],
+};
 
-// Round UP to next valid 4n+1 (ensures output is >= input frames)
-function roundUpToValid4n1(frames) {
-  const n = Math.ceil((frames - 1) / 4);
-  return Math.max(5, 4 * n + 1);
-}
-
-// Get duration string from frame count (assuming 24fps output)
+// Get duration string from frame count
 function getFrameDuration(frames, fps = 24) {
   const seconds = frames / fps;
   if (seconds < 1) {
@@ -86,6 +104,7 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
     sliding_window_size: videoDefaults.sliding_window_size ?? null,
     sliding_window_stride: videoDefaults.sliding_window_stride ?? null,
     tea_cache_l1_thresh: videoDefaults.tea_cache_l1_thresh ?? null,
+    audio_flow_shift: videoDefaults.audio_flow_shift ?? null,
     denoising_strength: videoDefaults.denoising_strength ?? 1.0,
     loras: videoDefaults.loras ?? (videoDefaults.lora ? [{ key: videoDefaults.lora, multiplier: videoDefaults.lora_multiplier ?? 1.0, bypass: videoDefaults.lora_bypass ?? false }] : []),
     seed: videoDefaults.seed ?? null,
@@ -110,6 +129,31 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
   // Fallback localStorage for when no project is loaded
   const [localFormData, setLocalFormData] = useLocalStorage('fuk_video_settings', initialDefaults);
 
+  // Sampling defaults for a model's own family. `defaults.video` supplies the
+  // shared UI shape (scale factor, seed mode, batch count); this overlays the
+  // values that genuinely differ per model, so picking LTX-2 gives 121 frames /
+  // 30 steps / cfg 3.0 instead of Wan's 41 / 40 / 4.
+  const familyDefaultsFor = useCallback((task) => {
+    const model = (config?.models?.video_models || []).find(m => m.key === task);
+    if (!model) return {};
+    const section = model.defaults_section;
+    const fam = (section && section !== 'video') ? (config?.defaults?.[section] || {}) : {};
+    const c = model.constraints || {};
+    const out = {};
+    if (fam.video_length != null) out.video_length = fam.video_length;
+    if (fam.steps != null) {
+      out.steps = fam.steps;
+      // The steps radio only offers 20 and 40; LTX-2 wants 30 and MiniMax 50.
+      out.stepsMode = [20, 40].includes(fam.steps) ? 'preset' : 'custom';
+    }
+    if (fam.cfg_scale != null) out.guidance_scale = fam.cfg_scale;
+    if (fam.negative_prompt != null) out.negative_prompt = fam.negative_prompt;
+    if (fam.denoising_strength != null) out.denoising_strength = fam.denoising_strength;
+    if (c.shift_default != null) out.sigma_shift = c.shift_default;
+    if (c.audio_shift_default != null) out.audio_flow_shift = c.audio_shift_default;
+    return out;
+  }, [config?.models?.video_models, config?.defaults]);
+
   // Use project state if available, otherwise localStorage.
   // New format: tabs.video = { activeModel, modelSettings: { [task]: {...} } }
   // Old format: tabs.video = flat object (backward compat — detected by absence of modelSettings)
@@ -118,13 +162,33 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
     if (tabState?.modelSettings) {
       const activeModel = tabState.activeModel || initialDefaults.task;
       const modelData = tabState.modelSettings[activeModel] || {};
-      return { ...initialDefaults, ...modelData, task: activeModel };
+      // Family defaults sit between the global shape and this model's own saved
+      // settings, so a model picked for the first time opens on its own numbers
+      // while anything the user has already tuned still wins.
+      return { ...initialDefaults, ...familyDefaultsFor(activeModel), ...modelData, task: activeModel };
     }
     if (tabState) {
-      return { ...initialDefaults, ...tabState };
+      return { ...initialDefaults, ...familyDefaultsFor(tabState.task ?? initialDefaults.task), ...tabState };
     }
-    return { ...initialDefaults, ...localFormData };
-  }, [project?.projectState?.tabs?.video, localFormData, initialDefaults]);
+    return { ...initialDefaults, ...familyDefaultsFor(localFormData?.task ?? initialDefaults.task), ...localFormData };
+  }, [project?.projectState?.tabs?.video, localFormData, initialDefaults, familyDefaultsFor]);
+
+  // The selected model's hard parameter limits. Drives the frame lattice, the
+  // resolution grid, which sampling controls render at all, and their ranges.
+  const constraints = useMemo(() => ({
+    ...DEFAULT_CONSTRAINTS,
+    ...((config?.models?.video_models || []).find(m => m.key === formData.task)?.constraints || {}),
+  }), [config?.models?.video_models, formData.task]);
+
+  const hiddenControls = useMemo(
+    () => new Set(constraints.hidden_controls || []),
+    [constraints]
+  );
+  const shiftParam = constraints.shift_param ?? null;
+  const audioShiftParam = constraints.audio_shift_param ?? null;
+  const spatialMultiple = constraints.spatial_multiple ?? 16;
+  const modelFps = constraints.fps ?? 24;
+  const lattice = useMemo(() => frameLattice(constraints), [constraints]);
 
   // Migrate old single lora fields to loras array
   const effectiveLoras = useMemo(() => {
@@ -169,9 +233,16 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
         });
       }
     } else {
-      setLocalFormData(newData);
+      // No project: one flat blob, so a model switch has to re-seed the
+      // sampling values itself — the per-model merge in formData only runs on
+      // the project path.
+      setLocalFormData(
+        newData.task !== currentData.task
+          ? { ...newData, ...familyDefaultsFor(newData.task) }
+          : newData
+      );
     }
-  }, [project?.isProjectLoaded, project?.updateTabState, setLocalFormData]);
+  }, [project?.isProjectLoaded, project?.updateTabState, setLocalFormData, familyDefaultsFor]);
 
   // Frame input state (for controlled input before validation)
   const [frameInput, setFrameInput] = useState(String(formData.video_length || 81));
@@ -250,17 +321,19 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
     if (formData.image_path) {
       const img = new Image();
       img.onload = () => {
-        // Round to nearest 64 for model compatibility
-        const width = Math.round(img.width / 64) * 64;
-        const height = Math.round(img.height / 64) * 64;
-        
+        // Snap up to the selected model's latent grid (/16 Wan, /32 LTX-2 and
+        // MiniMax-H3). Rounding up rather than to-nearest means the frame is
+        // never cropped below the source, and matches what the runner does.
+        const width = snapDimension(img.width, spatialMultiple);
+        const height = snapDimension(img.height, spatialMultiple);
+
         setFormData(prev => ({
           ...prev,
           source_width: width,
           source_height: height,
           // Update output dimensions with scale factor
-          width: Math.round(width * prev.scale_factor / 64) * 64,
-          height: Math.round(height * prev.scale_factor / 64) * 64,
+          width: snapDimension(width * prev.scale_factor, spatialMultiple),
+          height: snapDimension(height * prev.scale_factor, spatialMultiple),
         }));
       };
       img.onerror = () => {
@@ -268,7 +341,7 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
       };
       img.src = buildImageUrl(formData.image_path);
     }
-  }, [formData.image_path, setFormData]);
+  }, [formData.image_path, setFormData, spatialMultiple]);
 
   // Fetch video info when control_path changes — drives frame count inheritance
   useEffect(() => {
@@ -281,15 +354,15 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
       .then(r => r.ok ? r.json() : Promise.reject())
       .then(info => {
         setSourceVideoInfo(info);
-        const base = roundUpToValid4n1(info.frame_count);
+        const base = snapFrames(info.frame_count, constraints);
         const frames = formData.trim_frames
-          ? roundToValid4n1(Math.min(base, formData.trim_frames))
+          ? snapFrames(Math.min(base, formData.trim_frames), constraints)
           : base;
         setFrameInput(String(frames));
         setFormData(prev => ({ ...prev, video_length: frames }));
       })
       .catch(() => setSourceVideoInfo(null));
-  }, [formData.control_path]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [formData.control_path, constraints]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Update frame count when trim changes — always derives from source when a control video is loaded
   const handleTrimChange = (value) => {
@@ -297,9 +370,9 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
     setFormData(prev => {
       const newData = { ...prev, trim_frames: trimVal };
       if (sourceVideoInfo) {
-        const base = roundUpToValid4n1(sourceVideoInfo.frame_count);
+        const base = snapFrames(sourceVideoInfo.frame_count, constraints);
         const frames = trimVal
-          ? roundToValid4n1(Math.min(base, trimVal))
+          ? snapFrames(Math.min(base, trimVal), constraints)
           : base;
         setFrameInput(String(frames));
         return { ...newData, video_length: frames };
@@ -316,8 +389,8 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
     setFormData(prev => ({
       ...prev,
       scale_factor: newScale,
-      width: Math.round(sourceW * newScale / 64) * 64 || 832,
-      height: Math.round(sourceH * newScale / 64) * 64 || 480,
+      width: snapDimension(sourceW * newScale, spatialMultiple),
+      height: snapDimension(sourceH * newScale, spatialMultiple),
     }));
   };
 
@@ -328,8 +401,8 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
 
   // Validate and round frames on blur
   const handleFrameInputBlur = () => {
-    const parsed = parseInt(frameInput) || 81;
-    const valid = roundToValid4n1(parsed);
+    const parsed = parseInt(frameInput) || formData.video_length || lattice.minFrames;
+    const valid = snapFrames(parsed, constraints);
     setFrameInput(String(valid));
     setFormData(prev => ({ ...prev, video_length: valid }));
   };
@@ -415,7 +488,12 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
       lora: null,
       lora_multiplier: 1.0,
       lora_bypass: undefined,
-      loras: effectiveLoras,
+      // Don't post values the selected model has no knob for — they would only
+      // land in the runner's **kwargs and then be recorded in the generation
+      // metadata as settings that were never applied.
+      loras: constraints.supports_lora === false ? [] : effectiveLoras,
+      sigma_shift: shiftParam ? formData.sigma_shift : null,
+      audio_flow_shift: audioShiftParam ? formData.audio_flow_shift : null,
     };
 
     // Build seed queue for batch
@@ -602,9 +680,13 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
     ? 'Reference Image'
     : 'Start Image';
   
-  // Calculate whether current frame input is valid
-  const currentFrameValid = (parseInt(frameInput) - 1) % 4 === 0;
-  const validFrameCount = roundToValid4n1(parseInt(frameInput) || 81);
+  // Calculate whether current frame input sits on the selected model's lattice
+  const parsedFrames = parseInt(frameInput);
+  const validFrameCount = snapFrames(
+    Number.isNaN(parsedFrames) ? (formData.video_length || lattice.minFrames) : parsedFrames,
+    constraints
+  );
+  const currentFrameValid = !Number.isNaN(parsedFrames) && parsedFrames === validFrameCount;
   
   // Calculate CSS variable for dynamic aspect ratio
   const aspectRatioStyle = { '--preview-aspect': `${formData.width || 832} / ${formData.height || 480}` };
@@ -733,7 +815,7 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
                 <div className="fuk-preview-info-row">
                   <span>{formData.width}×{formData.height}</span>
                   <span>•</span>
-                  <span>{formData.video_length} frames ({getFrameDuration(formData.video_length)})</span>
+                  <span>{formData.video_length} frames ({getFrameDuration(formData.video_length, modelFps)})</span>
                   <span>•</span>
                   <span>{formData.steps} steps</span>
                   {result?.outputs?.mp4 && (
@@ -1016,7 +1098,9 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
             <div className="fuk-form-group-compact">
               <label className="fuk-label">
                 Frames
-                <span className="fuk-label-description">(must be 4n+1)</span>
+                <span className="fuk-label-description">
+                  (must be {lattice.factor}n+{lattice.remainder})
+                </span>
                 {sourceVideoInfo && (
                   <span className="fuk-label-description">
                     · Source: {sourceVideoInfo.frame_count} @ {sourceVideoInfo.fps.toFixed(1)}fps
@@ -1031,11 +1115,13 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
                   value={frameInput}
                   onChange={(e) => handleFrameInputChange(e.target.value)}
                   onBlur={handleFrameInputBlur}
-                  min={5}
+                  min={lattice.minFrames}
                   max={241}
-                  step={4}
+                  step={lattice.factor}
                 />
-                <span className="fuk-input-result">≈ {getFrameDuration(formData.video_length)} @ 24fps</span>
+                <span className="fuk-input-result">
+                  ≈ {getFrameDuration(formData.video_length, modelFps)} @ {modelFps}fps
+                </span>
                 {sourceVideoInfo && (
                   <>
                     <label className="fuk-label fuk-label--nowrap">Trim to</label>
@@ -1045,19 +1131,20 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
                       value={formData.trim_frames ?? ''}
                       onChange={(e) => handleTrimChange(e.target.value)}
                       placeholder="∞"
-                      min={5}
-                      step={4}
+                      min={lattice.minFrames}
+                      step={lattice.factor}
                     />
                   </>
                 )}
               </div>
               {!currentFrameValid && (
                 <p className="fuk-help-text fuk-help-text--info">
-                  Will round to {validFrameCount} frames ({getFrameDuration(validFrameCount)})
+                  Will round up to {validFrameCount} frames ({getFrameDuration(validFrameCount, modelFps)})
                 </p>
               )}
             </div>
 
+            {!hiddenControls.has('sliding_window') && (
             <div className="fuk-form-pair">
               <div className="fuk-form-group-compact">
                 <label className="fuk-label" title="Number of frames per sliding window chunk. Leave blank to disable.">
@@ -1094,7 +1181,9 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
                 />
               </div>
             </div>
+            )}
 
+            {constraints.supports_lora !== false && (
             <div className="fuk-form-group-compact">
               <div className="lora-header">
                 <label className="fuk-label">LoRA</label>
@@ -1156,6 +1245,7 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
                 </div>
               ))}
             </div>
+            )}
           </div>
 
           {/* Generation Parameters Card */}
@@ -1209,34 +1299,65 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
             
             <div className="fuk-form-pair">
               <div className="fuk-form-group-compact">
-                <label className="fuk-label">Guidance Scale</label>
+                <label
+                  className="fuk-label"
+                  title={constraints.cfg_min >= 1 && constraints.cfg_max <= 10 && constraints.cfg_min === 1
+                    ? 'Classifier-free guidance. 1.0 disables CFG (and the negative prompt with it) — which is what MiniMax-H3 ships as its default.'
+                    : 'Classifier-free guidance strength.'}
+                >
+                  Guidance Scale <Info className="fuk-label-info" />
+                </label>
                 <input
                   type="number"
                   className="fuk-input"
                   value={formData.guidance_scale}
                   onChange={(e) => setFormData({...formData, guidance_scale: parseFloat(e.target.value)})}
                   step={0.5}
-                  min={1}
-                  max={15}
+                  min={constraints.cfg_min ?? 1}
+                  max={constraints.cfg_max ?? 15}
                 />
               </div>
+              {/* LTX-2 derives its noise schedule from sequence length and takes
+                  no shift argument, so the control is absent rather than inert. */}
+              {shiftParam && (
               <div className="fuk-form-group-compact">
-                <label className="fuk-label" title="Controls sampling timestep distribution. Default: 5.0">
-                  Sigma Shift <Info className="fuk-label-info" />
+                <label className="fuk-label" title={constraints.shift_help || 'Controls sampling timestep distribution.'}>
+                  {constraints.shift_label || 'Sigma Shift'} <Info className="fuk-label-info" />
                 </label>
                 <input
                   type="number"
                   className="fuk-input"
-                  value={formData.sigma_shift}
+                  value={formData.sigma_shift ?? constraints.shift_default ?? ''}
                   onChange={(e) => setFormData({...formData, sigma_shift: parseFloat(e.target.value)})}
-                  step={0.5}
-                  min={1}
-                  max={10}
+                  step={constraints.shift_step ?? 0.5}
+                  min={constraints.shift_min ?? 1}
+                  max={constraints.shift_max ?? 10}
                 />
               </div>
+              )}
+              {/* MiniMax-H3 denoises picture and sound together on two
+                  schedules, so the audio branch has its own shift. */}
+              {audioShiftParam && (
+              <div className="fuk-form-group-compact">
+                <label className="fuk-label" title={constraints.audio_shift_help || 'Noise-schedule shift for the audio branch.'}>
+                  {constraints.audio_shift_label || 'Audio Shift'} <Info className="fuk-label-info" />
+                </label>
+                <input
+                  type="number"
+                  className="fuk-input"
+                  value={formData.audio_flow_shift ?? constraints.audio_shift_default ?? ''}
+                  onChange={(e) => setFormData({...formData, audio_flow_shift: parseFloat(e.target.value)})}
+                  step={constraints.audio_shift_step ?? 0.5}
+                  min={constraints.audio_shift_min ?? 1}
+                  max={constraints.audio_shift_max ?? 10}
+                />
+              </div>
+              )}
             </div>
 
+            {(!hiddenControls.has('switch_dit_boundary') || !hiddenControls.has('tea_cache')) && (
             <div className="fuk-form-pair">
+              {!hiddenControls.has('switch_dit_boundary') && (
               <div className="fuk-form-group-compact">
                 <label className="fuk-label" title="Timestep fraction (×1000) where Wan 2.2 switches from the high-noise DiT to the low-noise DiT. Higher = more steps on the high-noise expert. Dual-DiT (A14B) models only. Default: 0.875">
                   DiT Switch Boundary <Info className="fuk-label-info" />
@@ -1251,6 +1372,8 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
                   max={1}
                 />
               </div>
+              )}
+              {!hiddenControls.has('tea_cache') && (
               <div className="fuk-form-group-compact">
                 <label className="fuk-label" title="TeaCache: skips the DiT forward pass on steps whose timestep embedding is close enough to the previous one. Blank = off. Lower = more conservative, higher = faster but risks motion stutter. Try 0.08–0.15 before going higher. Unvalidated on our shots — A/B against a blank run before trusting it on a final.">
                   TeaCache Threshold <Info className="fuk-label-info" />
@@ -1269,8 +1392,10 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
                   max={1}
                 />
               </div>
+              )}
             </div>
-            {formData.tea_cache_l1_thresh != null && (
+            )}
+            {!hiddenControls.has('tea_cache') && formData.tea_cache_l1_thresh != null && (
               <p className="fuk-help-text fuk-help-text--info">
                 TeaCache on — speed/quality tradeoff is unvalidated on our shots.
                 Watch the DiT switch step for artifacts.

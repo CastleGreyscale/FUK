@@ -97,6 +97,59 @@ class PipelineRunner:
         """
         return self.defaults_config.get(self.pipeline_family, {})
 
+    def get_constraints(self, entry: dict = None) -> dict:
+        """Resolve the model's hard parameter constraints.
+
+        The family's `constraints` block in defaults.json, overlaid with any
+        per-model `constraints` on the models.json entry — same precedence as
+        `pipeline_kwargs`. These are the model's *limits* (latent grid, frame
+        lattice, which shift knob exists), not its preferred values, and the
+        same block is handed to the UI so both sides validate identically.
+        """
+        merged = dict(self.get_family_defaults().get("constraints", {}))
+        if entry:
+            merged.update(entry.get("constraints", {}))
+        return merged
+
+    def snap_to_grid(self, width, height, num_frames=None, entry: dict = None,
+                     spatial: int = None):
+        """Round up to the model's latent grid.
+
+        Rounds *up*, reproducing DiffSynth's own check_resize_height_width. The
+        pipelines snap internally anyway, but only after FUK has already resized
+        control media and logged the size — so snapping here is what keeps the
+        keyframe canvas, the log, and the returned metadata agreeing with what
+        the DiT actually ran.
+
+        `spatial` overrides the family value for modes that need a coarser grid
+        (LTX-2 two-stage halves the size before its own check, so it needs 64).
+        """
+        c = self.get_constraints(entry)
+        div = int(spatial or c.get("spatial_multiple", 16))
+        factor = int(c.get("frame_factor", 4))
+        remainder = int(c.get("frame_remainder", 1))
+        min_frames = int(c.get("min_frames", factor + remainder))
+
+        def up(v, d):
+            return max(d, ((int(v) + d - 1) // d) * d)
+
+        w, h = up(width, div), up(height, div)
+        if num_frames is None:
+            if (w, h) != (int(width), int(height)):
+                _log(self.log_prefix,
+                     f"  Snapped to pipeline grid: {width}x{height} -> {w}x{h} (/{div})")
+            return w, h
+
+        n = int(num_frames)
+        if n % factor != remainder % factor:
+            n = ((n - remainder + factor - 1) // factor) * factor + remainder
+        n = max(min_frames, n)
+        if (w, h, n) != (int(width), int(height), int(num_frames)):
+            _log(self.log_prefix,
+                 f"  Snapped to pipeline grid: {width}x{height}x{num_frames} -> {w}x{h}x{n} "
+                 f"(/{div}, {factor}n+{remainder})")
+        return w, h, n
+
     # ------------------------------------------------------------------
     # Pipeline + LoRA access (delegates to hub)
     # ------------------------------------------------------------------

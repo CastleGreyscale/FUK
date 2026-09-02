@@ -87,9 +87,6 @@
   background: var(--color-gray-900);
 }
 
-.mm-tool--ok  { border-left: 3px solid var(--color-success-500); }
-.mm-tool--bad { border-left: 3px solid var(--color-error-500); }
-
 .mm-dot {
   width: 8px;
   height: 8px;

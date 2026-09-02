@@ -85,26 +85,12 @@ class WanPipelineRunner(PipelineRunner):
 
     pipeline_family = "video"
 
-    # Mirrors WanVideoPipeline's height/width_division_factor and
-    # time_division_factor/remainder. Kept here so we can apply the same rounding
-    # before loading control media — see the call site in generate().
-    _SPATIAL_DIV = 16
-    _TIME_DIV, _TIME_REM = 4, 1
-
-    def _snap_to_grid(self, width, height, num_frames):
-        """Round size/length up to what the pipeline will actually run at."""
-        def up(v, div):
-            return ((int(v) + div - 1) // div) * div
-
-        w, h = up(width, self._SPATIAL_DIV), up(height, self._SPATIAL_DIV)
-        n = int(num_frames)
-        if n % self._TIME_DIV != self._TIME_REM:
-            n = up(n, self._TIME_DIV) + self._TIME_REM
-        if (w, h, n) != (int(width), int(height), int(num_frames)):
-            _log(self.log_prefix,
-                 f"  Snapped to pipeline grid: {width}x{height}x{num_frames} "
-                 f"-> {w}x{h}x{n} (control media loads at these dims)")
-        return w, h, n
+    # The latent grid (/16, 4n+1) now lives in defaults.json under
+    # video.constraints and is applied by PipelineRunner.snap_to_grid. It is
+    # config rather than a constant because WanVideoPipeline overrides its own
+    # division factors from the VAE at load time (wan_video.py:177-179): the
+    # Wan 2.1 VAE gives 16, but WanVideoVAE38 (Wan 2.2 TI2V-5B) gives 32, and
+    # such an entry can now declare that in its own `constraints` block.
 
     def generate(
         self,
@@ -163,7 +149,7 @@ class WanPipelineRunner(PipelineRunner):
         defaults = self.get_family_defaults()
         width = width or defaults.get("width") or 832
         height = height or defaults.get("height") or 480
-        num_frames = video_length or defaults.get("video_length", 81)
+        num_frames = video_length or defaults.get("video_length", 41)
 
         # Snap to the grid the pipeline itself enforces, BEFORE anything downstream
         # uses these numbers. WanVideoPipeline rounds height/width up to a multiple of
@@ -175,9 +161,13 @@ class WanPipelineRunner(PipelineRunner):
         # control then reads as noise and the video appears to ignore it entirely.
         # (Blender hits this constantly: render height x percentage is rarely /16 —
         # e.g. 720 x 50% = 360, which rounds to 368.)
-        width, height, num_frames = self._snap_to_grid(width, height, num_frames)
-        num_steps = steps or infer_steps or defaults.get("steps", 50)
-        effective_cfg = cfg_scale or guidance_scale or defaults.get("cfg_scale", 6.0)
+        width, height, num_frames = self.snap_to_grid(width, height, num_frames, entry)
+        num_steps = steps or infer_steps or defaults.get("steps", 40)
+        # `is not None` rather than `or`, so an explicit cfg_scale=0 is honoured
+        # instead of silently falling through to guidance_scale.
+        effective_cfg = (cfg_scale if cfg_scale is not None
+                         else guidance_scale if guidance_scale is not None
+                         else defaults.get("cfg_scale", 4.0))
         negative_prompt = negative_prompt or defaults.get("negative_prompt", "")
         denoise = (denoising_strength if denoising_strength is not None
                    else defaults.get("denoising_strength", 1.0))
@@ -351,7 +341,7 @@ class WanPipelineRunner(PipelineRunner):
                 params={
                     "prompt": prompt, "seed": seed,
                     "steps": num_steps, "size": f"{width}x{height}",
-                    "frames": num_frames, "cfg_scale": effective_cfg,
+                    "frames": num_frames, "fps": 24, "cfg_scale": effective_cfg,
                     "denoising_strength": denoise, "sigma_shift": sigma_shift,
                     "switch_dit_boundary": switch_dit_boundary,
                     # Speed/quality A/B fields — make the tradeoff readable

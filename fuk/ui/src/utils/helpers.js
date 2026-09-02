@@ -41,19 +41,46 @@ export function calculateDimensions(aspectRatioValue, width, aspectRatios = []) 
 }
 
 /**
- * Validate video length is 4n+1
+ * The frame lattice each video model requires, as `factor`n + `remainder`.
+ * Wan is 4n+1, LTX-2 is 8n+1, MiniMax-H3 is 17n+5 — so these come from the
+ * model's `constraints` block (served by /api/config/models), never hardcoded.
+ * Falls back to Wan's lattice when no constraints are available yet.
  */
-export function isValidVideoLength(length) {
-  return (length - 1) % 4 === 0;
+export const DEFAULT_FRAME_LATTICE = { factor: 4, remainder: 1, minFrames: 5 };
+
+export function frameLattice(constraints) {
+  const c = constraints || {};
+  return {
+    factor: c.frame_factor ?? DEFAULT_FRAME_LATTICE.factor,
+    remainder: c.frame_remainder ?? DEFAULT_FRAME_LATTICE.remainder,
+    minFrames: c.min_frames ?? DEFAULT_FRAME_LATTICE.minFrames,
+  };
+}
+
+export function isValidVideoLength(length, constraints) {
+  const { factor, remainder, minFrames } = frameLattice(constraints);
+  return length >= minFrames && length % factor === remainder % factor;
 }
 
 /**
- * Get nearest valid video length
+ * Snap a frame count onto the model's lattice, rounding UP — matching what the
+ * pipelines do internally, so the user never silently gets a shorter clip than
+ * the number shown in the field.
  */
-export function nearestValidVideoLength(length) {
-  const remainder = (length - 1) % 4;
-  if (remainder === 0) return length;
-  return length + (4 - remainder);
+export function snapFrames(length, constraints) {
+  const { factor, remainder, minFrames } = frameLattice(constraints);
+  const n = Math.max(1, Math.round(length) || 0);
+  const snapped = Math.ceil((n - remainder) / factor) * factor + remainder;
+  return Math.max(minFrames, snapped);
+}
+
+/**
+ * Snap a pixel dimension up to the model's latent grid (16 for Wan, 32 for
+ * LTX-2 and MiniMax-H3, 64 for LTX-2 two-stage).
+ */
+export function snapDimension(px, multiple = 16) {
+  const m = Math.max(1, multiple);
+  return Math.max(m, Math.ceil((Math.round(px) || 0) / m) * m);
 }
 
 /**
