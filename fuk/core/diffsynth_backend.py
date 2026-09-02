@@ -52,6 +52,11 @@ import json
 
 from perf_monitor import record_timing
 from encode_cache import install_encode_cache
+# Imported for its import-time side effect: folds Qwen's causal conv3d to a 2D
+# conv for single-frame input, which is what keeps a 2048x2048 image decode
+# from asking for a 20 GiB im2col workspace. Lives here so every entry point
+# that touches a Qwen VAE picks it up, not just the image pipeline.
+import qwen_vae_patch  # noqa: F401
 
 
 #from latent_manager import LatentManager

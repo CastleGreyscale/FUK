@@ -230,6 +230,11 @@ class QwenPipelineRunner(PipelineRunner):
         except Exception as _mu_err:
             _log(self.log_prefix, f"Could not compute effective shift μ: {_mu_err}", "warning")
 
+        # --- VAE decode guard ---
+        # Installed first so it sits innermost: both the preview decodes and the
+        # final one fall back to tiling rather than OOMing after a full denoise.
+        decode_guard_cleanup = self.install_vae_decode_guard(pipe)
+
         # --- Per-step hook: live preview and/or cancellation (opt-in) ---
         # Grab the un-hooked VAE decode BEFORE latent capture wraps it, so preview
         # decodes don't trip the "capture first decode" logic and corrupt the latent.
@@ -292,6 +297,11 @@ class QwenPipelineRunner(PipelineRunner):
                 preview_cleanup()
             if cleanup_hook:
                 cleanup_hook()
+            # Last, because it was installed first — latent capture restores
+            # vae.decode to the guard, and only then can the guard unwind to
+            # the class method.
+            if decode_guard_cleanup:
+                decode_guard_cleanup()
 
     # ------------------------------------------------------------------
     # Source image resolution

@@ -353,6 +353,73 @@ class PipelineRunner:
         _log(self.log_prefix, f"Latent capture enabled → {latent_path}")
         return latent_path, cleanup
 
+    def install_vae_decode_guard(self, pipe):
+        """Stop a too-large VAE decode from throwing away a finished generation.
+
+        Decode is the last thing that happens after every denoising step, so an
+        OOM there costs the whole run. This wraps it with two safeguards:
+
+          - Predictive: if the estimated peak does not fit in free VRAM, go
+            straight to a tiled decode rather than allocating and failing.
+          - Reactive: if an untiled decode OOMs anyway, drop the cached blocks
+            and retry tiled.
+
+        Tiling is the fallback and not the default because it makes the VAE's
+        mid-block attention per-tile. With the single-frame conv2d fold in
+        qwen_vae_patch it should almost never fire — 2048x2048 peaks around
+        5.3 GiB, well inside a 24 GB card.
+
+        Returns a cleanup fn to call in a finally block, or None if the guard
+        does not apply to this pipeline.
+        """
+        vae = getattr(pipe, "vae", None)
+        # The byte-per-pixel estimate is calibrated to this VAE specifically.
+        if vae is None or type(vae).__name__ != "QwenImageVAE" or not torch.cuda.is_available():
+            return None
+
+        from qwen_vae_patch import estimate_decode_bytes, tiled_vae_decode, choose_tile
+
+        original_decode = vae.decode
+        # Same reasoning as _capture_latent_hook: restoring by assignment when the
+        # method came from the class would leave a bound method on the instance
+        # holding a reference cycle back to it.
+        had_own_attr = "decode" in vae.__dict__
+
+        def guarded_decode(latent, *args, **kwargs):
+            need = estimate_decode_bytes(latent)
+            free = torch.cuda.mem_get_info()[0]
+
+            def _tiled(reason):
+                budget = int(torch.cuda.mem_get_info()[0] * 0.7)
+                tile, stride = choose_tile(latent, budget)
+                _log(self.log_prefix,
+                     f"Tiled VAE decode ({reason}) — tile {tile}, stride {stride} "
+                     f"in latent units", "warning")
+                return tiled_vae_decode(
+                    lambda z: original_decode(z, *args, **kwargs), latent, tile, stride)
+
+            if need > free * 0.9:
+                return _tiled(f"needs ~{need / 2**30:.1f} GiB, "
+                              f"{free / 2**30:.1f} GiB free")
+            try:
+                return original_decode(latent, *args, **kwargs)
+            except torch.cuda.OutOfMemoryError:
+                torch.cuda.empty_cache()
+                return _tiled("recovering from OOM")
+
+        vae.decode = guarded_decode
+
+        def cleanup():
+            if had_own_attr:
+                vae.decode = original_decode
+            else:
+                try:
+                    del vae.decode      # fall back to the class method
+                except AttributeError:
+                    vae.decode = original_decode
+
+        return cleanup
+
     # ------------------------------------------------------------------
     # Image loading helpers
     # ------------------------------------------------------------------
