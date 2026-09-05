@@ -17,6 +17,11 @@ Two kinds of thing appear in the panel and they behave differently on purpose:
            from the generation dropdowns but stays listed here, so turning it
            back on is one click and does not need a re-download.
 
+           A model may also carry add-on LoRAs — LTX-2's camera moves and
+           in-context controls, which are its function variants rather than
+           optional extras. Those are declared in defaults_loras.json, download
+           individually, and never count toward whether the model is complete.
+
 Downloads prefer HuggingFace. DiffSynth defaults to ModelScope, but HF is
 usually faster and steadier, and the per-component fallback in
 fuk/utils/download_models.py means the ModelScope-only repos (the DiffSynth
@@ -52,6 +57,13 @@ class DownloadRequest(BaseModel):
     # Omitted means "everything this model needs". Named components let the UI
     # retry only the pieces that failed rather than re-walking a 60GB model.
     patterns: Optional[List[str]] = None
+
+
+class LoraDownloadRequest(BaseModel):
+    # Relative paths, as listed in the model's `addons`. Omitted means "every
+    # one that is not already on disk" — the panel sends an explicit list so a
+    # user can take one camera move without the other eleven.
+    paths: Optional[List[str]] = None
 
 
 class DeleteRequest(BaseModel):
@@ -194,7 +206,68 @@ def _on_disk_bytes(models_root: Path, entry: dict) -> int:
     return sum(seen.values())
 
 
-def _model_status(models_root: Path, key: str, entry: dict) -> dict:
+# ---------------------------------------------------------------------------
+# Add-on LoRAs
+#
+# LTX-2 ships its function variants as LoRAs on one shared 35GB base rather than
+# as separate checkpoints, so "download LTX-2" and "download the dolly-in move"
+# are two different questions and the panel has to ask both. These are declared
+# in defaults_loras.json, not models.json, because FUK's LoRA registry resolves
+# them by path under defined_loras_path; an entry belongs to a model when its
+# path is prefixed with the model key and its "model" list names that key —
+# the same rule fuk/utils/download_models.py uses for headless runs.
+# ---------------------------------------------------------------------------
+
+def _load_loras_config(config_dir: Path) -> dict:
+    """defaults_loras.json, or an empty config when it is missing or broken."""
+    path = Path(config_dir) / "defaults_loras.json"
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _defined_loras_root(loras_config: dict) -> Optional[Path]:
+    base = loras_config.get("defined_loras_path")
+    return Path(base).expanduser() if base else None
+
+
+def _addon_loras(loras_config: dict, model_key: str) -> List[dict]:
+    """Panel rows for the LoRAs that download alongside one model."""
+    base = _defined_loras_root(loras_config)
+    prefix = f"{model_key}/"
+    rows = []
+    for entry in loras_config.get("loras", []):
+        rel = str(entry.get("path", ""))
+        if model_key not in (entry.get("model") or []) or not rel.startswith(prefix):
+            continue
+        dest = (base / rel) if base else None
+        # stat() follows the symlink these are normally installed as, so this
+        # is the real weight size rather than the link's few bytes.
+        present = bool(dest and dest.exists())
+        # Repos come from the entry. download_models.py can also derive one from
+        # the filename, but importing it here would pull diffsynth into a plain
+        # listing request, so an entry without "repo" simply has no size or link
+        # to show — the download still tries, and derives it in the worker.
+        repo = entry.get("repo")
+        rows.append({
+            "name": entry.get("name") or Path(rel).stem,
+            "path": rel,
+            "filename": Path(rel).name,
+            "repo": repo,
+            "huggingface_url": f"https://huggingface.co/{repo}" if repo else None,
+            "trigger_word": entry.get("trigger_word") or "",
+            "present": present,
+            "size_bytes": dest.stat().st_size if present else 0,
+            "install_path": str(dest) if dest else None,
+        })
+    return rows
+
+
+def _model_status(models_root: Path, key: str, entry: dict,
+                  addons: Optional[List[dict]] = None) -> dict:
     """Full panel row for one registry entry."""
     targets = _entry_targets(entry)
     parts, present_count = [], 0
@@ -246,6 +319,10 @@ def _model_status(models_root: Path, key: str, entry: dict) -> dict:
         # install_trellis_env.sh or on first use.
         "downloadable": bool(targets),
         "notes": entry.get("notes"),
+        # Optional per-function LoRAs. Deliberately not folded into
+        # components_present/downloaded: a model with none of them installed is
+        # still complete and generates fine.
+        "addons": addons or [],
     }
 
 
@@ -547,13 +624,18 @@ def setup_model_manager_routes(
         models_config = _load_models()
         root = _models_root()
 
-        models = [_model_status(root, k, e) for k, e in _iter_models(models_config)]
+        loras_config = _load_loras_config(config_dir)
+
+        models = [_model_status(root, k, e, _addon_loras(loras_config, k))
+                  for k, e in _iter_models(models_config)]
         # Group ordering is the UI's business, but a stable sort here keeps rows
         # from jumping around between polls.
         models.sort(key=lambda m: (m["category"], m["key"]))
 
+        loras_root = _defined_loras_root(loras_config)
         return {
             "models_root": str(root),
+            "loras_root": str(loras_root) if loras_root else None,
             "download_source": os.environ.get("DIFFSYNTH_DOWNLOAD_SOURCE", "huggingface"),
             "tools": _tool_status(generation_backend, log),
             "models": models,
@@ -662,6 +744,118 @@ def setup_model_manager_routes(
         threading.Thread(target=worker, name=f"dl-{model_key}", daemon=True).start()
         log.info("ModelManager", f"{model_key} download started ({len(targets)} targets)")
         return {"success": True, "job_id": job_id, "total": len(targets)}
+
+    @app.post("/api/models/manage/{model_key}/loras/download")
+    async def download_model_loras(model_key: str, request: LoraDownloadRequest):
+        """Fetch a model's add-on LoRAs. Returns a job id to poll.
+
+        Separate from the model download rather than an extra flag on it: these
+        are optional, individually chosen, and land in the LoRA directory rather
+        than the model cache. The job is filed under "<key>:loras" so its
+        progress cannot overwrite a base-model download running at the same time.
+        """
+        loras_config = _load_loras_config(config_dir)
+        base = _defined_loras_root(loras_config)
+        if base is None:
+            raise HTTPException(
+                status_code=400,
+                detail="defined_loras_path is not set in defaults_loras.json — "
+                       "there is nowhere to put these.",
+            )
+
+        available = {r["path"]: r for r in _addon_loras(loras_config, model_key)}
+        if not available:
+            raise HTTPException(status_code=404,
+                                detail=f"'{model_key}' has no add-on LoRAs")
+
+        if request.paths:
+            unknown = [p for p in request.paths if p not in available]
+            if unknown:
+                raise HTTPException(status_code=400,
+                                    detail=f"Unknown LoRA(s): {', '.join(unknown)}")
+            wanted = [available[p] for p in request.paths]
+        else:
+            wanted = [r for r in available.values() if not r["present"]]
+
+        if not wanted:
+            raise HTTPException(status_code=400,
+                                detail=f"Every {model_key} LoRA is already downloaded")
+
+        # The entries themselves, not the panel rows — fetch_addon_lora reads
+        # "path" and "repo" straight off the config entry.
+        by_path = {str(e.get("path", "")): e for e in loras_config.get("loras", [])}
+        entries = [by_path[r["path"]] for r in wanted]
+
+        root = _models_root()
+        job_id = _new_job(f"{model_key}:loras", [(r["name"], r["repo"], r["path"])
+                                                 for r in wanted])
+
+        def worker():
+            utils_dir = str(Path(__file__).resolve().parent.parent / "utils")
+            if utils_dir not in sys.path:
+                sys.path.insert(0, utils_dir)
+            os.environ["DIFFSYNTH_MODEL_BASE_PATH"] = str(root)
+
+            try:
+                from download_models import fetch_addon_lora
+            except Exception as e:
+                _update_job(job_id, status="failed", error=f"downloader unavailable: {e}")
+                return
+
+            done, failed = 0, []
+            for entry in entries:
+                name = entry.get("name") or entry["path"]
+                _update_job(job_id, current=f"{name}: {entry.get('repo') or entry['path']}")
+                try:
+                    # HuggingFace first, for the same reason as the model
+                    # components: these repos all exist there, and the helper
+                    # falls back to ModelScope on its own if one does not.
+                    dest = fetch_addon_lora(entry, base, prefer="huggingface")
+                except Exception as e:
+                    dest = None
+                    log.warning("ModelManager", f"{model_key} LoRA {name} raised: {e}")
+                if dest is None:
+                    failed.append({"label": name, "model_id": entry.get("repo"),
+                                   "pattern": entry["path"]})
+                else:
+                    done += 1
+                _update_job(job_id, completed=done, failed=failed)
+
+            _update_job(
+                job_id,
+                status="completed" if not failed else "partial",
+                current=None,
+                finished_at=time.time(),
+            )
+            log.info("ModelManager",
+                     f"{model_key} LoRA download finished: {done}/{len(entries)}"
+                     + (f", {len(failed)} failed" if failed else ""))
+
+        threading.Thread(target=worker, name=f"dl-{model_key}-loras", daemon=True).start()
+        log.info("ModelManager",
+                 f"{model_key} LoRA download started ({len(entries)} LoRAs)")
+        return {"success": True, "job_id": job_id, "total": len(entries)}
+
+    @app.get("/api/models/manage/{model_key}/loras/sizes")
+    async def model_lora_sizes(model_key: str):
+        """Remote size per add-on LoRA, keyed by path.
+
+        Its own endpoint, requested when the panel expands the LoRA list, rather
+        than part of the main listing: each one is a separate single-file repo,
+        so pricing all twelve of LTX-2's costs twelve hub round trips that most
+        visits to this panel never need.
+        """
+        loras_config = _load_loras_config(config_dir)
+        out = {}
+        for row in _addon_loras(loras_config, model_key):
+            if not row["repo"]:
+                continue
+            matches = _pattern_matches(row["repo"], row["filename"])
+            out[row["path"]] = {
+                "total_bytes": sum(matches.values()) if matches else 0,
+                "complete": bool(matches),
+            }
+        return {"sizes": out}
 
     @app.get("/api/models/manage/sizes")
     async def model_sizes(keys: str = ""):

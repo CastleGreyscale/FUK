@@ -246,7 +246,7 @@ class QwenPipelineRunner(PipelineRunner):
             )
 
         # --- Latent capture ---
-        latent_path, cleanup_hook = self.setup_latent_capture(pipe, output_path, save_latent)
+        latent_path, cleanup_hook = self.setup_latent_capture(pipe, output_path, save_latent, model_type)
 
         # --- Generate ---
         # Log what's actually going to the pipe

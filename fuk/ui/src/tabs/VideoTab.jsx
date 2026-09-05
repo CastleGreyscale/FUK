@@ -1209,7 +1209,14 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
                   >
                     <option value="">None</option>
                     {config?.models?.loras
-                      ?.filter(l => typeof l === 'string' || !l.model || l.model === formData.model)
+                      ?.filter(l => {
+                        // A curated entry's "model" is a list — one LoRA often
+                        // applies to several registry keys — while a scanned one
+                        // has no model at all and is offered everywhere.
+                        if (typeof l === 'string' || !l.model) return true;
+                        const models = Array.isArray(l.model) ? l.model : [l.model];
+                        return models.includes(formData.model);
+                      })
                       .map((lora, i) => (
                       <option key={typeof lora === 'string' ? lora : lora.key || i} value={typeof lora === 'string' ? lora : lora.key}>
                         {typeof lora === 'string' ? lora : (lora.name || lora.description || lora.key) + (lora.size_mb ? ` (${lora.size_mb}MB)` : '')}

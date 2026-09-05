@@ -199,67 +199,193 @@ class EXRExporter:
         
         return None
     
+    # How to reach the picture decoder of each model family, and what it
+    # decodes to.  These differ in every respect that matters here:
+    #
+    #   attr / method  where the decoder lives on the pipeline and what its
+    #                  decode entry point is called.  MiniMax-H3 keeps a raw
+    #                  `decode` alongside `decode_video`, but only the latter
+    #                  un-normalises the latent, so the method is named
+    #                  explicitly rather than probed for.
+    #   component      substring that picks the decoder's weights out of the
+    #                  models.json component list.  LTX-2 ships its encoder and
+    #                  decoder as separate files, and both audio-video families
+    #                  ship an audio VAE that must not be picked up here.
+    #   value_range    MiniMax-H3's VAE reverts an ImageNet normalisation and
+    #                  clamps, so it hands back [0, 1]; every other family
+    #                  decodes to [-1, 1].
+    _VAE_FAMILIES = {
+        "qwen":       {"attr": "vae", "method": "decode", "component": "vae", "value_range": (-1.0, 1.0)},
+        "wan":        {"attr": "vae", "method": "decode", "component": "vae", "value_range": (-1.0, 1.0)},
+        "flux2":      {"attr": "vae", "method": "decode", "component": "vae", "value_range": (-1.0, 1.0)},
+        "krea2":      {"attr": "vae", "method": "decode", "component": "vae", "value_range": (-1.0, 1.0)},
+        "minimax_h3": {"attr": "video_vae", "method": "decode_video",
+                       "component": "video_vae", "value_range": (0.0, 1.0)},
+        "ltx2":       {"attr": "video_vae_decoder", "method": "decode",
+                       "component": "video_vae_decoder", "value_range": (-1.0, 1.0)},
+    }
+
+    # Latent channel count → pipeline family, for latents captured before the
+    # hook started recording which model produced them.  Qwen-Image, Wan and
+    # Krea-2 all use 16-channel VAEs, so tensor rank breaks the tie: a 5-D
+    # latent is video (Wan), a 4-D one is a still (Qwen).
+    _LATENT_CHANNEL_FAMILIES = {
+        (16, False): "qwen",
+        (32, False): "flux2",
+        (16, True): "wan",
+        (24, True): "minimax_h3",
+        (128, True): "ltx2",
+    }
+
+    def _vae_family(self, backend, model_type: str) -> dict:
+        """Family spec for a model type, or a clear error naming the pipeline."""
+        pipeline_type = backend.get_model_entry(model_type).get("pipeline", "qwen")
+        spec = self._VAE_FAMILIES.get(pipeline_type)
+        if spec is None:
+            raise ValueError(
+                f"'{model_type}' uses the '{pipeline_type}' pipeline, which the EXR "
+                f"exporter has no VAE decode path for yet."
+            )
+        return spec
+
+    def _resolve_latent_model(self, backend, latent_data, latent, is_video: bool) -> str:
+        """Work out which model's VAE decodes this latent.
+
+        Prefers the model_type stamped in by the capture hook.  Latents saved
+        before that existed carry no provenance, so fall back to the channel
+        count — decoding a 24-channel MiniMax latent with Wan's 16-channel VAE
+        fails on a tensor size mismatch, which is what this avoids.
+        """
+        recorded = latent_data.get('model_type') if isinstance(latent_data, dict) else None
+        if recorded:
+            try:
+                resolved = backend.resolve_model_type(recorded)
+                self._vae_family(backend, resolved)   # reject unsupported families here
+                return resolved
+            except ValueError as e:
+                print(f"  ⚠️  Recorded model '{recorded}' unusable ({e}) — inferring from latent")
+
+        channels = latent.shape[1]
+        family = self._LATENT_CHANNEL_FAMILIES.get((channels, is_video))
+        if family is None:
+            raise ValueError(
+                f"Cannot tell which VAE decodes this latent: {channels} channels, "
+                f"{'video' if is_video else 'image'}, and the file records no model. "
+                f"Pass model_type explicitly."
+            )
+
+        candidates = [k for k, v in backend.models_config.items()
+                      if isinstance(v, dict) and v.get("pipeline") == family]
+        if not candidates:
+            raise ValueError(
+                f"Latent looks like a '{family}' latent ({channels} channels) but no "
+                f"'{family}' model is registered in models.json."
+            )
+        print(f"  📄 No model recorded in latent — inferred '{candidates[0]}' "
+              f"from {channels} channels")
+        return candidates[0]
+
     def _load_vae_only(self, backend, model_type: str):
         """
-        Load ONLY the VAE from a model config — no DiT, no text encoder.
-        
-        Uses DiffSynth's from_pretrained with a single ModelConfig containing
-        just the VAE weights.  Loads ~1.3 GB to CPU instead of 20+ GB for the
-        full pipeline.
-        
+        Load ONLY the picture VAE for a model — no DiT, no text encoder.
+
+        Loads the single decoder component through DiffSynth's model pool
+        rather than the pipeline's from_pretrained, which would also pull in
+        tokenizers and processors this path never uses.
+
         Returns:
-            (vae, needs_device_arg) — the VAE module and whether decode() needs a device kwarg
+            (vae, decode_fn, value_range) — the module, a callable taking
+            (latent, device) that returns a decoded tensor, and the [min, max]
+            range that tensor comes back in.
         """
         import inspect
-        
-        # 1. Check if a pipeline is already cached — grab its VAE for free
+        import torch
+
+        spec = self._vae_family(backend, model_type)
+        attr, method_name = spec["attr"], spec["method"]
+
+        def _wrap(module):
+            decode = getattr(module, method_name)
+            params = inspect.signature(decode).parameters
+
+            def decode_fn(latent, device):
+                kwargs = {}
+                if 'device' in params:
+                    kwargs['device'] = device
+                # Wan and Qwen tile only on request and are faster untiled; the
+                # audio-video VAEs default to tiling and need it at these sizes.
+                if 'tiled' in params and params['tiled'].default is False:
+                    kwargs['tiled'] = False
+                return decode(latent, **kwargs)
+
+            return module, decode_fn, spec["value_range"]
+
+        # 1. Check if a pipeline is already cached — grab its VAE for free.
+        # getattr is guarded because pipelines are nn.Modules, whose __getattr__
+        # raises AttributeError rather than returning the default.
         for key, pipe in backend.pipelines.items():
-            if key.startswith(f"{model_type}:") and hasattr(pipe, 'vae') and pipe.vae is not None:
-                print(f"  📄 Reusing VAE from cached pipeline: {key}")
-                vae = pipe.vae
-                needs_device = 'device' in inspect.signature(vae.decode).parameters
-                return vae, needs_device
-        
-        # 2. No cached pipeline — load VAE-only via DiffSynth
+            if not key.startswith(f"{model_type}:"):
+                continue
+            try:
+                module = getattr(pipe, attr, None)
+            except AttributeError:
+                module = None
+            if module is not None:
+                print(f"  📄 Reusing {attr} from cached pipeline: {key}")
+                return _wrap(module)
+
+        # 2. No cached pipeline — load the decoder component on its own
         entry = backend.get_model_entry(model_type)
         primary_id = entry["model_id"]
         pipeline_type = entry["pipeline"]
-        
-        # Find the VAE component in model config
+
+        want = spec["component"]
         vae_comps = [c for c in entry.get("components", [])
-                     if "VAE" in c["pattern"] or "vae" in c["pattern"]]
+                     if want in c["pattern"].lower()]
         if not vae_comps:
-            raise ValueError(f"No VAE component in models.json for '{model_type}'")
-        
+            raise ValueError(
+                f"No '{want}' component in models.json for '{model_type}'")
+
         comp = vae_comps[0]
         mid = comp.get("model_id", primary_id)
-        
+
         print(f"  📄 Loading VAE-only: {mid} / {comp['pattern']}")
-        
-        # Build minimal pipeline with just the VAE component
-        import torch
-        if pipeline_type == "wan":
-            from diffsynth.pipelines.wan_video import WanVideoPipeline, ModelConfig as MC
-            PipelineCls = WanVideoPipeline
-        else:
-            from diffsynth.pipelines.qwen_image import QwenImagePipeline, ModelConfig as MC
-            PipelineCls = QwenImagePipeline
-        
-        vae_config = MC(model_id=mid, origin_file_pattern=comp["pattern"])
-        
-        pipe = PipelineCls.from_pretrained(
-            torch_dtype=torch.float32,
-            device="cpu",
-            model_configs=[vae_config],
-        )
-        
-        vae = pipe.vae
-        if vae is None:
+
+        # Asked of the backend instance rather than imported: importing the
+        # registry by name re-executes diffsynth_backend under a second module
+        # name and yields an empty one.
+        PipelineCls = backend.get_pipeline_class(pipeline_type)
+        if PipelineCls is None:
+            raise RuntimeError(
+                f"Pipeline class for '{pipeline_type}' not registered — the backend "
+                f"has not finished initialising.")
+        MC = backend._get_model_config_class(entry)
+
+        # Pre-quantized checkpoints (the MiniMax-H3 NF4 weights) carry their own
+        # quant config and cannot be loaded or cast to float32 — bitsandbytes
+        # 4-bit tensors only dequantize on the GPU. Load those at bf16 and leave
+        # the cast to the caller.
+        prequantized = "nf4" in comp["pattern"].lower() or "int8" in comp["pattern"].lower()
+        dtype = torch.bfloat16 if prequantized else torch.float32
+
+        shell = PipelineCls(device="cpu", torch_dtype=dtype)
+        pool = shell.download_and_load_models(
+            [MC(model_id=mid, origin_file_pattern=comp["pattern"])])
+        if not pool.model:
             raise RuntimeError(f"VAE failed to load from {mid}/{comp['pattern']}")
-        
-        needs_device = 'device' in inspect.signature(vae.decode).parameters
-        print(f"  📄 VAE loaded to CPU ({type(vae).__name__})")
-        return vae, needs_device
+
+        vae = pool.model[0]
+        print(f"  📄 VAE loaded to CPU ({type(vae).__name__}, {dtype})")
+        return _wrap(vae)
+
+    @staticmethod
+    def _is_quantized(module) -> bool:
+        """True if the module holds bitsandbytes 4-bit weights.
+
+        Those cannot be cast to float32 or run on the CPU, so the decode paths
+        have to keep them in their native dtype and stay on the GPU.
+        """
+        return any(type(p).__name__ == "Params4bit" for p in module.parameters())
 
     def _decode_beauty_latents(
         self,
@@ -281,7 +407,6 @@ class EXRExporter:
         before linearising.  The VAE is loaded once and reused for all passes.
         """
         import torch
-        import inspect
 
         if scales is None:
             scales = [0.85, 1.0, 1.15]
@@ -295,22 +420,22 @@ class EXRExporter:
         is_video = latent.ndim == 5
 
         if model_type == "auto":
-            if is_video:
-                wan_models = [k for k, v in backend.models_config.items()
-                              if isinstance(v, dict) and v.get("pipeline") == "wan"]
-                if wan_models:
-                    model_type = wan_models[0]
-                else:
-                    raise ValueError("No Wan pipeline in models.json for video decode")
-            else:
-                model_type = "qwen_image"
+            model_type = self._resolve_latent_model(backend, latent_data, latent, is_video)
+        else:
+            model_type = backend.resolve_model_type(model_type)
 
         decode_mode = ("noise" if noise_bracketed else "scale" if bracketed else "standard")
         print(f"  📄 Latent shape: {latent.shape}, model: {model_type}, decode: {decode_mode}")
 
-        vae, needs_device_arg = self._load_vae_only(backend, model_type)
-        vae = vae.to(dtype=torch.float32).eval()
-        latent = latent.to(dtype=torch.float32)
+        vae, decode_fn, (v_min, v_max) = self._load_vae_only(backend, model_type)
+        vae = vae.eval()
+        # Pre-quantized (NF4) VAEs cannot be cast or run on the CPU — leave them
+        # in their native dtype and match the latent to it.
+        quantized = self._is_quantized(vae)
+        work_dtype = next(vae.parameters()).dtype if quantized else torch.float32
+        if not quantized:
+            vae = vae.to(dtype=torch.float32)
+        latent = latent.to(dtype=work_dtype)
 
         def _vae_decode(lat):
             """GPU-first, CPU fallback. Returns float32 tensor."""
@@ -318,10 +443,7 @@ class EXRExporter:
                 vae.to(device)
                 l = lat.to(device)
                 with torch.no_grad():
-                    if needs_device_arg:
-                        return vae.decode(l, device=device, tiled=False)
-                    else:
-                        return vae.decode(l)
+                    return decode_fn(l, device)
 
             result = None
             if torch.cuda.is_available():
@@ -331,26 +453,34 @@ class EXRExporter:
                     result = _run(torch.device('cuda'))
                     print(f"  📄 GPU decode complete")
                 except (RuntimeError, torch.cuda.OutOfMemoryError) as e:
+                    if quantized:
+                        raise
                     print(f"  ⚠️  GPU failed: {str(e).split(chr(10))[0][:80]}, falling back to CPU...")
                     vae.cpu()
                     torch.cuda.empty_cache()
             if result is None:
+                if quantized:
+                    raise RuntimeError(
+                        f"'{model_type}' ships a 4-bit quantized VAE, which only "
+                        f"dequantizes on the GPU — no CUDA device is available.")
                 import os
                 torch.set_num_threads(os.cpu_count() or 4)
                 print(f"  📄 CPU decode...")
                 result = _run(torch.device('cpu'))
                 print(f"  📄 CPU decode complete")
-            if result.dtype == torch.bfloat16:
+            if result.dtype != torch.float32:
                 result = result.to(torch.float32)
             return result
 
         def _tensor_to_frames(decoded):
             """Convert decoded tensor → list of HWC float32 frames in sRGB [0, 1].
 
-            DiffSynth VAEs decode to [-1, 1] — remap before clipping, or the whole
-            lower half of the tonal range collapses to black and contrast doubles.
+            Most DiffSynth VAEs decode to [-1, 1], but MiniMax-H3's reverts an
+            ImageNet normalisation and hands back [0, 1]. Remap from whichever
+            this family uses before clipping, or half the tonal range collapses
+            to black and contrast doubles.
             """
-            pixels = (decoded.cpu().numpy() + 1.0) / 2.0
+            pixels = (decoded.cpu().numpy() - v_min) / (v_max - v_min)
             frames = []
             if is_video and pixels.ndim == 5:
                 for fi in range(pixels.shape[2]):
@@ -1165,7 +1295,7 @@ class EXRExporter:
         latent_path: Path,
         output_path: Path,
         backend,
-        model_type: str = "qwen_image",
+        model_type: str = "auto",
         bit_depth: Literal[16, 32] = 32,
         compression: str = "ZIP",
         bracketed: bool = False,
@@ -1185,7 +1315,6 @@ class EXRExporter:
           - noise_bracketed=True: noise perturbation (σ=0/0.05/0.10) + Mertens fusion
         """
         import torch
-        import inspect
 
         if not self._has_openexr:
             raise RuntimeError("OpenEXR not installed")
@@ -1208,10 +1337,21 @@ class EXRExporter:
         else:
             raise ValueError(f"Unrecognised latent format in {latent_path}")
 
+        if model_type == "auto":
+            model_type = self._resolve_latent_model(
+                backend, latent_data, latent, latent.ndim == 5)
+        else:
+            model_type = backend.resolve_model_type(model_type)
+
         # Load VAE via DiffSynth (reuses cached pipeline if already loaded)
-        vae, needs_device_arg = self._load_vae_only(backend, model_type)
-        vae = vae.to(dtype=torch.float32).eval()
-        latent = latent.to(dtype=torch.float32)
+        vae, decode_fn, (v_min, v_max) = self._load_vae_only(backend, model_type)
+        vae = vae.eval()
+        # NF4 VAEs cannot be cast or run on the CPU — see _decode_beauty_latents.
+        quantized = self._is_quantized(vae)
+        work_dtype = next(vae.parameters()).dtype if quantized else torch.float32
+        if not quantized:
+            vae = vae.to(dtype=torch.float32)
+        latent = latent.to(dtype=work_dtype)
 
         def _decode(lat):
             """GPU-first decode, CPU fallback. Returns float32 numpy (H, W, C)."""
@@ -1219,10 +1359,7 @@ class EXRExporter:
                 vae.to(device)
                 l = lat.to(device)
                 with torch.no_grad():
-                    if needs_device_arg:
-                        out = vae.decode(l, device=device, tiled=False)
-                    else:
-                        out = vae.decode(l)
+                    out = decode_fn(l, device)
                 if isinstance(out, torch.Tensor):
                     return out
                 # Some VAEs return a dict
@@ -1238,13 +1375,19 @@ class EXRExporter:
                 try:
                     t = _run(torch.device('cuda'))
                 except (RuntimeError, torch.cuda.OutOfMemoryError):
+                    if quantized:
+                        raise
                     vae.cpu()
                     torch.cuda.empty_cache()
             if t is None:
+                if quantized:
+                    raise RuntimeError(
+                        f"'{model_type}' ships a 4-bit quantized VAE, which only "
+                        f"dequantizes on the GPU — no CUDA device is available.")
                 t = _run(torch.device('cpu'))
 
             # (1, C, H, W) or (1, C, 1, H, W) → (H, W, C)
-            if t.dtype == torch.bfloat16:
+            if t.dtype != torch.float32:
                 t = t.to(torch.float32)
             arr = t.cpu().numpy()
             if arr.ndim == 5:
@@ -1254,8 +1397,8 @@ class EXRExporter:
             if arr.shape[0] in (1, 3, 4):
                 arr = np.transpose(arr, (1, 2, 0))
             arr = arr[:, :, :3].astype(np.float32)
-            # Qwen image VAE outputs in [-1, 1]; map to [0, 1] sRGB before returning
-            arr = (arr + 1.0) / 2.0
+            # Map the family's own output range to [0, 1] sRGB before returning
+            arr = (arr - v_min) / (v_max - v_min)
             return arr
 
         # Build brackets

@@ -136,7 +136,7 @@ class Krea2PipelineRunner(PipelineRunner):
                 pipe, preview_callback, cancel_check, num_steps, original_vae_decode,
             )
 
-        latent_path, cleanup_hook = self.setup_latent_capture(pipe, output_path, save_latent)
+        latent_path, cleanup_hook = self.setup_latent_capture(pipe, output_path, save_latent, model_type)
 
         try:
             with torch.inference_mode():

@@ -266,7 +266,10 @@ function ActiveLorasPicker({ sb, active, available }) {
   const grouped = useMemo(() => {
     const groups = new Map();
     for (const l of items) {
-      const k = typeof l.model === 'string' && l.model ? l.model : 'other';
+      // Curated entries carry a list of model keys; group under the first, which
+      // is also what the backend keys the registry by. Scanned entries have none.
+      const m = Array.isArray(l.model) ? l.model[0] : l.model;
+      const k = typeof m === 'string' && m ? m : 'other';
       if (!groups.has(k)) groups.set(k, []);
       groups.get(k).push(l);
     }

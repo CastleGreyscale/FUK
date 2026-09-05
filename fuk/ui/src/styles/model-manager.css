@@ -266,6 +266,67 @@
 .mm-parts code { color: var(--color-gray-400); word-break: break-all; }
 .mm-part--missing td:first-child { color: var(--color-gray-600); }
 
+/* --- Add-on LoRAs ---------------------------------------------------------
+   LTX-2's function variants. Indented under the model row and set on the same
+   sunken panel as .mm-detail, so they read as belonging to the model rather
+   than as a second list of models. */
+
+.mm-addons { margin-top: 0.15rem; }
+.mm-addons-toggle { color: var(--color-info-400); }
+
+.mm-addons-sub {
+  font-size: var(--font-size-xs);
+  color: var(--color-gray-500);
+  line-height: 1.4;
+  margin: 0.15rem 0 0.35rem;
+}
+
+.mm-addon-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.4rem 0.5rem;
+  border-radius: var(--radius-sm);
+  background: var(--color-gray-800);
+}
+
+.mm-addon {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.15rem 0;
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+
+/* Already installed: still listed, so the set reads as a whole, but visibly
+   settled rather than something waiting on a decision. */
+.mm-addon--have { cursor: default; color: var(--color-gray-400); }
+
+.mm-addon-name { flex-shrink: 0; }
+
+.mm-addon-trigger {
+  color: var(--color-gray-500);
+  font-size: var(--font-size-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mm-addon-size {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: var(--color-gray-500);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+}
+
+.mm-addon--have .mm-addon-size { color: var(--color-success-400); }
+
+.mm-addons .mm-dl { margin-top: 0.4rem; align-self: flex-start; }
+
 .mm-footnote {
   font-size: var(--font-size-sm);
   color: var(--color-gray-500);

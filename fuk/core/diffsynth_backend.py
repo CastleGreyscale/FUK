@@ -800,6 +800,17 @@ class DiffSynthBackend:
             return self.Krea2ModelConfig
         return self.ModelConfig
 
+    def get_pipeline_class(self, pipeline_type: str):
+        """Return the registered pipeline class for a pipeline type, or None.
+
+        PIPELINE_CLASSES is a module global filled in by __init__, so it must be
+        read from inside this module. Callers elsewhere have to go through this
+        method: importing the name directly re-executes this module under a
+        second name (the server imports it as `core.diffsynth_backend`) and
+        hands back a fresh, empty registry.
+        """
+        return PIPELINE_CLASSES.get(pipeline_type)
+
     def _build_model_configs(self, entry: dict, vram_config: dict = None) -> list:
         """Build ModelConfig list from a model entry's components.
         
@@ -1083,18 +1094,23 @@ class DiffSynthBackend:
                 return decoder, method
         return None
 
-    def _capture_latent_hook(self, pipe, save_path: Path):
+    def _capture_latent_hook(self, pipe, save_path: Path, model_type: str = None):
         """
         Install a hook to capture latent before VAE decode.
-        
+
         Uses non-blocking copy to avoid stalling the GPU pipeline during
         the PCIe transfer. The actual torch.save() happens in cleanup,
         AFTER decode completes, so disk I/O doesn't block generation.
-        
+
         Args:
             pipe: The pipeline instance
             save_path: Where to save the captured latent
-            
+            model_type: The model that produced the latent, recorded alongside
+                it. Latent channel counts differ per family (Wan 16, MiniMax-H3
+                24, LTX-2 128, FLUX.2 32), so anything decoding the file later
+                has to know which VAE to reach for — guessing picks the wrong
+                one and the decode dies on a channel mismatch.
+
         Returns:
             Function to remove the hook and save latent
         """
@@ -1124,6 +1140,11 @@ class DiffSynthBackend:
                 captured['latent'] = cpu_latent
                 captured['shape'] = list(latent.shape)
                 captured['dtype'] = str(latent.dtype)
+                if model_type:
+                    captured['model_type'] = model_type
+                    entry = self.models_config.get(model_type)
+                    if isinstance(entry, dict):
+                        captured['pipeline'] = entry.get('pipeline')
             return original_decode(latent, *args, **kwargs)
 
         # Install hook

@@ -227,26 +227,105 @@ def download_seedvr2(models_root: str):
     return result
 
 
+# ---------------------------------------------------------------------------
+# Add-on LoRAs
+#
+# Some models ship their function variants as LoRAs on one shared base rather
+# than as separate checkpoints — LTX-2 is the whole design: one 35GB
+# transformer, then ~0.3-2.6GB per camera move or control mode. These cannot
+# ride the models.json loop, because FUK's LoRA registry resolves them by
+# filesystem path under defined_loras_path rather than by model_id, so they are
+# declared in defaults_loras.json and picked up from there by both this script
+# and the Models panel.
+#
+# The marker for "this LoRA belongs to that model" is a path prefixed with the
+# model key plus that key in the entry's "model" list. Nothing here is
+# LTX-specific beyond the repo-name fallback.
+# ---------------------------------------------------------------------------
+
+def ltx2_lora_repo(filename: str) -> str | None:
+    """Upstream repo for an LTX-2 function LoRA, derived from its filename.
+
+    Lightricks publishes one repo per LoRA and names the file after it, so the
+    mapping is mechanical: camera moves live in LTX-2-19b-LoRA-Camera-Control-*,
+    in-context LoRAs in LTX-2-19b-IC-LoRA-*. Entries normally carry an explicit
+    "repo"; this covers hand-added ones that follow upstream naming.
+    """
+    stem = filename.replace("ltx-2-19b-", "").replace(".safetensors", "")
+    titled = lambda s: "-".join(p.capitalize() for p in s.split("-"))
+    if stem.startswith("lora-camera-control-"):
+        return ("Lightricks/LTX-2-19b-LoRA-Camera-Control-"
+                + titled(stem[len("lora-camera-control-"):]))
+    if stem.startswith("ic-lora-"):
+        # ic-lora-union-control-ref0.5 → IC-LoRA-Union-Control: the trailing
+        # variant tag names the file, not the repo.
+        return ("Lightricks/LTX-2-19b-IC-LoRA-"
+                + titled(stem[len("ic-lora-"):].split("-ref")[0]))
+    return None
+
+
+def addon_lora_repo(entry: dict) -> str | None:
+    """The repo one add-on LoRA comes from, or None if it cannot be resolved."""
+    return entry.get("repo") or ltx2_lora_repo(Path(entry.get("path", "")).name)
+
+
+def addon_loras_for_model(loras_config: dict, model_key: str) -> list:
+    """Curated LoRA entries that belong to `model_key` and download with it."""
+    prefix = f"{model_key}/"
+    return [
+        e for e in loras_config.get("loras", [])
+        if model_key in (e.get("model") or []) and str(e.get("path", "")).startswith(prefix)
+    ]
+
+
+def fetch_addon_lora(entry: dict, defined_base, prefer: str = None):
+    """
+    Download one add-on LoRA and place it under defined_loras_path.
+
+    The download lands in the shared model cache and is symlinked into the LoRA
+    directory — these run to 2.6GB each and there is no reason to hold two
+    copies. Falls back to copying where symlinks are unavailable.
+
+    Returns the destination path, or None if the repo could not be resolved or
+    every source failed. Already-present files are returned untouched, which is
+    what makes a re-run cheap.
+    """
+    dest = Path(defined_base).expanduser() / entry["path"]
+    if dest.exists():
+        return dest
+    # A dangling link still occupies the name — its target was cleared out of the
+    # model cache — so drop it rather than failing on it further down.
+    if dest.is_symlink():
+        dest.unlink()
+
+    repo = addon_lora_repo(entry)
+    if not repo:
+        return None
+
+    filename = dest.name
+    path = download_model_component(repo, filename, component_name=entry.get("name"),
+                                    prefer=prefer)
+    if path is None:
+        return None
+
+    src = Path(path)
+    if src.is_dir():
+        src = src / filename
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        dest.symlink_to(src)
+    except OSError:
+        shutil.copy2(src, dest)
+    return dest
+
+
 def download_ltx2_loras(loras_config: dict):
     """
     Fetch the LTX-2 function LoRAs into the curated LoRA directory.
 
-    These cannot ride the models.json loop: they are LoRAs, not pipeline
-    components, and FUK's LoRA registry resolves them by filesystem path under
-    defined_loras_path rather than by model_id. Each lives in its own upstream
-    repo, so the repo is derived from the filename declared in
-    defaults_loras.json.
-
-    Downloads land in the shared model cache and are symlinked into the LoRA
-    directory — the files are up to 2.4GB each and there is no reason to hold
-    two copies. Falls back to copying where symlinks are unavailable.
-
     Returns (fetched, failed) counts, or None when nothing is configured.
     """
-    entries = [
-        e for e in loras_config.get("loras", [])
-        if "ltx2" in (e.get("model") or []) and str(e.get("path", "")).startswith("ltx2/")
-    ]
+    entries = addon_loras_for_model(loras_config, "ltx2")
     if not entries:
         return None
 
@@ -260,50 +339,24 @@ def download_ltx2_loras(loras_config: dict):
     print(f"{'#'*80}")
     print("# One 35GB base transformer, one small LoRA per camera move or control mode.")
 
-    dest_dir = Path(base).expanduser() / "ltx2"
-    dest_dir.mkdir(parents=True, exist_ok=True)
-
-    # Repo names follow the filenames, which is why they are derived rather
-    # than listed twice: camera moves live in LTX-2-19b-LoRA-Camera-Control-*,
-    # in-context LoRAs in LTX-2-19b-IC-LoRA-*.
     fetched, failed = 0, 0
     for entry in entries:
         filename = Path(entry["path"]).name
-        dest = dest_dir / filename
-        if dest.exists():
+        if (Path(base).expanduser() / entry["path"]).exists():
             print(f"\n  ✓ already present: {filename}")
             fetched += 1
             continue
-
-        stem = filename.replace("ltx-2-19b-", "").replace(".safetensors", "")
-        if stem.startswith("lora-camera-control-"):
-            move = stem[len("lora-camera-control-"):]
-            repo = "Lightricks/LTX-2-19b-LoRA-Camera-Control-" + "-".join(
-                p.capitalize() for p in move.split("-"))
-        elif stem.startswith("ic-lora-union-control"):
-            repo = "Lightricks/LTX-2-19b-IC-LoRA-Union-Control"
-        elif stem.startswith("ic-lora-detailer"):
-            repo = "Lightricks/LTX-2-19b-IC-LoRA-Detailer"
-        else:
+        if not addon_lora_repo(entry):
             print(f"\n  ⚠ no known repo for {filename} — skipping")
             failed += 1
             continue
 
-        path = download_model_component(repo, filename, component_name=entry.get("name"))
-        if path is None:
+        dest = fetch_addon_lora(entry, base)
+        if dest is None:
             failed += 1
-            continue
-
-        src = Path(path)
-        if src.is_dir():
-            src = src / filename
-        try:
-            dest.symlink_to(src)
-            print(f"  ✓ linked → {dest}")
-        except OSError:
-            shutil.copy2(src, dest)
-            print(f"  ✓ copied → {dest}")
-        fetched += 1
+        else:
+            print(f"  ✓ ready → {dest}")
+            fetched += 1
 
     return fetched, failed
 

@@ -13,6 +13,9 @@
  *   Models   Download button plus an active checkbox. Unchecking unregisters a
  *            model — it leaves the generation dropdowns but stays listed here,
  *            so re-enabling is one click and never needs a re-download.
+ *            Models whose function variants ship as LoRAs — LTX-2's camera moves
+ *            and in-context controls — list those under the model row, picked
+ *            and downloaded one at a time.
  *
  * Downloads prefer HuggingFace, with a per-component fallback to ModelScope for
  * the repos HF does not carry.
@@ -75,7 +78,126 @@ function ToolRow({ tool }) {
 // Models — download + active
 // ============================================================================
 
-function ModelRow({ model, job, size, sizesLoading, onToggle, onDownload, onDelete, busy }) {
+// LTX-2's camera moves and in-context controls: function variants that live as
+// LoRAs on the shared base rather than as models of their own. Listed under the
+// model they belong to, downloadable one at a time, and never part of whether
+// the model itself is complete.
+function AddonLoras({ model, job, sizes, sizesLoading, onDownload, onExpand, busy }) {
+  const [open, setOpen] = useState(false);
+  // null means "everything still missing", which is what most people want —
+  // unticking is how you take a subset, rather than starting from nothing.
+  const [picked, setPicked] = useState(null);
+
+  const addons = model.addons;
+  const missing = addons.filter((a) => !a.present);
+  const missingPaths = new Set(missing.map((a) => a.path));
+  const present = addons.length - missing.length;
+  const running = job && job.status === 'running';
+
+  const selected = picked ?? missingPaths;
+
+  const toggle = (path) => setPicked((prev) => {
+    const next = new Set(prev ?? missingPaths);
+    if (next.has(path)) next.delete(path); else next.add(path);
+    return next;
+  });
+
+  // Filtered against what is still missing, so a selection made before a
+  // download does not survive it as a request to fetch the same files again.
+  const selection = [...selected].filter((p) => missingPaths.has(p));
+  const selectedBytes = selection.reduce(
+    (n, p) => n + (sizes?.[p]?.total_bytes || 0), 0);
+
+  return (
+    <div className="mm-addons">
+      {/* Sizes are fetched on expand, not with the panel: one hub round trip per LoRA. */}
+      <button
+        className="mm-disclose mm-addons-toggle"
+        onClick={() => { setOpen((v) => !v); if (!open) onExpand(model.key); }}
+      >
+        {open ? 'Hide' : 'Show'} optional LoRAs — {present}/{addons.length} installed
+      </button>
+
+      {open && (
+        <>
+          <div className="mm-addons-sub">
+            Function variants on the shared base: one small file per camera move or
+            control mode, not another copy of the model. They appear in the LoRA
+            picker once downloaded.
+          </div>
+
+          <div className="mm-addon-list">
+            {addons.map((a) => (
+              <label
+                key={a.path}
+                className={`mm-addon ${a.present ? 'mm-addon--have' : ''}`}
+                title={a.install_path || a.path}
+              >
+                <input
+                  type="checkbox"
+                  className="fuk-checkbox"
+                  disabled={a.present || running || busy}
+                  checked={!a.present && selected.has(a.path)}
+                  onChange={() => toggle(a.path)}
+                />
+                <span className="mm-addon-name">{a.name}</span>
+                {a.trigger_word && <code className="mm-addon-trigger">{a.trigger_word}</code>}
+                <span className="mm-addon-size">
+                  {a.present
+                    ? <><CheckCircle className="fuk-icon--sm" /> {fmtBytes(a.size_bytes)}</>
+                    : sizes?.[a.path]
+                      ? fmtBytes(sizes[a.path].total_bytes)
+                      : (sizesLoading ? 'sizing…' : '—')}
+                </span>
+                {a.huggingface_url && (
+                  <a className="mm-link" href={a.huggingface_url} target="_blank" rel="noreferrer"
+                     onClick={(e) => e.stopPropagation()}>
+                    <Link className="fuk-icon--sm" />
+                  </a>
+                )}
+              </label>
+            ))}
+          </div>
+
+          {running && (
+            <div className="mm-progress">
+              <div
+                className="mm-progress-bar"
+                style={{ width: `${(job.completed / Math.max(1, job.total)) * 100}%` }}
+              />
+              <span className="mm-progress-text">
+                {job.completed}/{job.total} — {job.current || 'starting…'}
+              </span>
+            </div>
+          )}
+          {job && job.status === 'partial' && (
+            <div className="mm-model-missing">
+              {job.failed.length} LoRA(s) failed — retry, or fetch them by hand from the
+              links above.
+            </div>
+          )}
+
+          <button
+            className="fuk-btn fuk-btn-secondary fuk-btn-sm mm-dl"
+            disabled={running || busy || selection.length === 0}
+            onClick={() => onDownload(model.key, selection)}
+          >
+            {running
+              ? <><Loader2 className="fuk-icon--sm mm-spin" /> downloading</>
+              : <><Download className="fuk-icon--sm" />
+                  {missing.length === 0 ? ' All installed'
+                    : selection.length === 0 ? ' Nothing selected'
+                    : ` Download ${selection.length} LoRA${selection.length > 1 ? 's' : ''}`}
+                  {selectedBytes > 0 && ` · ${fmtBytes(selectedBytes)}`}</>}
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+function ModelRow({ model, job, loraJob, size, loraSizes, sizesLoading, loraSizesLoading,
+                    onToggle, onDownload, onDownloadLoras, onExpandLoras, onDelete, busy }) {
   const [open, setOpen] = useState(false);
   // Delete is two-step: the server returns a plan, the row shows it, and only
   // an explicit second click removes anything.
@@ -155,6 +277,18 @@ function ModelRow({ model, job, size, sizesLoading, onToggle, onDownload, onDele
           <button className="mm-disclose" onClick={() => setOpen((v) => !v)}>
             {open ? 'Hide' : 'Where do the weights go?'}
           </button>
+
+          {model.addons?.length > 0 && (
+            <AddonLoras
+              model={model}
+              job={loraJob}
+              sizes={loraSizes}
+              sizesLoading={loraSizesLoading}
+              onDownload={onDownloadLoras}
+              onExpand={onExpandLoras}
+              busy={busy}
+            />
+          )}
 
           {open && (
             <div className="mm-detail">
@@ -281,6 +415,11 @@ export default function ModelManager() {
   // round trip to the hub; the panel renders immediately and fills these in.
   const [sizes, setSizes] = useState({});
   const [sizesLoading, setSizesLoading] = useState(false);
+  // model key -> { lora path -> size }. Fetched when a LoRA list is expanded,
+  // because each add-on is its own single-file repo and therefore its own
+  // round trip.
+  const [loraSizes, setLoraSizes] = useState({});
+  const [loraSizesLoading, setLoraSizesLoading] = useState({});
   const pollRef = useRef(null);
 
   const load = useCallback(async () => {
@@ -421,6 +560,41 @@ export default function ModelManager() {
     }
   };
 
+  // Filed under "<key>:loras" so add-on progress and base-model progress can
+  // run at once without one overwriting the other's bar.
+  const handleDownloadLoras = async (key, paths) => {
+    try {
+      const res = await fetch(`${API_URL}/models/manage/${key}/loras/download`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paths }),
+      });
+      if (!res.ok) throw new Error((await res.json()).detail || `HTTP ${res.status}`);
+      const { job_id, total } = await res.json();
+      setJobs((prev) => ({
+        ...prev,
+        [`${key}:loras`]: {
+          id: job_id, status: 'running', completed: 0, total, current: null, failed: [],
+        },
+      }));
+    } catch (e) {
+      setError(`LoRA download failed to start for ${key}: ${e}`);
+    }
+  };
+
+  const handleExpandLoras = useCallback(async (key) => {
+    if (loraSizes[key]) return;
+    setLoraSizesLoading((prev) => ({ ...prev, [key]: true }));
+    try {
+      const res = await fetch(`${API_URL}/models/manage/${key}/loras/sizes`);
+      if (res.ok) {
+        const { sizes: fresh } = await res.json();
+        setLoraSizes((prev) => ({ ...prev, [key]: fresh }));
+      }
+    } catch { /* advisory, same as the model sizes */ }
+    finally { setLoraSizesLoading((prev) => ({ ...prev, [key]: false })); }
+  }, [loraSizes]);
+
   // Wrapped in .mm-panel so these inherit the same padding and scroll container
   // as the loaded state — otherwise they render flush against the tab edge.
   if (error && !data) {
@@ -493,10 +667,15 @@ export default function ModelManager() {
                 key={m.key}
                 model={m}
                 job={jobs[m.key]}
+                loraJob={jobs[`${m.key}:loras`]}
                 size={sizes[m.key]}
+                loraSizes={loraSizes[m.key]}
                 sizesLoading={sizesLoading}
+                loraSizesLoading={!!loraSizesLoading[m.key]}
                 onToggle={handleToggle}
                 onDownload={handleDownload}
+                onDownloadLoras={handleDownloadLoras}
+                onExpandLoras={handleExpandLoras}
                 onDelete={handleDelete}
                 busy={busy}
               />
@@ -509,6 +688,10 @@ export default function ModelManager() {
         Weights live under <code>{data.models_root}</code>. Sizes are per model, so
         models sharing a repo — the Qwen text encoder, the Wan VAE — report the same
         files more than once.
+        {data.loras_root && (
+          <> Add-on LoRAs are linked into <code>{data.loras_root}</code> from that same
+          cache, so they cost their size once.</>
+        )}
       </div>
     </div>
   );

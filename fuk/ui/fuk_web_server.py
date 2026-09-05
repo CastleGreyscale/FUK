@@ -3539,7 +3539,10 @@ async def export_to_exr(request: ExportEXRRequest):
                         latent_path=latent_path,
                         output_path=output_path,
                         backend=generation_backend,
-                        model_type="qwen_image",
+                        # The latent records which model made it; hardcoding
+                        # qwen_image here decoded FLUX.2 and Krea-2 latents
+                        # with the wrong VAE.
+                        model_type="auto",
                         bit_depth=request.bit_depth,
                         compression=request.compression,
                         bracketed=request.bracketed_latent,

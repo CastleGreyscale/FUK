@@ -309,7 +309,7 @@ class WanPipelineRunner(PipelineRunner):
         pipe_kwargs.update(pipe_defaults)
 
         # --- Latent capture ---
-        latent_path, cleanup_hook = self.setup_latent_capture(pipe, output_path, save_latent)
+        latent_path, cleanup_hook = self.setup_latent_capture(pipe, output_path, save_latent, model_type)
 
         # --- Generate ---
         try:

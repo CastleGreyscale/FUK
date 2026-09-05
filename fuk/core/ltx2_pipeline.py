@@ -201,7 +201,7 @@ class LTX2PipelineRunner(PipelineRunner):
 
         pipe_kwargs.update(pipe_defaults)
 
-        latent_path, cleanup_hook = self.setup_latent_capture(pipe, output_path, save_latent)
+        latent_path, cleanup_hook = self.setup_latent_capture(pipe, output_path, save_latent, model_type)
 
         if progress_callback:
             progress_callback("generating", 0, num_steps)

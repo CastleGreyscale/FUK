@@ -373,7 +373,8 @@
                 </table>
 
                 <h3 id="ltx2-loras">LTX-2 Function LoRAs</h3>
-                <p>LTX-2's variants are LoRAs on one shared 35GB base, not separate fused checkpoints — nine functions for about 10GB of LoRA against 35GB apiece the other way. They load through the same path as every other FUK LoRA, so adding a tenth camera move is a download and a config line.</p>
+                <p>LTX-2's variants are LoRAs on one shared 35GB base, not separate fused checkpoints — twelve functions for about 12GB of LoRA against 35GB apiece the other way. They load through the same path as every other FUK LoRA, so adding a thirteenth camera move is a download and a config line.</p>
+                <p>Download them from <strong>Utilities → Models</strong>: the LTX-2 row carries a <em>Show optional LoRAs</em> list where each one can be ticked and fetched on its own, with its size shown before you commit. They are optional — LTX-2 is complete and generates without any of them — so they never count toward the model's own download state. A headless <code>download_models.py</code> run fetches the whole set at the end instead. Either way the file lands in the shared model cache and is symlinked into <code>&lt;defined_loras_path&gt;/ltx2/</code>, so it costs its size once and appears in the LoRA picker immediately.</p>
                 <table class="wiki-table">
                     <thead>
                         <tr><th>LoRA</th><th>Size</th><th>Notes</th></tr>
@@ -382,6 +383,7 @@
                         <tr><td>Camera — Dolly In / Out / Left / Right</td><td>0.3 GB each</td><td>Camera move baked into the generation</td></tr>
                         <tr><td>Camera — Jib Up / Down, Static</td><td>2.1 GB each</td><td>Static locks the camera off</td></tr>
                         <tr><td>IC Union Control</td><td>0.6 GB</td><td>Depth / pose / edge video steers structure. Needs a driving video in the In-Context Video slot</td></tr>
+                        <tr><td>IC Canny / Depth / Pose Control</td><td>0.6 GB each</td><td>One preprocessor apiece, where Union takes any of the three. Same In-Context Video slot</td></tr>
                         <tr><td>IC Detailer</td><td>2.4 GB</td><td>Re-renders a low-detail clip with more detail. Also driven by the In-Context Video slot</td></tr>
                     </tbody>
                 </table>
@@ -1525,6 +1527,7 @@
                     <li><strong>Download</strong> — runs in the background with per-component progress. HuggingFace is preferred because it is faster and steadier, with a per-component fallback to ModelScope for the repos HF does not carry. Already-present files are skipped, so an interrupted download resumes by re-running it.</li>
                     <li><strong>Projected size</strong> — what a download would actually pull, which is not the same as the model's total. Anything sharing files with a model you already have pulls less: Krea-2 reports about 32.8 GB to fetch of 33.0 GB total, because the Qwen-Image VAE is already on disk.</li>
                     <li><strong>Where the weights go</strong> — expands to the HuggingFace and ModelScope links, the exact install path, and a per-component present/missing breakdown, for when fetching something by hand is easier.</li>
+                    <li><strong>Optional LoRAs</strong> — where a model's function variants ship as LoRAs on its shared base rather than as models of their own, they are listed under it. Today that is <a href="#ltx2-loras">LTX-2</a>: twelve camera moves and in-context controls, ticked individually and downloaded together, each priced before you commit. They are optional by definition, so they never count toward whether the model itself is complete, and they land in the LoRA directory rather than the model cache — symlinked out of that cache, so a LoRA costs its size once. Downloaded ones show a size and stay listed rather than disappearing, so the set reads as a whole.</li>
                 </ul>
 
                 <h3>Deleting weights</h3>

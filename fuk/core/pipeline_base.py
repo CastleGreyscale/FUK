@@ -336,10 +336,14 @@ class PipelineRunner:
     # Latent capture (delegates to hub)
     # ------------------------------------------------------------------
 
-    def setup_latent_capture(self, pipe, output_path: Path, save_latent: bool):
+    def setup_latent_capture(self, pipe, output_path: Path, save_latent: bool,
+                             model_type: str = None):
         """
         Conditionally install latent capture hook.
-        
+
+        model_type is stamped into the saved file so the EXR exporter can pick
+        the matching VAE rather than guessing — see _capture_latent_hook.
+
         Returns (latent_path, cleanup_fn) — cleanup_fn is None if not capturing.
         Always call cleanup_fn in a finally block.
         """
@@ -349,7 +353,7 @@ class PipelineRunner:
         latent_dir = output_path.parent / "latents"
         latent_dir.mkdir(exist_ok=True)
         latent_path = latent_dir / f"{output_path.stem}.latent.pt"
-        cleanup = self.backend._capture_latent_hook(pipe, latent_path)
+        cleanup = self.backend._capture_latent_hook(pipe, latent_path, model_type)
         _log(self.log_prefix, f"Latent capture enabled → {latent_path}")
         return latent_path, cleanup
 
