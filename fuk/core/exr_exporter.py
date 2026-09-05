@@ -909,6 +909,68 @@ class EXRExporter:
         
         return channels, metadata
 
+    def _add_depth_channels(
+        self,
+        channels_dict: dict,
+        channel_info: dict,
+        arr: np.ndarray,
+        bit_depth: int,
+        pixel_type,
+    ) -> None:
+        """
+        Write depth under both a bare 'Z' and a layered 'depth.Z'.
+
+        A channel's layer is everything before the last dot, so a bare 'Z' has
+        no layer and lands in the base layer next to R/G/B. Nuke and Fusion map
+        that onto their depth aux buffer automatically, but Resolve enumerates
+        only prefixed names — so with 'Z' alone, normals and crypto show up in
+        its layer picker and depth silently does not, appearing instead as an
+        extra channel of the beauty layer. 'depth.Z' (the Nuke/Arnold spelling)
+        gives Resolve a layer to select; the bare 'Z' stays for everyone else.
+        """
+        payload = self._to_bytes(arr, bit_depth)
+        for name in ('Z', 'depth.Z'):
+            channels_dict[name] = payload
+            channel_info[name] = self.Imath.Channel(pixel_type)
+
+    # Codecs that quantise FLOAT channels. Fine for beauty, fatal for
+    # Cryptomatte: the ID channels carry MurmurHash3 bit patterns reinterpreted
+    # as floats, so any lossy pass turns a handful of exact object IDs into
+    # thousands of near-miss values and the mattes stop matching anything.
+    # (B44/B44A are absent deliberately — they only touch HALF channels, and
+    # crypto is always written FLOAT.)
+    _FLOAT_LOSSY = {'PXR24', 'DWAA', 'DWAB'}
+
+    def _compression_attr(self, compression: str, has_cryptomatte: bool = False):
+        """
+        Map a compression name onto an Imath.Compression header attribute.
+
+        Unknown names fall back to ZIP rather than raising — a bad preset
+        should not cost someone a long sequence export. Same for a lossy pick
+        on a file carrying Cryptomatte, which would destroy the ID channels.
+        """
+        table = {
+            'NONE': 'NO_COMPRESSION',
+            'RLE': 'RLE_COMPRESSION',
+            'ZIPS': 'ZIPS_COMPRESSION',
+            'ZIP': 'ZIP_COMPRESSION',
+            'PIZ': 'PIZ_COMPRESSION',
+            'PXR24': 'PXR24_COMPRESSION',
+            'B44': 'B44_COMPRESSION',
+            'B44A': 'B44A_COMPRESSION',
+            'DWAA': 'DWAA_COMPRESSION',
+            'DWAB': 'DWAB_COMPRESSION',
+        }
+        key = str(compression).upper().replace('_COMPRESSION', '')
+        attr = table.get(key)
+        if attr is None:
+            print(f"  ⚠ Unknown EXR compression '{compression}', using ZIP")
+            attr = 'ZIP_COMPRESSION'
+        elif has_cryptomatte and key in self._FLOAT_LOSSY:
+            print(f"  ⚠ {key} would corrupt the Cryptomatte ID channels, using ZIP")
+            attr = 'ZIP_COMPRESSION'
+        return self.Imath.Compression(getattr(self.Imath.Compression, attr))
+
     def _export_frame_multilayer(
         self,
         layers: Dict[str, str],
@@ -1041,10 +1103,11 @@ class EXRExporter:
             channel_info['B'] = self.Imath.Channel(pixel_type)
         
         if 'depth' in loaded_layers:
-            arr = loaded_layers['depth']
-            channels_dict['Z'] = self._to_bytes(arr, bit_depth)
-            channel_info['Z'] = self.Imath.Channel(pixel_type)
-        
+            self._add_depth_channels(
+                channels_dict, channel_info,
+                loaded_layers['depth'], bit_depth, pixel_type,
+            )
+
         # Normals: prefer raw (already [-1,1]) over PNG (needs conversion)
         if 'normals_raw' in loaded_layers:
             arr = loaded_layers['normals_raw']
@@ -1094,7 +1157,10 @@ class EXRExporter:
         # Create and write EXR
         header = self.OpenEXR.Header(width, height)
         header['channels'] = channel_info
-        
+        header['compression'] = self._compression_attr(
+            compression, has_cryptomatte=bool(crypto_metadata)
+        )
+
         # Write Cryptomatte manifest metadata into header (required by spec)
         for meta_key, meta_val in crypto_metadata.items():
             header[meta_key] = meta_val.encode('utf-8') if isinstance(meta_val, str) else meta_val
@@ -1235,10 +1301,11 @@ class EXRExporter:
             channel_info['B'] = self.Imath.Channel(pixel_type)
         
         if 'depth' in loaded_layers:
-            arr = loaded_layers['depth']
-            channels_dict['Z'] = self._to_bytes(arr, bit_depth)
-            channel_info['Z'] = self.Imath.Channel(pixel_type)
-        
+            self._add_depth_channels(
+                channels_dict, channel_info,
+                loaded_layers['depth'], bit_depth, pixel_type,
+            )
+
         if 'normals' in loaded_layers:
             arr = loaded_layers['normals']
             arr_decoded = arr * 2.0 - 1.0
@@ -1263,6 +1330,9 @@ class EXRExporter:
         # Create EXR header
         header = self.OpenEXR.Header(width, height)
         header['channels'] = channel_info
+        header['compression'] = self._compression_attr(
+            compression, has_cryptomatte=bool(crypto_metadata)
+        )
         for meta_key, meta_val in crypto_metadata.items():
             header[meta_key] = meta_val.encode('utf-8') if isinstance(meta_val, str) else meta_val
 
@@ -1465,6 +1535,7 @@ class EXRExporter:
 
         header = self.OpenEXR.Header(width, height)
         header['channels'] = channel_info
+        header['compression'] = self._compression_attr(compression)
         exr_file = self.OpenEXR.OutputFile(str(output_path), header)
         exr_file.writePixels(channels_dict)
         exr_file.close()
