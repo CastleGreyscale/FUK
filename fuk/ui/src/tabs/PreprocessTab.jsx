@@ -610,6 +610,7 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
           <video
             src={buildImageUrl(result.url)}
             controls
+            muted
             className="fuk-preview-media--constrained"
             preload="metadata"
           />
@@ -651,6 +652,7 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
                 <video
                   src={buildImageUrl(sourceInput)}
                   controls
+                  muted
                   className="fuk-preview-media fuk-preview-media--constrained"
                   preload="metadata"
                 />

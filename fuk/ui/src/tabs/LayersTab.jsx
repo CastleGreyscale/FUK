@@ -363,6 +363,7 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
                       <video
                         src={buildImageUrl(layerData.preview_url || layerData.url)}
                         controls
+                        muted
                         preload="metadata"
                         className="fuk-layer-card-media"
                       />

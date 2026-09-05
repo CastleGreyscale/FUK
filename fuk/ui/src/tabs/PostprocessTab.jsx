@@ -484,6 +484,7 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                   <video
                     src={buildImageUrl(sourceInput)}
                     controls
+                    muted
                     loop
                     className="fuk-preview-media--constrained"
                     preload="metadata"
@@ -552,6 +553,7 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                   <video
                     src={buildImageUrl(result.url)}
                     controls
+                    muted
                     autoPlay
                     loop
                     className="fuk-preview-media--constrained"

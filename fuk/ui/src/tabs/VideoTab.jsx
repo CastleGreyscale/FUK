@@ -807,6 +807,7 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
                 ref={videoRef}
                 src={buildImageUrl(previewVideo)}
                 controls
+                muted
                 loop
                 autoPlay
                 className="fuk-preview-media"
