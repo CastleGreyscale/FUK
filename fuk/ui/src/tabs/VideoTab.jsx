@@ -871,7 +871,7 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
               : { ...prev, [keyOrPatch]: value }
           ))}
           disabled={generating}
-          model={formData.model}
+          model={formData.task}
           loras={effectiveLoras}
           mode="video"
         />
@@ -1212,10 +1212,13 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
                       ?.filter(l => {
                         // A curated entry's "model" is a list — one LoRA often
                         // applies to several registry keys — while a scanned one
-                        // has no model at all and is offered everywhere.
+                        // has no model at all and is offered everywhere. The
+                        // selected model key is formData.task here, not
+                        // formData.model: this tab names the field after the
+                        // generation task.
                         if (typeof l === 'string' || !l.model) return true;
                         const models = Array.isArray(l.model) ? l.model : [l.model];
-                        return models.includes(formData.model);
+                        return models.includes(formData.task);
                       })
                       .map((lora, i) => (
                       <option key={typeof lora === 'string' ? lora : lora.key || i} value={typeof lora === 'string' ? lora : lora.key}>
