@@ -580,6 +580,66 @@ class PipelineRunner:
         _log(self.log_prefix, "=" * 60)
 
     # ------------------------------------------------------------------
+    # Audio sidecar
+    # ------------------------------------------------------------------
+
+    def save_audio_sidecar(self, audio, output_path: Path,
+                           sample_rate: int) -> Optional[Path]:
+        """Write the model's raw audio beside the muxed video as a float32 WAV.
+
+        The mp4 stays the deliverable, but its audio has been through two lossy
+        stages by the time it lands: write_video_audio clips to [-1,1] and
+        quantises to int16, then AAC re-encodes at 192kbps. This keeps the audio
+        VAE's float32 output verbatim — the same tensor the muxer was handed, at
+        the model's own rate — so the clean signal survives for any later work
+        that needs better than the mp4 track.
+
+        Two deliberate differences from the mp4 track:
+          - native channel count. convert_to_stereo duplicates mono into two
+            identical channels for the container; the WAV keeps mono as mono.
+          - no clipping. Samples outside [-1,1] are written as-is rather than
+            clamped, so the WAV shows what the model actually produced.
+
+        Never fatal: a run that produced video is a success even if the sidecar
+        cannot be written.
+        """
+        if audio is None:
+            return None
+
+        try:
+            import numpy as np
+            from scipy.io import wavfile
+
+            samples = audio.detach().to(torch.float32).cpu()
+            if samples.ndim == 3:      # [B, C, S] — runners emit a single item
+                samples = samples[0]
+            if samples.ndim == 1:      # [S] — bare mono
+                samples = samples.unsqueeze(0)
+            if samples.ndim != 2:
+                raise ValueError(f"unexpected audio shape {tuple(samples.shape)}")
+
+            # scipy writes [samples, channels]; the tensor is [channels, samples]
+            data = samples.T.contiguous().numpy()
+
+            wav_path = output_path.with_suffix(".wav")
+            wavfile.write(str(wav_path), int(sample_rate), data)
+
+            channels = data.shape[1]
+            peak = float(np.abs(data).max()) if data.size else 0.0
+            _log(self.log_prefix,
+                 f"Audio sidecar: {wav_path.name} "
+                 f"({sample_rate}Hz, {channels}ch, float32, peak {peak:.3f})")
+            if peak > 1.0:
+                _log(self.log_prefix,
+                     f"Audio peaks at {peak:.3f} — the mp4 track is clipped here, "
+                     f"the WAV is not", "warning")
+            return wav_path
+
+        except Exception as e:
+            _log(self.log_prefix, f"Could not write audio sidecar: {e}", "warning")
+            return None
+
+    # ------------------------------------------------------------------
     # Result builders
     # ------------------------------------------------------------------
 

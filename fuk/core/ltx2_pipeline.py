@@ -221,13 +221,17 @@ class LTX2PipelineRunner(PipelineRunner):
             # LTX-2 emits picture and sound from one denoise, so they are muxed
             # together here rather than written as separate files.
             from diffsynth.utils.data.media_io_ltx2 import write_video_audio_ltx2
+            audio_sample_rate = entry.get("audio_sample_rate", 24000)
             write_video_audio_ltx2(
                 video=video,
                 audio=audio,
                 output_path=str(output_path),
                 fps=fps,
-                audio_sample_rate=entry.get("audio_sample_rate", 24000),
+                audio_sample_rate=audio_sample_rate,
             )
+            # The mux is lossy twice over (int16 then AAC), so keep the VAE's
+            # float32 audio alongside it.
+            wav_path = self.save_audio_sidecar(audio, output_path, audio_sample_rate)
 
             elapsed = time.time() - start_time
             _log(self.log_prefix,
@@ -249,6 +253,7 @@ class LTX2PipelineRunner(PipelineRunner):
                     "mode": log_params["mode"],
                 },
                 has_audio=audio is not None,
+                audio_wav=wav_path,
             )
         except Exception as e:
             _log(self.log_prefix, f"Video generation failed: {e}", "error")

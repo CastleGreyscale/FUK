@@ -1455,7 +1455,14 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
         outputs = {
             "mp4": get_project_relative_url(paths["generated_mp4"])
         }
-        
+
+        # Audio-video models (LTX-2, MiniMax-H3) drop a float32 WAV next to the
+        # mp4 — the audio before int16 + AAC. Only present when the model has an
+        # audio branch, so it is advertised only when it exists.
+        wav_path = paths["generated_mp4"].with_suffix(".wav")
+        if wav_path.exists():
+            outputs["wav"] = get_project_relative_url(wav_path)
+
         # Export to EXR if requested
         if request.export_exr:
             active_generations[generation_id]["phase"] = "exporting_exr"

@@ -193,6 +193,9 @@ class MiniMaxH3PipelineRunner(PipelineRunner):
                 fps=fps,
                 audio_sample_rate=audio_sample_rate,
             )
+            # The mux is lossy twice over (int16 then AAC), so keep the VAE's
+            # float32 audio alongside it.
+            wav_path = self.save_audio_sidecar(audio, output_path, audio_sample_rate)
 
             elapsed = time.time() - start_time
             _log(self.log_prefix,
@@ -214,6 +217,7 @@ class MiniMaxH3PipelineRunner(PipelineRunner):
                     "audio_flow_shift": a_shift,
                 },
                 has_audio=audio is not None,
+                audio_wav=wav_path,
             )
         except Exception as e:
             _log(self.log_prefix, f"Generation failed: {e}", "error")
