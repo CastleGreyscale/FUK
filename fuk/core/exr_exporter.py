@@ -29,6 +29,16 @@ import shutil
 import json
 
 
+# Scale-free depth models return Z in [0, 1], where 0 is the nearest thing in
+# frame rather than the camera. Comp depth tools work in scene units — a focus
+# distance, a blur falloff over metres — so handing them a 0..1 buffer bunches
+# every control against one end of its range and the result reads as a uniform
+# blur over the whole frame. Map onto a plausible scene instead. Metric models
+# (ZoeDepth) bypass this entirely and export real metres.
+RELATIVE_Z_NEAR_M = 1.0
+RELATIVE_Z_FAR_M = 100.0
+
+
 class EXRCompression(str, Enum):
     """Available EXR compression methods"""
     NONE = "NONE"
@@ -139,11 +149,12 @@ class EXRExporter:
     
     def _find_raw_data_path(self, layer_path: Path, layer_name: str) -> Optional[Path]:
         """
-        Look for raw .npy file alongside an MP4 or inside a sequence directory.
-        
+        Look for raw .npy file alongside an MP4, still, or sequence directory.
+
         The batch preprocessors save these automatically:
         depth.mp4     -> depth_raw.npy  (same directory)
         depth_seq/    -> depth_seq/depth_raw.npy
+        depth_xx.png  -> depth_xx_raw.npy  (stills)
         """
         if self._is_video_file(layer_path):
             raw_path = layer_path.parent / f"{layer_path.stem}_raw.npy"
@@ -157,8 +168,46 @@ class EXRExporter:
                 raw_path = layer_path / name
                 if raw_path.exists():
                     return raw_path
+        else:
+            # Still image: float buffer written beside the 8-bit preview
+            raw_path = layer_path.parent / f"{layer_path.stem}_raw.npy"
+            if raw_path.exists():
+                return raw_path
         return None
     
+    def _load_depth_meta(self, raw_npy_path: Optional[Path]) -> Optional[dict]:
+        """
+        Read the sidecar that says a raw depth buffer holds true Z.
+
+        Returns None for a pass made before the sidecar existed. Those buffers
+        hold a display map (near = white, invert toggle baked in) — the
+        inverse of a Z channel — and there is no way to tell from the array
+        which orientation the model produced, so callers warn rather than
+        guess and silently flip someone's geometry.
+        """
+        if raw_npy_path is None:
+            return None
+        try:
+            meta = json.loads(raw_npy_path.with_suffix(".json").read_text())
+        except (OSError, ValueError):
+            return None
+        return meta if meta.get("space") == "z" else None
+
+    def _depth_to_scene_z(self, arr: np.ndarray, depth_meta: Optional[dict]) -> np.ndarray:
+        """
+        Put a raw depth buffer into the units an EXR Z channel is read in.
+
+        Metric passes are already metres. Relative passes are [0,1] with 0 at
+        the nearest surface in frame, which is an orientation but not a scale,
+        so they are mapped onto an assumed scene depth.
+        """
+        arr = arr.astype(np.float32)
+        if depth_meta is None:
+            return arr
+        if depth_meta.get("is_metric"):
+            return arr
+        return RELATIVE_Z_NEAR_M + arr * (RELATIVE_Z_FAR_M - RELATIVE_Z_NEAR_M)
+
     def _find_beauty_latent_path(self, beauty_path: Path) -> Optional[Path]:
         """
         Find the corresponding .latent.pt file for a beauty pass video/image.
@@ -627,7 +676,8 @@ class EXRExporter:
         frame_counts = {}
         layer_paths = {}
         raw_data = {}
-        
+        depth_meta = None
+
         for layer_name, layer_path in aov_layers.items():
             if layer_path is None:
                 continue
@@ -647,6 +697,15 @@ class EXRExporter:
                     raw_data[layer_name] = raw_array
                     frame_counts[layer_name] = len(raw_array)
                     print(f"  ✅ {layer_name}: {len(raw_array)} frames from RAW .npy (lossless)")
+                    if layer_name == 'depth':
+                        depth_meta = self._load_depth_meta(raw_npy_path)
+                        if depth_meta is None:
+                            print("     ⚠ no Z sidecar — this pass predates Z-correct "
+                                  "export and holds a display map (near=white, invert "
+                                  "baked in). Re-run the depth pass for a usable Z.")
+                        else:
+                            units = 'metres' if depth_meta.get('is_metric') else 'relative'
+                            print(f"     true Z ({units})")
                     continue
                 except Exception as e:
                     print(f"  ⚠ {layer_name}: raw .npy failed ({e}), falling back to MP4")
@@ -731,6 +790,7 @@ class EXRExporter:
                         compression=compression,
                         quiet=True,
                         raw_arrays=frame_raw,  # Beauty + AOVs from raw data
+                        depth_meta=depth_meta,
                     )
                     
                     exported_frames.append(output_path)
@@ -980,6 +1040,7 @@ class EXRExporter:
         linear: bool = True,
         quiet: bool = False,
         raw_arrays: Optional[Dict[str, np.ndarray]] = None,
+        depth_meta: Optional[dict] = None,
     ) -> Dict[str, Any]:
         """
         Internal method to export a single frame (used by sequence export).
@@ -1002,9 +1063,11 @@ class EXRExporter:
                     # Decoded latent: float32 [H,W,3] range [0,1], already in linear space
                     if arr.ndim == 3 and arr.shape[2] in [3, 4]:
                         loaded_layers['beauty'] = arr[:,:,:3].astype(np.float32)
+                        if arr.shape[2] == 4:
+                            loaded_layers['alpha'] = arr[:, :, 3].astype(np.float32)
                     elif arr.ndim == 2:
                         loaded_layers['beauty'] = np.stack([arr, arr, arr], axis=-1).astype(np.float32)
-                
+
                 elif layer_name == 'depth':
                     # Already float32 [H,W] range [0,1]
                     loaded_layers['depth'] = arr.astype(np.float32) if arr.ndim == 2 else arr[:,:,0].astype(np.float32)
@@ -1060,36 +1123,38 @@ class EXRExporter:
                 if arr.ndim == 2:
                     arr = np.stack([arr, arr, arr], axis=-1)
                 elif arr.shape[2] == 4:
+                    # Alpha is linear coverage, not colour — never gamma it
+                    loaded_layers['alpha'] = arr[:, :, 3].copy()
                     arr = arr[:, :, :3]
                 if linear:
                     arr = self._srgb_to_linear(arr)
                 loaded_layers['beauty'] = arr
-                
+
             elif layer_name == 'depth':
                 if arr.ndim == 3:
                     arr = arr[:, :, 0]
                 loaded_layers['depth'] = arr
-                
+
             elif layer_name == 'normals':
                 if arr.ndim == 2:
                     arr = np.stack([arr, arr, arr], axis=-1)
                 loaded_layers['normals'] = arr
-                
+
             elif layer_name == 'crypto':
                 if arr.ndim == 2:
                     arr = np.stack([arr, arr, arr], axis=-1)
                 loaded_layers['crypto'] = arr
-        
+
         if not loaded_layers:
             raise ValueError("No valid layers to export")
-        
+
         # Build EXR channels
         channels_dict = {}
         channel_info = {}
-        
+
         pixel_type = (
-            self.Imath.PixelType(self.Imath.PixelType.HALF) 
-            if bit_depth == 16 
+            self.Imath.PixelType(self.Imath.PixelType.HALF)
+            if bit_depth == 16
             else self.Imath.PixelType(self.Imath.PixelType.FLOAT)
         )
         
@@ -1101,11 +1166,21 @@ class EXRExporter:
             channel_info['R'] = self.Imath.Channel(pixel_type)
             channel_info['G'] = self.Imath.Channel(pixel_type)
             channel_info['B'] = self.Imath.Channel(pixel_type)
-        
+
+            # Always write A. Without it comps read the base layer as RGB and
+            # synthesise their own alpha, and 'Z' next to three channels is
+            # what made depth look like a stray extra colour channel.
+            alpha = loaded_layers.get('alpha')
+            if alpha is None:
+                alpha = np.ones(arr.shape[:2], dtype=np.float32)
+            channels_dict['A'] = self._to_bytes(alpha, bit_depth)
+            channel_info['A'] = self.Imath.Channel(pixel_type)
+
         if 'depth' in loaded_layers:
             self._add_depth_channels(
                 channels_dict, channel_info,
-                loaded_layers['depth'], bit_depth, pixel_type,
+                self._depth_to_scene_z(loaded_layers['depth'], depth_meta),
+                bit_depth, pixel_type,
             )
 
         # Normals: prefer raw (already [-1,1]) over PNG (needs conversion)
@@ -1234,38 +1309,60 @@ class EXRExporter:
         # Load all layers and determine dimensions
         loaded_layers = {}
         width, height = None, None
-        
+        depth_meta = None
+
         for layer_name, layer_path in layers.items():
             if layer_path is None:
                 continue
-                
+
             layer_path = Path(layer_path)
             if not layer_path.exists():
                 print(f"  ⚠ Skipping {layer_name}: file not found")
                 continue
-            
+
+            # Depth: prefer the float buffer over the 8-bit preview. 256 levels
+            # of quantisation is not something a focus pull can be built on.
+            if layer_name == 'depth':
+                raw_npy = self._find_raw_data_path(layer_path, layer_name)
+                depth_meta = self._load_depth_meta(raw_npy)
+                if raw_npy is not None and depth_meta is not None:
+                    arr = np.load(str(raw_npy)).astype(np.float32)
+                    if arr.ndim == 3:
+                        arr = arr[:, :, 0]
+                    if width is None:
+                        height, width = arr.shape[:2]
+                    loaded_layers['depth'] = arr
+                    units = 'metres' if depth_meta.get('is_metric') else 'relative'
+                    print(f"  ✓ Loaded depth from raw .npy (true Z, {units})")
+                    continue
+                print("  ⚠ Depth has no Z sidecar — writing the 8-bit display map "
+                      "as-is. Its orientation is near=white, the inverse of a Z "
+                      "channel. Re-run the depth pass for a usable Z.")
+
             img = Image.open(layer_path)
             arr = np.array(img).astype(np.float32) / 255.0
-            
+
             if width is None:
                 height, width = arr.shape[:2]
-            
+
             if layer_name == 'beauty':
                 if arr.ndim == 2:
                     arr = np.stack([arr, arr, arr], axis=-1)
                 elif arr.shape[2] == 4:
+                    # Alpha is linear coverage, not colour — never gamma it
+                    loaded_layers['alpha'] = arr[:, :, 3].copy()
                     arr = arr[:, :, :3]
                 if linear:
                     arr = self._srgb_to_linear(arr)
                 loaded_layers['beauty'] = arr
                 print(f"  ✓ Loaded beauty ({width}x{height}, {'linear' if linear else 'sRGB'})")
-                
+
             elif layer_name == 'depth':
                 if arr.ndim == 3:
                     arr = arr[:, :, 0]
                 loaded_layers['depth'] = arr
                 print(f"  ✓ Loaded depth")
-                
+
             elif layer_name == 'normals':
                 if arr.ndim == 2:
                     arr = np.stack([arr, arr, arr], axis=-1)
@@ -1280,11 +1377,34 @@ class EXRExporter:
         
         if not loaded_layers:
             raise ValueError("No valid layers to export")
-        
+
+        # Beauty sets the frame size when it's there; every channel in one EXR
+        # part must match it. The raw depth buffer is written at the depth
+        # model's process resolution, which is often not the render size.
+        if 'beauty' in loaded_layers:
+            height, width = loaded_layers['beauty'].shape[:2]
+        for key, arr in loaded_layers.items():
+            if arr.shape[:2] == (height, width):
+                continue
+            print(f"  ↳ resizing {key} {arr.shape[1]}x{arr.shape[0]} → {width}x{height}")
+            # Crypto/ID mattes MUST use nearest-neighbor (no interpolation)
+            resample = Image.NEAREST if 'crypto' in key else Image.LANCZOS
+            if arr.ndim == 2:
+                loaded_layers[key] = np.array(
+                    Image.fromarray(arr, mode='F').resize((width, height), resample)
+                ).astype(np.float32)
+            else:
+                loaded_layers[key] = np.stack([
+                    np.array(
+                        Image.fromarray(arr[:, :, c], mode='F').resize((width, height), resample)
+                    ).astype(np.float32)
+                    for c in range(arr.shape[2])
+                ], axis=-1)
+
         # Build EXR channels
         channels_dict = {}
         channel_info = {}
-        
+
         pixel_type = (
             self.Imath.PixelType(self.Imath.PixelType.HALF) 
             if bit_depth == 16 
@@ -1299,11 +1419,19 @@ class EXRExporter:
             channel_info['R'] = self.Imath.Channel(pixel_type)
             channel_info['G'] = self.Imath.Channel(pixel_type)
             channel_info['B'] = self.Imath.Channel(pixel_type)
-        
+
+            # Always write A — see _export_frame_multilayer for why
+            alpha = loaded_layers.get('alpha')
+            if alpha is None:
+                alpha = np.ones(arr.shape[:2], dtype=np.float32)
+            channels_dict['A'] = self._to_bytes(alpha, bit_depth)
+            channel_info['A'] = self.Imath.Channel(pixel_type)
+
         if 'depth' in loaded_layers:
             self._add_depth_channels(
                 channels_dict, channel_info,
-                loaded_layers['depth'], bit_depth, pixel_type,
+                self._depth_to_scene_z(loaded_layers['depth'], depth_meta),
+                bit_depth, pixel_type,
             )
 
         if 'normals' in loaded_layers:

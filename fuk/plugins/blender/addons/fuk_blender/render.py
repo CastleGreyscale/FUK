@@ -86,6 +86,13 @@ def _depth_valid_mask(ch, far):
     return np.isfinite(ch) & (ch < far * 0.999) & (ch < 1e9)
 
 
+def _linear_to_srgb(x):
+    """Scene-linear -> sRGB (the IEC 61966-2-1 OETF, i.e. Blender's 'Standard')."""
+    import numpy as np
+    x = np.clip(x, 0.0, 1.0)
+    return np.where(x <= 0.0031308, x * 12.92, 1.055 * np.power(x, 1.0 / 2.4) - 0.055)
+
+
 def _global_depth_range(exr_paths, far):
     """Min/max of valid depth across a whole sequence — so per-frame normalization
     doesn't flicker as the object's depth range changes frame to frame."""
@@ -133,8 +140,17 @@ def _exr_to_png(exr_path, png_path, mode, far=1e9, depth_range=None):
         rgb = np.stack([depth, depth, depth], axis=-1)
     elif mode == "normals":
         rgb = np.clip(a[..., :3] * 0.5 + 0.5, 0.0, 1.0)
-    else:  # passthrough colour (openpose rig render)
-        rgb = np.clip(a[..., :3], 0.0, 1.0)
+    else:  # colour (openpose rig render)
+        # The compositor's File Output writes OpenEXR scene-LINEAR — no view
+        # transform. Blender's own F12 PNG does get one ('Standard' == the sRGB
+        # OETF), which is why the rig looks right rendered from Blender and wrong
+        # coming through here. Writing those linear floats straight to 8-bit
+        # linearizes the rig's colours a second time: #ff5500 lands at #ff1700,
+        # #aaff00 at #67ff00, and every 0.6-attenuated limb at 81 instead of 153.
+        # draw_bodypose's 18-colour palette IS the pose encoder's whole vocabulary
+        # — a hue shift that large reads as a different keypoint, or as none — so
+        # the control map silently fails to latch instead of erroring. Encode.
+        rgb = _linear_to_srgb(a[..., :3])
 
     out8 = np.clip(rgb * 255.0 + 0.5, 0, 255).astype(np.uint8)
     h, w = out8.shape[:2]

@@ -468,14 +468,21 @@ class DepthPreprocessor(BasePreprocessor):
         image = self.load_image_bgr(image_path)
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
-        depth = self._infer_depth(image_rgb, str(image_path), process_res, process_res_method)
-        
+        native = self._infer_depth(image_rgb, str(image_path), process_res, process_res_method)
+
+        # True Z alongside the display map, for EXR export. Taken from the
+        # native output rather than the greyscale PNG: 256 quantisation steps
+        # of an already display-oriented map is not a depth channel anything
+        # can pull focus against.
+        z_map, z_is_metric = self._native_to_z(np.asarray(native, dtype=np.float32))
+
+        depth = native
         if normalize:
             depth = (depth - depth.min()) / (depth.max() - depth.min() + 1e-8)
-        
+
         if invert:
             depth = 1.0 - depth
-        
+
         # Optional guided edge refinement (off by default - degrades DA3 quality)
         if guided_filter:
             depth = self._guided_upsample(depth, image)
@@ -492,7 +499,25 @@ class DepthPreprocessor(BasePreprocessor):
         }
         final_output = self._make_unique_path(output_path, params, exact_output=exact_output)
         cv2.imwrite(str(final_output), output_image)
-        
+
+        # Skipped under exact_output: that means we're one frame of a video
+        # driven by the generic per-frame loop, which keeps its own clip-wide
+        # raw buffer — a .npy per frame would just litter the sequence dir.
+        if not exact_output:
+            raw_depth_path = final_output.parent / f"{final_output.stem}_raw.npy"
+            if z_map.shape[:2] != image.shape[:2]:
+                z_map = cv2.resize(
+                    z_map, (image.shape[1], image.shape[0]),
+                    interpolation=cv2.INTER_LANCZOS4,
+                )
+            try:
+                np.save(str(raw_depth_path), z_map.astype(np.float32))
+                self._write_depth_z_sidecar(raw_depth_path, z_is_metric)
+            except OSError as e:
+                # A missing raw buffer only costs EXR export its float depth,
+                # so don't fail the preprocess over it
+                print(f"[Depth] ⚠ Could not write raw depth buffer: {e}")
+
         return {
             "output_path": str(final_output),
             "method": "depth",
@@ -955,11 +980,22 @@ class DepthPreprocessor(BasePreprocessor):
                 # Each frame is read from disk, finished in place, and written
                 # back, so only one frame is resident at a time.
                 print(f"[Depth] Post-processing depth maps...")
+                depth_is_metric = False
                 for i, frame_path in enumerate(frame_paths):
                     output_frame_path = output_frames_dir / frame_path.name
 
-                    depth_map = np.array(mm[i], dtype=np.float32)
+                    native = np.array(mm[i], dtype=np.float32)
 
+                    # True Z for the .npy, before the display map overwrites it.
+                    # The buffer's only consumer is EXR export, which needs a Z
+                    # channel: near = small, far = large, and no invert toggle
+                    # baked in. The greyscale frames below keep the display
+                    # convention (near = white) that people and ControlNet read.
+                    z_map, depth_is_metric = self._native_to_z(
+                        native, lo=global_min, hi=global_max
+                    )
+
+                    depth_map = native
                     if normalize:
                         np.subtract(depth_map, global_min, out=depth_map)
                         np.multiply(depth_map, inv_range, out=depth_map)
@@ -967,9 +1003,8 @@ class DepthPreprocessor(BasePreprocessor):
                     if invert:
                         np.subtract(1.0, depth_map, out=depth_map)
 
-                    # Write the finished values back so the .npy matches the
-                    # frames (normalized + smoothed + inverted, as before)
-                    mm[i] = depth_map
+                    mm[i] = z_map
+                    del z_map
 
                     # Resize to original dimensions if needed
                     if depth_map.shape[:2] != (original_size[1], original_size[0]):
@@ -997,7 +1032,9 @@ class DepthPreprocessor(BasePreprocessor):
                             )
 
                 mm.flush()
-                print(f"[Depth] Saved raw depth data: {raw_depth_path}")
+                self._write_depth_z_sidecar(raw_depth_path, depth_is_metric)
+                print(f"[Depth] Saved raw depth data: {raw_depth_path} "
+                      f"(true Z, {'metres' if depth_is_metric else 'relative'})")
 
             except Exception:
                 # Don't leave a half-written buffer behind for EXR export to find
@@ -1005,6 +1042,7 @@ class DepthPreprocessor(BasePreprocessor):
                     del mm
                     mm = None
                 raw_depth_path.unlink(missing_ok=True)
+                raw_depth_path.with_suffix(".json").unlink(missing_ok=True)
                 raise
             finally:
                 if mm is not None:
@@ -1136,6 +1174,74 @@ class DepthPreprocessor(BasePreprocessor):
         depth = (depth - depth.min()) / (depth.max() - depth.min() + 1e-8)
         return depth.astype(np.float32)
 
+    def _native_to_z(
+        self,
+        raw: np.ndarray,
+        lo: Optional[float] = None,
+        hi: Optional[float] = None,
+    ) -> Tuple[np.ndarray, bool]:
+        """
+        Raw model output -> true Z (near = small, far = large).
+
+        Shared by get_depth_z() (per-frame, robust percentiles) and the video
+        path (clip-global range, so a pan or a passing foreground object cannot
+        rescale Z from frame to frame and pump the whole background).
+
+        Args:
+            raw:    native inference output, whatever orientation the model uses
+            lo, hi: range to rescale against. None = robust per-frame
+                    percentiles, which is what get_depth_z has always done.
+
+        Returns:
+            (z, is_metric) — see get_depth_z for what each case means.
+            Never aliases `raw`: the video path derives the display map from
+            the same buffer and finishes it in place, so handing back the
+            input would let one overwrite the other.
+        """
+        if self.model_type in METRIC_MODELS and raw.min() > 0:
+            return raw.astype(np.float32, copy=True), True
+
+        if self.model_type in DISPARITY_MODELS:
+            # Scale-and-shift-invariant disparity: the shift is genuinely
+            # unrecoverable, so reciprocating across an assumed near/far ratio
+            # is the best available reconstruction.
+            d_lo = raw.min() if lo is None else lo
+            d_hi = raw.max() if hi is None else hi
+            disp = (raw - d_lo) / (d_hi - d_lo + 1e-8)
+            raw = 1.0 / (disp * (1.0 - DISPARITY_FAR_RATIO) + DISPARITY_FAR_RATIO)
+            if lo is None or hi is None:
+                lo = hi = None
+            else:
+                # The reciprocal of a [0,1] disparity has a known range, so use
+                # it rather than re-measuring: one scale for the whole clip.
+                lo, hi = 1.0, 1.0 / DISPARITY_FAR_RATIO
+
+        if lo is None or hi is None:
+            lo, hi = np.percentile(raw, 0.5), np.percentile(raw, 99.5)
+
+        z = (raw - lo) / (hi - lo + 1e-8)
+        return np.clip(z, -0.1, 1.1).astype(np.float32), False
+
+    def _write_depth_z_sidecar(self, raw_depth_path: Path, is_metric: bool) -> None:
+        """
+        Mark a raw depth .npy as holding true Z rather than a display map.
+
+        The buffer used to be written in display orientation (near = white,
+        with the user's invert toggle already baked in), which is the opposite
+        of what an EXR Z channel means. Passes made before this existed have no
+        sidecar, so EXR export can tell the two apart instead of guessing and
+        silently flipping someone's geometry.
+        """
+        meta = {
+            "space": "z",
+            "is_metric": bool(is_metric),
+            "model": self.model_type.value,
+        }
+        try:
+            raw_depth_path.with_suffix(".json").write_text(json.dumps(meta, indent=2))
+        except OSError as e:
+            print(f"[Depth] ⚠ Could not write depth Z sidecar: {e}")
+
     def get_depth_z(self, image_path: Path) -> Tuple[np.ndarray, bool]:
         """
         Depth oriented as true Z — near = small, far = large.
@@ -1166,20 +1272,7 @@ class DepthPreprocessor(BasePreprocessor):
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
         raw = self._infer_depth(image_rgb, str(image_path)).astype(np.float32)
-
-        if self.model_type in METRIC_MODELS and raw.min() > 0:
-            return raw, True
-
-        if self.model_type in DISPARITY_MODELS:
-            # Scale-and-shift-invariant disparity: the shift is genuinely
-            # unrecoverable, so reciprocating across an assumed near/far ratio
-            # is the best available reconstruction.
-            disp = (raw - raw.min()) / (raw.max() - raw.min() + 1e-8)
-            raw = 1.0 / (disp * (1.0 - DISPARITY_FAR_RATIO) + DISPARITY_FAR_RATIO)
-
-        lo, hi = np.percentile(raw, 0.5), np.percentile(raw, 99.5)
-        z = (raw - lo) / (hi - lo + 1e-8)
-        return np.clip(z, -0.1, 1.1).astype(np.float32), False
+        return self._native_to_z(raw)
 
     # ========================================================================
     # Utilities
