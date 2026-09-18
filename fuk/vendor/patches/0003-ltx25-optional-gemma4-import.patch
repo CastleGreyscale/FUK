@@ -1,0 +1,43 @@
+diff --git a/diffsynth/models/ltx25_text_encoder.py b/diffsynth/models/ltx25_text_encoder.py
+index f0d05a0..422f180 100644
+--- a/diffsynth/models/ltx25_text_encoder.py
++++ b/diffsynth/models/ltx25_text_encoder.py
+@@ -3,7 +3,37 @@ from pathlib import Path
+ from typing import NamedTuple
+ 
+ import torch
+-from transformers import Gemma4UnifiedConfig, Gemma4UnifiedForConditionalGeneration, PreTrainedTokenizerFast
++from transformers import PreTrainedTokenizerFast
++
++# FUK patch: LTX-2.5's text encoder needs Gemma4Unified, which does not exist in
++# every transformers release (absent in 5.1.0). This module is imported
++# unconditionally by pipelines/ltx2_audio_video.py, so a missing symbol here
++# takes down the whole LTX-2 import chain — and with it FUK's backend, which
++# imports that pipeline eagerly at startup.
++#
++# Degrade instead of exploding: LTX-2 keeps working on the installed
++# transformers, and only an actual attempt to build an LTX-2.5 text encoder
++# fails, with a message that says what to install. Drop this patch once FUK
++# pins a transformers that ships Gemma4Unified.
++try:
++    from transformers import Gemma4UnifiedConfig, Gemma4UnifiedForConditionalGeneration
++except ImportError as _gemma4_import_error:
++    _GEMMA4_UNAVAILABLE = _gemma4_import_error
++
++    def _raise_gemma4_unavailable(*args, **kwargs):
++        raise ImportError(
++            "LTX-2.5 needs Gemma4Unified from transformers, which this "
++            f"transformers build does not provide ({_GEMMA4_UNAVAILABLE}). "
++            "Upgrade transformers to use LTX-2.5; LTX-2 is unaffected."
++        )
++
++    class Gemma4UnifiedConfig:
++        def __init__(self, *args, **kwargs):
++            _raise_gemma4_unavailable()
++
++    class Gemma4UnifiedForConditionalGeneration(torch.nn.Module):
++        def __init__(self, *args, **kwargs):
++            _raise_gemma4_unavailable()
+ 
+ from .ltx2_common import rms_norm
+ from .ltx2_dit import (

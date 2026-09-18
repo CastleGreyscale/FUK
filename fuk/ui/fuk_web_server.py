@@ -1898,9 +1898,12 @@ async def get_models():
 
     # Which pipeline families land in which dropdown. ltx2 and minimax_h3 both
     # generate video with a synchronized soundtrack, so they belong with the
-    # video models; threed has its own UI and is deliberately absent.
+    # video models; qwen_video_edit only *edits* video rather than generating
+    # it, but it is still a clip in and a clip out, so it belongs here too and
+    # not with the Qwen image models it shares a backbone with. threed has its
+    # own UI and is deliberately absent.
     IMAGE_PIPELINES = ("qwen", "flux2", "krea2")
-    VIDEO_PIPELINES = ("wan", "ltx2", "minimax_h3")
+    VIDEO_PIPELINES = ("wan", "ltx2", "minimax_h3", "qwen_video_edit")
 
     # models.json `pipeline` -> the defaults.json section holding that family's
     # sampling defaults and `constraints`. The names match for every family

@@ -624,15 +624,25 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
   //   Wan      input_image / vace_reference_image / vace_video / end_image
   //   LTX-2    input_images (first frame) / in_context_videos (IC-LoRA driver)
   //   MiniMax  keyframes (first+last) / references (Ref2VA subject)
+  //   Qwen-VE  edit_video (the clip being edited — the only truly mandatory one)
   const requiresControlVideo = modelSupports.includes('vace_video')
     || modelSupports.includes('in_context_videos')
     || modelSupports.includes('references')
+    || modelSupports.includes('edit_video')
     || formData.task?.includes('-FC');
   const isFunControl = modelSupports.includes('vace_video') || formData.task?.includes('-FC');
 
   // The video slot means something different per family, and only Wan's is
   // actually required, so it is labelled from the model rather than assumed.
-  const videoSlot = modelSupports.includes('in_context_videos')
+  const videoSlot = modelSupports.includes('edit_video')
+    ? {
+        label: 'Source Video',
+        required: true,
+        help: 'The clip to edit. This model cannot generate from scratch — the '
+            + 'prompt describes the change to make to this footage. Edited in '
+            + '45-frame chunks; the prompt applies to all of them.',
+      }
+    : modelSupports.includes('in_context_videos')
     ? {
         label: 'In-Context Video',
         required: false,

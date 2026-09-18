@@ -182,6 +182,12 @@ class DiffSynthBackend:
             _log("BACKEND", f"MiniMaxH3PipelineRunner not available: {e}", "warning")
 
         try:
+            from qwen_video_edit_pipeline import QwenVideoEditPipelineRunner
+            self.runners["qwen_video_edit"] = QwenVideoEditPipelineRunner(self)
+        except ImportError as e:
+            _log("BACKEND", f"QwenVideoEditPipelineRunner not available: {e}", "warning")
+
+        try:
             from krea2_pipeline import Krea2PipelineRunner
             self.runners["krea2"] = Krea2PipelineRunner(self)
         except ImportError as e:
@@ -291,6 +297,7 @@ class DiffSynthBackend:
         from diffsynth.pipelines.ltx2_audio_video import LTX2AudioVideoPipeline, ModelConfig as LTX2ModelConfig
         from diffsynth.pipelines.minimax_h3_audio_video import MiniMaxH3Pipeline, ModelConfig as MiniMaxH3ModelConfig
         from diffsynth.pipelines.krea2 import Krea2Pipeline, ModelConfig as Krea2ModelConfig
+        from diffsynth.pipelines.qwen_video_edit import QwenVideoEditPipeline
 
         # Store ModelConfig classes as instance attributes for use in other methods
         self.ModelConfig = ModelConfig
@@ -307,6 +314,9 @@ class DiffSynthBackend:
         PIPELINE_CLASSES["ltx2"] = LTX2AudioVideoPipeline
         PIPELINE_CLASSES["minimax_h3"] = MiniMaxH3Pipeline
         PIPELINE_CLASSES["krea2"] = Krea2Pipeline
+        # Shares Qwen-Image's ModelConfig — the video-edit pipeline re-exports
+        # nothing of its own, so no dedicated *ModelConfig attribute here.
+        PIPELINE_CLASSES["qwen_video_edit"] = QwenVideoEditPipeline
 
     # ------------------------------------------------------------------
     # Config helpers

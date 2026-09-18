@@ -9,7 +9,7 @@ they are the only record of our changes, so they must stay version-controlled.
 
 ## Active patches — DiffSynth-Studio
 
-Base commit: `102fe9980b9375ecb6436d360297a00327472535` (version 2.1.5, 2026-08-28).
+Base commit: `c458cb42ab1ee838bff85c6546e14bb01c3571e9` (version 2.1.7, 2026-09-14).
 
 ### `0001-wan-vace-seq-len-clamp.patch`
 
@@ -34,6 +34,30 @@ slice when the context is already long enough.
 
    This is the regression signal to watch when upgrading: render a Wan VACE job with a
    reference image and inspect curved surfaces for ringing.
+
+### `0003-ltx25-optional-gemma4-import.patch`
+
+`diffsynth/models/ltx25_text_encoder.py` — added at the 2.1.7 upgrade. LTX-2.5 arrived in
+`a98c6d4` and its text encoder does
+`from transformers import Gemma4UnifiedConfig, Gemma4UnifiedForConditionalGeneration`.
+Those symbols do not exist in transformers 5.1.0, which is what FUK has installed, and
+upstream leaves `transformers` unpinned so nothing flags the mismatch.
+
+The blast radius is much larger than LTX-2.5. `pipelines/ltx2_audio_video.py` imports this
+module unconditionally, and `diffsynth_backend._setup_diffsynth_env` imports *that*
+eagerly at startup — so the missing symbol took down the entire FUK backend, every model
+included, not just the one nobody had registered yet.
+
+`LTX25TextEncoder` subclasses `Gemma4UnifiedForConditionalGeneration` in its class body, so
+deferring the import into a function is not an option — the name has to resolve at module
+import. The patch instead catches the `ImportError` and substitutes stubs that raise a
+message naming the real cause if anything actually tries to construct them. LTX-2 is
+untouched and keeps working; only a genuine LTX-2.5 load fails.
+
+Drop this patch as soon as FUK pins a transformers that ships Gemma4Unified (5.1.0 does
+not; latest on PyPI at the time of writing is 5.17.0, unverified). Upgrading transformers
+under the Qwen, FLUX and Krea2 pipelines is its own piece of work and was deliberately not
+bundled into the DiffSynth upgrade.
 
 ## Dropped patches
 

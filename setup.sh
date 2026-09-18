@@ -121,7 +121,7 @@ echo "[4/7] Cloning vendor dependencies..."
 # upstream HEAD happened to be that day — that is how this tree ended up running
 # a DiffSynth seven months newer than the one its patches were written against.
 # Bump these deliberately, and re-run the regression matrix when you do.
-DIFFSYNTH_SHA=102fe9980b9375ecb6436d360297a00327472535   # 2.1.5, 2026-08-28
+DIFFSYNTH_SHA=c458cb42ab1ee838bff85c6546e14bb01c3571e9   # 2.1.7, 2026-09-14
 DEPTH_ANYTHING_3_SHA=2c21ea849ceec7b469a3e62ea0c0e270afc3281a
 SAM2_SHA=2b90b9f5ceec907a1c18123530e92e794ad901a4
 DSINE_SHA=ef0c2afa32b4dd19cb8ca4567c652802cd92591c
@@ -166,8 +166,10 @@ if clone_pinned DiffSynth-Studio https://github.com/modelscope/DiffSynth-Studio.
             echo "    ✓ $(basename "$patch")"
         else
             echo "    ✗ FAILED to apply $(basename "$patch")"
-            echo "      DiffSynth is unpatched. Expect VACE OOM at 720p and ring"
-            echo "      artifacts on reference-image renders. See fuk/vendor/patches/README.md"
+            echo "      DiffSynth is unpatched. Expect VACE OOM at 720p, ring artifacts"
+            echo "      on reference-image renders, and — if 0003 was the one that failed —"
+            echo "      a backend that will not start at all on transformers < Gemma4Unified."
+            echo "      See fuk/vendor/patches/README.md"
             exit 1
         fi
     done
@@ -782,6 +784,31 @@ cat > fuk/config/models.json.template << 'EOL'
     }
   },
 
+  "_qwen_video_edit_comment": "Qwen-Video-Edit is video-to-video: a source clip plus an instruction, no generation from scratch — the video slot is required and the image slots do nothing. Hybrid stack: QwenImageDiT backbone + Qwen-Image text encoder + the Wan 2.1 VAE, bridged by a QwenVideoEditAdapter, so both the text encoder and the VAE are already on disk if you run Qwen images or any Wan model. Upstream's example fetches the VAE as Wan-AI/Wan2.1-T2V-1.3B/Wan2.1_VAE.pth; this entry points at the converted safetensors FUK already holds for the Wan models instead, which the hash loader resolves to the same wan_video_vae and which saves a redundant download. The DiT is 40.9GB, so this is not a cheap addition despite reusing everything else. The repo holds three checkpoints, all the same size and only one of them wired here: 360P/step-30000 (registered — by far the most trained, and the only one upstream's example uses), 480P/global_local_81/step-6500, and 720P/global_local_45/step-3500. The global_local_NN in those paths is the chunk length that variant expects — 81 frames at 480P, 45 at 720P — so switching the component pattern to a higher-res checkpoint also means setting chunk_frames to match, and accepts a far less converged model in exchange for the resolution. The model works in fixed 45-frame chunks and takes one prompt per chunk; the runner replicates the tab's single prompt across every chunk so a long clip is edited end to end instead of upstream silently dropping everything past frame 45. LICENCE: the weights are a personal research checkpoint (a raw step-30000 file) published to ModelScope with NO declared licence at all — not permissive, not non-commercial, simply unstated. Do not put its output in paid work until the author states terms. See THIRD_PARTY_LICENSES.md.",
+
+  "qwen_video_edit": {
+    "model_id": "yunpeng1998/Qwen-Video-Edit",
+    "pipeline": "qwen_video_edit",
+    "category": "video",
+    "description": "Qwen-Video-Edit — prompt-driven video-to-video editing (360P; unlicensed research weights)",
+    "aliases": ["qwen-video-edit", "qve", "v2v"],
+    "supports": ["edit_video", "negative_prompt", "tiled"],
+    "parameter_map": {"control_input": "edit_video"},
+    "fps": 16,
+    "size_gb": 41,
+    "components": [
+      {"pattern": "360P/step-30000.safetensors"},
+      {"model_id": "Qwen/Qwen-Image", "pattern": "text_encoder/model*.safetensors"},
+      {"model_id": "DiffSynth-Studio/Wan-Series-Converted-Safetensors", "pattern": "Wan2.1_VAE.safetensors"}
+    ],
+    "tokenizer": {"model_id": "Qwen/Qwen-Image", "pattern": "tokenizer/"},
+    "processor": {"model_id": "Qwen/Qwen-Image-Edit", "pattern": "processor/"},
+    "pipeline_kwargs": {
+      "tiled": true
+    },
+    "enabled": true
+  },
+
   "_klein_comment": "Klein reuses Flux2ImagePipeline — no runner needed. It differs from FLUX.2-dev in its text encoder: klein carries a Qwen3 encoder (loaded as z_image_text_encoder) rather than dev's Mistral3, and flux2_image.py branches on that to pick AutoTokenizer over AutoProcessor. All three klein-4B components are already registered in DiffSynth 2.1.5, so this entry needs no vendor patch. FLUX.2-klein-9B is deliberately absent: it is gated on HuggingFace and ships under a non-Apache 'other' licence, so it needs a licence review before use on paid work. Its DiffSynth entries exist upstream if you add it.",
 
   "_threed_comment": "3D reconstruction models. Not DiffSynth pipelines — they load from their own vendored repos (see docs/3D_RECONSTRUCTION_SYSTEM.md). Entries stay flat like every other model so resolve_model_type/aliases keep working; the 'threed' pipeline value is what groups them.",
@@ -926,6 +953,18 @@ cat > fuk/config/defaults.json.template << 'EOL'
     "cfg_scale": 1.0,
     "flow_shift": 12.0,
     "audio_flow_shift": 3.0,
+    "negative_prompt": " "
+  },
+
+  "_qwen_video_edit_comment": "Qwen-Video-Edit defaults. There is deliberately no video_length here: length comes from the source clip, and an unset value means edit the whole thing. chunk_frames is the model's trained 45-frame window, not a user-facing duration — do not raise it to get longer clips. 640x384 is the authors' own demonstrated size (the registered checkpoint is trained at 360P). fps 16 matches the checkpoint's training rate, unlike every other video family here at 24. No shift knob: the scheduler derives its shift from the latent sequence length via dynamic_shift_len.",
+  "qwen_video_edit": {
+    "task": "qwen_video_edit",
+    "width": 640,
+    "height": 384,
+    "chunk_frames": 45,
+    "frame_rate": 16,
+    "steps": 40,
+    "cfg_scale": 4.0,
     "negative_prompt": " "
   },
 

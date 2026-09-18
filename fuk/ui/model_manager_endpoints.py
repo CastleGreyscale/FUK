@@ -125,6 +125,7 @@ _CATEGORY_BY_PIPELINE = {
     "wan": "video",
     "ltx2": "video",
     "minimax_h3": "video",
+    "qwen_video_edit": "video",
     "threed": "threed",
 }
 
