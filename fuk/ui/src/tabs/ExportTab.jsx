@@ -29,9 +29,26 @@ const DEFAULT_SETTINGS = {
   exportPath: '',
   bracketedLatent: false,
   noiseBracketedLatent: false,
+  // Bracket tuning. Empty string = "let the backend default apply", so these
+  // stay in sync with BRACKET_SCALES / BRACKET_SIGMAS in core/exr_exporter.py
+  // instead of restating them here.
+  bracketScales: '',
+  bracketSigmas: '',
+  bracketSeed: '',
+  bracketFusion: 'mertens',
   // Video sequence settings
   sequenceStartFrame: 1,
   sequencePattern: '{name}.{frame:04d}',
+};
+
+// Parse a comma/space separated bracket list into numbers.
+// Returns null for blank or unparseable input so the backend applies its own
+// default rather than receiving a half-parsed list.
+const parseFloatList = (text) => {
+  if (!text || !text.trim()) return null;
+  const parts = text.split(/[,\s]+/).filter(Boolean).map(Number);
+  if (!parts.length || parts.some((n) => !Number.isFinite(n))) return null;
+  return parts;
 };
 
 // Helper to check if a path is a video file
@@ -239,6 +256,18 @@ const {
     try {
       const taskType = isVideoMode ? 'export_exr_sequence' : 'export_exr';
 
+      // Bracket options, shared by both payloads. The sequence payload used to
+      // omit these entirely, so ticking a bracket box in video mode silently
+      // exported a plain single decode.
+      const bracketOptions = {
+        bracketed_latent: settings.bracketedLatent,
+        noise_bracketed_latent: settings.noiseBracketedLatent,
+        bracket_fusion: settings.bracketFusion || null,
+        bracket_scales: parseFloatList(settings.bracketScales),
+        noise_bracket_sigmas: parseFloatList(settings.bracketSigmas),
+        bracket_seed: settings.bracketSeed === '' ? null : parseInt(settings.bracketSeed, 10),
+      };
+
       let payload;
 
       if (isVideoMode) {
@@ -271,6 +300,7 @@ const {
           export_path: settings.exportPath || null,
           start_frame: settings.sequenceStartFrame,
           filename_pattern: `${settings.exportFilename}.{frame:04d}.exr`,
+          ...bracketOptions,
         };
       } else {
         // ExportEXRRequest accepts layers directly
@@ -289,8 +319,7 @@ const {
           filename: settings.exportFilename,
           export_path: settings.exportPath || null,
           use_latent: true,
-          bracketed_latent: settings.bracketedLatent,
-          noise_bracketed_latent: settings.noiseBracketedLatent,
+          ...bracketOptions,
         };
       }
 
@@ -673,6 +702,72 @@ const {
                     </p>
                   </div>
                 </label>
+
+              {(settings.bracketedLatent || settings.noiseBracketedLatent) && (
+                <>
+                  <div className="compact-form-row">
+                    <label className="fuk-label">Fusion</label>
+                    <select
+                      className="fuk-select fuk-select--compact"
+                      value={settings.bracketFusion}
+                      onChange={(e) => updateSettings({ bracketFusion: e.target.value })}
+                      disabled={exporting}
+                    >
+                      <option value="mertens">Mertens (bounded 0–1)</option>
+                      <option value="debevec">Debevec (true HDR, &gt;1)</option>
+                      <option value="average">Average (linear mean)</option>
+                    </select>
+                  </div>
+
+                  {settings.bracketedLatent && (
+                    <div className="compact-form-row">
+                      <label className="fuk-label">Scales</label>
+                      <input
+                        type="text"
+                        className="fuk-input fuk-input--compact"
+                        value={settings.bracketScales}
+                        onChange={(e) => updateSettings({ bracketScales: e.target.value })}
+                        placeholder="0.85, 1.0, 1.15"
+                        disabled={exporting}
+                      />
+                    </div>
+                  )}
+
+                  {settings.noiseBracketedLatent && (
+                    <>
+                      <div className="compact-form-row">
+                        <label className="fuk-label">Sigmas</label>
+                        <input
+                          type="text"
+                          className="fuk-input fuk-input--compact"
+                          value={settings.bracketSigmas}
+                          onChange={(e) => updateSettings({ bracketSigmas: e.target.value })}
+                          placeholder="0.0, 0.025, 0.05"
+                          disabled={exporting}
+                        />
+                      </div>
+                      <div className="compact-form-row">
+                        <label className="fuk-label">Seed</label>
+                        <input
+                          type="number"
+                          className="fuk-input fuk-input--compact"
+                          value={settings.bracketSeed}
+                          onChange={(e) => updateSettings({ bracketSeed: e.target.value })}
+                          placeholder="42"
+                          disabled={exporting}
+                        />
+                      </div>
+                    </>
+                  )}
+
+                  <p className="fuk-help-text fuk-help-text--sm">
+                    Blank = backend default. Mertens fuses for looks and cannot
+                    exceed 1.0 whatever the spread; only Debevec writes true
+                    over-range, and it needs a dark bracket to recover from —
+                    0.85× caps recovery at about a quarter stop, try 0.25×.
+                  </p>
+                </>
+              )}
             </div>
           </div>
 

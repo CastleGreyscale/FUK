@@ -39,6 +39,23 @@ RELATIVE_Z_NEAR_M = 1.0
 RELATIVE_Z_FAR_M = 100.0
 
 
+# Bracket decode defaults. Both decode paths (stills via export_from_latent,
+# sequences via _decode_beauty_latents) read these, so a change here moves both
+# together — they used to carry separate copies of the same literals.
+#
+# A word on the spread: bracketing can only recover range that at least one
+# bracket captured below clipping, so the widest usable stop is set by the
+# darkest scale. At 0.85× that ceiling is 1/0.85 ≈ 1.18, about a quarter stop —
+# which is why the default brackets look almost identical to a plain decode.
+# Meaningful highlight recovery needs something like 0.25× on the low end.
+# Left narrow as the default because wide scales also distort hue and contrast
+# (latent scaling is not a real exposure change — see _fuse_brackets).
+BRACKET_SCALES = (0.85, 1.0, 1.15)
+BRACKET_SIGMAS = (0.0, 0.025, 0.05)
+BRACKET_SEED = 42
+BRACKET_FUSION = "mertens"
+
+
 class EXRCompression(str, Enum):
     """Available EXR compression methods"""
     NONE = "NONE"
@@ -446,21 +463,23 @@ class EXRExporter:
         scales: Optional[List[float]] = None,
         noise_bracketed: bool = False,
         sigmas: Optional[List[float]] = None,
-        seed: int = 42,
+        seed: int = BRACKET_SEED,
+        fusion: str = BRACKET_FUSION,
     ) -> List[np.ndarray]:
         """
-        Decode beauty pass latents to float32 linear numpy arrays.
+        Decode beauty pass latents to float32 scene-linear numpy arrays.
 
         When bracketed or noise_bracketed is True, decodes the latent multiple
-        times with scale or noise perturbations and fuses each frame with Mertens
-        before linearising.  The VAE is loaded once and reused for all passes.
+        times with scale or noise perturbations and fuses each frame via
+        _fuse_brackets (see there for what `fusion` trades off).  The VAE is
+        loaded once and reused for all passes.
         """
         import torch
 
         if scales is None:
-            scales = [0.85, 1.0, 1.15]
+            scales = list(BRACKET_SCALES)
         if sigmas is None:
-            sigmas = [0.0, 0.025, 0.05]
+            sigmas = list(BRACKET_SIGMAS)
 
         print(f"  📄 Decoding beauty latents: {latent_path.name}")
 
@@ -522,24 +541,28 @@ class EXRExporter:
             return result
 
         def _tensor_to_frames(decoded):
-            """Convert decoded tensor → list of HWC float32 frames in sRGB [0, 1].
+            """Convert decoded tensor → list of HWC float32 frames, sRGB-encoded.
 
             Most DiffSynth VAEs decode to [-1, 1], but MiniMax-H3's reverts an
             ImageNet normalisation and hands back [0, 1]. Remap from whichever
-            this family uses before clipping, or half the tonal range collapses
-            to black and contrast doubles.
+            this family uses, or half the tonal range collapses to black and
+            contrast doubles.
+
+            Nominally [0, 1] but deliberately NOT clamped to it: the VAE puts
+            real signal outside the range and clipping it here threw away the
+            only over-range detail the brackets had to work with.
             """
             pixels = (decoded.cpu().numpy() - v_min) / (v_max - v_min)
             frames = []
             if is_video and pixels.ndim == 5:
                 for fi in range(pixels.shape[2]):
                     f = np.transpose(pixels[0, :, fi, :, :], (1, 2, 0))
-                    frames.append(np.clip(f[:, :, :3], 0.0, 1.0).astype(np.float32))
+                    frames.append(f[:, :, :3].astype(np.float32))
             elif pixels.ndim == 4:
                 f = pixels[0]
                 if f.shape[0] in (1, 3, 4):
                     f = np.transpose(f, (1, 2, 0))
-                frames.append(np.clip(f[:, :, :3], 0.0, 1.0).astype(np.float32))
+                frames.append(f[:, :, :3].astype(np.float32))
             else:
                 raise ValueError(f"Unexpected decoded shape: {pixels.shape}")
             return frames
@@ -568,27 +591,28 @@ class EXRExporter:
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-        # Fuse brackets and linearise
+        # Fuse brackets and linearise. Noise brackets share one exposure, so
+        # only the scale passes can hand Debevec anything to solve against.
         num_frames = len(passes[0])
+        exposures = list(scales) if bracketed and not noise_bracketed else None
         if len(passes) > 1:
-            import cv2
-            merge_mertens = cv2.createMergeMertens()
-            decoded_frames = []
-            print(f"  [BRACKET] Mertens fusing {num_frames} frames × {len(passes)} brackets...")
-            for fi in range(num_frames):
-                imgs_u8 = [(p[fi] * 255).astype(np.uint8) for p in passes]
-                fused = np.clip(merge_mertens.process(imgs_u8), 0.0, 1.0).astype(np.float32)
-                decoded_frames.append(self._srgb_to_linear(fused))
-                if progress_callback and (fi + 1) % 10 == 0:
-                    progress_callback(fi + 1, num_frames)
-        else:
-            decoded_frames = []
-            for fi, frame in enumerate(passes[0]):
-                decoded_frames.append(self._srgb_to_linear(frame))
-                if progress_callback and (fi + 1) % 10 == 0:
-                    progress_callback(fi + 1, num_frames)
+            print(f"  [BRACKET] fusing {num_frames} frames × {len(passes)} "
+                  f"brackets ({fusion})...")
+        decoded_frames = []
+        for fi in range(num_frames):
+            # Quiet per-frame: one range line per frame would bury the log.
+            decoded_frames.append(self._fuse_brackets(
+                [p[fi] for p in passes], mode=fusion,
+                exposures=exposures, quiet=True,
+            ))
+            if progress_callback and (fi + 1) % 10 == 0:
+                progress_callback(fi + 1, num_frames)
 
-        print(f"  ✅ {len(decoded_frames)} beauty frames decoded ({decode_mode})")
+        lo = min(float(f.min()) for f in decoded_frames)
+        hi = max(float(f.max()) for f in decoded_frames)
+        print(f"  ✅ {len(decoded_frames)} beauty frames decoded ({decode_mode}"
+              f"{'/' + fusion if len(passes) > 1 else ''}) — "
+              f"linear range [{lo:.4f}, {hi:.4f}]")
         return decoded_frames
 
     
@@ -608,7 +632,8 @@ class EXRExporter:
         scales: Optional[List[float]] = None,
         noise_bracketed: bool = False,
         sigmas: Optional[List[float]] = None,
-        seed: int = 42,
+        seed: int = BRACKET_SEED,
+        fusion: str = BRACKET_FUSION,
     ) -> Dict[str, Any]:
         """
         Export video sequence to multilayer EXR (LATENT-ONLY VERSION)
@@ -667,8 +692,9 @@ class EXRExporter:
             noise_bracketed=noise_bracketed,
             sigmas=sigmas,
             seed=seed,
+            fusion=fusion,
         )
-        
+
         total_frames = len(beauty_decoded_frames)
         print(f"\n  ✅ Beauty: {total_frames} frames from latent (lossless)")
         
@@ -1500,7 +1526,8 @@ class EXRExporter:
         scales: Optional[List[float]] = None,
         noise_bracketed: bool = False,
         sigmas: Optional[List[float]] = None,
-        seed: int = 42,
+        seed: int = BRACKET_SEED,
+        fusion: str = BRACKET_FUSION,
     ) -> Dict[str, Any]:
         """
         Decode a .latent.pt file directly to an EXR using the DiffSynth VAE.
@@ -1509,8 +1536,11 @@ class EXRExporter:
 
         Decode modes:
           - default: single clean decode
-          - bracketed=True: scale bracketing (0.7×/1.0×/1.3×) + Mertens fusion
-          - noise_bracketed=True: noise perturbation (σ=0/0.05/0.10) + Mertens fusion
+          - bracketed=True: scale bracketing (BRACKET_SCALES) + fusion
+          - noise_bracketed=True: noise perturbation (BRACKET_SIGMAS) + fusion
+
+        `fusion` selects how multiple brackets are combined — see
+        _fuse_brackets. Only "debevec" can write values above 1.0.
         """
         import torch
 
@@ -1518,9 +1548,9 @@ class EXRExporter:
             raise RuntimeError("OpenEXR not installed")
 
         if scales is None:
-            scales = [0.85, 1.0, 1.15]
+            scales = list(BRACKET_SCALES)
         if sigmas is None:
-            sigmas = [0.0, 0.025, 0.05]
+            sigmas = list(BRACKET_SIGMAS)
 
         latent_path = Path(latent_path)
         output_path = Path(output_path)
@@ -1631,22 +1661,14 @@ class EXRExporter:
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-        # Clip each bracket to [0, 1] (Mertens expects perceptual-space [0,1])
-        brackets = [np.clip(b, 0.0, 1.0) for b in brackets]
-
-        if len(brackets) > 1:
-            import cv2
-            # Mertens expects uint8 — float32 [0,1] inputs get divided by 255 internally
-            imgs_u8 = [(b * 255).astype(np.uint8) for b in brackets]
-            fused = cv2.createMergeMertens().process(imgs_u8)
-            fused = np.clip(fused, 0.0, 1.0).astype(np.float32)
-            print(f"  [BRACKET] Mertens fused range [{fused.min():.4f}, {fused.max():.4f}]")
-        else:
-            fused = brackets[0]
-
-        # sRGB → scene-linear for EXR
-        arr = self._srgb_to_linear(fused)
-        print(f"  [BRACKET] Post-linearise range [{arr.min():.4f}, {arr.max():.4f}] → writing EXR")
+        # Fuse and linearise. Brackets stay unclamped up to this point — each
+        # mode clips only where its own algorithm requires it (Mertens and
+        # Debevec both read 8-bit code values), and a single decode is never
+        # clipped at all, so over-range VAE output reaches the EXR intact.
+        exposures = list(scales) if bracketed and not noise_bracketed else None
+        arr = self._fuse_brackets(brackets, mode=fusion, exposures=exposures)
+        print(f"  [BRACKET] Post-linearise range "
+              f"[{arr.min():.4f}, {arr.max():.4f}] → writing EXR")
         height, width = arr.shape[:2]
 
         pixel_type = (
@@ -1680,6 +1702,8 @@ class EXRExporter:
             "layers_included": ["beauty"],
             "bracketed": bracketed,
             "noise_bracketed": noise_bracketed,
+            "fusion": fusion if (bracketed or noise_bracketed) else None,
+            "linear_range": [float(arr.min()), float(arr.max())],
         }
 
     def export_single_layers(
@@ -1738,18 +1762,140 @@ class EXRExporter:
     def _to_bytes(self, arr: np.ndarray, bit_depth: int) -> bytes:
         """Convert numpy array to bytes for EXR"""
         if bit_depth == 16:
-            return arr.astype(np.float16).tobytes()
-        else:
-            return arr.astype(np.float32).tobytes()
-    
+            # Half tops out at 65504 and underflows below ~6e-8. Scene-linear
+            # beauty sits far inside that, but an inf here would silently
+            # poison a comp, so saturate rather than emit one.
+            return np.nan_to_num(
+                arr, nan=0.0, posinf=65504.0, neginf=-65504.0
+            ).astype(np.float16).tobytes()
+        return arr.astype(np.float32).tobytes()
+
     @staticmethod
     def _srgb_to_linear(img: np.ndarray) -> np.ndarray:
-        """Convert sRGB to linear color space"""
-        return np.where(
-            img <= 0.04045,
-            img / 12.92,
-            np.power((img + 0.055) / 1.055, 2.4)
-        )
+        """Convert sRGB to linear, preserving out-of-range values.
+
+        Now that nothing upstream clamps the decode, this sees values below 0
+        and above 1. np.where evaluates both branches, so feeding a negative
+        straight into np.power((x + 0.055) / 1.055, 2.4) raised a NaN in the
+        discarded slot on every call. Transform the magnitude and re-apply the
+        sign instead: the curve is odd-extended below 0 and extrapolates
+        cleanly above 1, so over-range highlights survive to the EXR.
+        """
+        mag = np.abs(img)
+        lin = np.where(mag <= 0.04045, mag / 12.92,
+                       np.power((mag + 0.055) / 1.055, 2.4))
+        return np.sign(img) * lin
+
+    # ------------------------------------------------------------------
+    # Bracket fusion
+    # ------------------------------------------------------------------
+
+    _FUSION_MODES = ("mertens", "debevec", "average")
+
+    def _srgb_response_curve(self) -> np.ndarray:
+        """The response curve Debevec should invert: our own sRGB encoding.
+
+        Debevec recovers radiance by inverting a camera response function.
+        There is no unknown camera in this pipeline — the curve is exactly the
+        sRGB transfer the decode path applied — so hand it over rather than
+        letting cv2 estimate one from three frames, which it does poorly and
+        inconsistently from export to export.
+        """
+        codes = np.arange(256, dtype=np.float32) / 255.0
+        lin = self._srgb_to_linear(codes).astype(np.float32)
+        lin[0] = 1e-6   # cv2 takes log(response); exact zero is rejected
+        return lin.reshape(256, 1, 1).repeat(3, axis=2)
+
+    def _fuse_brackets(
+        self,
+        passes: List[np.ndarray],
+        mode: str = BRACKET_FUSION,
+        exposures: Optional[List[float]] = None,
+        quiet: bool = False,
+    ) -> np.ndarray:
+        """Combine bracket decodes into one scene-linear frame.
+
+        `passes` are display-referred (sRGB-encoded, nominally [0,1] but no
+        longer clamped to it). The return is always scene-linear float32.
+
+        The three modes differ in one respect that matters more than any
+        other — whether the result can exceed 1.0:
+
+        mertens   Exposure *fusion*. Picks the best-exposed pixels by local
+                  contrast and saturation. Produces a good-looking image and
+                  never an HDR one: its output is bounded by its inputs, so it
+                  cannot represent a highlight brighter than white. cv2's
+                  implementation also divides float input by 255 internally,
+                  so the 8-bit round trip below is required, not sloppiness.
+        debevec   True radiance reconstruction against known exposures. The
+                  only mode that yields values above 1.0. Needs `exposures`,
+                  and needs them to mean something — see the caveat below.
+        average   Mean in linear space, each pass divided back out by its own
+                  exposure first so the brackets land on a common scale rather
+                  than simply brightening the result. No cv2 heuristics and no
+                  8-bit round trip, so it is the only mode that carries
+                  over-range input straight through. The right choice for
+                  *noise* brackets, where the passes share one exposure and
+                  the mean is a straight denoiser.
+
+        Caveat for debevec: scaling a latent is not an exposure change. The VAE
+        is non-linear, so a 1.15× latent is not 1.15× the light — it is a
+        different image with more contrast and shifted hue. Passing the scales
+        as exposure times is an approximation, and it degrades as the spread
+        widens. Treat debevec output as plausible extended range, not as
+        measured radiance.
+        """
+        if mode not in self._FUSION_MODES:
+            print(f"  ⚠ Unknown fusion mode '{mode}', using {BRACKET_FUSION}")
+            mode = BRACKET_FUSION
+
+        if len(passes) == 1:
+            return self._srgb_to_linear(passes[0]).astype(np.float32)
+
+        # Degenerate exposures (noise brackets are all the same stop) carry no
+        # radiometric information for Debevec to solve against.
+        if mode == "debevec" and (exposures is None or len(set(exposures)) < 2):
+            if not quiet:
+                print("  ⚠ debevec needs distinct exposures per bracket "
+                      "(noise brackets share one) — using average instead")
+            mode = "average"
+
+        if mode == "average":
+            # Undo each bracket's own gain before averaging, or a spread whose
+            # scales do not average to 1.0 just shifts brightness. Divide in
+            # the encoded domain, not after linearising: gamma does not commute
+            # with the gain, and normalising post-transfer drifts badly as the
+            # spread widens (~25% high at 0.25×, negligible at 0.85×).
+            if exposures is not None and len(exposures) == len(passes):
+                norm = [p / x for p, x in zip(passes, exposures) if x]
+            else:
+                norm = passes
+            fused = np.mean([self._srgb_to_linear(p) for p in norm],
+                            axis=0).astype(np.float32)
+        elif mode == "debevec":
+            import cv2
+            # Debevec reads 8-bit code values; anything outside [0,1] was never
+            # representable in a bracket and is what the other passes are for.
+            imgs = [(np.clip(p, 0.0, 1.0) * 255).astype(np.uint8) for p in passes]
+            fused = cv2.createMergeDebevec().process(
+                imgs,
+                times=np.asarray(exposures, dtype=np.float32),
+                response=self._srgb_response_curve(),
+            ).astype(np.float32)
+            # Already scene-linear — the response curve did the decoding, so
+            # do NOT run _srgb_to_linear over this the way the others need.
+        else:
+            import cv2
+            imgs = [(np.clip(p, 0.0, 1.0) * 255).astype(np.uint8) for p in passes]
+            # Mertens' own output strays slightly outside [0,1]; let it, the
+            # sign-preserving transfer below handles both tails.
+            fused = self._srgb_to_linear(
+                cv2.createMergeMertens().process(imgs)).astype(np.float32)
+
+        if not quiet:
+            print(f"  [BRACKET] fused ({mode}) → linear range "
+                  f"[{fused.min():.4f}, {fused.max():.4f}]")
+        return fused
     
     @staticmethod
     def _linear_to_srgb(img: np.ndarray) -> np.ndarray:

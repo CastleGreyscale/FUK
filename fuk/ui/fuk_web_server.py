@@ -3415,10 +3415,15 @@ class ExportEXRRequest(BaseModel):
     
     # True latent export (bypasses MP4/PNG lossy compression)
     use_latent: bool = False  # Auto-use latent.safetensors if available
-    bracketed_latent: bool = False  # Mertens fusion of 0.7×/1.0×/1.3× latent decodes
-    bracket_scales: Optional[List[float]] = None  # Custom scales (default [0.7, 1.0, 1.3])
-    noise_bracketed_latent: bool = False  # Mertens fusion of noise-perturbed decodes
-    noise_bracket_sigmas: Optional[List[float]] = None  # Custom sigmas (default [0.0, 0.05, 0.10])
+    # Bracketed decode. Defaults for the numeric fields live in exr_exporter
+    # (BRACKET_SCALES / BRACKET_SIGMAS / BRACKET_SEED / BRACKET_FUSION) — None
+    # here means "use those", so the two do not drift apart again.
+    bracketed_latent: bool = False       # fuse scale-perturbed latent decodes
+    bracket_scales: Optional[List[float]] = None
+    noise_bracketed_latent: bool = False  # fuse noise-perturbed latent decodes
+    noise_bracket_sigmas: Optional[List[float]] = None
+    bracket_fusion: Optional[str] = None  # mertens | debevec | average
+    bracket_seed: Optional[int] = None    # noise-bracket RNG seed
 
     # Output naming and location
     filename: Optional[str] = None  # Custom filename (without extension)
@@ -3446,6 +3451,8 @@ class EXRSequenceExportRequest(BaseModel):
     bracket_scales: Optional[List[float]] = None
     noise_bracketed_latent: bool = False
     noise_bracket_sigmas: Optional[List[float]] = None
+    bracket_fusion: Optional[str] = None  # mertens | debevec | average
+    bracket_seed: Optional[int] = None
 
 
 @app.post("/api/export/exr")
@@ -3524,6 +3531,19 @@ async def export_to_exr(request: ExportEXRRequest):
         
         exporter = EXRExporter()
         results = {"success": True, "outputs": {}}
+
+        # Only forward the bracket knobs the caller actually set — omitting one
+        # lets the exporter's own BRACKET_* default apply, so the defaults are
+        # defined in exactly one place. (`is not None`, not truthiness: seed 0
+        # and an empty scale list are both meaningful answers.)
+        bracket_kwargs = {
+            k: v for k, v in (
+                ("scales", request.bracket_scales),
+                ("sigmas", request.noise_bracket_sigmas),
+                ("fusion", request.bracket_fusion),
+                ("seed", request.bracket_seed),
+            ) if v is not None
+        }
         
         # Determine filename
         base_filename = request.filename or "export"
@@ -3540,7 +3560,7 @@ async def export_to_exr(request: ExportEXRRequest):
             if latent_path and 'beauty' in resolved_layers and len(resolved_layers) == 1:
                 # TRUE LATENT PATH - bypasses PNG entirely
                 decode_mode = "noise-bracketed" if request.noise_bracketed_latent else ("bracketed" if request.bracketed_latent else "standard")
-                log.info("Export", f"TRUE LATENT path | latent={latent_path.name} | decode={decode_mode}")
+                log.info("Export", f"TRUE LATENT path | latent={latent_path.name} | decode={decode_mode} | brackets={bracket_kwargs or 'defaults'}")
                 try:
                     result = exporter.export_from_latent(
                         latent_path=latent_path,
@@ -3553,9 +3573,8 @@ async def export_to_exr(request: ExportEXRRequest):
                         bit_depth=request.bit_depth,
                         compression=request.compression,
                         bracketed=request.bracketed_latent,
-                        scales=request.bracket_scales,
                         noise_bracketed=request.noise_bracketed_latent,
-                        sigmas=request.noise_bracket_sigmas,
+                        **bracket_kwargs,
                     )
                     result["is_true_latent"] = True
                     log.success("Export", f"TRUE LATENT EXR: {output_path}")
@@ -3748,7 +3767,21 @@ async def export_exr_sequence(request: EXRSequenceExportRequest):
         
         # Export using LATENT-ONLY API (working version)
         exporter = EXRExporter()
-        
+
+        # See the matching block in export_to_exr — unset knobs fall through to
+        # the exporter's BRACKET_* defaults rather than being restated here.
+        bracket_kwargs = {
+            k: v for k, v in (
+                ("scales", request.bracket_scales),
+                ("sigmas", request.noise_bracket_sigmas),
+                ("fusion", request.bracket_fusion),
+                ("seed", request.bracket_seed),
+            ) if v is not None
+        }
+        if request.bracketed_latent or request.noise_bracketed_latent:
+            mode = "noise-bracketed" if request.noise_bracketed_latent else "bracketed"
+            log.info("SeqExport", f"decode={mode} | brackets={bracket_kwargs or 'defaults'}")
+
         result = exporter.export_video_sequence(
             beauty_latent=beauty_latent,
             aov_layers=resolved_aovs,
@@ -3760,9 +3793,8 @@ async def export_exr_sequence(request: EXRSequenceExportRequest):
             start_frame=request.start_frame,
             model_type=request.model_type,
             bracketed=request.bracketed_latent,
-            scales=request.bracket_scales,
             noise_bracketed=request.noise_bracketed_latent,
-            sigmas=request.noise_bracket_sigmas,
+            **bracket_kwargs,
         )
         
         log.success("SeqExport", f"Exported {result['frame_count']} frames (LATENT-ONLY)")
