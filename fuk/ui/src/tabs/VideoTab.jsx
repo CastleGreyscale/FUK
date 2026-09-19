@@ -140,6 +140,12 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
     const fam = (section && section !== 'video') ? (config?.defaults?.[section] || {}) : {};
     const c = model.constraints || {};
     const out = {};
+    // Size is deliberately NOT taken from the family block. Output dimensions
+    // are inherited from the conditioning media — the start image, or the
+    // source video when a model has no image slot — snapped to that model's
+    // own latent grid, the same rule for every video family. Until that media
+    // is loaded width/height stay null, which is why Generate is gated on a
+    // required video slot the same way it is on a required start image.
     if (fam.video_length != null) out.video_length = fam.video_length;
     if (fam.steps != null) {
       out.steps = fam.steps;
@@ -359,7 +365,23 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
           ? snapFrames(Math.min(base, formData.trim_frames), constraints)
           : base;
         setFrameInput(String(frames));
-        setFormData(prev => ({ ...prev, video_length: frames }));
+        setFormData(prev => {
+          const next = { ...prev, video_length: frames };
+          // Dimensions inherit from the source clip the same way they inherit
+          // from a start image — snapped up to this model's latent grid, then
+          // scaled. A start image stays the authority when the model has one
+          // (Wan i2v, VACE with a reference), so this only takes over for the
+          // models whose conditioning *is* the video, like Qwen-Video-Edit.
+          if (!prev.image_path && info.width && info.height) {
+            const sw = snapDimension(info.width, spatialMultiple);
+            const sh = snapDimension(info.height, spatialMultiple);
+            next.source_width = sw;
+            next.source_height = sh;
+            next.width = snapDimension(sw * (prev.scale_factor || 1), spatialMultiple);
+            next.height = snapDimension(sh * (prev.scale_factor || 1), spatialMultiple);
+          }
+          return next;
+        });
       })
       .catch(() => setSourceVideoInfo(null));
   }, [formData.control_path, constraints]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1475,7 +1497,14 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
           && (imageInputsOptional || !requiresStartImage || !!formData.image_path)
           && (imageInputsOptional || !requiresEndImage || !!formData.end_image_path)
           && (!requiresAnimatePoseVideo || !!formData.animate_pose_video)
-          && (!requiresAnimateFaceVideo || !!formData.animate_face_video)}
+          && (!requiresAnimateFaceVideo || !!formData.animate_face_video)
+          // A video slot the model marks required really is required — VACE's
+          // control video, Qwen-Video-Edit's source clip. Without this the tab
+          // would post a job with no conditioning and no inherited dimensions,
+          // which fails at the request schema rather than anywhere useful.
+          // Optional slots (LTX-2 in-context, MiniMax references) are exempt,
+          // since videoSlot.required is false for those.
+          && (!requiresControlVideo || !videoSlot.required || !!formData.control_path)}
         generateLabel="Generate Video"
         generatingLabel={batchProgress ? `Generating ${batchProgress.current}/${batchProgress.total}...` : 'Generating...'}
         batchCount={formData.batchCount}

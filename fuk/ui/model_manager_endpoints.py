@@ -22,6 +22,11 @@ Two kinds of thing appear in the panel and they behave differently on purpose:
            optional extras. Those are declared in defaults_loras.json, download
            individually, and never count toward whether the model is complete.
 
+  Storage A read-speed check over the weights, and a rewrite pass for whatever
+          has gone slow. Flash loses charge; files written once and never
+          touched read slower every month. The work is in
+          fuk/utils/nand_refresh.py, which also runs headless.
+
 Downloads prefer HuggingFace. DiffSynth defaults to ModelScope, but HF is
 usually faster and steadier, and the per-component fallback in
 fuk/utils/download_models.py means the ModelScope-only repos (the DiffSynth
@@ -64,6 +69,16 @@ class LoraDownloadRequest(BaseModel):
     # one that is not already on disk" — the panel sends an explicit list so a
     # user can take one camera move without the other eleven.
     paths: Optional[List[str]] = None
+
+
+class MaintenanceRequest(BaseModel):
+    # "scan" measures and changes nothing; "refresh" rewrites what it finds slow.
+    mode: str = "scan"
+    threshold_mbps: Optional[float] = None
+    min_size_mb: Optional[int] = None
+    # Rewrite everything regardless of measured speed. For the case where the
+    # threshold is wrong rather than the drive.
+    rewrite_all: bool = False
 
 
 class DeleteRequest(BaseModel):
@@ -109,6 +124,21 @@ def _update_job(job_id: str, **fields):
         job = _jobs.get(job_id)
         if job:
             job.update(fields)
+
+
+def _nand_refresh():
+    """The storage maintenance utility from fuk/utils.
+
+    Imported by adding fuk/utils to sys.path, the same way the download worker
+    reaches download_models. Always under this one bare name: the module holds
+    its running sweep in module-level state, and a second module object would
+    mean the status endpoint polling a job that the start endpoint never created.
+    """
+    utils_dir = str(Path(__file__).resolve().parent.parent / "utils")
+    if utils_dir not in sys.path:
+        sys.path.insert(0, utils_dir)
+    import nand_refresh
+    return nand_refresh
 
 
 # ---------------------------------------------------------------------------
@@ -981,6 +1011,69 @@ def setup_model_manager_routes(
             "freed_bytes": freed,
             "kept_shared": plan["kept_shared"],
         }
+
+    # -----------------------------------------------------------------------
+    # Storage maintenance — NAND refresh
+    #
+    # Flash loses charge, and weights that are written once and never touched
+    # read slower every month they sit. The perf watchdog already warns when
+    # loads degrade; these three routes are what that warning asks you to do.
+    # The work itself is in fuk/utils/nand_refresh.py, runnable without the
+    # server. Only one sweep at a time, enforced there.
+    # -----------------------------------------------------------------------
+
+    @app.get("/api/models/manage/maintenance")
+    async def storage_maintenance_status():
+        """Whether a sweep applies here, what one is doing, and the last report."""
+        nr = _nand_refresh()
+        root = _models_root()
+        return {
+            **nr.describe_root(root),
+            "job": nr.get_job(),
+            **nr.history(),
+            "defaults": {
+                "threshold_mbps": nr.DEFAULT_THRESHOLD_MBPS,
+                "min_size_mb": nr.DEFAULT_MIN_SIZE_MB,
+            },
+        }
+
+    @app.post("/api/models/manage/maintenance/start")
+    async def storage_maintenance_start(request: MaintenanceRequest):
+        """Start a scan or a refresh. Returns the job; poll the status route."""
+        nr = _nand_refresh()
+
+        # A download saturating the same drive would make every measurement a
+        # reading of the download, and the rewrites would fight it for bandwidth.
+        with _jobs_lock:
+            busy = [j["model"] for j in _jobs.values() if j["status"] == "running"]
+        if busy:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Downloads in progress ({', '.join(busy)}) — they share the disk, "
+                       f"so a sweep now would measure them. Wait for them to finish.",
+            )
+
+        opts = {"root": _models_root(), "rewrite_all": request.rewrite_all, "log": log}
+        if request.threshold_mbps is not None:
+            opts["threshold_mbps"] = request.threshold_mbps
+        if request.min_size_mb is not None:
+            opts["min_size_mb"] = request.min_size_mb
+
+        try:
+            job = nr.start(request.mode, **opts)
+        except (nr.RefreshError, ValueError) as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+        log.info("ModelManager", f"storage {request.mode} started on {opts['root']}")
+        return {"success": True, "job": job}
+
+    @app.post("/api/models/manage/maintenance/cancel")
+    async def storage_maintenance_cancel():
+        """Stop after the current file. A rewrite in flight always completes."""
+        stopped = _nand_refresh().cancel()
+        if stopped:
+            log.info("ModelManager", "storage sweep cancellation requested")
+        return {"success": True, "cancelling": stopped}
 
     @app.get("/api/models/manage/jobs/{job_id}")
     async def download_job_status(job_id: str):

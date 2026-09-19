@@ -407,3 +407,53 @@
 }
 
 .mm-del-confirm:hover:not(:disabled) { background: var(--color-error-500); }
+
+/* --- Storage maintenance -------------------------------------------------- */
+
+.mm-maint-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+}
+
+.mm-maint-free {
+  margin-left: auto;
+  font-size: var(--font-size-xs);
+  color: var(--color-gray-500);
+}
+
+.mm-maint-confirm {
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.6rem;
+  border: var(--border-width) solid var(--color-warning-600);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  color: var(--color-gray-300);
+  line-height: 1.45;
+}
+
+.mm-maint-go {
+  display: block;
+  margin-top: 0.5rem;
+  background: var(--color-warning-600);
+  color: #fff;
+  border: none;
+}
+
+.mm-maint-go:hover:not(:disabled) { background: var(--color-warning-500); }
+
+.mm-maint-report {
+  margin-top: 0.5rem;
+  font-size: var(--font-size-sm);
+  color: var(--color-gray-400);
+  line-height: 1.6;
+}
+
+.mm-maint-report b { color: var(--color-gray-200); font-weight: 600; }
+.mm-maint-aged { color: var(--color-warning-400); }
+.mm-maint-ok { color: var(--color-success-400); }
+.mm-maint-when { color: var(--color-gray-500); font-size: var(--font-size-xs); }
+
+.mm-maint-table td:nth-child(2) { white-space: nowrap; }
+.mm-maint-table code { word-break: break-all; }

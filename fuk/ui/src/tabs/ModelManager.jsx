@@ -17,13 +17,17 @@
  *            and in-context controls — list those under the model row, picked
  *            and downloaded one at a time.
  *
+ *   Storage  Read-speed check and refresh pass over the weights. Flash loses
+ *            charge, so files written once and never touched read slower every
+ *            month; rewriting them restores full speed.
+ *
  * Downloads prefer HuggingFace, with a per-component fallback to ModelScope for
  * the repos HF does not carry.
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  Download, CheckCircle, AlertCircle, Loader2, RefreshCw, Link, Info, Trash2,
+  Download, CheckCircle, AlertCircle, Loader2, RefreshCw, Link, Info, Trash2, Zap,
 } from '../components/Icons';
 
 const API_URL = '/api';
@@ -402,6 +406,175 @@ function ModelRow({ model, job, loraJob, size, loraSizes, sizesLoading, loraSize
 }
 
 // ============================================================================
+// Storage maintenance — NAND refresh
+// ============================================================================
+
+// Flash loses charge. Weights are written once and read forever, so they age
+// until a load that took seconds takes minutes, with nothing corrupt and SMART
+// perfectly clean. Rewriting a file puts it back on fresh cells. Scan measures
+// and changes nothing; Refresh rewrites what came back slow.
+function StorageCard({ state, onStart, onCancel, busy }) {
+  const [open, setOpen] = useState(false);
+  // Refresh is an hour of disk work and hundreds of GB of writes, so it asks
+  // once. Scan is free and does not.
+  const [confirming, setConfirming] = useState(false);
+
+  if (!state) return null;
+
+  const job = state.job;
+  const running = job && job.status === 'running';
+  const report = state.last_refresh || state.last_scan;
+  // What a refresh would rewrite, if anything has been measured yet.
+  const aged = state.last_scan?.aged_bytes ?? state.last_refresh?.aged_bytes ?? 0;
+  // Bytes, not file count: one 38GB checkpoint is a quarter of the sweep on its
+  // own, so a file-counted bar would sit still and then jump.
+  const pct = running && job.bytes_total
+    ? Math.min(100, (job.bytes_done / job.bytes_total) * 100) : 0;
+
+  if (!state.supported) {
+    return (
+      <div className="fuk-card mm-card">
+        <span className="fuk-label">Storage maintenance</span>
+        <div className="mm-sub mm-sub--card">
+          <Info className="fuk-icon--sm" /> Not applicable here — {state.reason}.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="fuk-card mm-card">
+      <span className="fuk-label">Storage maintenance</span>
+      <div className="mm-sub mm-sub--card">
+        Flash cells leak charge, so weights that sit unread for months come back
+        at a fraction of their original speed — nothing is corrupt, reads just get
+        slow. Rewriting a file restores it. <b>Check</b> measures and changes
+        nothing; <b>Refresh</b> rewrites whatever reads below
+        {' '}{state.defaults.threshold_mbps} MB/s.
+      </div>
+
+      <div className="mm-maint-actions">
+        <button
+          className="fuk-btn fuk-btn-secondary fuk-btn-sm"
+          disabled={running || busy}
+          onClick={() => onStart('scan')}
+        >
+          {running && job.mode === 'scan'
+            ? <><Loader2 className="fuk-icon--sm mm-spin" /> checking</>
+            : <><Zap className="fuk-icon--sm" /> Check read speed</>}
+        </button>
+        <button
+          className="fuk-btn fuk-btn-secondary fuk-btn-sm"
+          disabled={running || busy}
+          onClick={() => setConfirming((v) => !v)}
+        >
+          {running && job.mode === 'refresh'
+            ? <><Loader2 className="fuk-icon--sm mm-spin" /> refreshing</>
+            : <><RefreshCw className="fuk-icon--sm" /> {confirming ? 'Cancel' : 'Refresh aged files'}</>}
+        </button>
+        {running && (
+          <button className="fuk-btn fuk-btn-secondary fuk-btn-sm" onClick={onCancel}>
+            Stop
+          </button>
+        )}
+        <span className="mm-maint-free">
+          {state.device && <>{state.fstype} on <code>{state.device}</code> · </>}
+          {fmtBytes(state.free_bytes)} free
+        </span>
+      </div>
+
+      {confirming && !running && (
+        <div className="mm-maint-confirm">
+          Every file that reads below {state.defaults.threshold_mbps} MB/s gets copied
+          and renamed over itself — {aged
+            ? <>about {fmtBytes(aged)} of writes, from the last check</>
+            : <>up to the whole library, since nothing has been checked yet</>}
+          , and tens of minutes. Safe to run while the server is up: a model already
+          loading finishes from the old copy. It can be stopped at any point, and
+          what was already rewritten stays rewritten.
+          <button
+            className="fuk-btn fuk-btn-sm mm-maint-go"
+            disabled={busy}
+            onClick={() => { setConfirming(false); onStart('refresh'); }}
+          >
+            <RefreshCw className="fuk-icon--sm" /> Start refresh
+          </button>
+        </div>
+      )}
+
+      {running && (
+        <div className="mm-progress">
+          <div className="mm-progress-bar" style={{ width: `${pct}%` }} />
+          <span className="mm-progress-text">
+            {job.completed}/{job.total} · {fmtBytes(job.bytes_done)} of{' '}
+            {fmtBytes(job.bytes_total)}
+            {job.rewritten > 0 && ` · ${job.rewritten} rewritten`}
+            {' — '}{job.current || 'starting…'}
+          </span>
+        </div>
+      )}
+
+      {job && job.status === 'failed' && (
+        <div className="mm-model-missing">Sweep failed — {job.error}</div>
+      )}
+
+      {!running && report && (
+        <div className="mm-maint-report">
+          <div>
+            <b>{report.files_measured}</b> files measured
+            {' · '}median <b>{report.median_mbps} MB/s</b>
+            {' · '}slowest <b>{report.slowest_mbps} MB/s</b>
+            {report.files_aged > 0
+              ? <> · <span className="mm-maint-aged">{report.files_aged} aged
+                  ({fmtBytes(report.aged_bytes)})</span></>
+              : <> · <span className="mm-maint-ok">
+                  <CheckCircle className="fuk-icon--sm" /> none aged</span></>}
+          </div>
+          {report.files_rewritten > 0 && (
+            <div>
+              Rewrote {report.files_rewritten} file(s),{' '}
+              {fmtBytes(report.bytes_rewritten)} in{' '}
+              {(report.elapsed_s / 60).toFixed(0)} min
+              {report.mean_gain && ` — ${report.mean_gain}× faster on average`}
+            </div>
+          )}
+          <div className="mm-maint-when">
+            {report.mode === 'refresh' ? 'Refreshed' : 'Checked'} {report.finished_at}
+            {report.cancelled && ' (stopped early)'}
+          </div>
+
+          {/* The slowest rows, when a sweep just ran in this session. The report
+              on disk keeps the summary only, so this is empty after a reload. */}
+          {job && job.files?.length > 0 && (
+            <>
+              <button className="mm-disclose" onClick={() => setOpen((v) => !v)}>
+                {open ? 'Hide' : 'Show'} the slowest files
+              </button>
+              {open && (
+                <table className="mm-parts mm-maint-table">
+                  <tbody>
+                    {job.files.slice(0, 15).map((f) => (
+                      <tr key={f.path}
+                          className={f.before_mbps < report.threshold_mbps
+                            ? 'mm-part--missing' : ''}>
+                        <td>{f.rewritten ? '↻' : '·'}</td>
+                        <td>{f.before_mbps ?? '?'}{f.after_mbps && ` → ${f.after_mbps}`} MB/s</td>
+                        <td>{fmtBytes(f.size)}</td>
+                        <td><code>{f.rel}</code></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
 // Panel
 // ============================================================================
 
@@ -420,7 +593,10 @@ export default function ModelManager() {
   // round trip.
   const [loraSizes, setLoraSizes] = useState({});
   const [loraSizesLoading, setLoraSizesLoading] = useState({});
+  // Storage maintenance: filesystem facts, the running sweep, the last report.
+  const [maint, setMaint] = useState(null);
   const pollRef = useRef(null);
+  const maintPollRef = useRef(null);
 
   const load = useCallback(async () => {
     try {
@@ -446,7 +622,32 @@ export default function ModelManager() {
     finally { setSizesLoading(false); }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  const loadMaint = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/models/manage/maintenance`);
+      if (res.ok) setMaint(await res.json());
+    } catch { /* the card just does not render — never blocks the panel */ }
+  }, []);
+
+  useEffect(() => { load(); loadMaint(); }, [load, loadMaint]);
+
+  // A sweep started before this tab was opened — or in another browser tab —
+  // is still running server-side, so the card picks it up rather than looking idle.
+  useEffect(() => {
+    if (maint?.job?.status !== 'running') {
+      if (maintPollRef.current) {
+        clearInterval(maintPollRef.current); maintPollRef.current = null;
+      }
+      return undefined;
+    }
+    if (maintPollRef.current) return undefined;
+    maintPollRef.current = setInterval(loadMaint, 1000);
+    return () => {
+      if (maintPollRef.current) {
+        clearInterval(maintPollRef.current); maintPollRef.current = null;
+      }
+    };
+  }, [maint, loadMaint]);
 
   // Size anything not fully downloaded. Downloaded models already report their
   // real on-disk size, so asking the hub about them would be a wasted request.
@@ -582,6 +783,31 @@ export default function ModelManager() {
     }
   };
 
+  const handleMaintStart = async (mode) => {
+    try {
+      const res = await fetch(`${API_URL}/models/manage/maintenance/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode }),
+      });
+      if (!res.ok) throw new Error((await res.json()).detail || `HTTP ${res.status}`);
+      const { job } = await res.json();
+      // Seed the job locally so the progress bar and the poll start on this
+      // render rather than a second later.
+      setMaint((m) => ({ ...m, job }));
+      setError(null);
+    } catch (e) {
+      setError(`Could not start the ${mode}: ${e}`);
+    }
+  };
+
+  const handleMaintCancel = async () => {
+    try {
+      await fetch(`${API_URL}/models/manage/maintenance/cancel`, { method: 'POST' });
+    } catch { /* the sweep either stops or it does not; the poll will say */ }
+    loadMaint();
+  };
+
   const handleExpandLoras = useCallback(async (key) => {
     if (loraSizes[key]) return;
     setLoraSizesLoading((prev) => ({ ...prev, [key]: true }));
@@ -683,6 +909,13 @@ export default function ModelManager() {
           </div>
         </div>
       ))}
+
+      <StorageCard
+        state={maint}
+        onStart={handleMaintStart}
+        onCancel={handleMaintCancel}
+        busy={busy}
+      />
 
       <div className="mm-footnote">
         Weights live under <code>{data.models_root}</code>. Sizes are per model, so

@@ -72,7 +72,7 @@ def record_timing(metric: str, seconds: float, context: str = "") -> None:
                 print(
                     f"\033[93m⚠ [PERF] {metric}: {seconds:.1f}s — {seconds / base:.1f}x "
                     f"slower than typical ({base:.1f}s median of last {len(prior)}). "
-                    f"Slow loads → check disk cold-read speed (NAND aging); "
+                    f"Slow loads → Utilities ▸ Models ▸ Check read speed (NAND aging); "
                     f"slow steps → check VRAM pressure/thermals.\033[0m",
                     flush=True,
                 )
