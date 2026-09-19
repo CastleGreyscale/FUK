@@ -28,7 +28,7 @@ import { useLocalStorage } from '../../src/hooks/useLocalStorage';
 import { useSavedSeeds } from '../hooks/useSavedSeeds';
 import { useVideoPlayback } from '../hooks/useVideoPlayback';
 import { startVideoGeneration } from '../../src/utils/api';
-import { formatTime, snapFrames, snapDimension, frameLattice } from '../utils/helpers.js';
+import { formatTime, snapFrames, snapDimension, frameLattice, applyResolutionPreset } from '../utils/helpers.js';
 import { 
   buildImageUrl, 
   SEED_MODES, 
@@ -39,12 +39,18 @@ import Footer from '../components/Footer';
 import PromptPanel from '../components/PromptPanel';
 
 
-// Scale factor presets for VRAM management
-const SCALE_FACTORS = [
-  { label: '100%', value: 1.0 },
-  { label: '75%', value: 0.75 },
-  { label: '50%', value: 0.5 },
-  { label: '25%', value: 0.25 },
+// Output resolution presets come from defaults.json (`resolution_presets`) so
+// the list is editable without a rebuild. This is only the fallback for a
+// config that predates the key — percentages are deliberately gone: a long-edge
+// target says whether the result is a size the model was trained to produce,
+// where "50%" depends entirely on what the source happened to be.
+const FALLBACK_RESOLUTION_PRESETS = [
+  { label: 'Source (native)', value: null },
+  { label: '1920 (HD)', value: 1920 },
+  { label: '1328 (Qwen native)', value: 1328 },
+  { label: '1280 (720p)', value: 1280 },
+  { label: '832 (Wan native)', value: 832 },
+  { label: '640 (360p)', value: 640 },
 ];
 
 // The frame lattice, latent grid and shift knob all differ per model — Wan is
@@ -87,6 +93,11 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
   
   // Model metadata from config
   const videoModels = config?.models?.video_models || [];
+
+  // Output resolution choices, editable in defaults.json alongside aspect_ratios.
+  const resolutionPresets = config?.defaults?.resolution_presets?.length
+    ? config.defaults.resolution_presets
+    : FALLBACK_RESOLUTION_PRESETS;
   
   // Initial defaults come entirely from backend config
   // These are the values used when no project is loaded and no localStorage exists
@@ -95,7 +106,7 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
     negative_prompt: videoDefaults.negative_prompt ?? '',
     task: videoDefaults.task ?? 'i2v-A14B',
     video_length: videoDefaults.video_length ?? 41,
-    scale_factor: videoDefaults.scale_factor ?? 1.0,
+    resolution_preset: videoDefaults.resolution_preset ?? null,
     steps: videoDefaults.steps ?? 20,
     stepsMode: videoDefaults.stepsMode ?? 'preset',
     guidance_scale: videoDefaults.guidance_scale ?? 5.0,
@@ -146,6 +157,12 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
     // own latent grid, the same rule for every video family. Until that media
     // is loaded width/height stay null, which is why Generate is gated on a
     // required video slot the same way it is on a required start image.
+    //
+    // What the family *does* choose is how far that inherited size is scaled:
+    // its native long edge. Qwen-Video-Edit is trained at 360p and wants 640
+    // even from a 4K source; LTX-2 wants 1536. Without this a big source clip
+    // would be inherited at full size into a model that cannot use it.
+    if (fam.resolution_preset !== undefined) out.resolution_preset = fam.resolution_preset;
     if (fam.video_length != null) out.video_length = fam.video_length;
     if (fam.steps != null) {
       out.steps = fam.steps;
@@ -333,14 +350,19 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
         const width = snapDimension(img.width, spatialMultiple);
         const height = snapDimension(img.height, spatialMultiple);
 
-        setFormData(prev => ({
-          ...prev,
-          source_width: width,
-          source_height: height,
-          // Update output dimensions with scale factor
-          width: snapDimension(width * prev.scale_factor, spatialMultiple),
-          height: snapDimension(height * prev.scale_factor, spatialMultiple),
-        }));
+        setFormData(prev => {
+          // Source keeps the true image size; output is that size taken to the
+          // model's chosen long edge.
+          const out = applyResolutionPreset(
+            img.width, img.height, prev.resolution_preset, spatialMultiple);
+          return {
+            ...prev,
+            source_width: width,
+            source_height: height,
+            width: out.width,
+            height: out.height,
+          };
+        });
       };
       img.onerror = () => {
         console.warn('Could not load image for dimension detection');
@@ -373,12 +395,12 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
           // (Wan i2v, VACE with a reference), so this only takes over for the
           // models whose conditioning *is* the video, like Qwen-Video-Edit.
           if (!prev.image_path && info.width && info.height) {
-            const sw = snapDimension(info.width, spatialMultiple);
-            const sh = snapDimension(info.height, spatialMultiple);
-            next.source_width = sw;
-            next.source_height = sh;
-            next.width = snapDimension(sw * (prev.scale_factor || 1), spatialMultiple);
-            next.height = snapDimension(sh * (prev.scale_factor || 1), spatialMultiple);
+            const out = applyResolutionPreset(
+              info.width, info.height, prev.resolution_preset, spatialMultiple);
+            next.source_width = snapDimension(info.width, spatialMultiple);
+            next.source_height = snapDimension(info.height, spatialMultiple);
+            next.width = out.width;
+            next.height = out.height;
           }
           return next;
         });
@@ -403,17 +425,24 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
     });
   };
 
-  // Update output dimensions when scale factor changes
-  const handleScaleChange = (newScale) => {
-    const sourceW = formData.source_width || 832;
-    const sourceH = formData.source_height || 480;
-    
-    setFormData(prev => ({
-      ...prev,
-      scale_factor: newScale,
-      width: snapDimension(sourceW * newScale, spatialMultiple),
-      height: snapDimension(sourceH * newScale, spatialMultiple),
-    }));
+  // Re-derive output dimensions when the resolution preset changes.
+  //
+  // No fallback source size here on purpose. The old handler defaulted to
+  // 832x480 when nothing was loaded, which silently invented an aspect ratio
+  // the source did not have; with nothing loaded there is no aspect to
+  // preserve, so the fields stay empty until media arrives and the inheritance
+  // effects fill them in.
+  const handleResolutionChange = (newPreset) => {
+    setFormData(prev => {
+      const next = { ...prev, resolution_preset: newPreset };
+      if (prev.source_width && prev.source_height) {
+        const out = applyResolutionPreset(
+          prev.source_width, prev.source_height, newPreset, spatialMultiple);
+        next.width = out.width;
+        next.height = out.height;
+      }
+      return next;
+    });
   };
 
   // Handle frame input change with validation
@@ -1110,11 +1139,12 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
               </label>
               <select
                 className="fuk-select"
-                value={formData.scale_factor}
-                onChange={(e) => handleScaleChange(parseFloat(e.target.value))}
+                value={formData.resolution_preset ?? ''}
+                onChange={(e) => handleResolutionChange(
+                  e.target.value === '' ? null : parseInt(e.target.value, 10))}
               >
-                {SCALE_FACTORS.map(sf => (
-                  <option key={sf.value} value={sf.value}>{sf.label}</option>
+                {resolutionPresets.map(rp => (
+                  <option key={rp.value ?? 'source'} value={rp.value ?? ''}>{rp.label}</option>
                 ))}
               </select>
               <p className="fuk-help-text fuk-mt-1">
@@ -1123,7 +1153,9 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
               {!formData.source_width && (
                 <p className="fuk-help-text fuk-help-text--warning">
                   <AlertCircle className="fuk-icon--sm" />
-                  Upload a start image to auto-detect dimensions
+                  {videoSlot.required
+                    ? 'Load a source video to auto-detect dimensions'
+                    : 'Upload a start image to auto-detect dimensions'}
                 </p>
               )}
             </div>

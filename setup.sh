@@ -868,6 +868,20 @@ cat > fuk/config/defaults.json.template << 'EOL'
     { "label": "2.75:1 (Panavision)", "value": "2.75:1", "ratio": 2.76   }
   ],
 
+  "_resolution_presets_comment": "Output resolution presets for the video tab, replacing the old 25/50/75/100% scale factors. `value` is the LONG EDGE in pixels — aspect comes from the source media, so 1920 gives 1920x1080 on a landscape clip and 1080x1920 on a portrait one. The result is snapped up to the selected model's latent grid (/16 Wan and Qwen-Video-Edit, /32 LTX-2 and MiniMax-H3), so the number shown is a target rather than a guarantee. A null value means keep the source resolution. Percentages were the wrong unit here: they say nothing about whether the result is a size the model was trained to produce, and the same 50% means something different for every source clip. Each video family picks its own default from this list via `resolution_preset` in its defaults block.",
+  "resolution_presets": [
+    { "label": "Source (native)",    "value": null },
+    { "label": "2048",               "value": 2048 },
+    { "label": "1920 (HD)",          "value": 1920 },
+    { "label": "1536",               "value": 1536 },
+    { "label": "1328 (Qwen native)", "value": 1328 },
+    { "label": "1280 (720p)",        "value": 1280 },
+    { "label": "1024",               "value": 1024 },
+    { "label": "832 (Wan native)",   "value": 832  },
+    { "label": "640 (360p)",         "value": 640  },
+    { "label": "512",                "value": 512  }
+  ],
+
   "image": {
     "prompt": "",
     "negative_prompt": "low resolution, low quality, limb deformities, finger deformities, over-saturated image, wax figure appearance, lack of facial detail, overly smooth, AI-generated look. Chaotic composition. Blurry, distorted text",
@@ -898,7 +912,7 @@ cat > fuk/config/defaults.json.template << 'EOL'
     "negative_prompt": "bright colors, overexposed, static, blurred details, subtitles, style, artwork, painting, picture, still, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, malformed limbs, fused fingers, still picture, cluttered background, three legs, many people in the background, walking backwards",
     "task": "wan_i2v_a14b",
     "video_length": 41,
-    "scale_factor": 1.0,
+    "resolution_preset": 832,
     "steps": 20,
     "stepsMode": "preset",
     "guidance_scale": 5.0,
@@ -946,6 +960,7 @@ cat > fuk/config/defaults.json.template << 'EOL'
   "_minimax_h3_comment": "MiniMax-H3 defaults. Sizes snap to a 16px spatial grid and 17n+5 frames; 124 frames at 24fps is roughly 5 seconds. cfg_scale 1.0 means CFG is off, which is what the upstream examples use — the negative prompt is a single space rather than empty, because an empty string disables the negative branch entirely.",
   "minimax_h3": {
     "task": "minimax_h3_fl2va",
+    "resolution_preset": 832,
     "width": 832,
     "height": 480,
     "video_length": 124,
@@ -959,6 +974,7 @@ cat > fuk/config/defaults.json.template << 'EOL'
   "_qwen_video_edit_comment": "Qwen-Video-Edit defaults. There is deliberately no video_length here: length comes from the source clip, and an unset value means edit the whole thing. chunk_frames is the model's trained 45-frame window, not a user-facing duration — do not raise it to get longer clips. 640x384 is the authors' own demonstrated size (the registered checkpoint is trained at 360P). fps 16 matches the checkpoint's training rate, unlike every other video family here at 24. No shift knob: the scheduler derives its shift from the latent sequence length via dynamic_shift_len.",
   "qwen_video_edit": {
     "task": "qwen_video_edit",
+    "resolution_preset": 640,
     "width": 640,
     "height": 384,
     "chunk_frames": 45,
@@ -971,6 +987,7 @@ cat > fuk/config/defaults.json.template << 'EOL'
   "_ltx2_comment": "LTX-2 defaults. Sizes snap to a 32px spatial grid and 8n+1 frames; 121 frames at 24fps is roughly 5 seconds. The long negative prompt is upstream's — it covers audio faults (off-sync, robotic voice, mismatched lip sync) as well as picture, because one denoise produces both.",
   "ltx2": {
     "task": "ltx2",
+    "resolution_preset": 1536,
     "width": 1536,
     "height": 1024,
     "video_length": 121,

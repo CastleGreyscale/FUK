@@ -84,6 +84,35 @@ export function snapDimension(px, multiple = 16) {
 }
 
 /**
+ * Resolve output dimensions from a source size and a resolution preset.
+ *
+ * The preset is a LONG-EDGE target in pixels (the `resolution_presets` list in
+ * defaults.json), not a percentage: aspect always comes from the source, so
+ * 1920 gives 1920x1080 on a landscape clip and 1080x1920 on a portrait one.
+ * A null/absent preset keeps the source size. Both axes then snap up to the
+ * model's latent grid, so the returned long edge can exceed the target by up
+ * to `multiple - 1` px — the grid is a hard constraint, the preset is a target.
+ *
+ * Returns nulls when the source size is unknown, so callers can leave the
+ * fields empty rather than inventing a size.
+ */
+export function applyResolutionPreset(sourceW, sourceH, longEdge, multiple = 16) {
+  const sw = Math.round(sourceW) || 0;
+  const sh = Math.round(sourceH) || 0;
+  if (sw <= 0 || sh <= 0) return { width: null, height: null };
+
+  const target = Number(longEdge);
+  const scale = (Number.isFinite(target) && target > 0)
+    ? target / Math.max(sw, sh)
+    : 1;
+
+  return {
+    width: snapDimension(sw * scale, multiple),
+    height: snapDimension(sh * scale, multiple),
+  };
+}
+
+/**
  * Format file size
  */
 export function formatFileSize(bytes) {
