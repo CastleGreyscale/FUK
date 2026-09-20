@@ -11,7 +11,9 @@ Supports:
 - Video/sequence export from latent (export_video_sequence - latent-only)
 - 16-bit half or 32-bit float
 - Various compression methods (ZIP, PIZ, DWAA, etc.)
-- Linear/sRGB color space handling
+- OCIO-backed output color management (see core/color_management.py and
+  docs/ACES_COLOR_PIPELINE.md): ACEScg, ACES2065-1, Linear Rec.2020, plus the
+  hand-rolled Linear Rec.709 and sRGB paths
 
 LATENT WORKFLOW:
 - export_video_sequence() requires beauty latent (true lossless path)
@@ -54,6 +56,23 @@ BRACKET_SCALES = (0.85, 1.0, 1.15)
 BRACKET_SIGMAS = (0.0, 0.025, 0.05)
 BRACKET_SEED = 42
 BRACKET_FUSION = "mertens"
+
+
+def _cm():
+    """The colour management module, imported lazily.
+
+    This file is reached under two import shapes — `core.exr_exporter` from the
+    web server and a bare `exr_exporter` from latent_manager — so the sibling
+    import has to work either way. Both spellings would give color_management
+    its own processor cache if both were ever live at once; that costs one
+    duplicate config load and nothing else, because the only module state there
+    is a cache.
+    """
+    try:
+        from core import color_management
+    except ImportError:
+        import color_management
+    return color_management
 
 
 class EXRCompression(str, Enum):
@@ -631,6 +650,7 @@ class EXRExporter:
         filename_pattern: str = "frame.{frame:04d}.exr",
         bit_depth: Literal[16, 32] = 32,
         compression: str = "ZIP",
+        color_space: str = "Linear",
         start_frame: int = 1,
         model_type: str = "auto",
         progress_callback: Optional[Callable[[int, int], None]] = None,
@@ -653,6 +673,9 @@ class EXRExporter:
             filename_pattern: Pattern with {frame:04d} placeholder
             bit_depth: 16 or 32
             compression: Compression method
+            color_space: Output colour space for beauty. Same values and same
+                default as the still path — without parity here the sequence
+                and the still of one generation diverge silently.
             start_frame: Starting frame number
             model_type: Model type for decoding ("auto", or explicit pipeline key)
             progress_callback: Optional callback(current_frame, total_frames)
@@ -685,6 +708,7 @@ class EXRExporter:
         print(f"Output: {output_dir}")
         print(f"Pattern: {filename_pattern}")
         print(f"Bit Depth: {bit_depth}-bit")
+        print(f"Color Space: {color_space}")
         print(f"{'='*60}\n")
         
         # Decode beauty latents
@@ -787,7 +811,8 @@ class EXRExporter:
             # Process frame by frame
             exported_frames = []
             total_size = 0
-            
+            color_result = {}
+
             for frame_idx in range(total_frames):
                 frame_num = start_frame + frame_idx
                 
@@ -820,13 +845,15 @@ class EXRExporter:
                         output_path=output_path,
                         bit_depth=bit_depth,
                         compression=compression,
+                        color_space=color_space,
                         quiet=True,
                         raw_arrays=frame_raw,  # Beauty + AOVs from raw data
                         depth_meta=depth_meta,
                     )
-                    
+
                     exported_frames.append(output_path)
                     total_size += result.get('file_size', 0)
+                    color_result = result.get('color', color_result)
                     
                 except Exception as e:
                     print(f"  ⚠ Frame {frame_num} failed: {e}")
@@ -849,7 +876,14 @@ class EXRExporter:
         print(f"  Frames: {len(exported_frames)}")
         print(f"  Total Size: {total_size_mb:.2f} MB")
         print(f"  Output: {output_dir}")
-        
+        # Per-frame transform cost belongs in the log at production frame
+        # counts — it is the measurement the getOptimizedProcessor decision
+        # rests on (spec §11 phase 4).
+        color_line = f"  Color: {color_result.get('target', color_space)}"
+        if color_result.get('ocio'):
+            color_line += f" (OCIO, {color_result.get('transform_ms')} ms/frame)"
+        print(color_line)
+
         return {
             "output_dir": str(output_dir),
             "frame_count": len(exported_frames),
@@ -862,6 +896,7 @@ class EXRExporter:
             "compression": compression,
             "layers_included": ['beauty'] + list(aov_layers.keys()),
             "frames": [str(f) for f in exported_frames],
+            "color": color_result,
         }
     
     # ==================================================================
@@ -1069,7 +1104,7 @@ class EXRExporter:
         output_path: Path,
         bit_depth: Literal[16, 32] = 32,
         compression: str = "ZIP",
-        linear: bool = True,
+        color_space: str = "Linear",
         quiet: bool = False,
         raw_arrays: Optional[Dict[str, np.ndarray]] = None,
         depth_meta: Optional[dict] = None,
@@ -1080,10 +1115,13 @@ class EXRExporter:
         """
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        
+        cm = _cm()
+
         # Load all layers
         loaded_layers = {}
         width, height = None, None
+        # Which state beauty arrives in, set by whichever branch loads it.
+        beauty_source = None
 
         # Process raw arrays first (lossless, no file I/O)
         if raw_arrays:
@@ -1092,7 +1130,9 @@ class EXRExporter:
                     height, width = arr.shape[:2] if arr.ndim >= 2 else (0, 0)
                 
                 if layer_name == 'beauty':
-                    # Decoded latent: float32 [H,W,3] range [0,1], already in linear space
+                    # Decoded latent: float32 [H,W,3], nominally [0,1] but
+                    # unclamped, and already linearised by _fuse_brackets.
+                    beauty_source = cm.SCENE_LINEAR
                     if arr.ndim == 3 and arr.shape[2] in [3, 4]:
                         loaded_layers['beauty'] = arr[:,:,:3].astype(np.float32)
                         if arr.shape[2] == 4:
@@ -1158,8 +1198,9 @@ class EXRExporter:
                     # Alpha is linear coverage, not colour — never gamma it
                     loaded_layers['alpha'] = arr[:, :, 3].copy()
                     arr = arr[:, :, :3]
-                if linear:
-                    arr = self._srgb_to_linear(arr)
+                # Straight off disk, so still sRGB-encoded — the colour
+                # transform below is the only thing that touches it.
+                beauty_source = cm.SRGB_ENCODED
                 loaded_layers['beauty'] = arr
 
             elif layer_name == 'depth':
@@ -1179,6 +1220,13 @@ class EXRExporter:
 
         if not loaded_layers:
             raise ValueError("No valid layers to export")
+
+        # Colour management, beauty only — depth, normals and crypto carry
+        # measurements and IDs, not colour, and pass through untouched (§6.4).
+        color_target, color_info = None, {}
+        if 'beauty' in loaded_layers:
+            loaded_layers['beauty'], color_target, color_info = self._apply_beauty_color(
+                loaded_layers['beauty'], color_space, beauty_source, quiet=quiet)
 
         # Build EXR channels
         channels_dict = {}
@@ -1271,17 +1319,25 @@ class EXRExporter:
         # Write Cryptomatte manifest metadata into header (required by spec)
         for meta_key, meta_val in crypto_metadata.items():
             header[meta_key] = meta_val.encode('utf-8') if isinstance(meta_val, str) else meta_val
-        
+
+        needs_chroma = (
+            color_target is not None
+            and self._write_color_header(header, color_target, beauty_source, color_info)
+        )
+
         exr_file = self.OpenEXR.OutputFile(str(output_path), header)
         exr_file.writePixels(channels_dict)
         exr_file.close()
-        
+
+        if needs_chroma:
+            cm.patch_chromaticities(output_path, color_target, quiet=quiet)
+
         file_size = output_path.stat().st_size
-        
+
         if not quiet:
             print(f"✅ Exported: {output_path.name} ({file_size / (1024*1024):.2f} MB)")
             print(f"   Layers: {list(channels_dict.keys())}")
-        
+
         return {
             "output_path": str(output_path),
             "file_size": file_size,
@@ -1290,6 +1346,7 @@ class EXRExporter:
             "channels": list(channels_dict.keys()),
             "bit_depth": bit_depth,
             "layers_included": list(loaded_layers.keys()),
+            "color": color_info,
         }
     
     # ========================================================================
@@ -1302,11 +1359,11 @@ class EXRExporter:
         output_path: Path,
         bit_depth: Literal[16, 32] = 32,
         compression: str = "ZIP",
-        linear: bool = True,
+        color_space: str = "Linear",
     ) -> Dict[str, Any]:
         """
         Export multiple AOV layers to a single multi-layer EXR
-        
+
         Args:
             layers: Dict mapping layer names to image paths
                 {
@@ -1318,17 +1375,19 @@ class EXRExporter:
             output_path: Where to save the EXR
             bit_depth: 16 (half float) or 32 (full float)
             compression: Compression method
-            linear: Convert beauty to linear color space
-            
+            color_space: Output colour space for beauty — see
+                core/color_management.TARGETS. AOVs are never transformed.
+
         Returns:
             Dict with output info
         """
         if not self._has_openexr:
             raise RuntimeError("OpenEXR not installed")
-        
+
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        
+        cm = _cm()
+
         print(f"\n{'='*60}")
         print(f"Exporting Multi-Layer EXR")
         print(f"{'='*60}")
@@ -1336,8 +1395,9 @@ class EXRExporter:
         print(f"Output: {output_path}")
         print(f"Bit Depth: {bit_depth}-bit")
         print(f"Compression: {compression}")
+        print(f"Color Space: {color_space}")
         print(f"{'='*60}\n")
-        
+
         # Load all layers and determine dimensions
         loaded_layers = {}
         width, height = None, None
@@ -1384,10 +1444,8 @@ class EXRExporter:
                     # Alpha is linear coverage, not colour — never gamma it
                     loaded_layers['alpha'] = arr[:, :, 3].copy()
                     arr = arr[:, :, :3]
-                if linear:
-                    arr = self._srgb_to_linear(arr)
                 loaded_layers['beauty'] = arr
-                print(f"  ✓ Loaded beauty ({width}x{height}, {'linear' if linear else 'sRGB'})")
+                print(f"  ✓ Loaded beauty ({width}x{height}, sRGB-encoded)")
 
             elif layer_name == 'depth':
                 if arr.ndim == 3:
@@ -1433,13 +1491,20 @@ class EXRExporter:
                     for c in range(arr.shape[2])
                 ], axis=-1)
 
+        # Colour management, beauty only (§6.4). Everything on this path came
+        # off disk as an 8-bit file, so beauty is still sRGB-encoded.
+        color_target, color_info = None, {}
+        if 'beauty' in loaded_layers:
+            loaded_layers['beauty'], color_target, color_info = self._apply_beauty_color(
+                loaded_layers['beauty'], color_space, cm.SRGB_ENCODED)
+
         # Build EXR channels
         channels_dict = {}
         channel_info = {}
 
         pixel_type = (
-            self.Imath.PixelType(self.Imath.PixelType.HALF) 
-            if bit_depth == 16 
+            self.Imath.PixelType(self.Imath.PixelType.HALF)
+            if bit_depth == 16
             else self.Imath.PixelType(self.Imath.PixelType.FLOAT)
         )
         
@@ -1496,19 +1561,30 @@ class EXRExporter:
         for meta_key, meta_val in crypto_metadata.items():
             header[meta_key] = meta_val.encode('utf-8') if isinstance(meta_val, str) else meta_val
 
+        needs_chroma = (
+            color_target is not None
+            and self._write_color_header(header, color_target, cm.SRGB_ENCODED, color_info)
+        )
+
         # Write EXR
         exr_file = self.OpenEXR.OutputFile(str(output_path), header)
         exr_file.writePixels(channels_dict)
         exr_file.close()
-        
+
+        if needs_chroma:
+            cm.patch_chromaticities(output_path, color_target)
+
         file_size = output_path.stat().st_size
         file_size_mb = file_size / (1024 * 1024)
-        
+
         print(f"\n✓ Exported multi-layer EXR")
         print(f"  File: {output_path}")
         print(f"  Size: {file_size_mb:.2f} MB")
         print(f"  Channels: {list(channels_dict.keys())}")
-        
+        if color_target is not None:
+            print(f"  Color: {color_target.key}"
+                  f"{' (OCIO)' if color_info.get('ocio') else ''}")
+
         return {
             "output_path": str(output_path),
             "width": width,
@@ -1518,6 +1594,7 @@ class EXRExporter:
             "compression": compression,
             "file_size": file_size,
             "layers_included": list(loaded_layers.keys()),
+            "color": color_info,
         }
     
     def export_from_latent(
@@ -1528,6 +1605,7 @@ class EXRExporter:
         model_type: str = "auto",
         bit_depth: Literal[16, 32] = 32,
         compression: str = "ZIP",
+        color_space: str = "Linear",
         bracketed: bool = False,
         scales: Optional[List[float]] = None,
         noise_bracketed: bool = False,
@@ -1674,7 +1752,14 @@ class EXRExporter:
         exposures = list(scales) if bracketed and not noise_bracketed else None
         arr = self._fuse_brackets(brackets, mode=fusion, exposures=exposures)
         print(f"  [BRACKET] Post-linearise range "
-              f"[{arr.min():.4f}, {arr.max():.4f}] → writing EXR")
+              f"[{arr.min():.4f}, {arr.max():.4f}]")
+
+        # _fuse_brackets always returns scene-linear Rec.709, so that — not the
+        # VAE's sRGB encoding — is what the transform starts from here.
+        cm = _cm()
+        arr, color_target, color_info = self._apply_beauty_color(
+            arr, color_space, cm.SCENE_LINEAR)
+        print(f"  [COLOR] {color_target.key} → writing EXR")
         height, width = arr.shape[:2]
 
         pixel_type = (
@@ -1692,9 +1777,14 @@ class EXRExporter:
         header = self.OpenEXR.Header(width, height)
         header['channels'] = channel_info
         header['compression'] = self._compression_attr(compression)
+        needs_chroma = self._write_color_header(
+            header, color_target, cm.SCENE_LINEAR, color_info)
         exr_file = self.OpenEXR.OutputFile(str(output_path), header)
         exr_file.writePixels(channels_dict)
         exr_file.close()
+
+        if needs_chroma:
+            cm.patch_chromaticities(output_path, color_target)
 
         file_size = output_path.stat().st_size
         return {
@@ -1710,6 +1800,7 @@ class EXRExporter:
             "noise_bracketed": noise_bracketed,
             "fusion": fusion if (bracketed or noise_bracketed) else None,
             "linear_range": [float(arr.min()), float(arr.max())],
+            "color": color_info,
         }
 
     def export_single_layers(
@@ -1718,18 +1809,18 @@ class EXRExporter:
         output_dir: Path,
         bit_depth: Literal[16, 32] = 32,
         compression: str = "ZIP",
-        linear: bool = True,
+        color_space: str = "Linear",
         filename_prefix: str = "",
     ) -> Dict[str, Any]:
         """
         Export each AOV layer as a separate EXR file
-        
+
         Args:
             layers: Dict mapping layer names to image paths
             output_dir: Directory to save EXR files
             bit_depth: 16 or 32
             compression: Compression method
-            linear: Convert beauty to linear
+            color_space: Output colour space for beauty; AOVs ignore it
             filename_prefix: Optional prefix for filenames
             
         Returns:
@@ -1754,7 +1845,9 @@ class EXRExporter:
                 output_path=output_path,
                 bit_depth=bit_depth,
                 compression=compression,
-                linear=linear if layer_name == 'beauty' else False,
+                # A single-AOV file has no beauty to transform, so the value is
+                # moot there — export_multilayer gates on the layer itself.
+                color_space=color_space,
             )
             
             results[layer_name] = result
@@ -1791,6 +1884,69 @@ class EXRExporter:
         lin = np.where(mag <= 0.04045, mag / 12.92,
                        np.power((mag + 0.055) / 1.055, 2.4))
         return np.sign(img) * lin
+
+    # ------------------------------------------------------------------
+    # Output colour management
+    # ------------------------------------------------------------------
+
+    def _apply_beauty_color(self, arr, color_space, source, quiet=False):
+        """Take a beauty array to the requested output colour space.
+
+        `source` says which state the array arrives in: SRGB_ENCODED for the
+        8-bit file path, SCENE_LINEAR for the latent paths, which linearise
+        inside _fuse_brackets long before the array reaches here.
+
+        The two branches below are mutually exclusive on purpose (spec §6.1).
+        An OCIO "sRGB texture → ACEScg" processor performs both the EOTF and
+        the gamut matrix, so calling _srgb_to_linear first linearises twice:
+        shadows crush, the whole frame oversaturates, and it looks ACES-y
+        enough to ship by accident. Do not fold them into a shared helper —
+        the exclusivity has to stay visible at the call site.
+
+        Returns (array, target, info). `target` is what actually came out,
+        which is not necessarily what was asked for: a target that needs OCIO
+        falls back to linear Rec.709 when OCIO or the config cannot deliver it,
+        and the returned target follows, so the chromaticities written into the
+        header always describe the pixels that are actually in the file.
+        """
+        cm = _cm()
+        target = cm.resolve(color_space)
+        info = {"ocio": False, "target": target.key, "source_encoding": source}
+
+        if target.needs_ocio:
+            # OCIO path — the processor does everything, no _srgb_to_linear.
+            out, info = cm.transform(arr, target, source, quiet=quiet)
+            if info.get("ocio"):
+                return np.ascontiguousarray(out, dtype=np.float32), target, info
+            print(f"  ⚠ {info.get('warning', 'OCIO transform unavailable')}")
+            info["fallback_from"] = target.key
+            target = cm.resolve("Linear")
+            info["target"] = target.key
+
+        # Hand-rolled path — linear Rec.709, or sRGB left display-referred.
+        if target.key == "sRGB":
+            if source == cm.SCENE_LINEAR:
+                arr = self._linear_to_srgb(arr)
+        elif source == cm.SRGB_ENCODED:
+            arr = self._srgb_to_linear(arr)
+        return np.ascontiguousarray(arr, dtype=np.float32), target, info
+
+    def _write_color_header(self, header, target, source, info) -> bool:
+        """Add colour attributes to a header that carries a beauty layer.
+
+        Chromaticities go in as a zeroed placeholder here and get their real
+        values patched in after the file is closed — see
+        color_management.patch_chromaticities for why. Returns whether that
+        patch still needs to run.
+        """
+        cm = _cm()
+        for key, value in cm.header_attributes(target, source, info).items():
+            header[key] = value
+        placeholder = cm.chromaticities_placeholder()
+        if placeholder is None:
+            return False
+        header['chromaticities'] = placeholder
+        return True
 
     # ------------------------------------------------------------------
     # Bracket fusion
@@ -1905,9 +2061,14 @@ class EXRExporter:
     
     @staticmethod
     def _linear_to_srgb(img: np.ndarray) -> np.ndarray:
-        """Convert linear to sRGB color space"""
-        return np.where(
-            img <= 0.0031308,
-            img * 12.92,
-            1.055 * np.power(img, 1/2.4) - 0.055
-        )
+        """Convert linear to sRGB, preserving out-of-range values.
+
+        The exact inverse of _srgb_to_linear, odd-extended below 0 the same
+        way and for the same reason: np.where evaluates both branches, so a
+        negative fed straight into np.power raises a NaN in the discarded slot.
+        Transform the magnitude and re-apply the sign.
+        """
+        mag = np.abs(img)
+        enc = np.where(mag <= 0.0031308, mag * 12.92,
+                       1.055 * np.power(mag, 1 / 2.4) - 0.055)
+        return np.sign(img) * enc

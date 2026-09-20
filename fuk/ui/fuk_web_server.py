@@ -3429,8 +3429,11 @@ class ExportEXRRequest(BaseModel):
     # EXR settings
     bit_depth: int = 32  # 16 or 32
     compression: str = "ZIP"
-    color_space: str = "Linear"  # 'Linear' or 'sRGB'
-    
+    # Output colour space. 'Linear' and 'sRGB' are the original values and keep
+    # working; the rest come from core.color_management.TARGETS and need OCIO.
+    # Widened rather than renamed so saved project state still loads.
+    color_space: str = "Linear"
+
     # Export mode
     multi_layer: bool = True  # Single multi-layer EXR
     single_files: bool = False  # Also export individual EXRs
@@ -3467,6 +3470,10 @@ class EXRSequenceExportRequest(BaseModel):
     filename_pattern: Optional[str] = None
     bit_depth: int = 32
     compression: str = "ZIP"
+    # Same values and same default as the still path. This field did not exist
+    # before — the sequence path always exported linear — so the default has to
+    # stay 'Linear' or every existing sequence export silently changes.
+    color_space: str = "Linear"
     start_frame: int = 1001
     model_type: str = "auto"
     bracketed_latent: bool = False
@@ -3594,6 +3601,7 @@ async def export_to_exr(request: ExportEXRRequest):
                         model_type="auto",
                         bit_depth=request.bit_depth,
                         compression=request.compression,
+                        color_space=request.color_space,
                         bracketed=request.bracketed_latent,
                         noise_bracketed=request.noise_bracketed_latent,
                         **bracket_kwargs,
@@ -3608,7 +3616,7 @@ async def export_to_exr(request: ExportEXRRequest):
                         output_path=output_path,
                         bit_depth=request.bit_depth,
                         compression=request.compression,
-                        linear=(request.color_space == "Linear"),
+                        color_space=request.color_space,
                     )
                     result["is_true_latent"] = False
             else:
@@ -3621,7 +3629,7 @@ async def export_to_exr(request: ExportEXRRequest):
                     output_path=output_path,
                     bit_depth=request.bit_depth,
                     compression=request.compression,
-                    linear=(request.color_space == "Linear"),
+                    color_space=request.color_space,
                 )
                 result["is_true_latent"] = False
             
@@ -3643,7 +3651,7 @@ async def export_to_exr(request: ExportEXRRequest):
                 output_dir=singles_dir,
                 bit_depth=request.bit_depth,
                 compression=request.compression,
-                linear=(request.color_space == "Linear"),
+                color_space=request.color_space,
                 filename_prefix=base_filename + "_" if custom_export else "",
             )
             
@@ -3660,7 +3668,16 @@ async def export_to_exr(request: ExportEXRRequest):
         results["saved_path"] = str(export_dir / f"{base_filename}.exr") if request.multi_layer else str(export_dir)
         results["custom_export"] = custom_export
         results["used_latent"] = results.get("multi_layer", {}).get("is_true_latent", False)
-        
+
+        # What the transform actually did, including any fallback — a
+        # wrong-looking EXR three weeks later needs to be traceable to the
+        # config that produced it.
+        color_result = results.get("multi_layer", {}).get("color") or {}
+        results["color"] = color_result
+        if color_result.get("warning"):
+            results["warning"] = color_result["warning"]
+            log.warning("Export", color_result["warning"])
+
         # Save metadata (only in project cache)
         if not custom_export:
             save_generation_metadata(
@@ -3675,6 +3692,7 @@ async def export_to_exr(request: ExportEXRRequest):
                     "bit_depth": request.bit_depth,
                     "compression": request.compression,
                     "color_space": request.color_space,
+                    "color": color_result,
                     "filename": base_filename,
                     "used_latent": results["used_latent"],
                 },
@@ -3812,6 +3830,7 @@ async def export_exr_sequence(request: EXRSequenceExportRequest):
             filename_pattern=filename_pattern,
             bit_depth=request.bit_depth,
             compression=request.compression,
+            color_space=request.color_space,
             start_frame=request.start_frame,
             model_type=request.model_type,
             bracketed=request.bracketed_latent,
@@ -3820,7 +3839,11 @@ async def export_exr_sequence(request: EXRSequenceExportRequest):
         )
         
         log.success("SeqExport", f"Exported {result['frame_count']} frames (LATENT-ONLY)")
-        
+
+        color_result = result.get("color") or {}
+        if color_result.get("warning"):
+            log.warning("SeqExport", color_result["warning"])
+
         return {
             "success": True,
             "output_dir": str(export_dir),
@@ -3832,6 +3855,8 @@ async def export_exr_sequence(request: EXRSequenceExportRequest):
             "layers_included": result.get("layers_included"),
             "custom_export": custom_export,
             "used_latent": True,
+            "color": color_result,
+            "warning": color_result.get("warning"),
         }
         
     except Exception as e:
@@ -3849,7 +3874,15 @@ async def get_export_capabilities():
         has_openexr = True
     except ImportError:
         has_openexr = False
-    
+
+    # Colour spaces are probed against the loaded OCIO config rather than
+    # listed statically — an arbitrary facility config may not define ACEScg
+    # under any name we know, and a target that cannot be delivered should
+    # never appear in the dropdown.
+    from core.color_management import available_targets, status as ocio_status
+    color_spaces = available_targets()
+    ocio = ocio_status()
+
     return {
         "exr": {
             "available": has_openexr,
@@ -3862,7 +3895,8 @@ async def get_export_capabilities():
                 {"value": "DWAA", "name": "DWAA (Lossy, Small)"},
                 {"value": "NONE", "name": "None (Uncompressed)"},
             ],
-            "color_spaces": ["Linear", "sRGB"],
+            "color_spaces": color_spaces,
+            "ocio": ocio,
             "missing_dependency": None if has_openexr else "pip install OpenEXR --break-system-packages",
         },
         "png": {

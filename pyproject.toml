@@ -99,6 +99,15 @@ dev = [
     "ruff>=0.14.0",
 ]
 
+# OCIO-backed output colour management for EXR export (ACEScg, ACES2065-1,
+# Linear Rec.2020). Optional in the same way OpenEXR is: without it the export
+# path falls back to the hand-rolled linear Rec.709 / sRGB transforms and the
+# capabilities endpoint reports ocio.available = false.
+# v2.x required — the ocio:// built-in config URI scheme does not exist before it.
+color = [
+    "opencolorio>=2.2.0",
+]
+
 # Depth Anything V3 specific dependencies
 # Install with: pip install -e ".[depth]"
 depth = [

@@ -779,10 +779,52 @@
                     <li><strong>Compression</strong> — ZIP, PIZ, RLE, and others; PIZ is efficient for noisy data, ZIP for smooth gradients</li>
                 </ul>
 
+                <h3>Color Management (ACES)</h3>
+                <p>Output color management is backed by <a href="https://opencolorio.org/" target="_blank">OpenColorIO</a>. The beauty pass can be written in any of the targets below; every export writes the matching <code>chromaticities</code> attribute into the EXR header, so Nuke auto-interprets the file without an artist setting a read node's colorspace by hand.</p>
+
+                <table class="wiki-table">
+                    <thead>
+                        <tr><th>Target</th><th>Primaries</th><th>Use</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td><code>Linear</code> <em>(default)</em></td><td>Rec.709</td><td>Scene-linear Rec.709. The historical FUK output — unchanged, byte for byte</td></tr>
+                        <tr><td><code>ACEScg</code></td><td>AP1</td><td>The ACES working space. What most ACES pipelines composite in</td></tr>
+                        <tr><td><code>ACES2065-1</code></td><td>AP0</td><td>ACES interchange / archival</td></tr>
+                        <tr><td><code>Linear Rec.2020</code></td><td>Rec.2020</td><td>Wide-gamut delivery pipelines outside ACES</td></tr>
+                        <tr><td><code>sRGB</code></td><td>Rec.709</td><td>Display-referred passthrough; no transform applied</td></tr>
+                    </tbody>
+                </table>
+
+                <h4>It uses your config, not a baked transform</h4>
+                <p>This is the part that matters in a facility. FUK does not ship a fixed ACES transform — it resolves an OCIO config in this order, first hit wins:</p>
+                <ol>
+                    <li>The <code>$OCIO</code> environment variable — your facility config, so FUK output lands in whatever color pipeline the seat already runs</li>
+                    <li><code>color.ocio_config_path</code> in <code>defaults.json</code> — explicit override</li>
+                    <li><code>ocio://studio-config-latest</code> — the OCIO v2 built-in, so it works out of the box with nothing to install or version</li>
+                </ol>
+                <p>Color space names differ between config generations — the same space is <code>sRGB - Texture</code> in an ACES 1.3 config and <code>sRGB Encoded Rec.709 (sRGB)</code> in the current studio config — so targets are resolved by name aliases, then by OCIO roles, and failing both, bridged from the built-in config through the <code>aces_interchange</code> role. Verified identical output across <code>ocio://default</code>, the CG config, the ACES 1.3 studio config, and a config with the source space deliberately renamed.</p>
+                <p>The Export panel shows which config is actually in play. A target your config cannot resolve never appears in the dropdown, so there is no way to request an export the seat can't deliver.</p>
+
+                <h4>What the transform assumes</h4>
+                <p>The VAE was trained on sRGB-encoded imagery, so that is treated as the source encoding. This is an assumption, not a measurement — but it is the right one for web-scraped training data and there is no better one available. It is applied exactly once: the latent decode path already linearizes during bracket fusion, so those exports convert gamut only, while the image-file path applies the transfer function and the gamut matrix together.</p>
+
+                <h4>What it deliberately does not do</h4>
+                <ul>
+                    <li><strong>No inverse tone mapping.</strong> ACEScg output is not HDR output. Nothing here invents highlights the latent never contained — synthesizing them would be a filter dressed as color science, and a compositor will regrade it anyway. Range and color space are separate concerns; range is what the <a href="#export-panel">bracketed latent</a> options address</li>
+                    <li><strong>No display encodings.</strong> No PQ, no HLG, no Rec.2100. EXR output is scene-linear; display transforms belong to the downstream app</li>
+                    <li><strong>No clamping.</strong> The decode path preserves values below 0 and above 1, and nothing in the color transform clips them — they reach the file intact at both 16- and 32-bit</li>
+                    <li><strong>AOVs are never touched.</strong> Depth, normals and Cryptomatte carry measurements and IDs, not color. They come out bit-identical whichever target you pick, and Cryptomatte stays 32-bit float even when beauty is written at 16-bit, because half-precision corrupts the hash bit patterns</li>
+                    <li><strong>Not an ACES container.</strong> ACES2065-1 is offered as a color space, not as ST 2065-4 container compliance — that would force PIZ compression and a fixed attribute set, removing choices the panel exposes</li>
+                </ul>
+
+                <div class="wiki-note">
+                    <p><strong>OpenColorIO is optional.</strong> Without it, <code>Linear</code> and <code>sRGB</code> still work exactly as before — they use built-in transfer functions and need no config. The wide-gamut targets simply don't appear. If a saved project asks for one anyway, the export falls back to linear Rec.709, writes Rec.709 chromaticities so the header still describes the actual pixels, and returns a warning rather than failing. Install with <code>pip install opencolorio</code>.</p>
+                </div>
+
                 <h3>Compatible Applications</h3>
                 <ul>
-                    <li>Nuke (full Cryptomatte support via the CryptomatteNode)</li>
-                    <li>Fusion / DaVinci Resolve (Cryptomatte operator)</li>
+                    <li>Nuke (full Cryptomatte support via the CryptomatteNode) — auto-interprets the color space from the chromaticities attribute</li>
+                    <li>Fusion / DaVinci Resolve (Cryptomatte operator) — Resolve does not read chromaticities reliably; set the clip's input color space from the <code>fuk/colorSpace</code> header attribute if it lands wrong</li>
                     <li>After Effects (with <a href="https://www.fnordware.com/ProEXR/" target="_blank">ProEXR</a> for multi-layer access)</li>
                     <li>Blender Compositor (native multi-layer EXR and Cryptomatte)</li>
                     <li>Houdini COPs</li>
@@ -1447,8 +1489,19 @@
                 <ul>
                     <li><strong>Bit Depth</strong> — 8, 16, or 32-bit per channel; 32-bit recommended for depth and normals passes to preserve floating-point precision</li>
                     <li><strong>Compression</strong> — ZIP (good for smooth gradients), PIZ (efficient for noisy/grainy content), RLE (fast, lower compression ratio)</li>
-                    <li><strong>Color Space</strong> — Linear, sRGB, or ACEScg; use Linear for technical passes, match your project's color management for the beauty</li>
+                    <li><strong>Color</strong> — the output color space for the <em>beauty</em> pass. AOVs are never transformed, whatever this is set to</li>
                 </ul>
+
+                <h4>Color space</h4>
+                <p>The dropdown is populated from the OCIO config this machine resolved, not from a fixed list — so a target your config cannot deliver never appears as an option. See <a href="#exr-export">EXR Export → Color Management</a> for what each target is and how the config is resolved.</p>
+                <ul>
+                    <li><strong>Linear</strong> is the default and stays the default. It is scene-linear Rec.709 and is pixel-identical to what FUK has always written; existing projects do not change color space when they are re-exported. It now also carries a <code>chromaticities</code> header so Nuke interprets it without being told</li>
+                    <li><strong>ACEScg</strong> is the pick for an ACES pipeline. Select it once and both still and sequence exports follow — the setting is sent with both, so a still and its sequence from the same generation cannot silently end up in different spaces</li>
+                    <li><strong>sRGB</strong> writes display-referred values into the EXR with no transform. Rarely what you want in a comp, but it is there for round-tripping</li>
+                </ul>
+                <p>Below the dropdown is a status line naming the OCIO version, where the config came from (<code>env</code>, <code>settings</code> or <code>builtin</code>) and its path. It is worth a glance before a delivery: it is how you confirm FUK picked up the facility config and did not quietly fall back to the built-in one. If OpenColorIO is not installed, the line says so and only Linear and sRGB are offered.</p>
+                <p>Hovering the dropdown explains the source assumption: output is treated as sRGB-encoded because that is what the model was trained on.</p>
+                <p>If a project was saved with a target this machine can no longer deliver — a config changed, or OpenColorIO was removed — the dropdown keeps showing it, marked unavailable, and the export falls back to Linear with a warning in the result rather than failing or silently substituting.</p>
 
                 <h3>Channels Card</h3>
                 <p>A visual guide showing which input layer maps to which EXR channel group — useful for verifying the layer mapping before committing to a full export run.</p>

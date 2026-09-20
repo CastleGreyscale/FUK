@@ -41,6 +41,14 @@ const DEFAULT_SETTINGS = {
   sequencePattern: '{name}.{frame:04d}',
 };
 
+// Shown only if /api/export/capabilities cannot be reached. These two are the
+// hand-rolled targets, so they are always available — anything wide-gamut needs
+// OCIO and has to come from the probe.
+const FALLBACK_COLOR_SPACES = [
+  { value: 'Linear', name: 'Linear Rec.709 (default)' },
+  { value: 'sRGB', name: 'sRGB (display-referred, no transform)' },
+];
+
 // Parse a comma/space separated bracket list into numbers.
 // Returns null for blank or unparseable input so the backend applies its own
 // default rather than receiving a half-parsed list.
@@ -97,7 +105,24 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
   const [exportResult, setExportResult] = useState(null);
   const [localError, setLocalError] = useState(null);  // For validation errors only
 
-  
+  // Export capabilities, fetched once. The colour space list is probed against
+  // the loaded OCIO config on the backend — a target the seat's config cannot
+  // resolve never reaches this dropdown.
+  const [capabilities, setCapabilities] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${API_URL}/api/export/capabilities`)
+      .then((r) => r.json())
+      .then((data) => { if (!cancelled) setCapabilities(data); })
+      .catch((err) => console.warn('[ExportTab] capabilities unavailable:', err));
+    return () => { cancelled = true; };
+  }, []);
+
+  const colorSpaces = capabilities?.exr?.color_spaces || FALLBACK_COLOR_SPACES;
+  const ocio = capabilities?.exr?.ocio;
+
+
   // Generation state (replaces local processing/timer)
 const {
     generating: exporting,
@@ -296,6 +321,9 @@ const {
           aov_layers: aovLayers,
           bit_depth: settings.exrBitDepth,
           compression: settings.exrCompression,
+          // Sent for the sequence too, or the sequence and the still of one
+          // generation land in different colour spaces without saying so.
+          color_space: settings.exrColorSpace,
           filename: settings.exportFilename,
           export_path: settings.exportPath || null,
           start_frame: settings.sequenceStartFrame,
@@ -663,11 +691,41 @@ const {
                   value={settings.exrColorSpace}
                   onChange={(e) => updateSettings({ exrColorSpace: e.target.value })}
                   disabled={exporting}
+                  title={
+                    'Output color space for the beauty pass. AOVs (depth, normals, '
+                    + 'cryptomatte) are never transformed.\n\n'
+                    + 'Output is treated as sRGB-encoded because that is what the '
+                    + 'model was trained on. That is an assumption, not a '
+                    + 'measurement — but it is the right one for web-scraped '
+                    + 'training data and there is no better one available.'
+                  }
                 >
-                  <option value="Linear">Linear</option>
-                  <option value="sRGB">sRGB</option>
+                  {/* A saved project can name a target this seat can no longer
+                      deliver (config changed, OCIO uninstalled). Keep it
+                      selected and say so rather than showing a blank select —
+                      the backend falls back to linear Rec.709 either way. */}
+                  {!colorSpaces.some((cs) => cs.value === settings.exrColorSpace) && (
+                    <option value={settings.exrColorSpace}>
+                      {settings.exrColorSpace} (unavailable — exports as Linear)
+                    </option>
+                  )}
+                  {colorSpaces.map((cs) => (
+                    <option key={cs.value} value={cs.value}>{cs.name || cs.value}</option>
+                  ))}
                 </select>
               </div>
+
+              {/* Which config is in play. An artist needs to see that FUK
+                  picked up the facility config and did not silently fall back. */}
+              {ocio && (
+                <p className="fuk-help-text fuk-help-text--sm">
+                  {ocio.available
+                    ? `OCIO ${ocio.version} · ${ocio.config_source} config · ${ocio.config_path}`
+                    : `OpenColorIO unavailable${ocio.error ? ` (${ocio.error})` : ''} — `
+                      + 'only Linear Rec.709 and sRGB are offered. Install with '
+                      + 'pip install opencolorio'}
+                </p>
+              )}
 
               <label className="fuk-checkbox-group" style={{alignItems: 'flex-start'}}>
                   <input
