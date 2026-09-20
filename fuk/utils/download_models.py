@@ -10,6 +10,7 @@ Sets DIFFSYNTH_MODEL_BASE_PATH from defaults.json to control download location.
 import argparse
 import json
 import os
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -244,23 +245,34 @@ def download_seedvr2(models_root: str):
 # ---------------------------------------------------------------------------
 
 def ltx2_lora_repo(filename: str) -> str | None:
-    """Upstream repo for an LTX-2 function LoRA, derived from its filename.
+    """Upstream repo for an LTX function LoRA, derived from its filename.
 
     Lightricks publishes one repo per LoRA and names the file after it, so the
-    mapping is mechanical: camera moves live in LTX-2-19b-LoRA-Camera-Control-*,
-    in-context LoRAs in LTX-2-19b-IC-LoRA-*. Entries normally carry an explicit
-    "repo"; this covers hand-added ones that follow upstream naming.
+    mapping is mechanical: camera moves live in <series>-LoRA-Camera-Control-*,
+    in-context LoRAs in <series>-IC-LoRA-*, where the series prefix is the
+    model generation the file is named for — ltx-2-19b- or ltx-2.5-22b-.
+    Entries normally carry an explicit "repo"; this covers hand-added ones that
+    follow upstream naming.
     """
-    stem = filename.replace("ltx-2-19b-", "").replace(".safetensors", "")
+    for prefix, series in (("ltx-2.5-22b-", "LTX-2.5-22b"),
+                           ("ltx-2-19b-", "LTX-2-19b")):
+        if filename.startswith(prefix):
+            stem = filename[len(prefix):].replace(".safetensors", "")
+            break
+    else:
+        return None
+
     titled = lambda s: "-".join(p.capitalize() for p in s.split("-"))
     if stem.startswith("lora-camera-control-"):
-        return ("Lightricks/LTX-2-19b-LoRA-Camera-Control-"
+        return (f"Lightricks/{series}-LoRA-Camera-Control-"
                 + titled(stem[len("lora-camera-control-"):]))
     if stem.startswith("ic-lora-"):
-        # ic-lora-union-control-ref0.5 → IC-LoRA-Union-Control: the trailing
-        # variant tag names the file, not the repo.
-        return ("Lightricks/LTX-2-19b-IC-LoRA-"
-                + titled(stem[len("ic-lora-"):].split("-ref")[0]))
+        # ic-lora-union-control-ref0.5 → IC-LoRA-Union-Control, and
+        # ic-lora-pixel-spatial-upscaler-x2-1.0 → IC-LoRA-Pixel-Spatial-Upscaler:
+        # the trailing variant or version tag names the file, not the repo.
+        tail = stem[len("ic-lora-"):].split("-ref")[0]
+        tail = re.sub(r"-x\d+(-[\d.]+)?$", "", tail)
+        return f"Lightricks/{series}-IC-LoRA-" + titled(tail)
     return None
 
 
@@ -335,9 +347,9 @@ def download_ltx2_loras(loras_config: dict):
         return None
 
     print(f"\n\n{'#'*80}")
-    print(f"# Processing: LTX-2 function LoRAs ({len(entries)})")
+    print(f"# Processing: LTX function LoRAs ({len(entries)})")
     print(f"{'#'*80}")
-    print("# One 35GB base transformer, one small LoRA per camera move or control mode.")
+    print("# One 42GB base DiT, one small LoRA per control mode.")
 
     fetched, failed = 0, 0
     for entry in entries:

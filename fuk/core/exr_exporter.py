@@ -274,9 +274,11 @@ class EXRExporter:
     #                  un-normalises the latent, so the method is named
     #                  explicitly rather than probed for.
     #   component      substring that picks the decoder's weights out of the
-    #                  models.json component list.  LTX-2 ships its encoder and
-    #                  decoder as separate files, and both audio-video families
-    #                  ship an audio VAE that must not be picked up here.
+    #                  models.json component list.  Both audio-video families
+    #                  ship an audio VAE that must not be picked up here, hence
+    #                  matching on "video" rather than bare "vae".  LTX-2.5
+    #                  packs encoder and decoder into one checkpoint — see
+    #                  _load_vae_only for why that needs care on the way out.
     #   value_range    MiniMax-H3's VAE reverts an ImageNet normalisation and
     #                  clamps, so it hands back [0, 1]; every other family
     #                  decodes to [-1, 1].
@@ -288,7 +290,7 @@ class EXRExporter:
         "minimax_h3": {"attr": "video_vae", "method": "decode_video",
                        "component": "video_vae", "value_range": (0.0, 1.0)},
         "ltx2":       {"attr": "video_vae_decoder", "method": "decode",
-                       "component": "video_vae_decoder", "value_range": (-1.0, 1.0)},
+                       "component": "video-vae", "value_range": (-1.0, 1.0)},
     }
 
     # Latent channel count → pipeline family, for latents captured before the
@@ -440,7 +442,11 @@ class EXRExporter:
         if not pool.model:
             raise RuntimeError(f"VAE failed to load from {mid}/{comp['pattern']}")
 
-        vae = pool.model[0]
+        # One checkpoint can register more than one model: LTX-2.5's video VAE
+        # file yields an encoder and a decoder, and the encoder is registered
+        # first, so pool.model[0] is the half that cannot decode. Take the one
+        # that actually carries the family's decode entry point.
+        vae = next((m for m in pool.model if hasattr(m, method_name)), pool.model[0])
         print(f"  📄 VAE loaded to CPU ({type(vae).__name__}, {dtype})")
         return _wrap(vae)
 
@@ -1532,7 +1538,7 @@ class EXRExporter:
         """
         Decode a .latent.pt file directly to an EXR using the DiffSynth VAE.
 
-        Uses _load_vae_only — no musubi-tuner, no full pipeline load.
+        Uses _load_vae_only — the decoder on its own, no full pipeline load.
 
         Decode modes:
           - default: single clean decode

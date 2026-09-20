@@ -1003,6 +1003,13 @@ class DiffSynthBackend:
         stage2 = self._build_extra_config(entry, "stage2_lora")
         if stage2:
             kwargs["stage2_lora_config"] = stage2
+            # DiffSynth's from_pretrained still defaults this to 0.8, which was
+            # right for LTX-2. LTX-2.5 wants 1.0 — upstream's own examples pass
+            # it explicitly, and below that the dev two-stage output dithers.
+            # Registry-driven so the next version can move it again.
+            strength = entry["stage2_lora"].get("strength")
+            if strength is not None:
+                kwargs["stage2_lora_strength"] = float(strength)
 
         import inspect as _inspect
         valid_params = _inspect.signature(PipelineCls.from_pretrained).parameters

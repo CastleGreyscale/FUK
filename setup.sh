@@ -168,7 +168,7 @@ if clone_pinned DiffSynth-Studio https://github.com/modelscope/DiffSynth-Studio.
             echo "    ✗ FAILED to apply $(basename "$patch")"
             echo "      DiffSynth is unpatched. Expect VACE OOM at 720p, ring artifacts"
             echo "      on reference-image renders, and — if 0003 was the one that failed —"
-            echo "      a backend that will not start at all on transformers < Gemma4Unified."
+            echo "      an LTX-2.5 device mismatch on the first generation."
             echo "      See fuk/vendor/patches/README.md"
             exit 1
         fi

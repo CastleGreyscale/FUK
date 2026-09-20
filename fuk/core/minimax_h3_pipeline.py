@@ -16,6 +16,11 @@ different conditioning and ship their own processors:
                      dicts that the prompt refers to as <Subject 1>, <Video 1>,
                      <Audio 1> and so on)
 
+  minimax_h3_control FL2VA plus the PAI Fun ControlNet-Union weights: a control
+                     video (`control_video`, at `control_scale`) in canny /
+                     depth / hed / mlsd / pose form drives the structure, and
+                     keyframes still apply on top.
+
 Both share the text encoder and the two VAEs, so adding the second model costs
 only its DiT.
 
@@ -26,6 +31,11 @@ calibrated exclusion list — so the quality is nothing like the online
 quantization measured in defaults_vram.json. FUK's own quant_* VRAM presets do
 not touch these files, and must not: the pattern heuristic in
 _should_quantize deliberately does not match them.
+
+The ControlNet entry is the exception to the pruning: it registers the unpruned
+NF4 DiT, because the pruned checkpoints tabulate the time embedding down to 8
+dimensions while the ControlNet's blocks carry the full 2688-dim adaLN
+projections. Pairing the two is a shape error, not a quality trade.
 """
 
 from __future__ import annotations
@@ -69,6 +79,8 @@ class MiniMaxH3PipelineRunner(PipelineRunner):
         reference_image: Optional[Any] = None,
         reference_video: Optional[Path] = None,
         reference_audio: Optional[Path] = None,
+        # ControlNet-Union: control video
+        control_scale: Optional[float] = None,
         # Progress
         progress_callback=None,
         # VRAM
@@ -110,6 +122,8 @@ class MiniMaxH3PipelineRunner(PipelineRunner):
         # space, and an empty string disables the negative branch entirely.
         negative_prompt = (negative_prompt if negative_prompt is not None
                            else defaults.get("negative_prompt", " ")) or " "
+        c_scale = (control_scale if control_scale is not None
+                   else defaults.get("control_scale", 1.0))
 
         width, height, num_frames = self.snap_to_grid(width, height, num_frames, entry)
         audio_sample_rate = entry.get("audio_sample_rate", 32000)
@@ -129,6 +143,10 @@ class MiniMaxH3PipelineRunner(PipelineRunner):
             "reference_video": str(reference_video) if reference_video else None,
             "reference_audio": str(reference_audio) if reference_audio else None,
         }
+        if "control_video" in supports:
+            control_src = kwargs.get("control_path")
+            log_params["control_video"] = str(control_src) if control_src else None
+            log_params["control_scale"] = c_scale if control_src else None
         self.log_generation_header("MINIMAX-H3 GENERATION", model_type, entry, log_params)
 
         pipe = self.get_pipeline(model_type, vram_preset=vram_preset)
@@ -165,6 +183,16 @@ class MiniMaxH3PipelineRunner(PipelineRunner):
                 width, height, num_frames, fps, pipe)
             if references:
                 pipe_kwargs["references"] = references
+
+        if "control_video" in supports:
+            # The tab's video slot is the control signal here, the same field
+            # Ref2VA reads as a reference clip. Without it the ControlNet is
+            # loaded but idle, which still generates — just pointlessly.
+            frames = self._build_control_video(
+                kwargs.get("control_path"), width, height, num_frames)
+            if frames:
+                pipe_kwargs["control_video"] = frames
+                pipe_kwargs["control_scale"] = c_scale
 
         pipe_kwargs.update(pipe_defaults)
 
@@ -215,6 +243,8 @@ class MiniMaxH3PipelineRunner(PipelineRunner):
                     "size": f"{width}x{height}", "frames": num_frames, "fps": fps,
                     "cfg_scale": effective_cfg, "flow_shift": shift,
                     "audio_flow_shift": a_shift,
+                    **({"control_scale": c_scale}
+                       if "control_video" in pipe_kwargs else {}),
                 },
                 has_audio=audio is not None,
                 audio_wav=wav_path,
@@ -254,6 +284,46 @@ class MiniMaxH3PipelineRunner(PipelineRunner):
             _log(self.log_prefix,
                  f"  Keyframes → indices {indices} at {width}x{height}")
         return frames, indices
+
+    def _build_control_video(self, source, width, height, num_frames):
+        """ControlNet-Union conditioning: the control clip as PIL frames.
+
+        The pipeline resizes and pads with the last frame (or truncates) to
+        num_frames itself, so handing it what the file has is enough. What it
+        does not do is resample time: the frames are read as they come, so a
+        30fps source plays back fast against the model's fixed 24.
+        """
+        if not source:
+            return None
+
+        from diffsynth.utils.data import VideoData
+
+        p = Path(str(source))
+        try:
+            if p.is_dir():
+                # A folder of frames must go through `image_folder` — the
+                # positional arg would try to open the directory as a video.
+                vd = VideoData(image_folder=str(p), height=height, width=width)
+            elif p.exists():
+                vd = VideoData(str(p), height=height, width=width)
+            else:
+                _log(self.log_prefix, f"Control video not found: {source}", "warning")
+                return None
+        except Exception as e:
+            _log(self.log_prefix, f"Could not read control video {source}: {e}", "warning")
+            return None
+
+        frames = [vd[i] for i in range(min(len(vd), num_frames))]
+        if not frames:
+            _log(self.log_prefix, f"Control video {source} held no frames", "warning")
+            return None
+        if len(frames) < num_frames:
+            _log(self.log_prefix,
+                 f"  Control video is {len(frames)} frames, short of {num_frames} — "
+                 f"the last frame will be held for the remainder", "warning")
+        _log(self.log_prefix,
+             f"  Control video → {len(frames)} frames at {width}x{height}")
+        return frames
 
     def _build_references(self, reference_image, reference_video, reference_audio,
                           width, height, num_frames, fps, pipe):

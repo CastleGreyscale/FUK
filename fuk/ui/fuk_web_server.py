@@ -687,6 +687,9 @@ class VideoGenerationRequest(BaseModel):
     # schedule is derived from sequence length — so the UI hides the control.
     sigma_shift: Optional[float] = None
     audio_flow_shift: Optional[float] = None  # MiniMax-H3 audio branch shift (default 3.0)
+    # MiniMax-H3 Fun ControlNet-Union strength. None = the family default (1.0);
+    # no UI control yet, API-only, the same footing as TeaCache below.
+    control_scale: Optional[float] = None
     switch_dit_boundary: Optional[float] = None  # Dual-DiT high→low noise switch point (default 0.875)
     denoising_strength: Optional[float] = None  # Edit strength when input image/video present
     sliding_window_size: Optional[int] = None  # Sliding window size for tiled inference
@@ -1437,6 +1440,7 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
             vram_preset=request.vram_preset,
             sigma_shift=request.sigma_shift,
             audio_flow_shift=request.audio_flow_shift,
+            control_scale=request.control_scale,
             switch_dit_boundary=request.switch_dit_boundary,
             denoising_strength=request.denoising_strength,
             sliding_window_size=request.sliding_window_size,
@@ -1529,6 +1533,7 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
             control_path=request.control_path,
             sigma_shift=eff_shift,
             audio_flow_shift=eff.get("audio_flow_shift"),
+            control_scale=eff.get("control_scale"),
             fps=eff.get("fps"),
             switch_dit_boundary=request.switch_dit_boundary,
             denoising_strength=request.denoising_strength,

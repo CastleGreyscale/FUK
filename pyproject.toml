@@ -16,7 +16,12 @@ dependencies = [
     "sageattention>=1.0.6",
 
     # Hugging Face Ecosystem
-    "transformers>=4.56.0",
+    # Floor: LTX-2.5's Gemma-4 text encoder needs Gemma4Unified, which first
+    # ships in transformers 5.10.0 — below it the ltx2 model cannot build, and
+    # before the patch was dropped the whole backend failed to import.
+    # Ceiling: 5.13 starts requiring safetensors>=0.8 and 5.16 tokenizers>=0.23.1.
+    # Staying under it keeps the upgrade to transformers + huggingface_hub alone.
+    "transformers>=5.10,<5.13",
     "diffusers>=0.32.0",
     "accelerate>=1.6.0",
     "safetensors>=0.4.5",

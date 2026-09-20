@@ -1,0 +1,45 @@
+diff --git a/diffsynth/core/vram/layers.py b/diffsynth/core/vram/layers.py
+index 716d1d0..8f471da 100644
+--- a/diffsynth/core/vram/layers.py
++++ b/diffsynth/core/vram/layers.py
+@@ -264,6 +264,40 @@ class AutoWrappedNonRecurseModule(AutoWrappedModule):
+     
+     def cast_to(self, module, dtype, device):
+         # Parameter casting is implemented in the model architecture.
++        #
++        # FUK patch: that holds for DiffSynth's own blocks. Every class wrapped
++        # this way — wan_video_dit.DiTBlock, ltx2_dit.BasicAVTransformerBlock,
++        # ace_step_dit.AceStepDiTLayer and the rest — owns nothing but small
++        # modulation / scale-shift tables and casts them itself inside forward.
++        #
++        # The LTX-2.5 text-encoder map is the exception: it wraps a foreign
++        # class, transformers' Gemma4UnifiedTextDecoderLayer, whose forward ends
++        # with `hidden_states *= self.layer_scalar`. Gemma4 registers that as a
++        # buffer, and ltx25_text_encoder.py converts it to a frozen Parameter so
++        # that disk-offload reload (which restores named_parameters() only) can
++        # fetch it. Nothing else moves it: the wrapped children cast themselves
++        # to the computation device, so the block's activations are on the GPU
++        # while its own scalar is still wherever the block was onloaded, and the
++        # multiply raises "Expected all tensors to be on the same device".
++        #
++        # Only reachable when preparing() is skipped, which on a CPU-offload
++        # preset means as soon as resident weights pass the VRAM limit.
++        #
++        # Device only, never dtype: these tensors are kilobytes per block, and
++        # some are deliberately kept above the computation precision. offload()
++        # moves them back with everything else.
++        target = torch.device(device)
++
++        def _elsewhere(t):
++            return t.device.type != target.type or (
++                target.index is not None and t.device.index != target.index)
++
++        for _, param in module.named_parameters(recurse=False):
++            if param is not None and _elsewhere(param.data):
++                param.data = param.data.to(device=target)
++        for name, buffer in module.named_buffers(recurse=False):
++            if buffer is not None and _elsewhere(buffer):
++                setattr(module, name, buffer.to(device=target))
+         return module
+     
+     def __getattr__(self, name):

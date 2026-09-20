@@ -1,31 +1,38 @@
 """
-LTX-2 Pipeline Runner for FUK
+LTX-2.5 Pipeline Runner for FUK
 
-LTX-2 is a 19B audio-video model: one denoise produces both the picture and a
+LTX-2.5 is a 22B audio-video model: one denoise produces both the picture and a
 matching soundtrack, which is why output always goes through
 write_video_audio_ltx2 rather than the plain save_video the Wan runner uses.
+
+The module, the pipeline family and the registry key all still say "ltx2". That
+is the family name DiffSynth uses for the whole line — its LTX2AudioVideoPipeline
+drives 2, 2.3 and 2.5 alike and picks the version off the DiT it was handed
+(`pipe.is_ltx25`) — and it is the task string already written into every saved
+generation. Only the weights moved from LTX-2 to 2.5; see the _ltx2_comment in
+models.json for what that cost and which dependency it needs.
 
 FUK drives it image-to-video. Text-to-video works in the underlying pipeline —
 omit `image_path` and it denoises from noise — but it is not registered as a
 FUK model, because in a VFX pipeline the first frame is nearly always something
 you already have.
 
-Function variants are LoRAs on one shared 35GB base, not separate checkpoints:
-camera moves (dolly in/out/left/right, jib up/down, static) and the two
-in-context LoRAs (Detailer, Union-Control). They are ordinary entries in
-defaults_loras.json and load through the same path as every other FUK LoRA, so
-adding a ninth camera move costs ~0.3-2.4GB instead of another full model.
+Function variants are LoRAs on one shared 42GB base rather than separate
+checkpoints. LTX-2's twelve (seven camera moves, five in-context controls) were
+19B and do not load here; upstream has reissued exactly one for 2.5 so far, the
+IC pixel spatial upscaler, and it is the only ltx2 entry left in
+defaults_loras.json.
 
-The in-context LoRAs additionally take a driving video via `control_path`,
-passed to the pipeline as `in_context_videos`:
-  - Union-Control: a depth/pose/edge video steers structure.
-  - Detailer: a low-detail video is re-rendered with more detail.
+An in-context LoRA additionally takes a driving video via `control_path`,
+passed to the pipeline as `in_context_videos` — for the current one, a
+low-resolution clip that comes back re-rendered at 2x.
 
 Three sampling modes, selected per model entry or per call:
   - one-stage (default): plain denoise at the requested size.
-  - distilled: few-step, needs the transformer_distilled weights.
+  - distilled: few-step, needs the distilled DiT weights.
   - two-stage: denoise small, then spatially upscale and refine. Needs the
-    stage2 distilled LoRA, declared as "stage2_lora" on the model entry.
+    stage2 distilled LoRA, declared as "stage2_lora" on the model entry —
+    with its "strength", which 2.5 wants at 1.0 rather than DiffSynth's 0.8.
 """
 
 from __future__ import annotations
@@ -221,7 +228,18 @@ class LTX2PipelineRunner(PipelineRunner):
             # LTX-2 emits picture and sound from one denoise, so they are muxed
             # together here rather than written as separate files.
             from diffsynth.utils.data.media_io_ltx2 import write_video_audio_ltx2
-            audio_sample_rate = entry.get("audio_sample_rate", 24000)
+            # Ask the vocoder rather than the registry: LTX-2 vocoded at 24kHz,
+            # LTX-2.5 runs a bandwidth-extension vocoder that hands back 48kHz,
+            # and the rate is a property of whichever audio VAE is loaded — not
+            # of the FUK entry. Declaring the wrong one does not resample, it
+            # just mislabels: 48kHz samples written as 24kHz play at half speed
+            # and twice the length, so the muxed clip runs long and the picture
+            # appears to freeze once the video track ends. Upstream's examples
+            # read the same attribute. The registry value is only a fallback.
+            audio_sample_rate = int(
+                getattr(getattr(pipe, "audio_vocoder", None), "output_sampling_rate", None)
+                or entry.get("audio_sample_rate", 48000)
+            )
             write_video_audio_ltx2(
                 video=video,
                 audio=audio,
