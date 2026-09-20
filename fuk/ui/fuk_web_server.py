@@ -690,6 +690,13 @@ class VideoGenerationRequest(BaseModel):
     # MiniMax-H3 Fun ControlNet-Union strength. None = the family default (1.0);
     # no UI control yet, API-only, the same footing as TeaCache below.
     control_scale: Optional[float] = None
+    # LTX-2 two-stage sampling: denoise at half linear size, upscale the latent,
+    # then refine at full size for a fixed 3 steps at CFG 1.0. None = the model
+    # entry's own default (one-stage). A quality *character* change as much as a
+    # speed one — the refine pass runs through the distilled LoRA — so it is a
+    # per-generation choice, not a default, and the mode that ran is recorded in
+    # the generation metadata.
+    use_two_stage_pipeline: Optional[bool] = None
     switch_dit_boundary: Optional[float] = None  # Dual-DiT high→low noise switch point (default 0.875)
     denoising_strength: Optional[float] = None  # Edit strength when input image/video present
     sliding_window_size: Optional[int] = None  # Sliding window size for tiled inference
@@ -1441,6 +1448,7 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
             sigma_shift=request.sigma_shift,
             audio_flow_shift=request.audio_flow_shift,
             control_scale=request.control_scale,
+            use_two_stage_pipeline=request.use_two_stage_pipeline,
             switch_dit_boundary=request.switch_dit_boundary,
             denoising_strength=request.denoising_strength,
             sliding_window_size=request.sliding_window_size,
@@ -1534,6 +1542,12 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
             sigma_shift=eff_shift,
             audio_flow_shift=eff.get("audio_flow_shift"),
             control_scale=eff.get("control_scale"),
+            # Which LTX-2 schedule actually ran ("one-stage" / "two-stage" /
+            # "distilled"). From the runner rather than the request, because
+            # the mode can also come from the model entry's pipeline_kwargs —
+            # and because a two-stage clip that reads as one-stage in history
+            # is an A/B silently compared against the wrong baseline.
+            sampling_mode=eff.get("mode"),
             fps=eff.get("fps"),
             switch_dit_boundary=request.switch_dit_boundary,
             denoising_strength=request.denoising_strength,

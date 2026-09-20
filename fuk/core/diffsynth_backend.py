@@ -621,6 +621,43 @@ class DiffSynthBackend:
         
         del self._active_user_loras[cache_key]
 
+    def invalidate_lora_stack(self, pipeline, cache_key: str, reason: str = ""):
+        """Drop every LoRA on a cached pipeline, tracked or not, and rebuild.
+
+        `_clear_user_loras` only fires when FUK believes a user LoRA is loaded,
+        and `_apply_user_loras` early-returns when the requested spec list
+        matches what it already recorded. Both are correct for LoRAs FUK itself
+        applied — and both are blind to a LoRA the *pipeline* loaded on its own
+        behalf mid-generation.
+
+        LTX-2's two-stage sampling does exactly that: at the stage-2 transition
+        it calls `pipe.load_lora(pipe.dit, pipe.stage2_lora_config)` and never
+        unloads it, because upstream builds a pipeline per script and throws it
+        away. FUK caches pipelines across generations, so the distilled refine
+        LoRA would still be sitting on the DiT for the next run — silently, at
+        full strength, under a one-stage 30-step schedule that was never meant
+        to have it. Nothing in the logs or the metadata would say so.
+
+        Clearing the bookkeeping as well as the weights is the point: without
+        the pop, the next run with the same user LoRAs would match the recorded
+        spec list and skip the reload that this clear just made necessary.
+        """
+        try:
+            pipeline.clear_lora()
+        except Exception as e:
+            _log("BACKEND", f"clear_lora() during invalidate: {e}", "warning")
+            return
+        _log("BACKEND", f"LoRA stack invalidated{f' ({reason})' if reason else ''}")
+
+        # A model-bundled LoRA is part of the model, not the request — it has to
+        # come back immediately rather than waiting for the next apply_loras.
+        model_lora_cfg = self._model_lora_config.get(cache_key)
+        if model_lora_cfg:
+            active_alpha = self._model_lora_alpha.get(cache_key, model_lora_cfg.get("alpha", 1.0))
+            self._load_model_lora(pipeline, model_lora_cfg, alpha_override=active_alpha)
+
+        self._active_user_loras.pop(cache_key, None)
+
     def override_model_lora_alpha(self, pipeline, cache_key: str, alpha: float):
         """
         Change the model-bundled LoRA alpha at runtime (e.g. EliGen strength slider).

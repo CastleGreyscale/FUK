@@ -74,6 +74,9 @@ const DEFAULT_CONSTRAINTS = {
   cfg_max: 15,
   supports_denoise: true,
   supports_lora: true,
+  // Opt-in rather than hidden_controls: two-stage sampling is an LTX-2 feature,
+  // so the families that lack it outnumber the one that has it.
+  supports_two_stage: false,
   hidden_controls: [],
 };
 
@@ -115,6 +118,7 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
     sliding_window_size: videoDefaults.sliding_window_size ?? null,
     sliding_window_stride: videoDefaults.sliding_window_stride ?? null,
     tea_cache_l1_thresh: videoDefaults.tea_cache_l1_thresh ?? null,
+    use_two_stage_pipeline: videoDefaults.use_two_stage_pipeline ?? false,
     audio_flow_shift: videoDefaults.audio_flow_shift ?? null,
     denoising_strength: videoDefaults.denoising_strength ?? 1.0,
     loras: videoDefaults.loras ?? (videoDefaults.lora ? [{ key: videoDefaults.lora, multiplier: videoDefaults.lora_multiplier ?? 1.0, bypass: videoDefaults.lora_bypass ?? false }] : []),
@@ -209,7 +213,14 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
   );
   const shiftParam = constraints.shift_param ?? null;
   const audioShiftParam = constraints.audio_shift_param ?? null;
-  const spatialMultiple = constraints.spatial_multiple ?? 16;
+  // Two-stage halves the request before running its own /32 check, so the size
+  // the user asks for has to be /64 or stage 1 gets rounded up inside the
+  // pipeline and the clip comes back a different size than the tab displayed.
+  // The runner snaps either way; matching it here keeps the number honest.
+  const twoStage = constraints.supports_two_stage && !!formData.use_two_stage_pipeline;
+  const spatialMultiple = (twoStage
+    ? constraints.spatial_multiple_two_stage ?? constraints.spatial_multiple
+    : constraints.spatial_multiple) ?? 16;
   const modelFps = constraints.fps ?? 24;
   const lattice = useMemo(() => frameLattice(constraints), [constraints]);
 
@@ -545,6 +556,11 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
       loras: constraints.supports_lora === false ? [] : effectiveLoras,
       sigma_shift: shiftParam ? formData.sigma_shift : null,
       audio_flow_shift: audioShiftParam ? formData.audio_flow_shift : null,
+      // null, not false: false would override a model entry that ships
+      // two-stage on by default in its pipeline_kwargs.
+      use_two_stage_pipeline: constraints.supports_two_stage
+        ? !!formData.use_two_stage_pipeline
+        : null,
     };
 
     // Build seed queue for batch
@@ -806,6 +822,10 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
       // Restored explicitly rather than via the `!= null` idiom above: null is
       // the meaningful "cache off" value, so a baseline run must clear it.
       if ('tea_cache_l1_thresh' in meta) updates.tea_cache_l1_thresh = meta.tea_cache_l1_thresh;
+      // The runner records which schedule ran, not the flag that asked for it,
+      // so a recalled generation restores the mode even when it came from the
+      // model entry rather than this control.
+      if ('sampling_mode' in meta) updates.use_two_stage_pipeline = meta.sampling_mode === 'two-stage';
       if (meta.seed != null) {
         updates.seed     = meta.seed;
         updates.seedMode = SEED_MODES.FIXED;
@@ -1487,6 +1507,31 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
               <p className="fuk-help-text fuk-help-text--info">
                 TeaCache on — speed/quality tradeoff is unvalidated on our shots.
                 Watch the DiT switch step for artifacts.
+              </p>
+            )}
+
+            {constraints.supports_two_stage && (
+            <div className="fuk-form-group-compact">
+              <label className="fuk-checkbox-group">
+                <input
+                  type="checkbox"
+                  className="fuk-checkbox"
+                  checked={!!formData.use_two_stage_pipeline}
+                  onChange={(e) => setFormData({...formData, use_two_stage_pipeline: e.target.checked})}
+                />
+                <div>
+                  <span className="fuk-label" title="Denoise at half width and height, upscale the latent, then refine at full size for a fixed 3 steps at CFG 1.0 through the distilled LoRA. Roughly 3x faster than one-stage at the same requested size. Not a free win: the refine pass gives the picture a different character, so A/B it against a one-stage run on the same seed before using it on a final.">
+                    Two-Stage Sampling <Info className="fuk-label-info" />
+                  </span>
+                </div>
+              </label>
+            </div>
+            )}
+            {twoStage && (
+              <p className="fuk-help-text fuk-help-text--info">
+                Output size snaps to /{spatialMultiple}; stage 1 renders at half
+                of it, then a 3-step refine at CFG 1.0 runs through the distilled
+                LoRA. Faster, but a different look — A/B on the same seed first.
               </p>
             )}
 

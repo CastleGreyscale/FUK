@@ -282,6 +282,16 @@ class LTX2PipelineRunner(PipelineRunner):
         finally:
             if cleanup_hook:
                 cleanup_hook()
+            if two_stage:
+                # Stage 2 loads the distilled refine LoRA onto the DiT itself
+                # (LTX2AudioVideoUnit_Stage2Params) and never unloads it —
+                # upstream discards the pipeline after one script, FUK caches
+                # it. Left alone it would still be merged for the next run,
+                # so the A/B this control exists for would compare two-stage
+                # against a contaminated one-stage. In `finally` because an
+                # abort partway through stage 2 leaves the same residue.
+                self.backend.invalidate_lora_stack(
+                    pipe, cache_key, reason="LTX-2 stage-2 refine LoRA")
 
     # ------------------------------------------------------------------
     # Helpers
