@@ -162,6 +162,8 @@ class LTX2PipelineRunner(PipelineRunner):
         pipe = self.get_pipeline(model_type, vram_preset=vram_preset)
         cache_key = self._cache_key(model_type, vram_preset)
         self.apply_loras(pipe, cache_key, lora, lora_multiplier, loras)
+        if two_stage:
+            self._preload_stage2_lora_to_cpu(pipe)
 
         pipe_kwargs = dict(
             prompt=prompt,
@@ -296,6 +298,50 @@ class LTX2PipelineRunner(PipelineRunner):
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _preload_stage2_lora_to_cpu(self, pipe):
+        """Park the stage-2 refine LoRA in RAM so the transition cannot OOM.
+
+        At the stage-1 → stage-2 handover DiffSynth calls
+
+            pipe.load_lora(pipe.dit, pipe.stage2_lora_config, ...,
+                           state_dict=pipe.stage2_lora_config.state_dict)
+
+        and `ModelConfig.state_dict` defaults to None — nothing upstream ever
+        fills it. So load_lora takes its `state_dict is None` branch and does
+        `load_state_dict(path, device=self.device)` with device "cuda": the
+        whole 8.9GB LoRA lands on the GPU in one allocation.
+
+        That allocation arrives at the worst possible moment. Thirty steps of
+        stage 1 have already promoted weights up to `vram_limit` (~17GB of the
+        24GB card under the "low" preset) and promotion is sticky until
+        load_models_to_device() — which only runs at the very end of __call__.
+        17GB resident + 8.9GB of LoRA does not fit, and the run dies at the
+        transition with everything stage 1 computed still in flight.
+
+        Filling `state_dict` ourselves takes the other branch. convert_state_dict
+        only re-keys tensors — it moves nothing between devices — and
+        LoRAHotLoadMixin.lora_forward does `lora_A.T.to(device=x.device)` per
+        call, so CPU-resident LoRA weights are streamed to the GPU a layer at a
+        time instead of landing as one 8.9GB block. Stage 2 is 3 steps, so the
+        repeated transfer costs seconds; the alternative is not running at all.
+
+        Loaded once per cached pipeline and left in RAM (8.9GB of 251GB), on
+        first two-stage use rather than at load, so one-stage runs never pay it.
+        """
+        cfg = getattr(pipe, "stage2_lora_config", None)
+        if cfg is None or getattr(cfg, "state_dict", None) is not None:
+            return
+
+        from diffsynth.core import load_state_dict
+
+        _t0 = time.perf_counter()
+        cfg.download_if_necessary()
+        cfg.state_dict = load_state_dict(
+            cfg.path, torch_dtype=pipe.torch_dtype, device="cpu")
+        _log(self.log_prefix,
+             f"  Stage-2 LoRA parked in RAM ({time.perf_counter() - _t0:.1f}s) — "
+             f"keeps the stage-1→2 handover off the GPU")
 
     def _load_control_video(self, path, width, height, num_frames, downsample_factor):
         """Load an in-context driving video for the IC-LoRAs.
