@@ -15,6 +15,7 @@ variant needs genuinely different generation logic.
 
 from __future__ import annotations
 
+import math
 import time
 import torch
 from pathlib import Path
@@ -137,6 +138,42 @@ class QwenPipelineRunner(PipelineRunner):
             except Exception as e:
                 _log(self.log_prefix, f"Could not read source image dimensions: {e}", "warning")
 
+        # --- In-context control: two-stage when the target exceeds the trained budget ---
+        # The context image is resized to the GENERATION size before it is encoded
+        # (qwen_image.py QwenImageUnit_ContextImageEmbedder), so its own resolution
+        # is irrelevant — the token sequence is (h//16)*(w//16) doubled by the
+        # concatenated context, driven by the output size alone. Feeding a small
+        # control map and generating large does not help; it is simply upsampled.
+        #
+        # The Control-Union LoRA was trained at --max_pixels 1048576. At 1920x1088
+        # the sequence is 2x that, and the model stops treating the context tokens
+        # as an abstraction and starts painting the skeleton into the output.
+        #
+        # So: denoise at the trained budget WITH control, then upscale and refine at
+        # the requested size WITHOUT it. By the refine pass the pose is already in
+        # the pixels, so the control has nothing left to contribute and the second
+        # pass never pays the doubled sequence.
+        budget = int(self.get_constraints(entry).get("max_pixels") or 0)
+        control_is_in_context = (
+            entry.get("parameter_map", {}).get("control_input") == "context_image"
+            and bool(control_image or context_image)
+        )
+        two_stage = bool(
+            budget and control_is_in_context and (width * height) > budget
+            and kwargs.get("control_two_stage", defaults.get("control_two_stage", True))
+        )
+        stage1_w = stage1_h = None
+        _refine_arg = kwargs.get("control_refine_denoise")
+        refine_denoise = float(_refine_arg if _refine_arg is not None
+                               else defaults.get("control_refine_denoise", 0.4))
+        if two_stage:
+            stage1_w, stage1_h = self._fit_pixel_budget(width, height, budget)
+            _log(self.log_prefix,
+                 f"In-context control over budget ({width}x{height} = "
+                 f"{width * height / 1e6:.2f}MP > {budget / 1e6:.2f}MP) — two-stage: "
+                 f"control at {stage1_w}x{stage1_h}, refine at {width}x{height} "
+                 f"(denoise {refine_denoise})")
+
         # --- Logging ---
         log_params = {
             "prompt": prompt,
@@ -235,19 +272,6 @@ class QwenPipelineRunner(PipelineRunner):
         # final one fall back to tiling rather than OOMing after a full denoise.
         decode_guard_cleanup = self.install_vae_decode_guard(pipe)
 
-        # --- Per-step hook: live preview and/or cancellation (opt-in) ---
-        # Grab the un-hooked VAE decode BEFORE latent capture wraps it, so preview
-        # decodes don't trip the "capture first decode" logic and corrupt the latent.
-        preview_cleanup = None
-        if preview_callback is not None or cancel_check is not None:
-            preview_cleanup = self._install_preview_hook(
-                pipe, preview_callback, cancel_check, num_steps,
-                original_vae_decode=pipe.vae.decode,
-            )
-
-        # --- Latent capture ---
-        latent_path, cleanup_hook = self.setup_latent_capture(pipe, output_path, save_latent, model_type)
-
         # --- Generate ---
         # Log what's actually going to the pipe
         if "negative_prompt" in pipe_kwargs:
@@ -256,7 +280,59 @@ class QwenPipelineRunner(PipelineRunner):
         else:
             _log(self.log_prefix, "  ✗ negative_prompt NOT in pipe_kwargs", "warning")
 
+        # The preview hook and latent capture belong to the pass that produces the
+        # final image. On a two-stage run that is the refine pass, so they are
+        # installed below, after stage 1 — latent capture grabs the FIRST decode it
+        # sees, and installing it up front would hand back stage 1's latent.
+        preview_cleanup = None
+        latent_path, cleanup_hook = None, None
+
+        def _install_final_hooks():
+            nonlocal preview_cleanup, latent_path, cleanup_hook
+            if preview_callback is not None or cancel_check is not None:
+                # Grab the un-hooked VAE decode BEFORE latent capture wraps it, so
+                # preview decodes don't trip the "capture first decode" logic.
+                preview_cleanup = self._install_preview_hook(
+                    pipe, preview_callback, cancel_check, num_steps,
+                    original_vae_decode=pipe.vae.decode,
+                )
+            latent_path, cleanup_hook = self.setup_latent_capture(
+                pipe, output_path, save_latent, model_type)
+
         try:
+            # --- Stage 1: in-context control, at the LoRA's trained pixel budget ---
+            if two_stage:
+                s1_kwargs = dict(pipe_kwargs)
+                s1_kwargs.update(width=stage1_w, height=stage1_h)
+                s1_preview = None
+                if preview_callback is not None or cancel_check is not None:
+                    s1_preview = self._install_preview_hook(
+                        pipe, preview_callback, cancel_check, num_steps,
+                        original_vae_decode=pipe.vae.decode,
+                    )
+                try:
+                    _t_s1 = time.perf_counter()
+                    with torch.inference_mode():
+                        stage1_image = pipe(**s1_kwargs)
+                    _log(self.log_prefix,
+                         f"[timing] stage 1 (control @ {stage1_w}x{stage1_h}): "
+                         f"{time.perf_counter() - _t_s1:.1f}s")
+                finally:
+                    if s1_preview:
+                        s1_preview()
+
+                # Hand stage 1 to the refine pass at the requested size and drop the
+                # control: the structure is in the pixels now, so keeping it would
+                # only re-impose the doubled sequence this split exists to avoid.
+                from PIL import Image as _PILImage
+                for key in mapped_inputs:
+                    pipe_kwargs.pop(key, None)
+                pipe_kwargs["input_image"] = stage1_image.resize(
+                    (width, height), _PILImage.Resampling.LANCZOS)
+                pipe_kwargs["denoising_strength"] = refine_denoise
+                denoise = refine_denoise
+
+            _install_final_hooks()
             _t_pipe = time.perf_counter()
             with torch.inference_mode():
                 image = pipe(**pipe_kwargs)
@@ -279,6 +355,8 @@ class QwenPipelineRunner(PipelineRunner):
                     "steps": num_steps, "size": f"{width}x{height}",
                     "cfg_scale": effective_cfg,
                     "denoising_strength": denoise,
+                    **({"control_two_stage": f"{stage1_w}x{stage1_h} -> {width}x{height}",
+                        "control_refine_denoise": refine_denoise} if two_stage else {}),
                 },
                 exponential_shift_mu_used=effective_shift_mu,
             )
@@ -306,6 +384,19 @@ class QwenPipelineRunner(PipelineRunner):
     # ------------------------------------------------------------------
     # Source image resolution
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _fit_pixel_budget(width: int, height: int, budget: int, div: int = 16):
+        """Largest width x height within `budget` pixels that keeps the aspect ratio
+        and lands on the latent grid.
+
+        Rounds DOWN to the grid on purpose: snap_to_grid rounds up, so rounding up
+        here would put the result back over the budget it exists to enforce.
+        """
+        scale = math.sqrt(budget / float(width * height))
+        w = max(div, int(width * scale) // div * div)
+        h = max(div, int(height * scale) // div * div)
+        return w, h
 
     @staticmethod
     def _resolve_source_image(
