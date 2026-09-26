@@ -96,6 +96,32 @@ BODY_KP = {
     12: ("leg.l",     "head"),   # LKnee
     13: ("foot.l",    "head"),   # LAnkle
 }
+# --- face: derived, because this rig has no facial bones ------------------
+# c_pupil / c_iris exist by name but sit at z = -55, out with the picker
+# widgets — they are UI, not anatomy. So nose/eyes/ears are built from the Neck
+# keypoint plus proportions of the figure's height, and all five ride the head's
+# deform bone.
+#
+# Anchoring on stature rather than on head.x's length is deliberate: it is what
+# OpenPose itself effectively encodes, and it self-corrects across characters
+# whose head bone spans a different part of the skull. Offsets are fractions of
+# figure height, from the Neck keypoint, in (up, forward, lateral).
+HEAD_BONE = "head.x"
+FACE_OFFSETS = {
+    0:  (0.105, 0.045, 0.000),   # Nose   — neck->nose ~0.105 of stature
+    14: (0.120, 0.020, -0.020),  # REye   (lateral is signed: + is the figure's left)
+    15: (0.120, 0.020, +0.020),  # LEye
+    16: (0.121, -0.005, -0.045), # REar
+    17: (0.121, -0.005, +0.045), # LEar
+}
+# The ears' FORWARD offset is the sensitive one. draw_bodypose really does draw
+# Nose->Eye->Ear (limbSeq ends [2,1],[1,15],[15,17],[1,16],[16,18]), but in a
+# real detection those sticks are short and disappear into the dot cluster.
+# Setting the ears well behind the neck axis stretches Eye->Ear into a pair of
+# visible spars off the sides of the head — an "antler" silhouette that appears
+# in no real OpenPose map. At -0.030 the ear sat 8cm behind the neck on a 1.59m
+# figure and the limb ran 1.7x its true length; an ear canal is ~1-2cm back.
+
 BODY_KP_NAME = {
     0: "Nose", 1: "Neck", 2: "RShoulder", 3: "RElbow", 4: "RWrist",
     5: "LShoulder", 6: "LElbow", 7: "LWrist", 8: "RHip", 9: "RKnee",
@@ -189,6 +215,38 @@ def resolve_deform_bone(arm_obj, position, tol=1e-4):
     return best[1], best[0]
 
 
+def figure_axes(arm_obj):
+    """(up, forward, left) for the character, in armature space.
+
+    Forward is read from the toes rather than assumed: this rig faces -Y, and
+    guessing wrong mirrors the whole face. Left is forward x up, which on this
+    rig puts arm.l at +X — matching the bone positions, so the check is real.
+    """
+    up = Vector((0.0, 0.0, 1.0))
+    toe = arm_obj.data.bones.get("c_toes_end.l") or arm_obj.data.bones.get("foot.l")
+    if toe is not None:
+        fwd = (toe.tail_local - toe.head_local)
+        fwd.z = 0.0
+        forward = fwd.normalized() if fwd.length > 1e-6 else Vector((0.0, -1.0, 0.0))
+    else:
+        forward = Vector((0.0, -1.0, 0.0))
+    left = -forward.cross(up)
+    return up, forward, left
+
+
+def face_points(arm_obj, height):
+    """{keypoint: position} for nose/eyes/ears, or {} if the neck is unmapped."""
+    neck_bone, neck_end = BODY_KP.get(1, (None, None))
+    neck = bone_point(arm_obj, neck_bone, neck_end) if neck_bone else None
+    if neck is None:
+        return {}
+    up, forward, left = figure_axes(arm_obj)
+    return {
+        kp: neck + up * (u * height) + forward * (f * height) + left * (s * height)
+        for kp, (u, f, s) in FACE_OFFSETS.items()
+    }
+
+
 def figure_height(arm_obj):
     """Height of the FIGURE, measured only across mapped keypoints.
 
@@ -208,28 +266,52 @@ def figure_height(arm_obj):
     return (max(zs) - min(zs)) / 0.82
 
 
-def build_source_mesh(arm_obj, scale_ref):
+def stick_radii(height, output_height_px, frame_fraction):
+    """(joint, body stick, hand stick) radii in world units.
+
+    OpenPose draws at FIXED PIXEL sizes — cv2.circle radius 4 for every joint of
+    both body and hand, an ellipse2Poly semi-axis of 4 for body limbs (8px
+    across) and cv2.line thickness 2 for hand limbs. Nothing scales with the
+    subject, so the right world size depends on how many world units a pixel
+    covers once the figure is framed.
+
+    `output_height_px` is the height the MODEL will read the map at — i.e. the
+    generation size, NOT necessarily Blender's render size. FUK resizes the
+    control map to the generation dimensions, so sticks sized against a 2048px
+    Blender render arrive at 1088 only 4.2px wide, half the convention. Sizing
+    against the generation height instead puts them at 8.0px as intended.
+    """
+    world_per_px = height / max(1.0, frame_fraction * output_height_px)
+    return 4.0 * world_per_px, 4.0 * world_per_px, 1.0 * world_per_px
+
+
+def build_source_mesh(arm_obj, height, output_height_px, frame_fraction):
     """One vertex per keypoint, one 2-vertex edge per limb, each vertex weighted
     to the bone it follows. Returns (object, report)."""
-    joint_r = scale_ref * 4.0 / 512.0     # cv2.circle radius 4 at 512px
-    body_r = scale_ref * 4.0 / 512.0      # ellipse2Poly semi-axis 4
-    hand_r = scale_ref * 1.0 / 512.0      # cv2.line thickness 2 -> radius 1
+    joint_r, body_r, hand_r = stick_radii(height, output_height_px, frame_fraction)
 
     verts, edges, groups = [], [], {}
     colors, radii, kinds = [], [], []
     missing, rebound = [], {}
+    face = face_points(arm_obj, height)
 
-    def add_vertex(bone, end, rgb, radius, kind):
-        p = bone_point(arm_obj, bone, end)
+    def add_vertex(bone, end, rgb, radius, kind, at=None, bind_to=None):
+        """`at`/`bind_to` are for derived keypoints (the face), which sit at no
+        bone endpoint and so cannot be resolved by position — they ride the head
+        bone rigidly instead."""
+        p = Vector(at) if at is not None else bone_point(arm_obj, bone, end)
         if p is None:
             return None
-        bind, dist = resolve_deform_bone(arm_obj, p)
-        if bind is None:
-            missing.append(f"{bone}/{end}: no deform bone within tolerance "
-                           f"(nearest {dist:.5f}) — this keypoint will not follow")
-            bind = bone
-        elif bind != bone:
-            rebound.setdefault(bone, bind)
+        if bind_to is not None:
+            bind = bind_to
+        else:
+            bind, dist = resolve_deform_bone(arm_obj, p)
+            if bind is None:
+                missing.append(f"{bone}/{end}: no deform bone within tolerance "
+                               f"(nearest {dist:.5f}) — this keypoint will not follow")
+                bind = bone
+            elif bind != bone:
+                rebound.setdefault(bone, bind)
         i = len(verts)
         verts.append(p)
         groups.setdefault(bind, []).append(i)
@@ -239,29 +321,46 @@ def build_source_mesh(arm_obj, scale_ref):
         return i
 
     def add_set(kp_map, limbs, joint_rgb_fn, limb_rgb_fn, limb_radius, limb_kind, label):
+        """kp_map values are either (bone, end) or a dict for a derived point."""
         placed = {}
-        for idx, (bone, end) in sorted(kp_map.items()):
-            i = add_vertex(bone, end, joint_rgb_fn(idx), joint_r, 0.0)
+        for idx, spec in sorted(kp_map.items()):
+            spec = spec if isinstance(spec, dict) else {"bone": spec[0], "end": spec[1]}
+            i = add_vertex(spec.get("bone"), spec.get("end"), joint_rgb_fn(idx),
+                           joint_r, 0.0, at=spec.get("at"), bind_to=spec.get("bind_to"))
             if i is None:
-                missing.append(f"{label} keypoint {idx} -> bone {bone!r} not found")
+                missing.append(f"{label} keypoint {idx} -> {spec.get('bone')!r} not found")
             else:
-                placed[idx] = (bone, end)
+                placed[idx] = spec
         for n, (a, b) in enumerate(limbs):
             if a not in placed or b not in placed:
                 missing.append(f"{label} limb {n} ({a}->{b}) skipped, endpoint unmapped")
                 continue
             rgb = limb_rgb_fn(n)
-            ia = add_vertex(*placed[a], rgb, limb_radius, limb_kind)
-            ib = add_vertex(*placed[b], rgb, limb_radius, limb_kind)
-            edges.append((ia, ib))
+            ends = []
+            for kp in (a, b):
+                s = placed[kp]
+                ends.append(add_vertex(s.get("bone"), s.get("end"), rgb, limb_radius,
+                                       limb_kind, at=s.get("at"),
+                                       bind_to=s.get("bind_to")))
+            edges.append(tuple(ends))
 
-    add_set(BODY_KP, BODY_LIMBS,
+    # Body, with the derived face folded in so the head limbs resolve too.
+    body_map = dict(BODY_KP)
+    if face and arm_obj.data.bones.get(HEAD_BONE) is not None:
+        for kp, pos in face.items():
+            body_map[kp] = {"at": pos, "bind_to": HEAD_BONE,
+                            "bone": HEAD_BONE, "end": "head"}
+    else:
+        missing.append(f"no {HEAD_BONE!r} bone — face keypoints 0 and 14-17 skipped")
+
+    add_set(body_map, BODY_LIMBS,
             lambda i: hex_rgb(COLORS[i]),
             lambda n: hex_rgb(COLORS[n], BODY_LIMB_ALPHA),
             body_r, 1.0, "body")
-    add_set(hand_kp("l"), HAND_LIMBS,
-            lambda i: HAND_JOINT_RGB,
-            hand_limb_rgb, hand_r, 2.0, "hand.l")
+    for side in ("l", "r"):
+        add_set(hand_kp(side), HAND_LIMBS,
+                lambda i: HAND_JOINT_RGB,
+                hand_limb_rgb, hand_r, 2.0, f"hand.{side}")
 
     old = bpy.data.objects.get(SOURCE_MESH)
     if old:
@@ -394,6 +493,16 @@ def build_node_group(material, joint_radius, body_radius, hand_radius):
     return ng
 
 
+# OpenPose stick/dot sizes are absolute pixels, so they depend on how much of
+# the frame the figure fills. Override with --frame-fraction when framing tighter
+# or wider than a typical full-body shot.
+DEFAULT_FRAME_FRACTION = 0.8
+
+# Height the MODEL reads the control map at — the generation size, not Blender's
+# render size. FUK resizes the map before the model sees it, so sizing sticks
+# against a large Blender render leaves them too thin by exactly that ratio.
+DEFAULT_OUTPUT_HEIGHT = 1024
+
 RENDER_COLLECTION = "OP_render"
 VIEW_LAYER = "OpenPose"
 
@@ -454,25 +563,31 @@ def setup_scene(src_obj):
     return vl
 
 
-def convert():
+def convert(frame_fraction=DEFAULT_FRAME_FRACTION, output_height_px=None):
     arm_obj = bpy.data.objects.get(RIG_OBJECT)
     if arm_obj is None:
         raise RuntimeError(f"no armature object named {RIG_OBJECT!r}")
 
-    scale_ref = figure_height(arm_obj)     # figure height, for stick widths
+    height = figure_height(arm_obj)
+    if output_height_px is None:
+        output_height_px = DEFAULT_OUTPUT_HEIGHT
+
+    joint_r, body_r, hand_r = stick_radii(height, output_height_px, frame_fraction)
 
     material = build_material()
-    obj, report = build_source_mesh(arm_obj, scale_ref)
-    ng = build_node_group(material, scale_ref * 4.0 / 512.0,
-                          scale_ref * 4.0 / 512.0, scale_ref * 1.0 / 512.0)
+    obj, report = build_source_mesh(arm_obj, height, output_height_px, frame_fraction)
+    ng = build_node_group(material, joint_r, body_r, hand_r)
     gn = obj.modifiers.new("OP_Generator", "NODES")
     gn.node_group = ng
 
     vl = setup_scene(obj)
     print(f"isolated on view layer {vl.name!r} (collection {RENDER_COLLECTION!r})")
 
-    print(f"character height {scale_ref:.3f} -> joint r {scale_ref * 4 / 512:.4f}, "
-          f"body stick r {scale_ref * 4 / 512:.4f}, hand stick r {scale_ref / 512:.4f}")
+    print(f"figure {height:.3f} tall; sticks sized for a {output_height_px}px "
+          f"GENERATION with the figure filling {frame_fraction:.0%} of frame")
+    print(f"  (that is the size the model reads the map at, not Blender's render size)")
+    print(f"  -> joint r {joint_r:.5f}, body stick r {body_r:.5f}, "
+          f"hand stick r {hand_r:.5f}")
     print(f"source mesh: {report['verts']} verts, {report['edges']} edges, "
           f"{len(obj.vertex_groups)} vertex groups")
     if report["rebound"]:
@@ -481,8 +596,7 @@ def convert():
         for a, b in sorted(report["rebound"].items()):
             print(f"  {a:14s} -> {b}")
     if report["missing"]:
-        print(f"\nUNMAPPED ({len(report['missing'])}) — this character has no "
-              f"face bones, so these are skipped rather than faked:")
+        print(f"\nUNMAPPED ({len(report['missing'])}):")
         for m in report["missing"]:
             print(f"  {m}")
     return obj
@@ -490,6 +604,13 @@ def convert():
 
 def main():
     argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
+    frame_fraction = DEFAULT_FRAME_FRACTION
+    if "--frame-fraction" in argv:
+        frame_fraction = float(argv[argv.index("--frame-fraction") + 1])
+    render_h = None
+    if "--output-height" in argv:
+        render_h = int(argv[argv.index("--output-height") + 1])
+
     src = Path(bpy.data.filepath)
     if "--out" in argv:
         dst = Path(argv[argv.index("--out") + 1])
@@ -498,7 +619,7 @@ def main():
     else:
         dst = src.with_name(src.stem + "_OP.blend")
 
-    convert()
+    convert(frame_fraction=frame_fraction, output_height_px=render_h)
     bpy.ops.wm.save_as_mainfile(filepath=str(dst))
     print(f"\nsaved -> {dst}")
 
