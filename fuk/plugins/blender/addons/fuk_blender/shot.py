@@ -274,6 +274,58 @@ def load_current(client, filename: str) -> dict:
     return data
 
 
+def carried_summary(filename: str, model: str) -> list:
+    """Human-readable lines for the advanced settings the shot will forward.
+
+    Read-only mirror of generation_extras(), for showing in the panel. These are
+    set in FUK's web UI and the Blender panel has no widgets for them, so from in
+    here a generation can be shaped by things you cannot see — a character LoRA
+    at 0.7 quietly overpowering the control LoRA, say, which looks exactly like
+    the control being ignored.
+
+    Cache-only on purpose: panel draw() runs on every redraw, so this must never
+    hit the network. Returns [] until something else has loaded the shot.
+    """
+    data = _LOADED.get(filename)
+    if data is None:
+        return []
+
+    image = (data.get("tabs", {}) or {}).get("image", {}) or {}
+    settings = _settings_for(image, model)
+    lines = []
+
+    for lora in settings.get("loras") or []:
+        if not isinstance(lora, dict):
+            continue
+        name = str(lora.get("key", "?")).split("/")[-1]
+        mult = lora.get("multiplier", lora.get("alpha", 1.0))
+        try:
+            lines.append(f"LoRA  {name}  x{float(mult):.2f}")
+        except (TypeError, ValueError):
+            lines.append(f"LoRA  {name}")
+
+    alpha = settings.get("eligen_alpha")
+    if alpha is not None:
+        try:
+            lines.append(f"Control strength  x{float(alpha):.2f}")
+        except (TypeError, ValueError):
+            pass
+
+    detail = settings.get("detail_bias")
+    try:
+        if detail is not None and float(detail) < 1.0:
+            lines.append(f"Detail bias  {float(detail):.2f}")
+    except (TypeError, ValueError):
+        pass
+
+    if settings.get("eligen_source"):
+        lines.append("EliGen masks  on")
+    if settings.get("vram_preset"):
+        lines.append(f"VRAM  {settings['vram_preset']}")
+
+    return lines
+
+
 def generation_extras(client, filename: str, model: str) -> dict:
     """Advanced generation fields carried by the shot that the Blender panel doesn't
     expose (LoRAs, detail bias, EliGen, VRAM preset). These are set in FUK's web UI

@@ -48,6 +48,32 @@ fuk/testing/
 fuk/vendor/*
 !fuk/vendor/patches/
 fuk/vendor/patches/.orig-*/
+
+# Blender writes a .blend1 beside every file it saves over. They are automatic
+# backups of the previous save, so they are pure churn — and large: four of them
+# were 8MB between them.
+**/*.blend1
+
+# Third-party rigs live here for local use only and are not FUK's to ship:
+# newRig/ is an Auto-Rig Pro character (ARP is a commercial addon) plus a
+# Gumroad rig whose licence we have not established. 40MB, and none of it is
+# needed to build or run the bridge.
+fuk/plugins/blender/newRig/
+
+# Derived rigs. Every one of these is rebuilt from Hand.blend by the scripts
+# beside it, so only the irreplaceable source (Hand.blend) and the finished rig
+# (Hand_OP21_posable.blend) are tracked. See README "OpenPose rigs" for the
+# rebuild chain — the order matters.
+fuk/plugins/blender/Hand_OP21.blend
+fuk/plugins/blender/Hand_OP21_rigged.blend
+fuk/plugins/blender/Hand_OP21_anatomical.blend
+
+# Addon archives are build output, not source. A committed zip also goes stale
+# silently: the one removed here was five weeks behind and still shipped the
+# OpenPose gamma bug, while being the install path the README points at.
+fuk/plugins/blender/addons/*.zip
+fuk/plugins/blender/*.tar.gzip
+
 **/outputs/
 **/venv/
 __pycache__/

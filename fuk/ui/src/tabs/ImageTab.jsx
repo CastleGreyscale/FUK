@@ -730,7 +730,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                 
                 {modelSupports(formData.model, 'context_image') && (
                   <div className="fuk-form-group-compact fuk-mt-4">
-                    <label className="fuk-label">LoRA Strength</label>
+                    <label className="fuk-label">Control Strength</label>
                     <div className="fuk-input-inline">
                       <input
                         type="range"
@@ -756,6 +756,13 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
 
                 <p className="fuk-help-text">
                   Upload one or more images to guide the generation.
+                  {modelSupports(formData.model, 'context_image') && (
+                    <> Control on this model is itself a LoRA, and any character
+                    LoRAs you add stack onto the same weights — so a strong one can
+                    drown the control out and the pose stops landing. Raise Control
+                    Strength above 1.0 to win that back without weakening the
+                    character, or lower the character LoRA instead.</>
+                  )}
                 </p>
               </>
 

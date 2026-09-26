@@ -16,6 +16,8 @@ from __future__ import annotations
 import textwrap
 import bpy
 
+from . import shot as shot_mod
+
 
 def wrap_text(text, width_px):
     """Word-wrap `text` to a given pixel width (approx chars-per-line from pixels)."""
@@ -180,6 +182,18 @@ class FUK_PT_generation(_ImagePanel, bpy.types.Panel):
         row.prop(props, "guidance_scale")
         draw_seed_block(layout, props, False)
         layout.prop(props, "output_format", text="Format")
+
+        # Read-only: settings the shot carries that this panel has no widgets
+        # for. Without this they are invisible from Blender, and a character
+        # LoRA stacking onto the control LoRA reads as "control is being
+        # ignored" with nothing on screen to explain it. Set them in FUK's web UI.
+        carried = shot_mod.carried_summary(props.shot_file, props.model)
+        if carried:
+            box = layout.box()
+            box.label(text="From shot (web UI):", icon="INFO")
+            col = box.column(align=True)
+            for line in carried:
+                col.label(text=line)
 
 
 class FUK_PT_control(_FukSubPanel, bpy.types.Panel):

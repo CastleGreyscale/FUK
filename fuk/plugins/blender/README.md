@@ -190,6 +190,57 @@ display live (like the progressive preview during diffusion). It adds a little t
 Works in Viewport/Image Editor modes; in New Window mode previews appear once the
 window exists. Currently wired for the Qwen (control-union) models.
 
+## OpenPose rigs
+
+Rigs you append into your scene and put on the OpenPose rig layer. Only two
+`.blend` files are tracked — the irreplaceable source and the finished rig.
+Everything in between is rebuilt by the scripts beside them.
+
+| file | what |
+| --- | --- |
+| `Body25_COCO18.blend` | body rig, recoloured to the COCO-18 convention |
+| `Hand.blend` | **source** hand rig, as downloaded — never edit in place |
+| `Hand_OP21_posable.blend` | **finished** hand rig: correct colours, anatomical proportions, a forearm, joint limits and per-finger curl controls |
+
+### Rebuilding the hand rig
+
+Run from this folder. **Order matters** — the arm step needs the wrist bone that
+step 2 adds, and the curl handles have to be placed *after* the bones are
+rescaled or they land against the old proportions:
+
+```bash
+# 1. colours: the palette the pose encoder actually reads
+blender Hand.blend --background --factory-startup \
+    --python openpose_hand21.py -- --out Hand_OP21.blend
+
+# 2. wrist bone only (the four finger chains ship unparented)
+blender Hand_OP21.blend --background --factory-startup \
+    --python hand_rig_constraints.py -- --no-limits --out step1.blend
+
+# 3. anatomical proportions + forearm
+blender step1.blend --background --factory-startup \
+    --python hand_rig_anatomy.py -- --arm forearm --out step2.blend
+
+# 4. joint limits + per-finger curl controls
+blender step2.blend --background --factory-startup \
+    --python hand_rig_constraints.py -- --preset anatomical --curl \
+    --out Hand_OP21_posable.blend
+```
+
+Each script takes `--out PATH` or `--inplace`, and a relative `--out` resolves
+against the *source* `.blend`, not the working directory.
+
+`hand_rig_constraints.py` also has a `--preset hinge` (safety rails only, no
+anatomical ranges) if the full preset fights a particular pose. Dial a bone's
+constraint **Influence** down rather than deleting it.
+
+### Experimental
+
+`openpose_gn_prototype.py` builds the skeleton with Geometry Nodes on top of an
+Auto-Rig Pro character instead of using a purpose-built diagram rig. Nothing is
+baked, so it regenerates per frame — the shape a control *video* needs. It wants
+an ARP rig that is not in this repo, and it covers body plus one hand, no face.
+
 ## Requirements / notes
 
 - Generation with a control map needs the **control-union model weights**
