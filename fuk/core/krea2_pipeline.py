@@ -81,19 +81,42 @@ class Krea2PipelineRunner(PipelineRunner):
         defaults = self.get_family_defaults()
         width = width or defaults.get("width", 1024)
         height = height or defaults.get("height", 1024)
-        # Steps and CFG differ sharply between Raw and Turbo, so the per-model
+
+        # Steps, CFG and mu differ sharply between Raw and Turbo, so the per-model
         # pipeline_kwargs win over the family defaults when the caller says
         # nothing — otherwise Turbo would run 52 steps at cfg 4.5 and look wrong.
-        num_steps = (steps or infer_steps
-                     or pipe_defaults.pop("num_inference_steps", None)
-                     or defaults.get("steps", 52))
+        #
+        # All three are popped UNCONDITIONALLY, before the precedence chains use
+        # them. pipe_defaults is merged into pipe_kwargs last, so any key left in
+        # it wins over everything computed here: popping inside an `or` chain
+        # meant that as soon as the caller DID supply a value the pop was skipped,
+        # the key survived, and the final update() put the registry value back.
+        # Net effect was that the Image tab's steps and CFG controls did nothing
+        # for Krea-2 — it always ran 52/4.5 (Raw) or 8/1.0 (Turbo).
+        entry_steps = pipe_defaults.pop("num_inference_steps", None)
+        entry_cfg = pipe_defaults.pop("cfg_scale", None)
+        entry_mu = pipe_defaults.pop("mu", None)
+
+        num_steps = steps or infer_steps or entry_steps or defaults.get("steps", 52)
         effective_cfg = (cfg_scale if cfg_scale is not None else
                          guidance_scale if guidance_scale is not None else
-                         pipe_defaults.pop("cfg_scale", None))
+                         entry_cfg)
         if effective_cfg is None:
             effective_cfg = defaults.get("cfg_scale", 4.5)
-        effective_mu = mu if mu is not None else pipe_defaults.pop("mu", None)
+        effective_mu = mu if mu is not None else entry_mu
         negative_prompt = negative_prompt or defaults.get("negative_prompt", "")
+
+        # Now that the caller's CFG actually reaches the pipeline, say so when it
+        # departs from the variant's registered operating point. For Raw that is
+        # a preference; for Turbo, cfg 1.0 is part of the distillation and the
+        # Image tab posts its generic guidance_scale (2.5 by default) on every
+        # call, so this is the line that explains an 8-step Turbo result looking
+        # washed out rather than leaving it to be rediscovered.
+        if entry_cfg is not None and float(effective_cfg) != float(entry_cfg):
+            _log(self.log_prefix,
+                 f"cfg_scale {effective_cfg} overrides {model_type}'s registered "
+                 f"{entry_cfg} (from pipeline_kwargs). Set the tab's guidance to "
+                 f"{entry_cfg} to sample this variant as documented.", "warning")
 
         log_params = {
             "prompt": prompt,
