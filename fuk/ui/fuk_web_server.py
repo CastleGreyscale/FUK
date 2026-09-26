@@ -1921,7 +1921,7 @@ async def get_models():
     # it, but it is still a clip in and a clip out, so it belongs here too and
     # not with the Qwen image models it shares a backbone with. threed has its
     # own UI and is deliberately absent.
-    IMAGE_PIPELINES = ("qwen", "flux2", "krea2")
+    IMAGE_PIPELINES = ("qwen", "qwen21", "flux2", "krea2")
     VIDEO_PIPELINES = ("wan", "ltx2", "minimax_h3", "qwen_video_edit")
 
     # models.json `pipeline` -> the defaults.json section holding that family's

@@ -194,6 +194,12 @@ class DiffSynthBackend:
             _log("BACKEND", f"Krea2PipelineRunner not available: {e}", "warning")
 
         try:
+            from qwen21_pipeline import QwenImage21PipelineRunner
+            self.runners["qwen21"] = QwenImage21PipelineRunner(self)
+        except ImportError as e:
+            _log("BACKEND", f"QwenImage21PipelineRunner not available: {e}", "warning")
+
+        try:
             from threed_pipeline import ThreeDPipelineRunner
             self.runners["threed"] = ThreeDPipelineRunner(self)
         except ImportError as e:
@@ -292,6 +298,12 @@ class DiffSynthBackend:
         
         # Import DiffSynth pipelines (must happen after env setup)
         from diffsynth.pipelines.qwen_image import QwenImagePipeline, ModelConfig
+        # Qwen-Image-2.1 is a separate pipeline, not a qwen_image variant: its own
+        # DiT, its own 64-channel RGBA VAE and a Qwen3-VL text encoder. It
+        # re-exports the same core ModelConfig, so it needs no *ModelConfig
+        # attribute of its own — _get_model_config_class falls through to
+        # self.ModelConfig for it.
+        from diffsynth.pipelines.qwen_image_21 import QwenImage21Pipeline
         from diffsynth.pipelines.wan_video import WanVideoPipeline, ModelConfig as WanModelConfig
         from diffsynth.pipelines.flux2_image import Flux2ImagePipeline, ModelConfig as Flux2ModelConfig
         from diffsynth.pipelines.ltx2_audio_video import LTX2AudioVideoPipeline, ModelConfig as LTX2ModelConfig
@@ -309,6 +321,7 @@ class DiffSynthBackend:
 
         # Populate pipeline registry
         PIPELINE_CLASSES["qwen"] = QwenImagePipeline
+        PIPELINE_CLASSES["qwen21"] = QwenImage21Pipeline
         PIPELINE_CLASSES["wan"] = WanVideoPipeline
         PIPELINE_CLASSES["flux2"] = Flux2ImagePipeline
         PIPELINE_CLASSES["ltx2"] = LTX2AudioVideoPipeline
