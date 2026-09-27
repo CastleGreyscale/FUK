@@ -493,9 +493,235 @@ def build_node_group(material, joint_radius, body_radius, hand_radius):
     return ng
 
 
+# ---------------------------------------------------------------------------
+# Driving the radii from the camera
+# ---------------------------------------------------------------------------
+#
+# stick_radii() converts OpenPose's fixed PIXEL sizes into world units, but it
+# does so once, at bake time, against a `frame_fraction` the caller guesses.
+# The result is frozen into the node group, so the sticks keep a constant WORLD
+# size while their screen size goes as 1/depth. Sized for a full shot at
+# frame_fraction 0.8 they measure ~9px across, near the 8px convention; dolly
+# in to a chest-up framing and the same geometry renders ~28px, and at head and
+# shoulders ~42px. At that width the map stops reading as a pose diagram and
+# ControlNet paints the sticks into the image as objects — most visibly the
+# nose/eye/ear cluster, whose five dots merge into one mass and come back as
+# hair.
+#
+# So the radii have to follow the camera instead. Vertical framing at the
+# subject's depth is
+#
+#     world_frame_h = depth * sensor_v / lens
+#
+# and one output pixel covers world_frame_h / gen_height_px, which is what the
+# OpenPose pixel constants below multiply.
+#
+# `sensor_v` is the fiddly part. Camera.angle_y looks like the answer and is
+# not: under the default AUTO sensor fit it is computed from sensor_height and
+# ignores the resolution entirely, so on this 576x896 portrait render it
+# reports 24mm where the true vertical sensor is 36mm — the 50% error goes
+# straight into every stick. AUTO puts sensor_width on the LARGER image
+# dimension, which is what the min() below reproduces. A camera explicitly set
+# to VERTICAL fit would need sensor_height instead, and is rejected rather than
+# silently mis-sized.
+#
+# Depth is a LOC_DIFF driver variable — a straight distance, not a projection
+# onto the view axis. They differ by the cosine of the subject's angle off
+# centre, which at this rig's 80mm lens is under 3% at the frame edge and zero
+# for a centred figure.
+#
+# The output height is DERIVED IN THE DRIVER rather than stored. An earlier
+# version had the addon precompute it into scene["op_gen_height"] before each
+# render, which was correct only for renders that went through that code path:
+# an F12 from the UI, or a full-res render after a 25% preview, kept the stale
+# number and sized every stick against it — a 280 left over from a quarter-res
+# preview puts 32px sticks in a 1120-tall render, four times the convention and
+# straight back into the failure this whole mechanism exists to prevent.
+# resolution_x/y and resolution_percentage are all readable from the driver, so
+# nothing needs to be cached and no render path can be missed.
+#
+# The one thing the driver cannot derive is the in-context control budget, which
+# belongs to the MODEL rather than to the render — hence the one scene property
+# that remains. It is stable across renders (it only changes when the model
+# does), so it has none of the staleness the height had.
+
+JOINT_PX = 4.0   # draw_bodypose/draw_handpose: cv2.circle(..., 4, ...)
+BODY_PX = 4.0    # draw_bodypose: ellipse2Poly semi-axis 4, so 8px across
+HAND_PX = 1.0    # draw_handpose: cv2.line(..., thickness=2), so 2px across
+
+CAMERA_OBJECT = "SHOT_CAM"
+ANCHOR_KP = 1    # Neck — the head cluster is the most scale-sensitive part
+
+# Scene custom properties earlier versions of this module wrote. Nothing reads
+# them now — the driver derives the output height from the render settings and
+# inlines the budget — but install_radius_drivers() clears them so a stale one
+# cannot be mistaken for a live control.
+GEN_HEIGHT_PROP_LEGACY = "op_gen_height"
+MAX_PIXELS_PROP_LEGACY = "op_max_pixels"
+
+RADIUS_SOCKETS = (("Joint Radius", JOINT_PX),
+                  ("Body Radius", BODY_PX),
+                  ("Hand Radius", HAND_PX))
+
+
+def radius_sockets(ng):
+    """[(label, pixels, driver data path)] for the three radius inputs.
+
+    The drivers go on the primitive nodes INSIDE the group rather than on
+    modifier inputs. Exposing them as group inputs reads better in the UI, but
+    Blender 5.x keeps a geometry nodes modifier's socket values in an
+    ID-property group under modifier.properties.inputs, and driver_add() on
+    that path fails as "not animatable" — a node socket's default_value is
+    animatable and has been for every version this rig has seen.
+
+    The two limb circles are told apart by their current radius rather than by
+    node name, since 'Curve Circle' vs 'Curve Circle.001' depends on the order
+    build_node_group happened to create them in.
+    """
+    spheres = [n for n in ng.nodes if n.bl_idname == "GeometryNodeMeshUVSphere"]
+    circles = [n for n in ng.nodes
+               if n.bl_idname == "GeometryNodeCurvePrimitiveCircle"]
+    if len(spheres) != 1 or len(circles) != 2:
+        raise RuntimeError(f"{ng.name!r}: expected 1 sphere and 2 circles, "
+                           f"found {len(spheres)} and {len(circles)}")
+    circles.sort(key=lambda c: c.inputs["Radius"].default_value, reverse=True)
+
+    out = []
+    for node, (label, px) in zip((spheres[0], circles[0], circles[1]),
+                                 RADIUS_SOCKETS):
+        socket = node.inputs["Radius"]
+        if socket.is_linked:
+            raise RuntimeError(f"{ng.name!r}: {node.name!r} Radius is linked; "
+                               "a link overrides default_value, so the driver "
+                               "would have no effect")
+        idx = list(node.inputs).index(socket)
+        out.append((label, px,
+                    f'nodes["{node.name}"].inputs[{idx}].default_value'))
+    return out
+
+
+def install_radius_drivers(obj, arm_obj, camera=None, max_pixels=None):
+    """Drive the three radii off the camera so sticks hold their PIXEL width.
+
+    Idempotent — re-running replaces the drivers rather than stacking them.
+    They re-evaluate per frame, so a camera move across a control VIDEO stays
+    correct for free, and they read the render settings live, so no render path
+    can be missed.
+    """
+    scene = bpy.context.scene
+    cam = camera or bpy.data.objects.get(CAMERA_OBJECT) or scene.camera
+    if cam is None or cam.type != "CAMERA":
+        raise RuntimeError(f"no camera to drive from (looked for {CAMERA_OBJECT!r})")
+    if cam.data.sensor_fit == "VERTICAL":
+        raise RuntimeError(
+            f"camera {cam.name!r} uses VERTICAL sensor fit; the driver assumes "
+            "AUTO/HORIZONTAL, where sensor_width spans the larger dimension")
+    if cam.data.type != "PERSP":
+        raise RuntimeError(f"camera {cam.name!r} is {cam.data.type}, not PERSP; "
+                           "an orthographic frame does not scale with depth")
+
+    anchor_name, anchor_end = BODY_KP[ANCHOR_KP]
+    anchor_pos = bone_point(arm_obj, anchor_name, anchor_end)
+    if anchor_pos is None:
+        raise RuntimeError(f"anchor bone {anchor_name!r} not on the rig")
+    # Same rebinding the source mesh does: the named bone is often a control
+    # bone with use_deform off, and a driver on it would not follow the pose.
+    anchor_bone, _ = resolve_deform_bone(arm_obj, anchor_pos)
+    anchor_bone = anchor_bone or anchor_name
+
+    budget_px = float(max_pixels or 0.0)
+    if budget_px < 0:
+        budget_px = 0.0
+    # Both are leftovers from designs that stored what the driver now derives or
+    # inlines. Harmless to leave behind, but confusing to find in a scene, and
+    # the second one is the very landmine described below.
+    for sc in bpy.data.scenes:
+        for stale in (GEN_HEIGHT_PROP_LEGACY, MAX_PIXELS_PROP_LEGACY):
+            sc.pop(stale, None)
+
+    mod = obj.modifiers.get("OP_Generator")
+    if mod is None or mod.node_group is None:
+        raise RuntimeError(f"{obj.name!r} has no OP_Generator nodes modifier")
+    ng = mod.node_group
+    sockets = radius_sockets(ng)
+
+    if ng.animation_data is None:
+        ng.animation_data_create()
+
+    for label, px, data_path in sockets:
+        try:
+            ng.driver_remove(data_path)
+        except (TypeError, RuntimeError):
+            pass
+        fcurve = ng.driver_add(data_path)
+        drv = fcurve.driver
+        drv.type = "SCRIPTED"
+
+        def var(name, kind):
+            v = drv.variables.new()
+            v.name, v.type = name, kind
+            return v
+
+        v = var("depth", "LOC_DIFF")
+        v.targets[0].id = cam
+        v.targets[1].id = arm_obj
+        v.targets[1].bone_target = anchor_bone
+
+        for name, ident, dpath in (("sw", cam.data, "sensor_width"),
+                                   ("lens", cam.data, "lens"),
+                                   ("rx", scene, "render.resolution_x"),
+                                   ("ry", scene, "render.resolution_y"),
+                                   ("pct", scene, "render.resolution_percentage")):
+            v = var(name, "SINGLE_PROP")
+            v.targets[0].id_type = "CAMERA" if ident is cam.data else "SCENE"
+            v.targets[0].id = ident
+            v.targets[0].data_path = dpath
+
+        # Built up in pieces below, then substituted into one expression — a
+        # driver holds a single string, but the string is unreadable written
+        # flat.
+        #
+        # Every variable above is a render or camera setting that always exists.
+        # An earlier version read the control budget from a scene custom
+        # property, and a missing one was not a graceful degradation: the
+        # variable evaluates to 0, sqrt(0/A) collapses the divisor onto its
+        # floor of 16, and the sticks render at 155px — twenty times the
+        # convention, in any scene the addon had not written to. The budget is
+        # a literal below instead, so there is nothing left to be absent.
+        #
+        # rw/rh are what will actually be RENDERED (percentage included), which
+        # is also what gets sent as the generation size. `fit` reproduces the
+        # AUTO sensor fit: sensor_width spans the larger image dimension.
+        rw, rh = "(rx * pct / 100.0)", "(ry * pct / 100.0)"
+        fit = "min(1.0, ry / max(1.0, rx))"
+        if budget_px:
+            # Size for the smaller stage-1 pass the runner denoises with control
+            # at when the request is over budget, mirroring _fit_pixel_budget
+            # including its deliberate round DOWN to the latent grid. min()
+            # covers the under-budget case, where the ratio exceeds 1.
+            scale = f"min(1.0, sqrt({budget_px:.1f} / max(1.0, {rw} * {rh})))"
+            gen = f"max(16.0, floor({rh} * {scale} / 16.0) * 16.0)"
+        else:
+            # Size for the rendered canvas: 8px in the map as authored, which is
+            # what controlnet_aux itself draws and what FUK's own openpose
+            # preprocessor produces.
+            gen = f"max(16.0, {rh})"
+        # max() guards stop a zeroed resolution from erroring the driver, which
+        # in Blender leaves the socket at its last value with no visible failure.
+        drv.expression = (f"{px} * depth * sw * {fit} "
+                          f"/ (max(1.0, lens) * {gen})")
+
+    return {"camera": cam.name, "anchor_bone": anchor_bone,
+            "mode": (f"stage-1 (budget {budget_px/1e6:.2f}MP)" if budget_px
+                     else "render canvas")}
+
+
 # OpenPose stick/dot sizes are absolute pixels, so they depend on how much of
 # the frame the figure fills. Override with --frame-fraction when framing tighter
 # or wider than a typical full-body shot.
+#
+# Only the starting value now: install_radius_drivers() takes the radii over
+# from the camera, and this is what the sockets read if the drivers are removed.
 DEFAULT_FRAME_FRACTION = 0.8
 
 # Height the MODEL reads the control map at — the generation size, not Blender's
@@ -563,7 +789,8 @@ def setup_scene(src_obj):
     return vl
 
 
-def convert(frame_fraction=DEFAULT_FRAME_FRACTION, output_height_px=None):
+def convert(frame_fraction=DEFAULT_FRAME_FRACTION, output_height_px=None,
+            max_pixels=None):
     arm_obj = bpy.data.objects.get(RIG_OBJECT)
     if arm_obj is None:
         raise RuntimeError(f"no armature object named {RIG_OBJECT!r}")
@@ -583,11 +810,16 @@ def convert(frame_fraction=DEFAULT_FRAME_FRACTION, output_height_px=None):
     vl = setup_scene(obj)
     print(f"isolated on view layer {vl.name!r} (collection {RENDER_COLLECTION!r})")
 
-    print(f"figure {height:.3f} tall; sticks sized for a {output_height_px}px "
+    print(f"figure {height:.3f} tall; sticks START sized for a {output_height_px}px "
           f"GENERATION with the figure filling {frame_fraction:.0%} of frame")
-    print(f"  (that is the size the model reads the map at, not Blender's render size)")
     print(f"  -> joint r {joint_r:.5f}, body stick r {body_r:.5f}, "
           f"hand stick r {hand_r:.5f}")
+    info = install_radius_drivers(obj, arm_obj, max_pixels=max_pixels)
+    print(f"radii now DRIVEN from {info['camera']!r} at bone "
+          f"{info['anchor_bone']!r}; sizing mode: {info['mode']}")
+    print(f"  frame_fraction is no longer baked, and the output height is read "
+          f"live from the render settings — sticks hold {2 * BODY_PX:.0f}px "
+          f"across at any camera distance, resolution or preview percentage")
     print(f"source mesh: {report['verts']} verts, {report['edges']} edges, "
           f"{len(obj.vertex_groups)} vertex groups")
     if report["rebound"]:
@@ -610,16 +842,40 @@ def main():
     render_h = None
     if "--output-height" in argv:
         render_h = int(argv[argv.index("--output-height") + 1])
+    # The sizing A/B: omit for the render canvas (what controlnet_aux draws, and
+    # what FUK's own preprocessor produces), or pass the model's budget to size
+    # for the smaller stage-1 pass the model really reads the map at.
+    max_pixels = None
+    if "--max-pixels" in argv:
+        max_pixels = float(argv[argv.index("--max-pixels") + 1])
 
     src = Path(bpy.data.filepath)
     if "--out" in argv:
         dst = Path(argv[argv.index("--out") + 1])
         if not dst.is_absolute():
             dst = src.parent / dst
+    elif "--drive-only" in argv:
+        dst = src
     else:
         dst = src.with_name(src.stem + "_OP.blend")
 
-    convert(frame_fraction=frame_fraction, output_height_px=render_h)
+    if "--drive-only" in argv:
+        # Upgrade a blend that was already converted, without rebuilding it.
+        # The saved prototype carries scene work the generator does not author
+        # (the Canny and Bone view layers, camera placement), so a full rebuild
+        # from OPii_Rig.blend would throw that away.
+        obj = bpy.data.objects.get(SOURCE_MESH)
+        arm_obj = bpy.data.objects.get(RIG_OBJECT)
+        if obj is None or arm_obj is None:
+            raise RuntimeError(f"--drive-only needs an existing {SOURCE_MESH!r} "
+                               f"and {RIG_OBJECT!r} in the file")
+        info = install_radius_drivers(obj, arm_obj, max_pixels=max_pixels)
+        print(f"radii driven from {info['camera']!r} at bone "
+              f"{info['anchor_bone']!r}; sizing mode: {info['mode']}")
+    else:
+        convert(frame_fraction=frame_fraction, output_height_px=render_h,
+                max_pixels=max_pixels)
+
     bpy.ops.wm.save_as_mainfile(filepath=str(dst))
     print(f"\nsaved -> {dst}")
 
