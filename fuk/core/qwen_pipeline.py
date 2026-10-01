@@ -210,31 +210,7 @@ class QwenPipelineRunner(PipelineRunner):
         if eligen_alpha is not None:
             self.backend.override_model_lora_alpha(pipe, cache_key, eligen_alpha)
 
-        # On a two-stage run the user's LoRAs are held back for the refine pass.
-        #
-        # In-context control IS a LoRA on the DiT, and user LoRAs add their deltas
-        # to the same weights (W' = W + sum(alpha_i * B_i A_i)), so they compete
-        # directly — a character LoRA at 0.7 can drown the control out and the
-        # pose simply stops landing, with nothing in the logs to say why. Load
-        # order cannot help: the sum is commutative.
-        #
-        # Splitting the passes removes the conflict instead of balancing it.
-        # Stage 1 runs control alone and settles pose and composition; stage 2
-        # runs the LoRAs alone over the result, by which point the pose is in the
-        # pixels and control has nothing left to contribute. It costs nothing in
-        # control strength and, unlike tuning alphas, it keeps working however
-        # many LoRAs are stacked.
-        defer_loras = bool(two_stage and (loras or lora)
-                           and kwargs.get("control_defer_loras",
-                                          defaults.get("control_defer_loras", True)))
-        if defer_loras:
-            names = [l.get("key", "?") for l in (loras or [])] or [str(lora)]
-            _log(self.log_prefix,
-                 f"Two-stage: holding {len(names)} user LoRA(s) back for the refine "
-                 f"pass so they don't fight the control LoRA — {', '.join(names)}")
-            self.apply_loras(pipe, cache_key, None, lora_multiplier, None)
-        else:
-            self.apply_loras(pipe, cache_key, lora, lora_multiplier, loras)
+        self.apply_loras(pipe, cache_key, lora, lora_multiplier, loras)
 
         # --- Build pipe() kwargs ---
         pipe_kwargs = dict(
@@ -373,9 +349,6 @@ class QwenPipelineRunner(PipelineRunner):
                      f"Refine pass: {s2_steps} steps (={num_steps} x {refine_denoise}), "
                      f"{num_steps + s2_steps} total for this generation")
 
-                # Now bring the user's LoRAs in, for the refine pass only.
-                if defer_loras:
-                    self.apply_loras(pipe, cache_key, lora, lora_multiplier, loras)
                 denoise = refine_denoise
 
             _install_final_hooks(pipe_kwargs.get("num_inference_steps", num_steps))
