@@ -158,6 +158,153 @@ HAND_LIMBS = [
 ]
 HAND_JOINT_RGB = (0.0, 0.0, 1.0)
 
+# --- face: 70 landmarks -----------------------------------------------------
+# draw_facepose (identical in controlnet_aux's open_pose and dwpose) is 70 white
+# dots of radius 3 and nothing else — no sticks, no per-point colour. So the
+# INDEX of a landmark never reaches the map; only where the dots sit does. The
+# iBUG-68 numbering is kept anyway because the expressions below are written
+# against it: 0-16 jaw, 17-21 / 22-26 brows, 27-35 nose, 36-41 / 42-47 eyes,
+# 48-59 outer lips, 60-67 inner lips, then 68 / 69 the pupils.
+#
+# The rig has no facial bones to hang these on (head.x is the only deform bone
+# above the neck), so the face is a fixed template in millimetres, origin at
+# the nose tip, axes (lateral: + is the figure's left, up, forward). All 70
+# points ride head.x rigidly; expression comes from shape keys on the source
+# mesh, which evaluate before the Armature modifier and so compose with any
+# head pose.
+#
+# Only the figure's left half and the midline are written out. The right half
+# is mirrored, which keeps the template exactly symmetric.
+#
+# The front-view proportions (lateral, up) were corrected against a close-up map
+# from the control LoRA's own training set, scaled by its pupil spacing: eye line
+# 40mm above the nose tip, lids 10mm apart, jaw 136mm wide and nearly parallel
+# down to mouth level. The first cut had the eyes 6mm low, the lids 8mm apart
+# and a narrower, heart-shaped jaw. Brows sit 23mm over the eye line — the
+# sample had them at 30, which one map cannot separate from a raised expression.
+# Depth (forward) is still anatomical estimate; a frontal map says nothing
+# about it.
+FACE_PX = 3.0            # draw_facepose: cv2.circle(..., 3, ...), so 6px across
+FACE_KIND = 3.0
+FACE_RGB = (1.0, 1.0, 1.0)
+FACE_IPD_MM = 63.0       # pupil to pupil in the template below
+FACE_WIDTH_MM = 134.0    # jaw landmark 0 to 16
+# 0-1 is the natural travel of each expression; the sliders run well past it in
+# both directions on purpose. A shape key extrapolates linearly outside 0-1, so
+# 2.0 is the same move twice as far and a negative value is its opposite (a
+# negative blink is a wide eye, a negative brow_raise a lowered brow). The
+# training maps come from a detector that snaps face landmarks to about 1/48 of
+# its face crop — roughly 5mm on a close-up — so an anatomically honest 4mm
+# move can sit below anything the control model ever saw change.
+FACE_SLIDER_RANGE = (-3.0, 3.0)
+FACE_LIFT_MM = 40.0      # how far the dots are slid toward the camera; see build_node_group
+
+_FACE_HALF = {
+    # jaw, chin (8) up to the ear (16)
+    8: (0, -76, -12), 9: (16, -74, -16), 10: (32, -66, -24), 11: (47, -55, -36),
+    12: (60, -37, -50), 13: (65, -20, -63), 14: (66, 0, -74), 15: (67, 17, -82),
+    16: (67, 36, -88),
+    # left brow, inner to outer
+    22: (10, 57, -14), 23: (21, 62, -13), 24: (32, 63, -15), 25: (44, 60, -20),
+    26: (53, 52, -28),
+    # nose: bridge down to the tip, then the base
+    27: (0, 40, -22), 28: (0, 27, -15), 29: (0, 13, -7), 30: (0, 0, 0),
+    33: (0, -13, -12), 34: (6, -10, -15), 35: (16, -5, -22),
+    # left eye: inner corner, upper lid, outer corner, lower lid
+    42: (16, 40, -24), 43: (26, 45, -21), 44: (37, 45, -22), 45: (43, 40, -29),
+    46: (37, 35, -23), 47: (26, 35, -22),
+    # outer lips: upper centre round to the corner (54), then the lower lip
+    51: (0, -24, -10), 52: (7, -23, -11), 53: (17, -26, -17), 54: (28, -31, -27),
+    55: (18, -38, -19), 56: (8, -42, -14), 57: (0, -43, -13),
+    # inner lips
+    62: (0, -30, -13), 63: (8, -30, -14), 64: (22, -31, -25),
+    65: (8, -33, -14), 66: (0, -33, -13),
+    # left pupil
+    69: (31.5, 40, -21),
+}
+# figure's right -> the left-side landmark it mirrors
+_FACE_MIRROR = {
+    7: 9, 6: 10, 5: 11, 4: 12, 3: 13, 2: 14, 1: 15, 0: 16,
+    21: 22, 20: 23, 19: 24, 18: 25, 17: 26,
+    32: 34, 31: 35,
+    39: 42, 38: 43, 37: 44, 36: 45, 41: 46, 40: 47,
+    50: 52, 49: 53, 48: 54, 59: 55, 58: 56,
+    61: 63, 60: 64, 67: 65,
+    68: 69,
+}
+FACE_PUPIL_L, FACE_PUPIL_R, FACE_NOSE_TIP = 69, 68, 30
+
+
+def face_template_mm():
+    """{landmark: (lateral, up, forward)} for all 70, in mm from the nose tip."""
+    pts = dict(_FACE_HALF)
+    for right, left in _FACE_MIRROR.items():
+        x, y, z = _FACE_HALF[left]
+        pts[right] = (-x, y, z)
+    assert sorted(pts) == list(range(70)), "face template must cover 0-69"
+    return pts
+
+
+def face_expressions_mm():
+    """{shape key: {landmark: (d_lateral, d_up, d_forward)}}.
+
+    Offsets in mm at slider value 1.0. A shape key is a straight-line blend, so
+    these are the END positions of each move rather than arcs — fine over the
+    range a face actually travels, and it is what keeps them keyable.
+    """
+    def sym(entries):
+        """Mirror left-side offsets onto the right; midline points pass through."""
+        left_to_right = {l: r for r, l in _FACE_MIRROR.items()}
+        out = {}
+        for idx, (dx, dy, dz) in entries.items():
+            out[idx] = (dx, dy, dz)
+            if idx in left_to_right:
+                out[left_to_right[idx]] = (-dx, dy, dz)
+        return out
+
+    def mirrored(entries):
+        """The same move on the figure's right side only."""
+        left_to_right = {l: r for r, l in _FACE_MIRROR.items()}
+        return {left_to_right[i]: (-dx, dy, dz) for i, (dx, dy, dz) in entries.items()}
+
+    # The mandible hinges near the ear, so the drop fades to nothing along the
+    # jawline; the lower lip follows the chin and the corners are dragged part way.
+    chin = (0.0, -22.0, -8.0)
+    def drop(w, dx=0.0):
+        return (dx, chin[1] * w, chin[2] * w)
+    jaw_open = sym({8: drop(1.0), 9: drop(0.97), 10: drop(0.88), 11: drop(0.72),
+                    12: drop(0.5), 13: drop(0.28), 14: drop(0.1),
+                    55: drop(0.8), 56: drop(0.8), 57: drop(0.8),
+                    65: drop(0.8), 66: drop(0.8),
+                    54: drop(0.35, -2.0), 64: drop(0.35, -2.0)})
+
+    brow_l = {i: (0.0, 7.0, 0.5) for i in (22, 23, 24, 25, 26)}
+    blink_l = {43: (0.0, -9.5, -0.5), 44: (0.0, -9.5, -0.5)}
+
+    return {
+        "jaw_open": jaw_open,
+        "smile": sym({54: (7, 5, -5), 64: (6, 4.5, -4.5), 53: (3, 2, -2),
+                       55: (3, 2, -2), 52: (1, 0.5, 0), 56: (1, 0.5, 0),
+                       63: (2, 1, -1), 65: (2, 1, -1),
+                       46: (0, 1.2, 0), 47: (0, 1.2, 0)}),
+        "frown": sym({54: (-1, -5, -1), 64: (-1, -4.5, -1),
+                       53: (0, -2, 0), 55: (0, -2, 0)}),
+        "pucker": sym({54: (-9, 0, 5), 64: (-8, 0, 5), 53: (-5, 0, 5),
+                        55: (-5, 0, 5), 52: (-2, 0, 5), 56: (-2, 0, 5),
+                        63: (-3, 0, 5), 65: (-3, 0, 5), 51: (0, 0, 5),
+                        57: (0, 0, 5), 62: (0, 0, 5), 66: (0, 0, 5)}),
+        "brow_raise.L": brow_l,
+        "brow_raise.R": mirrored(brow_l),
+        "brow_furrow": sym({22: (-3, -4, 0), 23: (-2, -3, 0),
+                             24: (-1, -1.5, 0)}),
+        "blink.L": blink_l,
+        "blink.R": mirrored(blink_l),
+        # Both pupils travel together, so these are NOT mirrored. Negative values
+        # look the other way: gaze_h +1 is toward the figure's left.
+        "gaze_h": {FACE_PUPIL_L: (6, 0, 0), FACE_PUPIL_R: (6, 0, 0)},
+        "gaze_v": {FACE_PUPIL_L: (0, 4, 0), FACE_PUPIL_R: (0, 4, 0)},
+    }
+
 
 def srgb_to_linear(c):
     return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
@@ -247,6 +394,34 @@ def face_points(arm_obj, height):
     }
 
 
+def face_scale(height):
+    """World units per template millimetre.
+
+    Matched to the body's own eye spacing rather than to stature, so the face
+    template and the COCO eye keypoints agree with each other by construction.
+    """
+    return (FACE_OFFSETS[15][2] - FACE_OFFSETS[14][2]) * height / FACE_IPD_MM
+
+
+def face_landmarks(arm_obj, height):
+    """({landmark: position}, to_world) for the 70-point face, or ({}, None).
+
+    The template hangs off the body's Nose keypoint, tip on tip. `to_world`
+    turns a template-space millimetre OFFSET into an armature-space vector, for
+    the expression shape keys.
+    """
+    body = face_points(arm_obj, height)
+    if 0 not in body:
+        return {}, None
+    up, forward, left = figure_axes(arm_obj)
+    s = face_scale(height)
+
+    def to_world(d):
+        return (left * d[0] + up * d[1] + forward * d[2]) * s
+
+    return {i: body[0] + to_world(p) for i, p in face_template_mm().items()}, to_world
+
+
 def figure_height(arm_obj):
     """Height of the FIGURE, measured only across mapped keypoints.
 
@@ -285,15 +460,24 @@ def stick_radii(height, output_height_px, frame_fraction):
     return 4.0 * world_per_px, 4.0 * world_per_px, 1.0 * world_per_px
 
 
-def build_source_mesh(arm_obj, height, output_height_px, frame_fraction):
+def build_source_mesh(arm_obj, height, output_height_px, frame_fraction,
+                      with_face=True):
     """One vertex per keypoint, one 2-vertex edge per limb, each vertex weighted
     to the bone it follows. Returns (object, report)."""
     joint_r, body_r, hand_r = stick_radii(height, output_height_px, frame_fraction)
+    face_r = joint_r * FACE_PX / JOINT_PX
 
     verts, edges, groups = [], [], {}
     colors, radii, kinds = [], [], []
     missing, rebound = [], {}
     face = face_points(arm_obj, height)
+    landmarks, to_world = face_landmarks(arm_obj, height) if with_face else ({}, None)
+    if landmarks:
+        # A real detection puts the COCO eye keypoints on the pupils. The
+        # hand-set FACE_OFFSETS eyes sit about 1cm low and 2cm back of where
+        # this template's pupils land, which is invisible on its own but reads
+        # as two pairs of eyes once the landmarks are drawn beside them.
+        face[14], face[15] = landmarks[FACE_PUPIL_R], landmarks[FACE_PUPIL_L]
 
     def add_vertex(bone, end, rgb, radius, kind, at=None, bind_to=None):
         """`at`/`bind_to` are for derived keypoints (the face), which sit at no
@@ -362,9 +546,23 @@ def build_source_mesh(arm_obj, height, output_height_px, frame_fraction):
                 lambda i: HAND_JOINT_RGB,
                 hand_limb_rgb, hand_r, 2.0, f"hand.{side}")
 
+    # Face landmarks: lone vertices like the joints, but their own kind so the
+    # node group can give them the smaller white dot.
+    face_vert = {}
+    if landmarks and arm_obj.data.bones.get(HEAD_BONE) is not None:
+        for idx in sorted(landmarks):
+            face_vert[idx] = add_vertex(HEAD_BONE, "head", FACE_RGB, face_r,
+                                        FACE_KIND, at=landmarks[idx],
+                                        bind_to=HEAD_BONE)
+
     old = bpy.data.objects.get(SOURCE_MESH)
     if old:
+        old_mesh = old.data
         bpy.data.objects.remove(old, do_unlink=True)
+        # Otherwise the rebuilt mesh comes back as OP_source.001 beside an
+        # orphan, and anything looking the datablock up by name finds the corpse.
+        if old_mesh is not None and old_mesh.users == 0:
+            bpy.data.meshes.remove(old_mesh)
     mesh = bpy.data.meshes.new(SOURCE_MESH)
     mesh.from_pydata([tuple(v) for v in verts], edges, [])
     mesh.update()
@@ -388,11 +586,26 @@ def build_source_mesh(arm_obj, height, output_height_px, frame_fraction):
             for i, v in enumerate(data):
                 attr.data[i].value = v
 
+    # Expressions. Shape keys sit below the modifier stack, so they deform the
+    # landmarks first and head.x then carries the result — an expression holds
+    # through any head pose, and each key is an ordinary animatable slider.
+    shape_keys = []
+    if face_vert:
+        obj.shape_key_add(name="Basis", from_mix=False)
+        for name, offsets in face_expressions_mm().items():
+            key = obj.shape_key_add(name=name, from_mix=False)
+            key.slider_min, key.slider_max = FACE_SLIDER_RANGE
+            for idx, delta in offsets.items():
+                vi = face_vert[idx]
+                key.data[vi].co = verts[vi] + to_world(delta)
+            shape_keys.append(name)
+
     mod = obj.modifiers.new("Armature", "ARMATURE")
     mod.object = arm_obj
 
     return obj, {"verts": len(verts), "edges": len(edges), "missing": missing,
-                 "rebound": rebound}
+                 "rebound": rebound, "face_landmarks": len(face_vert),
+                 "shape_keys": shape_keys}
 
 
 def build_material():
@@ -416,13 +629,21 @@ def build_material():
     return mat
 
 
-def build_node_group(material, joint_radius, body_radius, hand_radius):
+def build_node_group(material, joint_radius, body_radius, hand_radius,
+                     face_radius=None, face_lift=0.0):
     old = bpy.data.node_groups.get(GN_GROUP)
     if old:
         bpy.data.node_groups.remove(old)
     ng = bpy.data.node_groups.new(GN_GROUP, "GeometryNodeTree")
     ng.interface.new_socket("Geometry", in_out="INPUT", socket_type="NodeSocketGeometry")
     ng.interface.new_socket("Geometry", in_out="OUTPUT", socket_type="NodeSocketGeometry")
+    if face_radius is not None:
+        # A plain checkbox on the modifier, for the shots where the face should
+        # be left to the prompt. Unlike the radii this is a user choice rather
+        # than a derived value, so it belongs where a user can see it.
+        show_face = ng.interface.new_socket(FACE_TOGGLE, in_out="INPUT",
+                                            socket_type="NodeSocketBool")
+        show_face.default_value = True
 
     n = ng.nodes.new
     gin, gout = n("NodeGroupInput"), n("NodeGroupOutput")
@@ -455,6 +676,7 @@ def build_node_group(material, joint_radius, body_radius, hand_radius):
     # feeding the radius attribute into Instance on Points' Scale left every dot
     # at radius 1.0.
     sphere = n("GeometryNodeMeshUVSphere")
+    sphere.name = NODE_JOINT
     sphere.inputs["Segments"].default_value = 12
     sphere.inputs["Rings"].default_value = 8
     sphere.inputs["Radius"].default_value = joint_radius
@@ -465,16 +687,60 @@ def build_node_group(material, joint_radius, body_radius, hand_radius):
     ng.links.new(iop.outputs["Instances"], realize.inputs["Geometry"])
     ng.links.new(realize.outputs["Geometry"], join.inputs["Geometry"])
 
+    # --- face: the same idea at draw_facepose's smaller radius ---
+    # A second sphere rather than a scaled instance of the first, for the reason
+    # above: per-point scale on Instance on Points did not take.
+    if face_radius is not None:
+        face_sphere = n("GeometryNodeMeshUVSphere")
+        face_sphere.name = NODE_FACE
+        face_sphere.inputs["Segments"].default_value = 12
+        face_sphere.inputs["Rings"].default_value = 8
+        face_sphere.inputs["Radius"].default_value = face_radius
+        # draw_facepose runs AFTER the body and hands, so in a real map the
+        # white dots sit on top of everything: the pupil dot over the coloured
+        # eye joint it shares a position with, the lip dots over the neck stick
+        # that crosses them. Rendered as geometry, depth decides instead and the
+        # sticks win. Sliding each landmark a few centimetres along its own view
+        # ray toward the camera puts it in front without moving where it
+        # projects; the cost is a dot 2-3% larger at portrait distance.
+        cam = n("GeometryNodeInputActiveCamera")
+        cam_info = n("GeometryNodeObjectInfo")
+        cam_info.transform_space = "RELATIVE"
+        ng.links.new(cam.outputs[0], cam_info.inputs["Object"])
+        position = n("GeometryNodeInputPosition")
+        to_cam = n("ShaderNodeVectorMath"); to_cam.operation = "SUBTRACT"
+        ng.links.new(cam_info.outputs["Location"], to_cam.inputs[0])
+        ng.links.new(position.outputs["Position"], to_cam.inputs[1])
+        unit = n("ShaderNodeVectorMath"); unit.operation = "NORMALIZE"
+        ng.links.new(to_cam.outputs["Vector"], unit.inputs[0])
+        lift = n("ShaderNodeVectorMath"); lift.operation = "SCALE"
+        lift.inputs["Scale"].default_value = face_lift
+        ng.links.new(unit.outputs["Vector"], lift.inputs[0])
+        lifted = n("GeometryNodeSetPosition")
+        ng.links.new(split(gin.outputs[0], FACE_KIND - 0.5, FACE_KIND + 0.5),
+                     lifted.inputs["Geometry"])
+        ng.links.new(lift.outputs["Vector"], lifted.inputs["Offset"])
+
+        face_iop = n("GeometryNodeInstanceOnPoints")
+        ng.links.new(lifted.outputs["Geometry"], face_iop.inputs["Points"])
+        ng.links.new(face_sphere.outputs["Mesh"], face_iop.inputs["Instance"])
+        ng.links.new(gin.outputs[FACE_TOGGLE], face_iop.inputs["Selection"])
+        face_realize = n("GeometryNodeRealizeInstances")
+        ng.links.new(face_iop.outputs["Instances"], face_realize.inputs["Geometry"])
+        ng.links.new(face_realize.outputs["Geometry"], join.inputs["Geometry"])
+
     # --- limbs: one tube per 2-vertex edge, one branch per stick width ---
     # There are exactly two widths (body 4, hand 1), so each branch gets a
     # fixed-radius profile circle. Driving the radius as a field was tried three
     # ways -- Set Curve Radius, the curve's built-in "radius" attribute, and
     # Curve to Mesh's Scale input -- and all three silently left the profile at
     # radius 1.0, i.e. 80x oversized.
-    for lo, hi, radius in ((0.5, 1.5, body_radius), (1.5, 2.5, hand_radius)):
+    for lo, hi, radius, name in ((0.5, 1.5, body_radius, NODE_BODY),
+                                 (1.5, 2.5, hand_radius, NODE_HAND)):
         to_curve = n("GeometryNodeMeshToCurve")
         ng.links.new(split(gin.outputs[0], lo, hi), to_curve.inputs[0])
         circle = n("GeometryNodeCurvePrimitiveCircle")
+        circle.name = name
         circle.inputs["Resolution"].default_value = 10
         circle.inputs["Radius"].default_value = radius
         to_mesh = n("GeometryNodeCurveToMesh")
@@ -541,9 +807,9 @@ def build_node_group(material, joint_radius, body_radius, hand_radius):
 # nothing needs to be cached and no render path can be missed.
 #
 # The one thing the driver cannot derive is the in-context control budget, which
-# belongs to the MODEL rather than to the render — hence the one scene property
-# that remains. It is stable across renders (it only changes when the model
-# does), so it has none of the staleness the height had.
+# belongs to the MODEL rather than to the render. That is inlined into the
+# expression as a literal when stage-1 sizing is asked for; it is not stored in
+# the scene either.
 
 JOINT_PX = 4.0   # draw_bodypose/draw_handpose: cv2.circle(..., 4, ...)
 BODY_PX = 4.0    # draw_bodypose: ellipse2Poly semi-axis 4, so 8px across
@@ -563,9 +829,23 @@ RADIUS_SOCKETS = (("Joint Radius", JOINT_PX),
                   ("Body Radius", BODY_PX),
                   ("Hand Radius", HAND_PX))
 
+# Names given to the primitive nodes at build time, so the drivers can find
+# them without guessing. FACE_TOGGLE is the modifier checkbox.
+NODE_JOINT, NODE_FACE = "OP_JointSphere", "OP_FaceSphere"
+NODE_BODY, NODE_HAND = "OP_BodyCircle", "OP_HandCircle"
+FACE_TOGGLE = "Face"
+
+# Below this many pixels of face width the landmarks are not drawn. Seventy 6px
+# dots only stay separate once the eye landmarks (about 10mm apart on a 130mm
+# face) are more than a dot's width from each other, which is 78px of face;
+# under that they fuse into a white patch that says nothing about expression.
+# Detectors drop face landmarks on small faces for the same reason, so a map
+# with a blob where a distant face should be is not one the model was shown.
+DEFAULT_FACE_MIN_PX = 80.0
+
 
 def radius_sockets(ng):
-    """[(label, pixels, driver data path)] for the three radius inputs.
+    """[(label, pixels, driver data path)] for each radius input.
 
     The drivers go on the primitive nodes INSIDE the group rather than on
     modifier inputs. Exposing them as group inputs reads better in the UI, but
@@ -574,21 +854,31 @@ def radius_sockets(ng):
     that path fails as "not animatable" — a node socket's default_value is
     animatable and has been for every version this rig has seen.
 
-    The two limb circles are told apart by their current radius rather than by
-    node name, since 'Curve Circle' vs 'Curve Circle.001' depends on the order
-    build_node_group happened to create them in.
+    Nodes are found by the names build_node_group gives them. Groups built
+    before that carry Blender's defaults ('Curve Circle' / 'Curve Circle.001',
+    which depend on creation order), so those fall back to telling the two limb
+    circles apart by their current radius.
     """
-    spheres = [n for n in ng.nodes if n.bl_idname == "GeometryNodeMeshUVSphere"]
-    circles = [n for n in ng.nodes
-               if n.bl_idname == "GeometryNodeCurvePrimitiveCircle"]
-    if len(spheres) != 1 or len(circles) != 2:
-        raise RuntimeError(f"{ng.name!r}: expected 1 sphere and 2 circles, "
-                           f"found {len(spheres)} and {len(circles)}")
-    circles.sort(key=lambda c: c.inputs["Radius"].default_value, reverse=True)
+    if NODE_JOINT in ng.nodes:
+        nodes = [ng.nodes[NODE_JOINT], ng.nodes[NODE_BODY], ng.nodes[NODE_HAND]]
+        labelled = list(RADIUS_SOCKETS)
+        if NODE_FACE in ng.nodes:
+            nodes.append(ng.nodes[NODE_FACE])
+            labelled.append(("Face Radius", FACE_PX))
+    else:
+        # A group built before the nodes were named: one sphere, two circles,
+        # and no face branch.
+        spheres = [n for n in ng.nodes if n.bl_idname == "GeometryNodeMeshUVSphere"]
+        circles = [n for n in ng.nodes
+                   if n.bl_idname == "GeometryNodeCurvePrimitiveCircle"]
+        if len(spheres) != 1 or len(circles) != 2:
+            raise RuntimeError(f"{ng.name!r}: expected 1 sphere and 2 circles, "
+                               f"found {len(spheres)} and {len(circles)}")
+        circles.sort(key=lambda c: c.inputs["Radius"].default_value, reverse=True)
+        nodes, labelled = [spheres[0], circles[0], circles[1]], list(RADIUS_SOCKETS)
 
     out = []
-    for node, (label, px) in zip((spheres[0], circles[0], circles[1]),
-                                 RADIUS_SOCKETS):
+    for node, (label, px) in zip(nodes, labelled):
         socket = node.inputs["Radius"]
         if socket.is_linked:
             raise RuntimeError(f"{ng.name!r}: {node.name!r} Radius is linked; "
@@ -600,8 +890,9 @@ def radius_sockets(ng):
     return out
 
 
-def install_radius_drivers(obj, arm_obj, camera=None, max_pixels=None):
-    """Drive the three radii off the camera so sticks hold their PIXEL width.
+def install_radius_drivers(obj, arm_obj, camera=None, max_pixels=None,
+                           face_min_px=DEFAULT_FACE_MIN_PX):
+    """Drive the radii off the camera so sticks and dots hold their PIXEL width.
 
     Idempotent — re-running replaces the drivers rather than stacking them.
     They re-evaluate per frame, so a camera move across a control VIDEO stays
@@ -644,6 +935,7 @@ def install_radius_drivers(obj, arm_obj, camera=None, max_pixels=None):
         raise RuntimeError(f"{obj.name!r} has no OP_Generator nodes modifier")
     ng = mod.node_group
     sockets = radius_sockets(ng)
+    face_w = FACE_WIDTH_MM * face_scale(figure_height(arm_obj))
 
     if ng.animation_data is None:
         ng.animation_data_create()
@@ -662,16 +954,16 @@ def install_radius_drivers(obj, arm_obj, camera=None, max_pixels=None):
             v.name, v.type = name, kind
             return v
 
-        v = var("depth", "LOC_DIFF")
+        v = var("d", "LOC_DIFF")
         v.targets[0].id = cam
         v.targets[1].id = arm_obj
         v.targets[1].bone_target = anchor_bone
 
         for name, ident, dpath in (("sw", cam.data, "sensor_width"),
-                                   ("lens", cam.data, "lens"),
+                                   ("f", cam.data, "lens"),
                                    ("rx", scene, "render.resolution_x"),
                                    ("ry", scene, "render.resolution_y"),
-                                   ("pct", scene, "render.resolution_percentage")):
+                                   ("p", scene, "render.resolution_percentage")):
             v = var(name, "SINGLE_PROP")
             v.targets[0].id_type = "CAMERA" if ident is cam.data else "SCENE"
             v.targets[0].id = ident
@@ -692,28 +984,48 @@ def install_radius_drivers(obj, arm_obj, camera=None, max_pixels=None):
         # rw/rh are what will actually be RENDERED (percentage included), which
         # is also what gets sent as the generation size. `fit` reproduces the
         # AUTO sensor fit: sensor_width spans the larger image dimension.
-        rw, rh = "(rx * pct / 100.0)", "(ry * pct / 100.0)"
-        fit = "min(1.0, ry / max(1.0, rx))"
+        #
+        # Variable names are single letters (d depth, f focal length, p
+        # percentage) and the spacing is stripped because Blender stores a
+        # driver expression in 256 bytes and truncates anything longer without
+        # complaint — the face expression below does not fit written out.
+        rw, rh = "(rx*p/100)", "(ry*p/100)"
+        fit = "min(1,ry/max(1,rx))"
+        canvas = f"max(16,{rh})"
         if budget_px:
             # Size for the smaller stage-1 pass the runner denoises with control
             # at when the request is over budget, mirroring _fit_pixel_budget
             # including its deliberate round DOWN to the latent grid. min()
             # covers the under-budget case, where the ratio exceeds 1.
-            scale = f"min(1.0, sqrt({budget_px:.1f} / max(1.0, {rw} * {rh})))"
-            gen = f"max(16.0, floor({rh} * {scale} / 16.0) * 16.0)"
+            scale = f"min(1,sqrt({budget_px:.0f}/max(1,{rw}*{rh})))"
+            gen = f"max(16,floor({rh}*{scale}/16)*16)"
         else:
             # Size for the rendered canvas: 8px in the map as authored, which is
             # what controlnet_aux itself draws and what FUK's own openpose
             # preprocessor produces.
-            gen = f"max(16.0, {rh})"
+            gen = canvas
         # max() guards stop a zeroed resolution from erroring the driver, which
         # in Blender leaves the socket at its last value with no visible failure.
-        drv.expression = (f"{px} * depth * sw * {fit} "
-                          f"/ (max(1.0, lens) * {gen})")
+        expr = f"{px}*d*sw*{fit}/(max(1,f)*{gen})"
+        if label == "Face Radius" and face_min_px and face_min_px > 0:
+            # Gate the landmarks on how wide the face is in the map: the dot
+            # radius ramps from nothing to full over the single pixel above the
+            # threshold. Written with min/max rather than a comparison so it
+            # stays inside Blender's built-in expression evaluator and never
+            # needs "auto-run Python scripts". Measured on the rendered canvas
+            # in both sizing modes — the stage-1 form does not fit in 256 bytes.
+            face_px = f"{face_w:.5f}*max(1,f)*{canvas}/max(1e-6,d*sw*{fit})"
+            expr += f"*min(1,max(0,{face_px}-{face_min_px:.0f}))"
+        if len(expr) > 255:
+            raise RuntimeError(f"driver expression for {label} is {len(expr)} "
+                               "bytes; Blender truncates at 255")
+        drv.expression = expr
 
     return {"camera": cam.name, "anchor_bone": anchor_bone,
             "mode": (f"stage-1 (budget {budget_px/1e6:.2f}MP)" if budget_px
-                     else "render canvas")}
+                     else "render canvas"),
+            "face": any(label == "Face Radius" for label, _, _ in sockets),
+            "face_min_px": face_min_px}
 
 
 # OpenPose stick/dot sizes are absolute pixels, so they depend on how much of
@@ -790,7 +1102,7 @@ def setup_scene(src_obj):
 
 
 def convert(frame_fraction=DEFAULT_FRAME_FRACTION, output_height_px=None,
-            max_pixels=None):
+            max_pixels=None, with_face=True, face_min_px=DEFAULT_FACE_MIN_PX):
     arm_obj = bpy.data.objects.get(RIG_OBJECT)
     if arm_obj is None:
         raise RuntimeError(f"no armature object named {RIG_OBJECT!r}")
@@ -802,8 +1114,12 @@ def convert(frame_fraction=DEFAULT_FRAME_FRACTION, output_height_px=None,
     joint_r, body_r, hand_r = stick_radii(height, output_height_px, frame_fraction)
 
     material = build_material()
-    obj, report = build_source_mesh(arm_obj, height, output_height_px, frame_fraction)
-    ng = build_node_group(material, joint_r, body_r, hand_r)
+    obj, report = build_source_mesh(arm_obj, height, output_height_px,
+                                    frame_fraction, with_face=with_face)
+    has_face = bool(report["face_landmarks"])
+    ng = build_node_group(material, joint_r, body_r, hand_r,
+                          face_radius=joint_r * FACE_PX / JOINT_PX if has_face else None,
+                          face_lift=FACE_LIFT_MM * face_scale(height))
     gn = obj.modifiers.new("OP_Generator", "NODES")
     gn.node_group = ng
 
@@ -814,7 +1130,15 @@ def convert(frame_fraction=DEFAULT_FRAME_FRACTION, output_height_px=None,
           f"GENERATION with the figure filling {frame_fraction:.0%} of frame")
     print(f"  -> joint r {joint_r:.5f}, body stick r {body_r:.5f}, "
           f"hand stick r {hand_r:.5f}")
-    info = install_radius_drivers(obj, arm_obj, max_pixels=max_pixels)
+    info = install_radius_drivers(obj, arm_obj, max_pixels=max_pixels,
+                                  face_min_px=face_min_px)
+    if has_face:
+        gate = (f"drawn once the face is {face_min_px:.0f}px wide in the map"
+                if face_min_px and face_min_px > 0 else "always drawn")
+        print(f"face: {report['face_landmarks']} landmarks on {HEAD_BONE!r}, {gate}; "
+              f"'{FACE_TOGGLE}' checkbox on the OP_Generator modifier turns it off")
+        print(f"  expressions (shape keys on {SOURCE_MESH}): "
+              f"{', '.join(report['shape_keys'])}")
     print(f"radii now DRIVEN from {info['camera']!r} at bone "
           f"{info['anchor_bone']!r}; sizing mode: {info['mode']}")
     print(f"  frame_fraction is no longer baked, and the output height is read "
@@ -848,13 +1172,24 @@ def main():
     max_pixels = None
     if "--max-pixels" in argv:
         max_pixels = float(argv[argv.index("--max-pixels") + 1])
+    # --no-face builds the body and hands only, with the COCO eye keypoints at
+    # their original hand-set offsets. --face-min-px 0 draws the landmarks at
+    # any size instead of hiding them on small faces.
+    with_face = "--no-face" not in argv
+    face_min_px = DEFAULT_FACE_MIN_PX
+    if "--face-min-px" in argv:
+        face_min_px = float(argv[argv.index("--face-min-px") + 1])
 
     src = Path(bpy.data.filepath)
     if "--out" in argv:
         dst = Path(argv[argv.index("--out") + 1])
         if not dst.is_absolute():
             dst = src.parent / dst
-    elif "--drive-only" in argv:
+    elif "--drive-only" in argv or "--in-place" in argv:
+        # --in-place is a full rebuild of the source mesh, node group and
+        # drivers inside an already-converted file. Needed for anything that
+        # changes the mesh itself (the face landmarks), which --drive-only
+        # deliberately leaves alone.
         dst = src
     else:
         dst = src.with_name(src.stem + "_OP.blend")
@@ -869,12 +1204,14 @@ def main():
         if obj is None or arm_obj is None:
             raise RuntimeError(f"--drive-only needs an existing {SOURCE_MESH!r} "
                                f"and {RIG_OBJECT!r} in the file")
-        info = install_radius_drivers(obj, arm_obj, max_pixels=max_pixels)
+        info = install_radius_drivers(obj, arm_obj, max_pixels=max_pixels,
+                                      face_min_px=face_min_px)
         print(f"radii driven from {info['camera']!r} at bone "
               f"{info['anchor_bone']!r}; sizing mode: {info['mode']}")
     else:
         convert(frame_fraction=frame_fraction, output_height_px=render_h,
-                max_pixels=max_pixels)
+                max_pixels=max_pixels, with_face=with_face,
+                face_min_px=face_min_px)
 
     bpy.ops.wm.save_as_mainfile(filepath=str(dst))
     print(f"\nsaved -> {dst}")
