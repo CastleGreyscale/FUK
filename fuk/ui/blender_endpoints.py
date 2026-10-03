@@ -59,6 +59,12 @@ class SaveEntryRequest(BaseModel):
     seed: Optional[int] = None
     width: int = 0
     height: int = 0
+    # The prompt as Blender composed it (markers unexpanded), the user's own draft,
+    # and the shot description the addon measured from the camera and prepended.
+    prompt_source: Optional[str] = None
+    prompt_user: Optional[str] = None
+    shot_injection: Optional[str] = None
+    shot_facts: Optional[dict] = None
 
 
 def _thumbnail(src: Path, dest: Path) -> None:
@@ -119,8 +125,17 @@ async def save_entry(req: SaveEntryRequest):
         except Exception:
             meta = {}
     meta.setdefault("timestamp", datetime.now().isoformat())
-    if req.prompt:
+    # When enriching, the entry already holds what the server recorded at
+    # generation time: `prompt` is the string the model actually saw (markers
+    # expanded, shot description included) and `prompt_source` the draft behind
+    # it. Blender only knows the draft, so letting it write here replaced the
+    # true model input with `#marker` text on every Render Full. It fills these
+    # in only where nothing is recorded — i.e. when creating an entry from files.
+    creating = not req.generation_id
+    if req.prompt and (creating or not meta.get("prompt")):
         meta["prompt"] = req.prompt
+    if req.prompt_source and (creating or not meta.get("prompt_source")):
+        meta["prompt_source"] = req.prompt_source
     if req.negative_prompt:
         meta["negative_prompt"] = req.negative_prompt
     if req.model:
@@ -134,7 +149,18 @@ async def save_entry(req: SaveEntryRequest):
     if source_rel:
         meta["source"] = source_rel
     meta["source_app"] = "blender"
-    meta["blender"] = {"control_kind": req.control_kind}
+    blender = dict(meta.get("blender") or {})
+    blender["control_kind"] = req.control_kind
+    # Kept apart from the prompt so the history can answer "what did I write"
+    # and "what did the camera add" separately, and so a surprising phrase can
+    # be traced to the measurement behind it.
+    if req.prompt_user is not None:
+        blender["prompt_user"] = req.prompt_user
+    if req.shot_injection is not None:
+        blender["shot_injection"] = req.shot_injection
+    if req.shot_facts is not None:
+        blender["shot_facts"] = req.shot_facts
+    meta["blender"] = blender
     with open(meta_path, "w") as f:
         json.dump(meta, f, indent=2)
 

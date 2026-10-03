@@ -12,6 +12,7 @@ from . import shot as shot_mod
 from . import render as render_mod
 from . import controls as controls_mod
 from . import viewer as viewer_mod
+from . import framing as framing_mod
 from . import ui as ui_mod
 from .client import FukClient, FukError
 from .prefs import get_server_url
@@ -142,28 +143,93 @@ def _resolved_seed(props, seed_used=None):
     return None if props.seed_mode == "random" else props_mod.parse_seed(props.seed)
 
 
-def _enrich_payload(props, render, control_path, gen_id):
-    """save-entry payload that enriches the just-generated entry in place."""
+def shot_description(context, props, frame=None):
+    """(label, facts) the camera and rig add to the prompt — ("", None) if none.
+
+    `facts` holds the words themselves (a prefix and a suffix around the user's
+    prompt); `label` is that injection as one line, for display and metadata.
+
+    Never raises: a shot description is a help to the prompt, and a rig it cannot
+    read must cost the phrase, not the generation. `frame` measures at that frame
+    (the first of a video) and puts the scene back afterwards.
+    """
+    if not props.auto_shot or not props.openpose_view_layer:
+        return "", None
+    scene = context.scene
+    restore = None
+    try:
+        if frame is not None and frame != scene.frame_current:
+            restore = scene.frame_current
+            scene.frame_set(frame)
+        return framing_mod.describe(scene, props.openpose_view_layer,
+                                    context.evaluated_depsgraph_get())
+    except Exception:
+        return "", None
+    finally:
+        if restore is not None:
+            scene.frame_set(restore)
+
+
+def _server_prompts(client, output_url):
+    """(prompt, prompt_source) as the server recorded them for a generation.
+
+    `prompt` is what the model saw — markers expanded — which Blender cannot
+    reconstruct itself. Read before a preview's entry is deleted, so that a later
+    Save to History can still write the true model input.
+    """
+    try:
+        meta = client.generation_metadata(output_url)
+        return meta.get("prompt") or "", meta.get("prompt_source") or ""
+    except (FukError, ValueError, TypeError, AttributeError):
+        return "", ""
+
+
+def _shot_fields(props, shot):
+    """The prompt-provenance fields every saved Blender entry carries."""
+    phrase, facts = shot or ("", None)
     return {
+        "prompt_user": props.prompt,
+        "shot_injection": phrase or "",
+        "shot_facts": facts,
+    }
+
+
+def _enrich_payload(props, render, control_path, gen_id, shot=None):
+    """save-entry payload that enriches the just-generated entry in place.
+
+    Carries no `prompt` or `negative_prompt`: the entry already holds the ones
+    the server recorded, which are the strings the model saw. Sending the
+    Blender drafts here used to overwrite the prompt with unexpanded `#marker`
+    text, and would drop the terms added to the negative.
+    """
+    payload = {
         "generation_id": gen_id,
         "control_path": control_path or None,
         "beauty_path": (render or {}).get("beauty"),
         "control_kind": props.control_source,
         "register_control": True,
-        "prompt": props.prompt,
-        "negative_prompt": props.negative_prompt or "",
+        "prompt": "",
+        "negative_prompt": "",
         "model": props.model,
         "seed": _resolved_seed(props),
         "width": (render or {}).get("width", 0),
         "height": (render or {}).get("height", 0),
     }
+    payload.update(_shot_fields(props, shot))
+    return payload
 
 
-def _write_io_meta(out_dir, props, render, control_path, result_path, seed_used):
+def _write_io_meta(out_dir, props, render, control_path, result_path, seed_used,
+                   shot=None, server_prompts=("", "")):
     """Persist the working set in blender_io so Save-to-History can package it."""
+    composed = framing_mod.compose((shot or ("", None))[1], props.prompt)
     meta = {
-        "prompt": props.prompt,
-        "negative_prompt": props.negative_prompt,
+        # What the model saw if the server told us, else the composed draft.
+        "prompt": server_prompts[0] or composed,
+        "prompt_source": server_prompts[1] or composed,
+        **_shot_fields(props, shot),
+        "negative_prompt": framing_mod.compose_negative(
+            (shot or ("", None))[1], props.negative_prompt),
         "model": props.model,
         "seed": _resolved_seed(props, seed_used),
         "control_kind": props.control_source,
@@ -189,6 +255,10 @@ def _create_payload_from_meta(meta):
         "control_kind": meta.get("control_kind", "control"),
         "register_control": True,
         "prompt": meta.get("prompt", ""),
+        "prompt_source": meta.get("prompt_source") or None,
+        "prompt_user": meta.get("prompt_user"),
+        "shot_injection": meta.get("shot_injection"),
+        "shot_facts": meta.get("shot_facts"),
         "negative_prompt": meta.get("negative_prompt", ""),
         "model": meta.get("model", ""),
         "seed": meta.get("seed"),
@@ -461,9 +531,13 @@ class FUK_OT_resolve_preview(bpy.types.Operator):
         props = context.scene.fuk
         prompt_attr, _, resolved_attr = _prompt_attrs(self.video)
         model = props_mod.VIDEO_TASK if self.video else props.model
+        # "Exactly as generation will" includes the shot description, measured
+        # where generation would measure it.
+        frame = context.scene.frame_start if self.video else None
+        text = framing_mod.compose(shot_description(context, props, frame=frame)[1],
+                                   getattr(props, prompt_attr))
         try:
-            res = _client(context).prompt_resolve(
-                getattr(props, prompt_attr), model=model, apply_mood=True)
+            res = _client(context).prompt_resolve(text, model=model, apply_mood=True)
         except FukError as e:
             self.report({"ERROR"}, str(e))
             return {"CANCELLED"}
@@ -570,6 +644,7 @@ class FUK_OT_generate(bpy.types.Operator):
     _control_path = ""    # the structural map actually sent to FUK
     _last_preview = ""    # last diffusion-preview URL displayed
     _cancelling = False   # an Esc-stop is in progress
+    _shot = None          # (phrase, facts) prepended to this run's prompt
 
     def invoke(self, context, event):
         props = context.scene.fuk
@@ -598,6 +673,9 @@ class FUK_OT_generate(bpy.types.Operator):
             client.set_project_folder(folder)
             shot_mod.load_current(client, props.shot_file)
 
+            # Measured before the render, from the same camera and pose it will use.
+            self._shot = shot_description(context, props)
+
             props.status = "Rendering passes..."
             preview = self.mode == "preview"
             result = render_mod.render_passes(
@@ -620,8 +698,9 @@ class FUK_OT_generate(bpy.types.Operator):
 
             steps = props.preview_steps if preview else props.steps
             payload = {
-                "prompt": props.prompt,
-                "negative_prompt": props.negative_prompt or None,
+                "prompt": framing_mod.compose(self._shot[1], props.prompt),
+                "negative_prompt": framing_mod.compose_negative(
+                    self._shot[1], props.negative_prompt) or None,
                 "model": props.model,
                 "steps": int(steps),
                 "guidance_scale": float(props.guidance_scale),
@@ -720,6 +799,7 @@ class FUK_OT_generate(bpy.types.Operator):
             # touch the entry, since previews delete it.
             seed_used = _record_seed_used(props, self._client, png_url,
                                           props_mod.IMAGE_SEED_FIELDS)
+            server_prompts = _server_prompts(self._client, png_url)
 
             dest = os.path.join(self._out_dir, "result.png")
             try:
@@ -738,7 +818,8 @@ class FUK_OT_generate(bpy.types.Operator):
 
             # Record the working set so Save-to-History can package it later.
             props.working_dir = self._out_dir
-            _write_io_meta(self._out_dir, props, self._render, self._control_path, dest, seed_used)
+            _write_io_meta(self._out_dir, props, self._render, self._control_path, dest,
+                           seed_used, shot=self._shot, server_prompts=server_prompts)
 
             # Apply the persistence policy: previews are ephemeral, Full persists.
             gen_id = _gen_id_from_url(png_url)
@@ -749,7 +830,8 @@ class FUK_OT_generate(bpy.types.Operator):
                     props.result_persisted = False
                     note = " (preview — not saved)"
                 else:
-                    self._client.save_entry(_enrich_payload(props, self._render, self._control_path, gen_id))
+                    self._client.save_entry(_enrich_payload(
+                        props, self._render, self._control_path, gen_id, shot=self._shot))
                     props.result_persisted = True
                     note = " — saved to history"
                     # Record the seed FUK rolled (and the control that drove it) in the
@@ -826,10 +908,14 @@ class FUK_OT_generate_video(bpy.types.Operator):
                 percentage=props.video_percentage)
             if not seq["frames"]:
                 raise FukError("No frames rendered — check the scene frame range")
+            # One description for the clip, read at its first frame. A move that
+            # changes the shot size part-way through is not followed.
+            video_shot = shot_description(context, props, frame=context.scene.frame_start)
             payload = {
                 "task": props_mod.VIDEO_TASK,
-                "prompt": props.video_prompt,
-                "negative_prompt": props.video_negative_prompt or None,
+                "prompt": framing_mod.compose(video_shot[1], props.video_prompt),
+                "negative_prompt": framing_mod.compose_negative(
+                    video_shot[1], props.video_negative_prompt) or None,
                 "image_path": ref,
                 "control_path": seq["control_dir"],
                 "video_length": seq["frames"],

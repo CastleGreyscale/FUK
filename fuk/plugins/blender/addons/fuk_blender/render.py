@@ -6,6 +6,8 @@ Renders the beauty image plus one structural control map in a single render:
   - depth    : Z pass -> Normalize -> File Output (EXR) -> OIIO -> normalized PNG
   - normals  : Normal pass -> File Output (EXR) -> OIIO (remap -1..1 -> 0..1) -> PNG
   - openpose : a user rig view-layer's Image -> File Output (EXR) -> OIIO -> PNG
+  - depth_openpose : both of the above from the one render, the skeleton keyed over
+                     the depth map into a single control image
 
 Blender 5.x notes (validated on 5.1):
   * The compositor is a node-group datablock assigned to `scene.compositing_node_group`
@@ -24,6 +26,90 @@ import bpy
 
 # Controls FUK can derive itself (no native Blender pass written).
 FUK_DERIVED = {"canny"}
+
+# Depth for the set, skeleton for the figure, in ONE map. The control-union pipeline
+# takes a single context image (only control_image[0] reaches the model), so two
+# controls can only be combined by compositing them before they leave Blender.
+COMBINED = "depth_openpose"
+# Controls that read the rig view layer.
+POSE_SOURCES = {"openpose", COMBINED}
+
+# The rig's limb sticks are drawn at 0.6 of their joint colour (as controlnet_aux
+# does), so 0.6 is the dimmest fully-covered skeleton pixel — see _pose_over.
+_POSE_KEY = 0.6
+
+_GEOMETRY_TYPES = {"MESH", "CURVE", "CURVES", "SURFACE", "META", "FONT",
+                   "VOLUME", "GREASEPENCIL", "GPENCIL", "POINTCLOUD"}
+# Objects that render nothing themselves, so losing them from a layer costs nothing
+# unless something there depends on them (see _isolate_pose_geometry).
+_KEEP_TYPES = {"LIGHT", "CAMERA", "LIGHT_PROBE", "SPEAKER"}
+
+
+def _pose_layer(scene, name):
+    """The rig view layer named `name`, or None if it is unset or gone."""
+    return scene.view_layers.get(name) if name else None
+
+
+def _layer_collections(lc):
+    yield lc
+    for child in lc.children:
+        yield from _layer_collections(child)
+
+
+def _isolate_pose_geometry(view_layer, pose_vl):
+    """Drop the rig layer's skeleton geometry from the active layer for this render.
+
+    A view layer only isolates in one direction: the rig layer excludes the set, but
+    nothing stops the skeleton's collection from also being enabled in the main layer
+    — it is, by default, for any collection created after the layer was. The emission
+    sticks are then real geometry in the main render: they land in the Z pass (and so
+    in the depth map) and in the beauty. hide_render can't fix it, being per-object
+    rather than per-layer — it would empty the rig layer too.
+
+    So: every collection that contributes geometry to the rig layer is excluded from
+    the active layer for the render. Returns [(layer_collection, exclude)] to hand to
+    _restore_layer_collections.
+
+    A collection is left alone when it holds lights or a camera (it isn't a pure
+    control collection), or an armature/empty that the active layer has no other
+    route to — excluding that would drop it from this layer's depsgraph and silently
+    freeze whatever it deforms at rest.
+    """
+    snap = []
+    if pose_vl is None or pose_vl.name == view_layer.name:
+        return snap
+    main = {lc.collection: lc for lc in _layer_collections(view_layer.layer_collection)}
+    for pose_lc in _layer_collections(pose_vl.layer_collection):
+        col = pose_lc.collection
+        main_lc = main.get(col)
+        if (pose_lc.exclude or main_lc is None or main_lc.exclude
+                or main_lc is view_layer.layer_collection):
+            continue
+        objs = list(col.objects)
+        if not any(o.type in _GEOMETRY_TYPES for o in objs):
+            continue
+        if any(o.type in _KEEP_TYPES for o in col.all_objects):
+            continue
+        inside = set(col.children_recursive) | {col}
+        helpers = [o for o in col.all_objects if o.type not in _GEOMETRY_TYPES]
+        if any(all(c in inside for c in o.users_collection) for o in helpers):
+            continue
+        # Excluding a parent flips its children too; record the whole subtree.
+        snap.extend((lc, lc.exclude) for lc in _layer_collections(main_lc))
+        main_lc.exclude = True
+    return snap
+
+
+def _restore_layer_collections(view_layer, snap):
+    if not snap:
+        return
+    for lc, exclude in snap:          # parents first, as recorded
+        if lc.exclude != exclude:
+            lc.exclude = exclude
+    # Flush the re-inclusion now, while the caller still has live change-detection
+    # suspended. Left to the next redraw, the re-added skeleton mesh reports a
+    # geometry update that reads as a user edit and re-triggers Live forever.
+    view_layer.update()
 
 
 def _eevee_engine():
@@ -107,15 +193,14 @@ def _global_depth_range(exr_paths, far):
     return (lo, hi) if hi > lo else None
 
 
-def _exr_to_png(exr_path, png_path, mode, far=1e9, depth_range=None):
-    """Convert a single-pass EXR to an 8-bit PNG via OpenImageIO + numpy.
+def _exr_to_rgb(exr_path, mode, far=1e9, depth_range=None):
+    """Read a single-pass EXR as a display-ready float RGB array (0..1).
 
     `far` is the camera clip-end; depth pixels at/beyond it are the empty
     background (EEVEE writes Z=clip_end there, Cycles ~1e10) and are excluded
     from the range so geometry keeps its gradient. `depth_range` (lo, hi) forces a
     fixed normalization range (used for temporally-consistent video sequences).
     """
-    import OpenImageIO as oiio
     import numpy as np
 
     a = _read_exr(exr_path)
@@ -151,6 +236,27 @@ def _exr_to_png(exr_path, png_path, mode, far=1e9, depth_range=None):
         # — a hue shift that large reads as a different keypoint, or as none — so
         # the control map silently fails to latch instead of erroring. Encode.
         rgb = _linear_to_srgb(a[..., :3])
+    return rgb
+
+
+def _pose_over(pose_rgb, base_rgb):
+    """Key the rig-layer skeleton over another control map.
+
+    The rig layer renders on an opaque black world, so there is no alpha to use
+    (film_transparent would give one, but it is scene-wide and would strip the
+    world out of the beauty). Coverage is recovered from brightness instead: an
+    antialiased edge pixel is the stick colour scaled by its coverage, and the
+    dimmest solid pixel the rig draws is a limb at _POSE_KEY. The skeleton is
+    already premultiplied by that coverage, hence pose + (1 - a) * base.
+    """
+    import numpy as np
+    a = np.clip(pose_rgb.max(axis=-1, keepdims=True) / _POSE_KEY, 0.0, 1.0)
+    return np.clip(pose_rgb + (1.0 - a) * base_rgb, 0.0, 1.0)
+
+
+def _write_png(rgb, png_path):
+    import OpenImageIO as oiio
+    import numpy as np
 
     out8 = np.clip(rgb * 255.0 + 0.5, 0, 255).astype(np.uint8)
     h, w = out8.shape[:2]
@@ -161,6 +267,11 @@ def _exr_to_png(exr_path, png_path, mode, far=1e9, depth_range=None):
     out.write_image(out8)
     out.close()
     return png_path
+
+
+def _exr_to_png(exr_path, png_path, mode, far=1e9, depth_range=None):
+    """Convert a single-pass EXR to an 8-bit PNG via OpenImageIO + numpy."""
+    return _write_png(_exr_to_rgb(exr_path, mode, far, depth_range), png_path)
 
 
 def render_passes(context, out_dir, control_source, preview=False,
@@ -174,6 +285,13 @@ def render_passes(context, out_dir, control_source, preview=False,
     os.makedirs(out_dir, exist_ok=True)
     scene = context.scene
     view_layer = context.view_layer
+
+    pose_vl = _pose_layer(scene, openpose_view_layer)
+    if control_source == COMBINED and pose_vl is None:
+        # Unlike plain openpose there is no estimator fallback: the estimate would
+        # have to come from the beauty, which holds no figure to estimate.
+        raise RuntimeError("Depth + OpenPose needs a Rig Layer — pick the view layer "
+                           "that renders the OpenPose skeleton")
 
     # --- snapshot ---
     snap = {
@@ -193,8 +311,13 @@ def render_passes(context, out_dir, control_source, preview=False,
     }
     temp_group = None
     pose_layer_snap = None
+    isolated = []
 
     try:
+        # Keep the skeleton out of this layer's beauty and Z pass, whichever control
+        # is selected — a rig in the scene must not show up in a depth-only map.
+        isolated = _isolate_pose_geometry(view_layer, pose_vl)
+
         # Blender renders Render Layers -> Compositor -> Sequencer. With any strip in
         # the sequencer, its output REPLACES the render: the compositor is skipped (so
         # no control EXR is written) and the beauty PNG becomes a frame of the strip.
@@ -209,13 +332,9 @@ def render_passes(context, out_dir, control_source, preview=False,
                 scene.render.engine = eevee
             scene.render.resolution_percentage = max(10, min(100, preview_percentage))
 
-        want_depth = control_source == "depth"
+        want_depth = control_source in ("depth", COMBINED)
         want_norm = control_source == "normals"
-        want_pose_layer = (
-            control_source == "openpose"
-            and openpose_view_layer
-            and openpose_view_layer in scene.view_layers
-        )
+        want_pose_layer = control_source in POSE_SOURCES and pose_vl is not None
 
         if want_depth:
             view_layer.use_pass_z = True
@@ -246,12 +365,11 @@ def render_passes(context, out_dir, control_source, preview=False,
                 fo = _add_exr_output(temp_group, "ctl_normals", out_dir, "RGBA")
                 temp_group.links.new(rl.outputs["Normal"], fo.inputs[0])
             if want_pose_layer:
-                pose_vl = scene.view_layers[openpose_view_layer]
                 pose_layer_snap = pose_vl.use
                 pose_vl.use = True
                 rl_pose = temp_group.nodes.new("CompositorNodeRLayers")
                 rl_pose.scene = scene
-                rl_pose.layer = openpose_view_layer
+                rl_pose.layer = pose_vl.name
                 fo = _add_exr_output(temp_group, "ctl_pose", out_dir, "RGBA")
                 temp_group.links.new(rl_pose.outputs["Image"], fo.inputs[0])
 
@@ -281,18 +399,29 @@ def render_passes(context, out_dir, control_source, preview=False,
 
         control_path = None
         control_kind = control_source
+        depth_rgb = pose_rgb = None
         if want_depth:
             exr = _find_exr(out_dir, "ctl_depth")
             if exr:
-                control_path = _exr_to_png(exr, os.path.join(out_dir, "depth.png"), "depth", far=far_clip)
+                depth_rgb = _exr_to_rgb(exr, "depth", far=far_clip)
+                control_path = _write_png(depth_rgb, os.path.join(out_dir, "depth.png"))
         elif want_norm:
             exr = _find_exr(out_dir, "ctl_normals")
             if exr:
                 control_path = _exr_to_png(exr, os.path.join(out_dir, "normals.png"), "normals")
-        elif want_pose_layer:
+        if want_pose_layer:
             exr = _find_exr(out_dir, "ctl_pose")
             if exr:
-                control_path = _exr_to_png(exr, os.path.join(out_dir, "openpose.png"), "color")
+                pose_rgb = _exr_to_rgb(exr, "color")
+                control_path = _write_png(pose_rgb, os.path.join(out_dir, "openpose.png"))
+        if control_source == COMBINED:
+            # depth.png and openpose.png stay on disk beside the composite, so a map
+            # that fails to latch can be traced to the half that is wrong. Both
+            # halves or nothing — sending one alone would pass for a weak control.
+            control_path = None
+            if depth_rgb is not None and pose_rgb is not None:
+                control_path = _write_png(_pose_over(pose_rgb, depth_rgb),
+                                          os.path.join(out_dir, f"{COMBINED}.png"))
 
         return {
             "beauty": beauty,
@@ -321,10 +450,11 @@ def render_passes(context, out_dir, control_source, preview=False,
             scene.view_layers[openpose_view_layer].use = pose_layer_snap
         if temp_group is not None:
             bpy.data.node_groups.remove(temp_group)
+        _restore_layer_collections(view_layer, isolated)
 
 
 # Native controls that can be rendered as a sequence (no per-frame server work).
-SEQUENCE_CONTROLS = {"depth", "normals", "openpose"}
+SEQUENCE_CONTROLS = {"depth", "normals", "openpose", COMBINED}
 
 
 def render_control_sequence(context, out_dir, control_source, openpose_view_layer="", percentage=100):
@@ -333,24 +463,28 @@ def render_control_sequence(context, out_dir, control_source, openpose_view_laye
     `percentage` scales the render resolution (and thus the output video size).
 
     Depth is normalized over a GLOBAL range across the sequence so it doesn't flicker.
-    Supports native controls (depth, normals, openpose rig layer); canny / estimated
-    openpose need per-frame server preprocessing and aren't supported here.
+    Supports native controls (depth, normals, openpose rig layer, and depth + openpose
+    composited per frame); canny / estimated openpose need per-frame server
+    preprocessing and aren't supported here.
     """
     import shutil
     scene = context.scene
     view_layer = context.view_layer
+    pose_vl = _pose_layer(scene, openpose_view_layer)
 
-    if control_source == "depth":
-        mode, socket, socket_type = "depth", "Depth", "FLOAT"
-    elif control_source == "normals":
-        mode, socket, socket_type = "normals", "Normal", "RGBA"
-    elif control_source == "openpose" and openpose_view_layer and openpose_view_layer in scene.view_layers:
-        mode, socket, socket_type = "color", "Image", "RGBA"
-    else:
+    # (convert mode, Render Layers socket, File Output socket type)
+    main_pass = {
+        "depth": ("depth", "Depth", "FLOAT"),
+        COMBINED: ("depth", "Depth", "FLOAT"),
+        "normals": ("normals", "Normal", "RGBA"),
+    }.get(control_source)
+    want_pose = control_source in POSE_SOURCES
+    if (main_pass is None and not want_pose) or (want_pose and pose_vl is None):
         raise RuntimeError(
             "Video control supports depth, normals, or openpose (with a rig layer). "
             "Canny / estimated openpose aren't supported for sequences."
         )
+    mode = main_pass[0] if main_pass else "color"
 
     exr_dir = os.path.join(out_dir, "_ctl_exr")
     control_dir = os.path.join(out_dir, "control")
@@ -381,7 +515,10 @@ def render_control_sequence(context, out_dir, control_source, openpose_view_laye
     }
     temp_group = None
     pose_layer_snap = None
+    isolated = []
     try:
+        isolated = _isolate_pose_geometry(view_layer, pose_vl)
+
         # A sequencer strip would replace the render and skip the compositor entirely —
         # see the note in render_passes. Doubly important here: the FUK_result strip we
         # add after a video generation would otherwise feed the next one its own output.
@@ -393,19 +530,21 @@ def render_control_sequence(context, out_dir, control_source, openpose_view_laye
         elif mode == "normals":
             view_layer.use_pass_normal = True
 
-        layer_name = view_layer.name
-        if mode == "color":
-            pose_vl = scene.view_layers[openpose_view_layer]
+        temp_group = bpy.data.node_groups.new("FUK_SEQ_COMP", "CompositorNodeTree")
+        if main_pass:
+            rl = temp_group.nodes.new("CompositorNodeRLayers")
+            rl.scene = scene
+            rl.layer = view_layer.name
+            fo = _add_exr_output(temp_group, "seq_main", exr_dir, main_pass[2])
+            temp_group.links.new(rl.outputs[main_pass[1]], fo.inputs[0])
+        if want_pose:
             pose_layer_snap = pose_vl.use
             pose_vl.use = True
-            layer_name = openpose_view_layer
-
-        temp_group = bpy.data.node_groups.new("FUK_SEQ_COMP", "CompositorNodeTree")
-        rl = temp_group.nodes.new("CompositorNodeRLayers")
-        rl.scene = scene
-        rl.layer = layer_name
-        fo = _add_exr_output(temp_group, "seq", exr_dir, socket_type)
-        temp_group.links.new(rl.outputs[socket], fo.inputs[0])
+            rl_pose = temp_group.nodes.new("CompositorNodeRLayers")
+            rl_pose.scene = scene
+            rl_pose.layer = pose_vl.name
+            fo = _add_exr_output(temp_group, "seq_pose", exr_dir, "RGBA")
+            temp_group.links.new(rl_pose.outputs["Image"], fo.inputs[0])
 
         scene.use_nodes = True
         scene.render.use_compositing = True
@@ -415,7 +554,15 @@ def render_control_sequence(context, out_dir, control_source, openpose_view_laye
 
         bpy.ops.render.render(animation=True)
 
-        exrs = sorted(glob.glob(os.path.join(exr_dir, "seq*.exr")))
+        exrs = sorted(glob.glob(os.path.join(exr_dir, "seq_main*.exr")))
+        pose_exrs = sorted(glob.glob(os.path.join(exr_dir, "seq_pose*.exr")))
+        if not main_pass:
+            exrs, pose_exrs = pose_exrs, []
+        elif want_pose and len(pose_exrs) != len(exrs):
+            # Frames are paired by index below; a short pass would shift every later
+            # skeleton onto the wrong depth frame without erroring.
+            raise RuntimeError(f"Depth and OpenPose passes disagree on length "
+                               f"({len(exrs)} vs {len(pose_exrs)} frames)")
 
         # Wan only runs at 4n+1 frames and rounds UP internally. A control sequence of
         # any other length lands on a different temporal grid than the latents, and
@@ -423,14 +570,16 @@ def render_control_sequence(context, out_dir, control_source, openpose_view_laye
         # drifts out of sync instead of erroring. Drop the trailing frames (at most 3)
         # so what we send is exactly what the model will run.
         usable = len(exrs) - ((len(exrs) - 1) % 4) if len(exrs) >= 5 else len(exrs)
-        exrs = exrs[:usable]
+        exrs, pose_exrs = exrs[:usable], pose_exrs[:usable]
 
         cam = scene.camera
         far = cam.data.clip_end if (cam and cam.type == "CAMERA") else 1e9
         depth_range = _global_depth_range(exrs, far) if mode == "depth" else None
         for i, exr in enumerate(exrs):
-            _exr_to_png(exr, os.path.join(control_dir, f"f_{i:04d}.png"),
-                        mode, far=far, depth_range=depth_range)
+            rgb = _exr_to_rgb(exr, mode, far=far, depth_range=depth_range)
+            if pose_exrs:
+                rgb = _pose_over(_exr_to_rgb(pose_exrs[i], "color"), rgb)
+            _write_png(rgb, os.path.join(control_dir, f"f_{i:04d}.png"))
 
         rx = int(scene.render.resolution_x * scene.render.resolution_percentage / 100)
         ry = int(scene.render.resolution_y * scene.render.resolution_percentage / 100)
@@ -457,4 +606,5 @@ def render_control_sequence(context, out_dir, control_source, openpose_view_laye
             scene.view_layers[openpose_view_layer].use = pose_layer_snap
         if temp_group is not None:
             bpy.data.node_groups.remove(temp_group)
+        _restore_layer_collections(view_layer, isolated)
         shutil.rmtree(exr_dir, ignore_errors=True)

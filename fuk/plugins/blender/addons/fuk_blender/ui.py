@@ -17,6 +17,8 @@ import textwrap
 import bpy
 
 from . import shot as shot_mod
+from . import framing as framing_mod
+from . import render as render_mod
 
 
 def wrap_text(text, width_px):
@@ -44,6 +46,37 @@ def draw_wrapped(layout, text, width_px):
         col.label(text=line)
 
 
+def draw_shot_description(layout, props, width):
+    """The toggle for the camera-measured shot description, and what it adds now.
+
+    Read straight from the scene on each redraw rather than cached: it is the
+    live answer to "what will be prepended if I render this view", and a stale
+    line here would be worse than none. Ten projected points — nothing to budget.
+    """
+    box = layout.box()
+    box.prop(props, "auto_shot")
+    if not props.auto_shot:
+        return
+    col = box.column(align=True)
+    col.scale_y = 0.85
+    if not props.openpose_view_layer:
+        col.label(text="Needs a Rig Layer (Control panel)", icon="INFO")
+        return
+    try:
+        context = bpy.context
+        text, facts = framing_mod.describe(context.scene, props.openpose_view_layer,
+                                           context.evaluated_depsgraph_get())
+    except Exception:
+        text, facts = "", None
+    if facts is None:
+        col.label(text="No rig found in the Rig Layer", icon="ERROR")
+    elif not text:
+        col.label(text="Adds nothing — head is out of view", icon="INFO")
+    else:
+        for i, line in enumerate(wrap_text("Adds: " + text, width)):
+            col.label(text=line, icon="OUTLINER_OB_CAMERA" if i == 0 else "BLANK1")
+
+
 def draw_prompt_block(layout, props, video, width):
     """The prompt / negative pair with its tag tools — shared by both modes."""
     prompt_attr, negative_attr, resolved_attr = ("video_prompt", "video_negative_prompt",
@@ -53,6 +86,7 @@ def draw_prompt_block(layout, props, video, width):
     row.prop(props, prompt_attr, text="")
     row.operator("fuk.edit_prompt", text="", icon="GREASEPENCIL").video = video
     draw_wrapped(layout, getattr(props, prompt_attr), width)
+    draw_shot_description(layout, props, width)
 
     row = layout.row(align=True)
     row.operator("fuk.insert_tag", text="Insert #tag", icon="ADD").video = video
@@ -207,11 +241,14 @@ class FUK_PT_control(_FukSubPanel, bpy.types.Panel):
         props = context.scene.fuk
 
         layout.prop(props, "control_source", text="")
-        if props.control_source == "openpose":
+        if props.control_source in render_mod.POSE_SOURCES:
             layout.prop_search(props, "openpose_view_layer", context.scene,
                                "view_layers", text="Rig Layer")
+            if (props.control_source == render_mod.COMBINED
+                    and props.openpose_view_layer not in context.scene.view_layers):
+                layout.label(text="Depth + OpenPose needs a rig layer", icon="ERROR")
         # Video renders the control as a sequence, which rules out the derived maps.
-        if props.mode == "video" and props.control_source not in ("depth", "normals", "openpose"):
+        if props.mode == "video" and props.control_source not in render_mod.SEQUENCE_CONTROLS:
             layout.label(text="Video needs depth / normals / openpose", icon="ERROR")
 
 

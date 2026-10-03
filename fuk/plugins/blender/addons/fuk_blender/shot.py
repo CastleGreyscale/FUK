@@ -127,6 +127,9 @@ def _pull_image(image: dict, props) -> None:
     layer = image.get("blender_openpose_view_layer")
     if layer is not None:
         props.openpose_view_layer = layer or ""
+    auto_shot = image.get("blender_auto_shot")
+    if auto_shot is not None:
+        props.auto_shot = bool(auto_shot)
 
 
 def _pull_video(video: dict, props) -> None:
@@ -223,6 +226,7 @@ def push(client, filename: str, props) -> dict:
     # Blender-only fields stay flat on the tab (shot-global, model-independent).
     image["blender_control_source"] = props.control_source
     image["blender_openpose_view_layer"] = props.openpose_view_layer
+    image["blender_auto_shot"] = bool(props.auto_shot)
 
     _, video, vtarget = _writable(client, filename, props, video=True)
     vtarget["task"] = props_mod.VIDEO_TASK
@@ -257,6 +261,7 @@ def record_run(client, filename: str, props, seed_used, video=False) -> None:
         else:
             tab["blender_control_source"] = props.control_source
             tab["blender_openpose_view_layer"] = props.openpose_view_layer
+            tab["blender_auto_shot"] = bool(props.auto_shot)
         client.save_shot(filename, data)
     except (FukError, OSError, KeyError, ValueError, TypeError):
         pass

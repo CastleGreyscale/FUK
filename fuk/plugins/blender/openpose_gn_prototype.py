@@ -1042,7 +1042,106 @@ DEFAULT_FRAME_FRACTION = 0.8
 DEFAULT_OUTPUT_HEIGHT = 1024
 
 RENDER_COLLECTION = "OP_render"
+ARMATURE_COLLECTION = "OP_armature"
 VIEW_LAYER = "OpenPose"
+
+# The kit's own stick figures, superseded by OP_Generator: the OPii mannequin
+# (a posable stick-man mesh — one of the rig's three "characters", next to Chad
+# and Stacy) and the Limb_system curve generator. Both are real, render-visible
+# geometry, and "Bone" is the view layer the kit built to render them.
+LEGACY_COLLECTIONS = ("Opii", "Limb_system")
+LEGACY_MESH = "OPii_mesh"
+LEGACY_VIEW_LAYER = "Bone"
+
+
+def _layer_collections(lc):
+    yield lc
+    for child in lc.children:
+        yield from _layer_collections(child)
+
+
+def isolate_view_layers(scene, src_obj):
+    """Give every stick figure in the file exactly one view layer to render in.
+
+    A dedicated view layer only isolates in one direction. The OpenPose layer
+    excludes everything else, but nothing excluded the skeletons from the
+    OTHER layers — and a depth map rendered from the working layer of a scene
+    with this rig in it came back with a stick figure in it. Two sources:
+
+      * The OPii mannequin. It sat in OPii_Rig as well as in its own Opii
+        collection, and OPii_Rig cannot be excluded from the working layer
+        (the rig controls live there), so the mannequin rendered wherever the
+        rig was posable. It is close to our skeleton but not on it, so under a
+        depth + openpose composite it read as a second, offset figure. It now
+        lives in Opii alone, enabled only in the kit's Bone layer.
+
+      * Our own emission sticks. A collection created after the view layers
+        exist is ENABLED in all of them. OP_render shared a collection with
+        the armature — which every layer that poses a mesh needs, or the
+        Armature modifier has no evaluated target and the mesh freezes at rest
+        — so it could not be excluded from Canny or Bone without breaking
+        them. The armature now rides in OP_armature, enabled everywhere, and
+        OP_render holds geometry only.
+
+    OP_render is deliberately LEFT ON in the working layer (the scene's first):
+    with the mannequin gone it is the only thing showing the pose in the
+    viewport. FUK's bridge excludes it for the duration of its own renders
+    (render._isolate_pose_geometry), so it never reaches a control map; a
+    plain F12 from the working layer will still show it.
+
+    Explicit and idempotent — it sets every state rather than toggling, and is
+    what --drive-only runs to upgrade an already-converted file.
+    """
+    col = bpy.data.collections.get(RENDER_COLLECTION)
+    if col is None:
+        col = bpy.data.collections.new(RENDER_COLLECTION)
+        scene.collection.children.link(col)
+    for c in list(src_obj.users_collection):
+        if c.name != col.name:
+            c.objects.unlink(src_obj)
+    if src_obj.name not in col.objects:
+        col.objects.link(src_obj)
+
+    arm_col = bpy.data.collections.get(ARMATURE_COLLECTION)
+    if arm_col is None:
+        arm_col = bpy.data.collections.new(ARMATURE_COLLECTION)
+        scene.collection.children.link(arm_col)
+    rig = bpy.data.objects.get(RIG_OBJECT)
+    if rig is not None:
+        if rig.name not in arm_col.objects:
+            arm_col.objects.link(rig)
+        if rig.name in col.objects:
+            col.objects.unlink(rig)
+
+    # The mannequin may only live in a collection that can be excluded.
+    legacy = bpy.data.objects.get(LEGACY_MESH)
+    if legacy is not None:
+        homes = [c for c in legacy.users_collection if c.name in LEGACY_COLLECTIONS]
+        if homes:
+            for c in list(legacy.users_collection):
+                if c.name not in LEGACY_COLLECTIONS:
+                    c.objects.unlink(legacy)
+
+    vl = scene.view_layers.get(VIEW_LAYER) or scene.view_layers.new(VIEW_LAYER)
+    work = scene.view_layers[0].name
+    changed = []
+    for layer in scene.view_layers:
+        is_pose = layer.name == vl.name       # bpy wrappers aren't identity-stable
+        for lc in _layer_collections(layer.layer_collection):
+            if lc.name == ARMATURE_COLLECTION:
+                want = False
+            elif lc.name == RENDER_COLLECTION:
+                want = not (is_pose or layer.name == work)
+            elif lc.name in LEGACY_COLLECTIONS:
+                want = layer.name != LEGACY_VIEW_LAYER
+            elif is_pose and lc.name != layer.layer_collection.name:
+                want = True
+            else:
+                continue
+            if lc.exclude != want:
+                lc.exclude = want
+                changed.append(f"{lc.name} {'out of' if want else 'into'} {layer.name!r}")
+    return vl, changed
 
 
 def setup_scene(src_obj):
@@ -1058,25 +1157,11 @@ def setup_scene(src_obj):
     """
     scene = bpy.context.scene
 
-    col = bpy.data.collections.get(RENDER_COLLECTION)
-    if col is None:
-        col = bpy.data.collections.new(RENDER_COLLECTION)
-        scene.collection.children.link(col)
-    for c in list(src_obj.users_collection):
-        c.objects.unlink(src_obj)
-    col.objects.link(src_obj)
-
-    # The armature has to stay IN this view layer. Excluding its collection
-    # drops it from that layer's depsgraph, and the Armature modifier then has
-    # no evaluated target — the skeleton silently freezes at rest. An armature
-    # renders nothing, so keeping it costs nothing.
-    rig = bpy.data.objects.get(RIG_OBJECT)
-    if rig is not None and col not in list(rig.users_collection):
-        col.objects.link(rig)
-
-    vl = scene.view_layers.get(VIEW_LAYER) or scene.view_layers.new(VIEW_LAYER)
-    for lc in vl.layer_collection.children:
-        lc.exclude = lc.name != RENDER_COLLECTION
+    # The armature has to stay IN the OpenPose view layer. Excluding its
+    # collection drops it from that layer's depsgraph, and the Armature
+    # modifier then has no evaluated target — the skeleton silently freezes at
+    # rest. An armature renders nothing, so keeping it costs nothing.
+    vl, _ = isolate_view_layers(scene, src_obj)
     # Objects sitting directly in the scene's master collection have no layer
     # collection to exclude, so those still need hiding individually.
     for obj in scene.collection.objects:
@@ -1208,6 +1293,9 @@ def main():
                                       face_min_px=face_min_px)
         print(f"radii driven from {info['camera']!r} at bone "
               f"{info['anchor_bone']!r}; sizing mode: {info['mode']}")
+        _, changed = isolate_view_layers(bpy.context.scene, obj)
+        print("view layers: " + ("; ".join(changed) if changed
+                                 else "already isolated"))
     else:
         convert(frame_fraction=frame_fraction, output_height_px=render_h,
                 max_pixels=max_pixels, with_face=with_face,

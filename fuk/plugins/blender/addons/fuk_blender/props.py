@@ -81,6 +81,8 @@ CONTROL_SOURCE_ITEMS = [
     ("depth", "Depth", "Blender Z-pass, normalized (native, exact)"),
     ("normals", "Normals", "Blender normal pass, remapped (native; experimental encoding)"),
     ("openpose", "OpenPose", "From a rig view layer (native) or FUK estimate (fallback)"),
+    ("depth_openpose", "Depth + OpenPose",
+     "Rig-layer skeleton keyed over the Z-pass depth, as one control map (native)"),
     ("canny", "Canny", "Edge map derived by FUK from the beauty render"),
 ]
 
@@ -211,6 +213,15 @@ class FukProps(bpy.types.PropertyGroup):
         name="OpenPose Layer",
         description="View layer that renders your OpenPose rig skeleton (leave blank to use FUK estimation)",
         default="",
+    )
+    auto_shot: bpy.props.BoolProperty(
+        name="Describe Shot",
+        description=(
+            "Prepend a description of the shot — its size, camera angle, which way "
+            "the figure faces and where it sits — measured from the camera and the "
+            "rig. The control map alone does not make the model want that shot"
+        ),
+        default=True,
     )
     preview_percentage: bpy.props.IntProperty(
         name="Preview %", default=50, min=10, max=100,

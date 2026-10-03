@@ -24,6 +24,19 @@ Blender scene ─► beauty.png (write_still)
   from the Normal pass, and OpenPose from a rig view layer you set up. **Canny** is
   the one map FUK derives from the beauty render. (If OpenPose has no rig layer, FUK
   estimates it from the beauty render as a fallback.)
+  - **Depth + OpenPose** uses both in one scene: depth for the set, the skeleton for
+    the figure. The control-union model reads a single control image, so the two
+    are composited — the rig layer's skeleton keyed over the depth map — into
+    `depth_openpose.png`. `depth.png` and `openpose.png` are written beside it so
+    either half can be inspected. It needs a rig layer (there is no estimator
+    fallback) and works for video too, composited per frame.
+  - With a rig layer set, the collections that draw the skeleton are **excluded
+    from the active view layer for the render** (and restored after), whichever
+    control is selected. Otherwise the emission sticks are real geometry in the
+    main layer and end up in the depth map and the beauty. Only collections the rig
+    layer actually renders are touched — anything else that should stay out of the
+    depth map (an older rig, viewport helpers) has to be excluded from the main
+    view layer by hand.
   - Renders temporarily force **Sequencer off**. Blender renders Render Layers →
     Compositor → Sequencer, and *any* strip in the sequencer replaces the render
     output: the compositor is skipped (no control pass) and the beauty PNG becomes a
@@ -72,7 +85,7 @@ Blender scene ─► beauty.png (write_still)
    taken at connect — press the ⟳ button beside the dropdown to re-scan the folder
    after creating shots in FUK (your current selection is kept).
 3. Edit the prompt / seed / settings, choose a **Control** (depth, normals, openpose,
-   canny), frame your camera, and press **Quick Preview** (fast, low-res) or
+   depth + openpose, canny), frame your camera, and press **Quick Preview** (fast, low-res) or
    **Render Full**.
 4. The result is shown per the **Result** mode (see below); *Save to Shot* persists
    your settings. Press **Esc** during a run to cancel.
@@ -252,6 +265,6 @@ an ARP rig that is not in this repo, and it covers body plus one hand, no face.
   afterward, so your scene is left untouched.
 - **OpenPose rig layer:** create a view layer that renders only your OpenPose
   skeleton rig, then select it under *Control ▸ OpenPose ▸ Rig Layer*. Leave it blank
-  to use FUK's estimator instead.
+  to use FUK's estimator instead (plain OpenPose only — *Depth + OpenPose* requires it).
 - Normal-map encoding (`n*0.5+0.5`) is a first pass; normal space may need tuning per
   scene.
