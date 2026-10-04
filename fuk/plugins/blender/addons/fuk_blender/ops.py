@@ -683,6 +683,7 @@ class FUK_OT_generate(bpy.types.Operator):
                 preview=preview,
                 preview_percentage=props.preview_percentage,
                 openpose_view_layer=props.openpose_view_layer,
+                canny_view_layer=props.canny_view_layer,
             )
 
             props.status = "Preparing control map..."
@@ -905,7 +906,7 @@ class FUK_OT_generate_video(bpy.types.Operator):
             props.status = "Rendering control sequence…"
             seq = render_mod.render_control_sequence(
                 context, out_dir, props.control_source, props.openpose_view_layer,
-                percentage=props.video_percentage)
+                percentage=props.video_percentage, canny_view_layer=props.canny_view_layer)
             if not seq["frames"]:
                 raise FukError("No frames rendered — check the scene frame range")
             # One description for the clip, read at its first frame. A move that

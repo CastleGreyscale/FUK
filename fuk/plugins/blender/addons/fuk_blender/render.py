@@ -6,8 +6,9 @@ Renders the beauty image plus one structural control map in a single render:
   - depth    : Z pass -> Normalize -> File Output (EXR) -> OIIO -> normalized PNG
   - normals  : Normal pass -> File Output (EXR) -> OIIO (remap -1..1 -> 0..1) -> PNG
   - openpose : a user rig view-layer's Image -> File Output (EXR) -> OIIO -> PNG
-  - depth_openpose : both of the above from the one render, the skeleton keyed over
-                     the depth map into a single control image
+  - canny    : a user line-work view-layer's Image, as rendered (no edge detection)
+  - combined : any of depth / canny / openpose from the one render, layered into a
+               single control image (depth_openpose, depth_canny_openpose, ...)
 
 Blender 5.x notes (validated on 5.1):
   * The compositor is a node-group datablock assigned to `scene.compositing_node_group`
@@ -31,8 +32,23 @@ FUK_DERIVED = {"canny"}
 # takes a single context image (only control_image[0] reaches the model), so two
 # controls can only be combined by compositing them before they leave Blender.
 COMBINED = "depth_openpose"
-# Controls that read the rig view layer.
-POSE_SOURCES = {"openpose", COMBINED}
+# A control source names the maps that go into that one image, joined by "_" —
+# "depth_canny_openpose" is all three. They are layered in this order, bottom to
+# top: depth is the solid ground, canny lines sit on it, and the skeleton goes
+# over both so a limb is never broken by an edge that crosses it.
+PART_ORDER = ("depth", "normals", "canny", "openpose")
+COMBINED_SOURCES = (COMBINED, "depth_canny", "canny_openpose", "depth_canny_openpose")
+
+
+def control_parts(control_source):
+    """The maps a control source is made of, in compositing order."""
+    named = set((control_source or "").split("_"))
+    return tuple(p for p in PART_ORDER if p in named)
+
+
+# Controls that read the rig view layer / the canny view layer.
+POSE_SOURCES = {"openpose"} | {c for c in COMBINED_SOURCES if "openpose" in control_parts(c)}
+CANNY_SOURCES = {"canny"} | {c for c in COMBINED_SOURCES if "canny" in control_parts(c)}
 
 # The rig's limb sticks are drawn at 0.6 of their joint colour (as controlnet_aux
 # does), so 0.6 is the dimmest fully-covered skeleton pixel — see _pose_over.
@@ -48,6 +64,24 @@ _KEEP_TYPES = {"LIGHT", "CAMERA", "LIGHT_PROBE", "SPEAKER"}
 def _pose_layer(scene, name):
     """The rig view layer named `name`, or None if it is unset or gone."""
     return scene.view_layers.get(name) if name else None
+
+
+def _require_layers(parts, pose_vl, canny_vl):
+    """Refuse a combined control whose view layers are not all there.
+
+    A single control can fall back — FUK estimates a pose or derives canny from
+    the beauty — but a composite has no such route: the estimate would have to
+    come from a beauty that need not hold a figure, and sending the parts that
+    did render would pass for a weak control rather than a missing one.
+    """
+    if len(parts) < 2:
+        return
+    if "openpose" in parts and pose_vl is None:
+        raise RuntimeError("This control needs a Rig Layer — pick the view layer "
+                           "that renders the OpenPose skeleton")
+    if "canny" in parts and canny_vl is None:
+        raise RuntimeError("This control needs a Canny Layer — pick the view layer "
+                           "that renders the line work")
 
 
 def _layer_collections(lc):
@@ -254,6 +288,39 @@ def _pose_over(pose_rgb, base_rgb):
     return np.clip(pose_rgb + (1.0 - a) * base_rgb, 0.0, 1.0)
 
 
+def _lines_over(lines_rgb, base_rgb):
+    """Key a view layer of bright line work over another control map.
+
+    The same idea as _pose_over with a different key: a canny map is white on
+    black, so a pixel's own brightness is its coverage and there is no dimmer
+    "solid" level to normalise against. The layer is expected to render its
+    lines light on a black world; anything it leaves black lets the map
+    underneath through.
+    """
+    import numpy as np
+    a = np.clip(lines_rgb.max(axis=-1, keepdims=True), 0.0, 1.0)
+    return np.clip(lines_rgb + (1.0 - a) * base_rgb, 0.0, 1.0)
+
+
+def _composite(parts, maps):
+    """Layer the rendered maps for `parts` into one image, or None if any is missing."""
+    import numpy as np
+    if any(maps.get(p) is None for p in parts):
+        return None
+    out = None
+    for part in parts:                      # PART_ORDER: bottom to top
+        rgb = maps[part]
+        if out is None:
+            out = rgb
+        elif part == "openpose":
+            out = _pose_over(rgb, out)
+        elif part == "canny":
+            out = _lines_over(rgb, out)
+        else:
+            out = np.clip(rgb, 0.0, 1.0)
+    return out
+
+
 def _write_png(rgb, png_path):
     import OpenImageIO as oiio
     import numpy as np
@@ -275,23 +342,22 @@ def _exr_to_png(exr_path, png_path, mode, far=1e9, depth_range=None):
 
 
 def render_passes(context, out_dir, control_source, preview=False,
-                  preview_percentage=50, openpose_view_layer=""):
+                  preview_percentage=50, openpose_view_layer="", canny_view_layer=""):
     """
     Render beauty + the native control map for `control_source` into `out_dir`.
 
     Returns dict: {beauty, control, control_kind, width, height}.
-    `control` is None when FUK must derive the map (canny, or openpose without a rig layer).
+    `control` is None when FUK must derive the map (canny without a canny layer,
+    or openpose without a rig layer).
     """
     os.makedirs(out_dir, exist_ok=True)
     scene = context.scene
     view_layer = context.view_layer
 
+    parts = control_parts(control_source)
     pose_vl = _pose_layer(scene, openpose_view_layer)
-    if control_source == COMBINED and pose_vl is None:
-        # Unlike plain openpose there is no estimator fallback: the estimate would
-        # have to come from the beauty, which holds no figure to estimate.
-        raise RuntimeError("Depth + OpenPose needs a Rig Layer — pick the view layer "
-                           "that renders the OpenPose skeleton")
+    canny_vl = _pose_layer(scene, canny_view_layer)
+    _require_layers(parts, pose_vl, canny_vl)
 
     # --- snapshot ---
     snap = {
@@ -310,7 +376,7 @@ def render_passes(context, out_dir, control_source, preview=False,
         "layer_use": view_layer.use,
     }
     temp_group = None
-    pose_layer_snap = None
+    layer_use_snap = []     # [(view layer, use)] for the extra layers switched on
     isolated = []
 
     try:
@@ -332,9 +398,10 @@ def render_passes(context, out_dir, control_source, preview=False,
                 scene.render.engine = eevee
             scene.render.resolution_percentage = max(10, min(100, preview_percentage))
 
-        want_depth = control_source in ("depth", COMBINED)
-        want_norm = control_source == "normals"
-        want_pose_layer = control_source in POSE_SOURCES and pose_vl is not None
+        want_depth = "depth" in parts
+        want_norm = "normals" in parts
+        want_pose_layer = "openpose" in parts and pose_vl is not None
+        want_canny_layer = "canny" in parts and canny_vl is not None
 
         if want_depth:
             view_layer.use_pass_z = True
@@ -348,9 +415,9 @@ def render_passes(context, out_dir, control_source, preview=False,
             view_layer.use = True
 
         # Build a fresh compositor node group for the native passes we need.
-        if want_depth or want_norm or want_pose_layer:
+        if want_depth or want_norm or want_pose_layer or want_canny_layer:
             # Drop last run's EXRs first — see _clear_exr.
-            _clear_exr(out_dir, "ctl_depth", "ctl_normals", "ctl_pose")
+            _clear_exr(out_dir, "ctl_depth", "ctl_normals", "ctl_pose", "ctl_canny")
             temp_group = bpy.data.node_groups.new("FUK_BLENDER_COMP", "CompositorNodeTree")
             rl = temp_group.nodes.new("CompositorNodeRLayers")
             rl.scene = scene
@@ -364,14 +431,19 @@ def render_passes(context, out_dir, control_source, preview=False,
             if want_norm:
                 fo = _add_exr_output(temp_group, "ctl_normals", out_dir, "RGBA")
                 temp_group.links.new(rl.outputs["Normal"], fo.inputs[0])
-            if want_pose_layer:
-                pose_layer_snap = pose_vl.use
-                pose_vl.use = True
-                rl_pose = temp_group.nodes.new("CompositorNodeRLayers")
-                rl_pose.scene = scene
-                rl_pose.layer = pose_vl.name
-                fo = _add_exr_output(temp_group, "ctl_pose", out_dir, "RGBA")
-                temp_group.links.new(rl_pose.outputs["Image"], fo.inputs[0])
+            # Each extra view layer is rendered as-is and its Image written out: the
+            # layer decides what a "pose" or a "canny" render looks like, not us.
+            for wanted, vl, name in ((want_pose_layer, pose_vl, "ctl_pose"),
+                                     (want_canny_layer, canny_vl, "ctl_canny")):
+                if not wanted:
+                    continue
+                layer_use_snap.append((vl, vl.use))
+                vl.use = True
+                rl_extra = temp_group.nodes.new("CompositorNodeRLayers")
+                rl_extra.scene = scene
+                rl_extra.layer = vl.name
+                fo = _add_exr_output(temp_group, name, out_dir, "RGBA")
+                temp_group.links.new(rl_extra.outputs["Image"], fo.inputs[0])
 
             scene.use_nodes = True
             scene.render.use_compositing = True
@@ -399,29 +471,24 @@ def render_passes(context, out_dir, control_source, preview=False,
 
         control_path = None
         control_kind = control_source
-        depth_rgb = pose_rgb = None
-        if want_depth:
-            exr = _find_exr(out_dir, "ctl_depth")
+        # Every part is written out under its own name, composite or not, so a map
+        # that fails to latch can be traced to the part that is wrong.
+        maps = {}
+        for part, wanted, exr_name, mode in (
+                ("depth", want_depth, "ctl_depth", "depth"),
+                ("normals", want_norm, "ctl_normals", "normals"),
+                ("canny", want_canny_layer, "ctl_canny", "color"),
+                ("openpose", want_pose_layer, "ctl_pose", "color")):
+            exr = _find_exr(out_dir, exr_name) if wanted else None
             if exr:
-                depth_rgb = _exr_to_rgb(exr, "depth", far=far_clip)
-                control_path = _write_png(depth_rgb, os.path.join(out_dir, "depth.png"))
-        elif want_norm:
-            exr = _find_exr(out_dir, "ctl_normals")
-            if exr:
-                control_path = _exr_to_png(exr, os.path.join(out_dir, "normals.png"), "normals")
-        if want_pose_layer:
-            exr = _find_exr(out_dir, "ctl_pose")
-            if exr:
-                pose_rgb = _exr_to_rgb(exr, "color")
-                control_path = _write_png(pose_rgb, os.path.join(out_dir, "openpose.png"))
-        if control_source == COMBINED:
-            # depth.png and openpose.png stay on disk beside the composite, so a map
-            # that fails to latch can be traced to the half that is wrong. Both
-            # halves or nothing — sending one alone would pass for a weak control.
-            control_path = None
-            if depth_rgb is not None and pose_rgb is not None:
-                control_path = _write_png(_pose_over(pose_rgb, depth_rgb),
-                                          os.path.join(out_dir, f"{COMBINED}.png"))
+                maps[part] = _exr_to_rgb(exr, mode, far=far_clip)
+                control_path = _write_png(maps[part], os.path.join(out_dir, f"{part}.png"))
+        if len(parts) > 1:
+            # All the parts or nothing — sending some alone would pass for a weak
+            # control.
+            combined = _composite(parts, maps)
+            control_path = (_write_png(combined, os.path.join(out_dir, f"{control_source}.png"))
+                            if combined is not None else None)
 
         return {
             "beauty": beauty,
@@ -446,18 +513,21 @@ def render_passes(context, out_dir, control_source, preview=False,
         view_layer.use_pass_z = snap["pass_z"]
         view_layer.use_pass_normal = snap["pass_n"]
         view_layer.use = snap["layer_use"]
-        if pose_layer_snap is not None and openpose_view_layer in scene.view_layers:
-            scene.view_layers[openpose_view_layer].use = pose_layer_snap
+        for vl, use in layer_use_snap:
+            vl.use = use
         if temp_group is not None:
             bpy.data.node_groups.remove(temp_group)
         _restore_layer_collections(view_layer, isolated)
 
 
 # Native controls that can be rendered as a sequence (no per-frame server work).
-SEQUENCE_CONTROLS = {"depth", "normals", "openpose", COMBINED}
+# "canny" is here for its view-layer form; without a canny layer it would need
+# the server to preprocess every frame, and the render refuses it.
+SEQUENCE_CONTROLS = {"depth", "normals", "openpose", "canny", *COMBINED_SOURCES}
 
 
-def render_control_sequence(context, out_dir, control_source, openpose_view_layer="", percentage=100):
+def render_control_sequence(context, out_dir, control_source, openpose_view_layer="",
+                            percentage=100, canny_view_layer=""):
     """Render the control pass over the scene frame range into a folder of PNGs — the
     VACE control 'video'. Returns {control_dir, frames, width, height, fps}.
     `percentage` scales the render resolution (and thus the output video size).
@@ -470,19 +540,20 @@ def render_control_sequence(context, out_dir, control_source, openpose_view_laye
     import shutil
     scene = context.scene
     view_layer = context.view_layer
+    parts = control_parts(control_source)
     pose_vl = _pose_layer(scene, openpose_view_layer)
+    canny_vl = _pose_layer(scene, canny_view_layer)
 
     # (convert mode, Render Layers socket, File Output socket type)
-    main_pass = {
-        "depth": ("depth", "Depth", "FLOAT"),
-        COMBINED: ("depth", "Depth", "FLOAT"),
-        "normals": ("normals", "Normal", "RGBA"),
-    }.get(control_source)
-    want_pose = control_source in POSE_SOURCES
-    if (main_pass is None and not want_pose) or (want_pose and pose_vl is None):
+    main_pass = (("depth", "Depth", "FLOAT") if "depth" in parts else
+                 ("normals", "Normal", "RGBA") if "normals" in parts else None)
+    want_pose = "openpose" in parts
+    want_canny = "canny" in parts
+    if (not parts or (want_pose and pose_vl is None) or (want_canny and canny_vl is None)):
         raise RuntimeError(
-            "Video control supports depth, normals, or openpose (with a rig layer). "
-            "Canny / estimated openpose aren't supported for sequences."
+            "Video control supports depth, normals, openpose (with a Rig Layer) and "
+            "canny (with a Canny Layer). Estimated openpose and FUK-derived canny "
+            "would need per-frame preprocessing and aren't supported for sequences."
         )
     mode = main_pass[0] if main_pass else "color"
 
@@ -514,7 +585,7 @@ def render_control_sequence(context, out_dir, control_source, openpose_view_laye
         "frame": scene.frame_current,
     }
     temp_group = None
-    pose_layer_snap = None
+    layer_use_snap = []
     isolated = []
     try:
         isolated = _isolate_pose_geometry(view_layer, pose_vl)
@@ -537,14 +608,17 @@ def render_control_sequence(context, out_dir, control_source, openpose_view_laye
             rl.layer = view_layer.name
             fo = _add_exr_output(temp_group, "seq_main", exr_dir, main_pass[2])
             temp_group.links.new(rl.outputs[main_pass[1]], fo.inputs[0])
-        if want_pose:
-            pose_layer_snap = pose_vl.use
-            pose_vl.use = True
-            rl_pose = temp_group.nodes.new("CompositorNodeRLayers")
-            rl_pose.scene = scene
-            rl_pose.layer = pose_vl.name
-            fo = _add_exr_output(temp_group, "seq_pose", exr_dir, "RGBA")
-            temp_group.links.new(rl_pose.outputs["Image"], fo.inputs[0])
+        for wanted, vl, name in ((want_canny, canny_vl, "seq_canny"),
+                                 (want_pose, pose_vl, "seq_pose")):
+            if not wanted:
+                continue
+            layer_use_snap.append((vl, vl.use))
+            vl.use = True
+            rl_extra = temp_group.nodes.new("CompositorNodeRLayers")
+            rl_extra.scene = scene
+            rl_extra.layer = vl.name
+            fo = _add_exr_output(temp_group, name, exr_dir, "RGBA")
+            temp_group.links.new(rl_extra.outputs["Image"], fo.inputs[0])
 
         scene.use_nodes = True
         scene.render.use_compositing = True
@@ -554,15 +628,20 @@ def render_control_sequence(context, out_dir, control_source, openpose_view_laye
 
         bpy.ops.render.render(animation=True)
 
-        exrs = sorted(glob.glob(os.path.join(exr_dir, "seq_main*.exr")))
-        pose_exrs = sorted(glob.glob(os.path.join(exr_dir, "seq_pose*.exr")))
-        if not main_pass:
-            exrs, pose_exrs = pose_exrs, []
-        elif want_pose and len(pose_exrs) != len(exrs):
+        # One list of frames per part, keyed like render_passes' `maps`.
+        seqs = {}
+        if main_pass:
+            seqs[mode] = sorted(glob.glob(os.path.join(exr_dir, "seq_main*.exr")))
+        if want_canny:
+            seqs["canny"] = sorted(glob.glob(os.path.join(exr_dir, "seq_canny*.exr")))
+        if want_pose:
+            seqs["openpose"] = sorted(glob.glob(os.path.join(exr_dir, "seq_pose*.exr")))
+        lengths = {k: len(v) for k, v in seqs.items()}
+        if len(set(lengths.values())) > 1:
             # Frames are paired by index below; a short pass would shift every later
-            # skeleton onto the wrong depth frame without erroring.
-            raise RuntimeError(f"Depth and OpenPose passes disagree on length "
-                               f"({len(exrs)} vs {len(pose_exrs)} frames)")
+            # frame of one map onto the wrong frame of another without erroring.
+            raise RuntimeError(f"Control passes disagree on length: {lengths}")
+        exrs = next(iter(seqs.values()), [])
 
         # Wan only runs at 4n+1 frames and rounds UP internally. A control sequence of
         # any other length lands on a different temporal grid than the latents, and
@@ -570,15 +649,17 @@ def render_control_sequence(context, out_dir, control_source, openpose_view_laye
         # drifts out of sync instead of erroring. Drop the trailing frames (at most 3)
         # so what we send is exactly what the model will run.
         usable = len(exrs) - ((len(exrs) - 1) % 4) if len(exrs) >= 5 else len(exrs)
-        exrs, pose_exrs = exrs[:usable], pose_exrs[:usable]
+        seqs = {k: v[:usable] for k, v in seqs.items()}
+        exrs = exrs[:usable]
 
         cam = scene.camera
         far = cam.data.clip_end if (cam and cam.type == "CAMERA") else 1e9
-        depth_range = _global_depth_range(exrs, far) if mode == "depth" else None
-        for i, exr in enumerate(exrs):
-            rgb = _exr_to_rgb(exr, mode, far=far, depth_range=depth_range)
-            if pose_exrs:
-                rgb = _pose_over(_exr_to_rgb(pose_exrs[i], "color"), rgb)
+        depth_range = _global_depth_range(seqs["depth"], far) if "depth" in seqs else None
+        for i in range(len(exrs)):
+            maps = {part: _exr_to_rgb(frames[i], part if part in ("depth", "normals") else "color",
+                                      far=far, depth_range=depth_range)
+                    for part, frames in seqs.items()}
+            rgb = _composite(parts, maps) if len(parts) > 1 else maps[parts[0]]
             _write_png(rgb, os.path.join(control_dir, f"f_{i:04d}.png"))
 
         rx = int(scene.render.resolution_x * scene.render.resolution_percentage / 100)
@@ -602,8 +683,8 @@ def render_control_sequence(context, out_dir, control_source, openpose_view_laye
         view_layer.use_pass_z = snap["pass_z"]
         view_layer.use_pass_normal = snap["pass_n"]
         scene.frame_current = snap["frame"]
-        if pose_layer_snap is not None and openpose_view_layer in scene.view_layers:
-            scene.view_layers[openpose_view_layer].use = pose_layer_snap
+        for vl, use in layer_use_snap:
+            vl.use = use
         if temp_group is not None:
             bpy.data.node_groups.remove(temp_group)
         _restore_layer_collections(view_layer, isolated)

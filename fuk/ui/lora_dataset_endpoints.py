@@ -17,6 +17,8 @@ from pydantic import BaseModel
 from lora_dataset_manager import (
     get_variation_presets,
     set_prompt_config,
+    set_dataset_model,
+    get_dataset_models,
     dataset_jobs,
     create_dataset_job,
     run_dataset_job,
@@ -91,6 +93,14 @@ async def create_job(request: CreateDatasetRequest, background_tasks: Background
         raise HTTPException(status_code=400, detail="At least one variation pack must be selected")
     if request.subject_type not in get_variation_presets():
         raise HTTPException(status_code=400, detail=f"Unknown subject_type: {request.subject_type!r}")
+
+    model = request.params.get("model")
+    if model and model not in get_dataset_models():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Model {model!r} is not a dataset builder option — "
+                   f"configured: {', '.join(get_dataset_models())}",
+        )
 
     # Resolve API-relative paths (e.g. api/project/cache/...) to absolute filesystem paths
     resolved_sources = []
@@ -307,6 +317,7 @@ def setup_dataset_routes(app, generation_backend, datasets_root: Path, defaults:
     lora_dataset_cfg = (defaults or {}).get("lora_dataset", {})
     _prompt_config = lora_dataset_cfg.get("variation_prompts")
     set_prompt_config(_prompt_config)
+    set_dataset_model(lora_dataset_cfg.get("model"), lora_dataset_cfg.get("model_options"))
     _resolve_path = resolve_input_path
     _datasets_root.mkdir(parents=True, exist_ok=True)
     app.include_router(router)

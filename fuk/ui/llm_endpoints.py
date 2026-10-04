@@ -38,6 +38,17 @@ REQUEST_TIMEOUT = 60
 
 VIDEO_EXTS = {".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v"}
 
+# The description is re-used as generation prompt text, where "frame" reads as a
+# literal picture frame / border. The VLM reaches for it constantly ("hair frames
+# her face", "in the frame"), so the prompts below avoid the word themselves and
+# this rule bans it outright.
+DESCRIBE_NO_FRAME_RULE = (
+    "Never use the words \"frame\", \"frames\", \"framed\" or \"framing\" in any "
+    "sense. Hair falls beside, around or past the face; a subject sits in the "
+    "image or the shot; composition is given by position and shot size "
+    "(centered, left of image, close-up)."
+)
+
 DESCRIBE_SYSTEM = (
     "You are a visual description assistant for a VFX production pipeline. "
     "Describe images with the precision and language of a cinematographer or "
@@ -46,20 +57,22 @@ DESCRIBE_SYSTEM = (
     "atmosphere, camera angle/lens feel, depth of field, and any notable visual "
     "effects or stylistic choices.\n\n"
     "Be concrete. Avoid vague qualitative adjectives (\"beautiful\", \"stunning\"). "
-    "Write in present tense. 2-4 sentences. No preamble."
+    "Write in present tense. 2-4 sentences. No preamble.\n\n"
+    + DESCRIBE_NO_FRAME_RULE
 )
 
 DESCRIBE_VIDEO_SYSTEM = (
     "You are a visual description assistant for a VFX production pipeline. "
-    "You are given several frames sampled evenly across a short video clip, "
+    "You are given several stills sampled evenly across a short video clip, "
     "ordered from earliest to latest. Describe the clip with the language of a "
     "cinematographer or VFX supervisor.\n\n"
     "Cover, in this order: subject and action, how the action evolves across the "
     "clip, camera movement (push, pull, pan, tilt, handheld, static), lighting and "
     "color, atmosphere, and any notable stylistic choices.\n\n"
-    "Treat the frames as a single continuous shot — do not describe them as separate "
+    "Treat the stills as a single continuous shot — do not describe them as separate "
     "images. Be concrete. Avoid vague qualitative adjectives. Write in present tense. "
-    "3-5 sentences. No preamble."
+    "3-5 sentences. No preamble.\n\n"
+    + DESCRIBE_NO_FRAME_RULE
 )
 
 # When the user supplies a focus, we swap the balanced "cover everything" brief
@@ -73,18 +86,19 @@ DESCRIBE_FOCUS_SYSTEM = (
     "  \"{focus}\"\n\n"
     "Devote nearly the whole description to that element — its form, structure, "
     "materials and texture, color, condition, pose or action, and how it reads in "
-    "the frame. Be exhaustive and concrete about it. Mention lighting, setting, "
+    "the image. Be exhaustive and concrete about it. Mention lighting, setting, "
     "mood, camera, or other subjects only in a single brief clause, and only where "
-    "they directly frame the focus element. Do NOT write a balanced scene "
+    "they directly bear on the focus element. Do NOT write a balanced scene "
     "description.\n\n"
     "If the element is not visible, say so in one sentence instead of inventing it. "
     "Avoid vague qualitative adjectives (\"beautiful\", \"stunning\"). Write in "
-    "present tense. 2-4 sentences. No preamble."
+    "present tense. 2-4 sentences. No preamble.\n\n"
+    + DESCRIBE_NO_FRAME_RULE
 )
 
 DESCRIBE_FOCUS_VIDEO_SYSTEM = (
     "You are a visual description assistant for a VFX production pipeline. You are "
-    "given several frames sampled evenly across a short video clip, ordered from "
+    "given several stills sampled evenly across a short video clip, ordered from "
     "earliest to latest. Write with the language of a cinematographer or VFX "
     "supervisor.\n\n"
     "The description must concentrate almost entirely on this element:\n"
@@ -93,10 +107,11 @@ DESCRIBE_FOCUS_VIDEO_SYSTEM = (
     "texture, color, condition, and how it moves or changes across the clip. Be "
     "exhaustive and concrete about it. Mention camera movement, lighting, setting, "
     "mood, or other subjects only in a single brief clause, and only where they "
-    "directly frame the focus element. Do NOT write a balanced scene description.\n\n"
-    "Treat the frames as a single continuous shot. If the element is not visible, "
+    "directly bear on the focus element. Do NOT write a balanced scene description.\n\n"
+    "Treat the stills as a single continuous shot. If the element is not visible, "
     "say so in one sentence instead of inventing it. Avoid vague qualitative "
-    "adjectives. Write in present tense. 3-5 sentences. No preamble."
+    "adjectives. Write in present tense. 3-5 sentences. No preamble.\n\n"
+    + DESCRIBE_NO_FRAME_RULE
 )
 
 EXPAND_SYSTEM_BASE = (
@@ -1052,13 +1067,13 @@ def setup_llm_routes(app, *, resolve_input_path: Callable[[str], Path], log, con
                 if focus:
                     system_prompt = DESCRIBE_FOCUS_VIDEO_SYSTEM.format(focus=focus)
                     user_text = (
-                        f"{len(images)} frames from a short clip, ordered earliest to latest. "
+                        f"{len(images)} stills from a short clip, ordered earliest to latest. "
                         f"Describe the clip as a single continuous shot, concentrating on: {focus}"
                     )
                 else:
                     system_prompt = DESCRIBE_VIDEO_SYSTEM
                     user_text = (
-                        f"{len(images)} frames from a short clip, ordered earliest to latest. "
+                        f"{len(images)} stills from a short clip, ordered earliest to latest. "
                         "Describe the clip as a single continuous shot."
                     )
             else:

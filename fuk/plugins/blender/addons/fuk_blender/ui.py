@@ -244,12 +244,24 @@ class FUK_PT_control(_FukSubPanel, bpy.types.Panel):
         if props.control_source in render_mod.POSE_SOURCES:
             layout.prop_search(props, "openpose_view_layer", context.scene,
                                "view_layers", text="Rig Layer")
-            if (props.control_source == render_mod.COMBINED
-                    and props.openpose_view_layer not in context.scene.view_layers):
-                layout.label(text="Depth + OpenPose needs a rig layer", icon="ERROR")
+        if props.control_source in render_mod.CANNY_SOURCES:
+            layout.prop_search(props, "canny_view_layer", context.scene,
+                               "view_layers", text="Canny Layer")
+        # A composite has no fallback for a missing part, so say so before the render does.
+        combined = props.control_source in render_mod.COMBINED_SOURCES
+        layers = context.scene.view_layers
+        if (combined and props.control_source in render_mod.POSE_SOURCES
+                and props.openpose_view_layer not in layers):
+            layout.label(text="This control needs a Rig Layer", icon="ERROR")
+        if (combined and props.control_source in render_mod.CANNY_SOURCES
+                and props.canny_view_layer not in layers):
+            layout.label(text="This control needs a Canny Layer", icon="ERROR")
         # Video renders the control as a sequence, which rules out the derived maps.
-        if props.mode == "video" and props.control_source not in render_mod.SEQUENCE_CONTROLS:
-            layout.label(text="Video needs depth / normals / openpose", icon="ERROR")
+        if props.mode == "video":
+            if props.control_source not in render_mod.SEQUENCE_CONTROLS:
+                layout.label(text="Video needs depth / normals / openpose / canny", icon="ERROR")
+            elif props.control_source == "canny" and props.canny_view_layer not in layers:
+                layout.label(text="Video canny needs a Canny Layer", icon="ERROR")
 
 
 class FUK_PT_result(_FukSubPanel, bpy.types.Panel):

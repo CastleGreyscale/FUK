@@ -25,6 +25,52 @@ def set_prompt_config(cfg: Optional[Dict]):
     _prompt_config = cfg or {}
 
 
+# Edit model the builder generates with — "model" in the lora_dataset block of
+# defaults_dataset.json, any models.json key or alias that supports edit_image.
+_dataset_model: str = "qwen_edit"
+# Per-model overrides from "model_options" in the same block — what the Setup
+# panel offers as a switch. Empty means the default model is the only choice.
+_dataset_model_options: Dict[str, Dict] = {}
+
+
+def set_dataset_model(model: Optional[str], options: Optional[Dict] = None):
+    global _dataset_model, _dataset_model_options
+    _dataset_model = model or "qwen_edit"
+    _dataset_model_options = {
+        k: v for k, v in (options or {}).items()
+        if not k.startswith("_") and isinstance(v, dict)
+    }
+
+
+def get_dataset_models() -> List[str]:
+    """Models a job may be created with: the default plus every configured option."""
+    return list(dict.fromkeys([_dataset_model, *_dataset_model_options]))
+
+
+def _generation_kwargs(params: Dict) -> Dict[str, Any]:
+    """Sampling kwargs for one variation, from the job's stamped params.
+
+    cfg_scale and denoising_strength are sent only when the job carries a
+    value: a model option sets them to null when the model has no use for them
+    (Qwen-Image-2.1 is CFG-free and has no img2img), and omitting them keeps
+    its runner from logging a dropped-parameter warning on every variation.
+    Jobs saved before the model switch have neither key and get the old values.
+    """
+    kwargs = {
+        "model": params.get("model") or "qwen_edit",
+        "steps": params.get("steps", 28),
+        "lora": params.get("lora") or None,
+        "lora_multiplier": params.get("lora_alpha", 1.0),
+    }
+    cfg = params.get("cfg_scale", 5.0)
+    if cfg is not None:
+        kwargs["guidance_scale"] = cfg
+    denoise = params.get("denoising_strength", 1.0)
+    if denoise is not None:
+        kwargs["denoising_strength"] = denoise
+    return kwargs
+
+
 def _key_to_label(key: str) -> str:
     return key.replace('_', ' ').title()
 
@@ -162,6 +208,11 @@ def create_dataset_job(
             shutil.copy2(src_path, dst)
             copied_sources.append(str(dst))
 
+    # Stamped on the job so reruns keep the model the set was started with,
+    # even if the config changes underneath it.
+    if not params.get("model"):
+        params["model"] = _dataset_model
+
     seed_strategy = params.get("seed_strategy", "fixed")
     base_seed = params.get("seed", 42)
     base_variations = _build_variation_list(
@@ -253,14 +304,9 @@ async def run_dataset_job(job_id: str, generation_backend):
                 "image",
                 prompt=variation["prompt"],
                 output_path=output_path,
-                model="qwen_edit",
                 seed=seed,
-                steps=params.get("steps", 28),
-                guidance_scale=params.get("cfg_scale", 5.0),
-                denoising_strength=1.0,
-                lora=params.get("lora") or None,
-                lora_multiplier=params.get("lora_alpha", 1.0),
                 control_image=ctrl_image,
+                **_generation_kwargs(params),
             )
             variation["status"] = "completed"
             print(f"[LoRA Dataset] Done: {variation['label']}")
@@ -316,14 +362,9 @@ async def rerun_single_variation(job_id: str, variation_id: str, generation_back
             "image",
             prompt=variation["prompt"],
             output_path=output_path,
-            model="qwen_edit",
             seed=variation["seed"],
-            steps=params.get("steps", 28),
-            guidance_scale=params.get("cfg_scale", 5.0),
-            denoising_strength=1.0,
-            lora=params.get("lora") or None,
-            lora_multiplier=params.get("lora_alpha", 1.0),
             control_image=ctrl_image,
+            **_generation_kwargs(params),
         )
         variation["status"] = "completed"
         print(f"[LoRA Dataset] Rerun done: {variation['label']}")

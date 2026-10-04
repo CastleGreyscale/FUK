@@ -81,9 +81,16 @@ CONTROL_SOURCE_ITEMS = [
     ("depth", "Depth", "Blender Z-pass, normalized (native, exact)"),
     ("normals", "Normals", "Blender normal pass, remapped (native; experimental encoding)"),
     ("openpose", "OpenPose", "From a rig view layer (native) or FUK estimate (fallback)"),
+    ("canny", "Canny",
+     "From a canny view layer (native) or derived by FUK from the beauty (fallback)"),
     ("depth_openpose", "Depth + OpenPose",
      "Rig-layer skeleton keyed over the Z-pass depth, as one control map (native)"),
-    ("canny", "Canny", "Edge map derived by FUK from the beauty render"),
+    ("depth_canny", "Depth + Canny",
+     "Canny-layer line work keyed over the Z-pass depth, as one control map (native)"),
+    ("canny_openpose", "Canny + OpenPose",
+     "Rig-layer skeleton keyed over the canny-layer line work, as one control map (native)"),
+    ("depth_canny_openpose", "Depth + Canny + OpenPose",
+     "All three in one control map: depth, then the canny lines, then the skeleton on top (native)"),
 ]
 
 CONTROL_MODELS = {m[0] for m in MODEL_ITEMS}
@@ -212,6 +219,15 @@ class FukProps(bpy.types.PropertyGroup):
     openpose_view_layer: bpy.props.StringProperty(
         name="OpenPose Layer",
         description="View layer that renders your OpenPose rig skeleton (leave blank to use FUK estimation)",
+        default="",
+    )
+    canny_view_layer: bpy.props.StringProperty(
+        name="Canny Layer",
+        description=(
+            "View layer that renders your line work — light lines on black, the way "
+            "a canny map looks. Rendered as it is, with no edge detection applied "
+            "(leave blank on plain Canny to have FUK derive it from the beauty)"
+        ),
         default="",
     )
     auto_shot: bpy.props.BoolProperty(

@@ -1,7 +1,8 @@
 /**
  * LoRA Dataset Builder
  * Three-phase tool: Setup → Running → Curation
- * Uses qwen_edit to produce variation sets for LoRA training.
+ * Uses an edit model (qwen_edit by default, switchable via lora_dataset.model_options)
+ * to produce variation sets for LoRA training.
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
@@ -38,8 +39,18 @@ function SetupPhase({ config, onStart }) {
   const [seed, setSeed]                 = useState(d.seed ?? 509327136);
   const [lora, setLora]                 = useState('');
   const [loraAlpha, setLoraAlpha]       = useState(0.8);
-  const [steps, setSteps]               = useState(d.steps ?? 28);
-  const [cfg, setCfg]                   = useState(d.cfg_scale ?? 2.5);
+  // Per-model settings from lora_dataset.model_options. A null cfg_scale or
+  // denoising_strength means the model has no use for it: hide it, don't send it.
+  const modelOptions = d.model_options ?? {};
+  const modelKeys = Object.keys(modelOptions).filter(k => !k.startsWith('_'));
+  const optionFor = m => modelOptions[m] ?? {};
+  const settingFor = (m, key, fallback) =>
+    optionFor(m)[key] !== undefined ? optionFor(m)[key] : (d[key] ?? fallback);
+
+  const [model, setModel]               = useState(d.model ?? 'qwen_edit');
+  const [steps, setSteps]               = useState(settingFor(d.model ?? 'qwen_edit', 'steps', 28));
+  const [cfg, setCfg]                   = useState(settingFor(d.model ?? 'qwen_edit', 'cfg_scale', 2.5) ?? 2.5);
+  const cfgFree = settingFor(model, 'cfg_scale', 2.5) === null;
   const [starting, setStarting]         = useState(false);
   const [error, setError]               = useState(null);
   const [sourceDragOver, setSourceDragOver] = useState(false);
@@ -132,8 +143,10 @@ function SetupPhase({ config, onStart }) {
           params: {
             seed_strategy:      seedStrategy,
             seed:               seed,
+            model:              model,
             steps:              steps,
-            cfg_scale:          cfg,
+            cfg_scale:          cfgFree ? null : cfg,
+            denoising_strength: settingFor(model, 'denoising_strength', 1.0),
             lora:               lora || null,
             lora_alpha:         loraAlpha,
           },
@@ -155,7 +168,30 @@ function SetupPhase({ config, onStart }) {
     };
     return acc;
   }, {});
-  const loras = config?.models?.loras || [];
+
+  // LoRAs are trained against one DiT, so offer only those whose declared
+  // models share the selected model's pipeline family. An undeclared LoRA
+  // (scanned, no "model" list) stays visible — nothing says it won't fit.
+  const registry = [...(config?.models?.image_models || []), ...(config?.models?.video_models || [])];
+  const pipelineOf = m => registry.find(e => e.key === m || (e.aliases || []).includes(m))?.pipeline;
+  const loraFits = (l, m) => {
+    if (typeof l === 'string' || !l.model) return true;
+    const declared = Array.isArray(l.model) ? l.model : [l.model];
+    const family = pipelineOf(m);
+    return !family || declared.some(k => pipelineOf(k) === family);
+  };
+  const loraKey = (l, i) => (typeof l === 'string' ? l : l.key || i);
+  const allLoras = config?.models?.loras || [];
+  const loras = allLoras.filter(l => loraFits(l, model));
+
+  const handleModelChange = m => {
+    setModel(m);
+    setSteps(settingFor(m, 'steps', 28));
+    const nextCfg = settingFor(m, 'cfg_scale', 2.5);
+    if (nextCfg !== null) setCfg(nextCfg);
+    const current = allLoras.find((l, i) => loraKey(l, i) === lora);
+    if (current && !loraFits(current, m)) setLora('');
+  };
 
   return (
     <div className="dataset-setup">
@@ -198,6 +234,17 @@ function SetupPhase({ config, onStart }) {
 
         {/* Generation params */}
         <div className="fuk-card dataset-card">
+          {modelKeys.length > 1 && (
+            <>
+              <span className="dataset-label">Model</span>
+              <select className="fuk-select" value={model} onChange={e => handleModelChange(e.target.value)}>
+                {modelKeys.map(k => (
+                  <option key={k} value={k}>{optionFor(k).label ?? k}</option>
+                ))}
+              </select>
+            </>
+          )}
+
           <span className="dataset-label">Seed Strategy</span>
           <div className="dataset-seed-row">
             {['fixed', 'random'].map(s => (
@@ -229,11 +276,13 @@ function SetupPhase({ config, onStart }) {
               <input type="number" className="fuk-input" value={steps} min={1} max={100}
                 onChange={e => setSteps(parseInt(e.target.value) || 28)} />
             </div>
-            <div className="dataset-params-col">
-              <span className="dataset-label">CFG</span>
-              <input type="number" className="fuk-input" value={cfg} min={1} max={20} step={0.5}
-                onChange={e => setCfg(parseFloat(e.target.value) || 5)} />
-            </div>
+            {!cfgFree && (
+              <div className="dataset-params-col">
+                <span className="dataset-label">CFG</span>
+                <input type="number" className="fuk-input" value={cfg} min={1} max={20} step={0.5}
+                  onChange={e => setCfg(parseFloat(e.target.value) || 5)} />
+              </div>
+            )}
           </div>
         </div>
 
@@ -243,7 +292,7 @@ function SetupPhase({ config, onStart }) {
           <select className="fuk-select" value={lora} onChange={e => setLora(e.target.value)}>
             <option value="">None</option>
             {loras.map((l, i) => {
-              const key = typeof l === 'string' ? l : l.key || i;
+              const key = loraKey(l, i);
               const name = typeof l === 'string' ? l : (l.name || l.description || l.key);
               return <option key={key} value={key}>{name}</option>;
             })}
