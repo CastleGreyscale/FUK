@@ -170,6 +170,17 @@ def shot_description(context, props, frame=None):
             scene.frame_set(restore)
 
 
+def shot_framing(shot):
+    """The measured shot size, which the server uses to pick each LoRA's wording.
+
+    A character LoRA can carry a close, a medium and a wide version of its
+    description, and the server expands `#markers` to the one that fits. None
+    when nothing was measured, which leaves every marker on its default text.
+    """
+    facts = (shot or ("", None))[1]
+    return (facts or {}).get("shot") or None
+
+
 def _server_prompts(client, output_url):
     """(prompt, prompt_source) as the server recorded them for a generation.
 
@@ -534,10 +545,11 @@ class FUK_OT_resolve_preview(bpy.types.Operator):
         # "Exactly as generation will" includes the shot description, measured
         # where generation would measure it.
         frame = context.scene.frame_start if self.video else None
-        text = framing_mod.compose(shot_description(context, props, frame=frame)[1],
-                                   getattr(props, prompt_attr))
+        shot = shot_description(context, props, frame=frame)
+        text = framing_mod.compose(shot[1], getattr(props, prompt_attr))
         try:
-            res = _client(context).prompt_resolve(text, model=model, apply_mood=True)
+            res = _client(context).prompt_resolve(text, model=model, apply_mood=True,
+                                                  framing=shot_framing(shot))
         except FukError as e:
             self.report({"ERROR"}, str(e))
             return {"CANCELLED"}
@@ -702,6 +714,7 @@ class FUK_OT_generate(bpy.types.Operator):
                 "prompt": framing_mod.compose(self._shot[1], props.prompt),
                 "negative_prompt": framing_mod.compose_negative(
                     self._shot[1], props.negative_prompt) or None,
+                "framing": shot_framing(self._shot),
                 "model": props.model,
                 "steps": int(steps),
                 "guidance_scale": float(props.guidance_scale),
@@ -917,6 +930,7 @@ class FUK_OT_generate_video(bpy.types.Operator):
                 "prompt": framing_mod.compose(video_shot[1], props.video_prompt),
                 "negative_prompt": framing_mod.compose_negative(
                     video_shot[1], props.video_negative_prompt) or None,
+                "framing": shot_framing(video_shot),
                 "image_path": ref,
                 "control_path": seq["control_dir"],
                 "video_length": seq["frames"],

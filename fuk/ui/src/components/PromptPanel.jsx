@@ -11,6 +11,7 @@ export default function PromptPanel({
   model,
   loras,
   mode = 'image',
+  framing,
 }) {
   const promptRef = useRef(null);
   const negRef = useRef(null);
@@ -106,12 +107,19 @@ export default function PromptPanel({
     }
     let cancelled = false;
     const id = setTimeout(() => {
-      resolvePromptPreview({ text, model, activeLoras: activeLoraKeys })
+      resolvePromptPreview({ text, model, activeLoras: activeLoraKeys, framing })
         .then(res => { if (!cancelled) setExpandedPreview(res); })
         .catch(() => { if (!cancelled) setExpandedPreview(null); });
     }, 250);
     return () => { cancelled = true; clearTimeout(id); };
-  }, [prompt, promptFocused, model, activeLoraKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [prompt, promptFocused, model, activeLoraKey, framing]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Framing only does anything for a marker that has variants, so the control
+  // stays out of the way until one does (or a saved shot already carries one).
+  const hasVariants = useMemo(
+    () => tokens.some(t => t.variants && Object.keys(t.variants).length > 0),
+    [tokens],
+  );
 
   const handleCompile = async () => {
     if (compiling) return;
@@ -243,6 +251,20 @@ export default function PromptPanel({
       <div className="prompt-panel-header">
         <span className="prompt-panel-title">Prompt</span>
         <div className="prompt-panel-header-actions">
+          {(hasVariants || framing) && (
+            <select
+              className="prompt-panel-framing"
+              value={framing || ''}
+              onChange={(e) => onChange('framing', e.target.value || null)}
+              disabled={disabled}
+              title="Which wording LoRA #markers expand to. A LoRA with no variant for this framing uses its default text; #marker:wide overrides it for one marker."
+            >
+              <option value="">Framing: default</option>
+              {FRAMINGS.map(f => (
+                <option key={f} value={f}>Framing: {f}</option>
+              ))}
+            </select>
+          )}
           <button
             type="button"
             className={`prompt-panel-headerbtn ${slotsOpen ? 'prompt-panel-headerbtn--active' : ''}`}
@@ -331,6 +353,9 @@ export default function PromptPanel({
     </div>
   );
 }
+
+// Mirrors FRAMINGS in llm_endpoints.py.
+const FRAMINGS = ['close', 'medium', 'wide'];
 
 // Deepest a segment can nest before we stop deepening the tint — keeps the
 // depth palette bounded (matches the `--d1`…`--d4` CSS rules).

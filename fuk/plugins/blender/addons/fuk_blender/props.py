@@ -235,7 +235,9 @@ class FukProps(bpy.types.PropertyGroup):
         description=(
             "Prepend a description of the shot — its size, camera angle, which way "
             "the figure faces and where it sits — measured from the camera and the "
-            "rig. The control map alone does not make the model want that shot"
+            "rig. The control map alone does not make the model want that shot. "
+            "The measured size also picks the close, medium or wide wording of any "
+            "LoRA #marker that has one"
         ),
         default=True,
     )

@@ -969,6 +969,7 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
           model={formData.task}
           loras={effectiveLoras}
           mode="video"
+          framing={formData.framing}
         />
       </div>
 

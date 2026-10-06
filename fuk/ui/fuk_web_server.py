@@ -659,6 +659,9 @@ class ImageGenerationRequest(BaseModel):
     eligen_source: Optional[str] = None  # Path to EliGen masks (directory, .psd, or .ora)
     eligen_alpha: Optional[float] = None  # Model LoRA strength (EliGen or control union)
     live_preview: bool = False  # Decode a few mid-denoise previews (Blender live view)
+    # Which wording of a LoRA's inject text `#markers` expand to: close, medium
+    # or wide, or a shot size the Blender addon measured. None = the default text.
+    framing: Optional[str] = None
     # [LAYER STACK DISABLED]
     # stack_id: Optional[str] = None       # e.g. "img_edit_001"
     # layer_name: Optional[str] = None     # Human label for the new layer
@@ -705,6 +708,9 @@ class VideoGenerationRequest(BaseModel):
     # yet, API-only until thresholds are validated on production shots.
     tea_cache_l1_thresh: Optional[float] = None
     tea_cache_model_id: Optional[str] = None  # Override the auto-picked coefficient set
+    # Which wording of a LoRA's inject text `#markers` expand to: close, medium
+    # or wide, or a shot size the Blender addon measured. None = the default text.
+    framing: Optional[str] = None
 
 class GenerationResponse(BaseModel):
     generation_id: str
@@ -989,11 +995,14 @@ def _resolve_request_prompt(request) -> tuple[str, str, dict]:
         model=getattr(request, "model", None) or getattr(request, "task", None),
         active_loras=_gen_active_lora_list(request),
         apply_mood=True,
+        framing=getattr(request, "framing", None),
     )
     return res["resolved"], source, {
         "expanded_markers": res["expanded_markers"],
         "unknown_markers": res["unknown_markers"],
         "mood_applied": res["mood_applied"],
+        "framing": res["framing"],
+        "variants_used": res["variants_used"],
     }
 
 
@@ -1015,6 +1024,8 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
         prompt, prompt_source, prompt_provenance = _resolve_request_prompt(request)
         if prompt_provenance["expanded_markers"] or prompt_provenance["mood_applied"]:
             log.info("ImageGen", f"Resolved markers: {prompt_provenance['expanded_markers']}; mood: {bool(prompt_provenance['mood_applied'])}")
+        if prompt_provenance["variants_used"]:
+            log.info("ImageGen", f"Framing variants: {prompt_provenance['variants_used']}")
 
         log.params("Parameters", {
             "prompt": prompt[:60] + "..." if len(prompt) > 60 else prompt,
@@ -1259,6 +1270,8 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
             prompt_expanded_markers=prompt_provenance["expanded_markers"],
             prompt_unknown_markers=prompt_provenance["unknown_markers"],
             mood_applied=prompt_provenance["mood_applied"],
+            prompt_framing=prompt_provenance["framing"] or None,
+            prompt_variants_used=prompt_provenance["variants_used"],
         )
         
         # Mark complete
@@ -1368,6 +1381,8 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
         prompt, prompt_source, prompt_provenance = _resolve_request_prompt(request)
         if prompt_provenance["expanded_markers"] or prompt_provenance["mood_applied"]:
             log.info("VideoGen", f"Resolved markers: {prompt_provenance['expanded_markers']}; mood: {bool(prompt_provenance['mood_applied'])}")
+        if prompt_provenance["variants_used"]:
+            log.info("VideoGen", f"Framing variants: {prompt_provenance['variants_used']}")
 
 
         # Force Python GC before starting so previous generation's objects are
@@ -1565,6 +1580,8 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
             prompt_expanded_markers=prompt_provenance["expanded_markers"],
             prompt_unknown_markers=prompt_provenance["unknown_markers"],
             mood_applied=prompt_provenance["mood_applied"],
+            prompt_framing=prompt_provenance["framing"] or None,
+            prompt_variants_used=prompt_provenance["variants_used"],
         )
         
         # Mark complete

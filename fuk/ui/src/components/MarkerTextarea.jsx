@@ -20,8 +20,30 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRe
 import { createPortal } from 'react-dom';
 import { fetchPromptTokens, PROMPT_TOKENS_CHANGED_EVENT } from '../utils/promptApi';
 
-// Match a `#` immediately before the caret followed by an in-progress word.
-const MARKER_TYPING_RE = /(?:^|[\s,;()])#([A-Za-z0-9_\-]*)$/;
+// Match a `#` immediately before the caret followed by an in-progress word,
+// which may run on into a `:framing` suffix (`#al:wi`).
+const MARKER_TYPING_RE = /(?:^|[\s,;()])#([A-Za-z0-9_\-]*(?::[A-Za-z_]*)?)$/;
+
+// A LoRA token with framing variants also offers each one as `#marker:framing`,
+// listed straight after it and carrying that variant's own text.
+function withVariants(tokens) {
+  const out = [];
+  for (const t of tokens) {
+    out.push(t);
+    if (!t.marker || !t.variants) continue;
+    for (const [framing, text] of Object.entries(t.variants)) {
+      out.push({
+        ...t,
+        id: `${t.id}:${framing}`,
+        name: `${t.name}:${framing}`,
+        marker: `${t.marker}:${framing}`,
+        expansion: text,
+        variants: null,
+      });
+    }
+  }
+  return out;
+}
 
 const SOURCE_BADGE = {
   global: { label: 'global', className: 'prompt-token-badge--global' },
@@ -197,7 +219,7 @@ const MarkerTextarea = forwardRef(function MarkerTextarea({
     // caption phrases (markerless) — the backend only ships caption tokens
     // when the corresponding LoRA is active, so they're already scoped.
     // On pick, captions insert as raw text (see insertToken).
-    const candidates = tokens.filter(t => t.marker || t.source === 'caption');
+    const candidates = withVariants(tokens.filter(t => t.marker || t.source === 'caption'));
     if (!q) return candidates.slice(0, 30);
     return candidates
       .map(t => ({ t, score: scoreToken(t, q) }))

@@ -656,6 +656,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
           model={formData.model}
           loras={effectiveLoras}
           mode="image"
+          framing={formData.framing}
         />
       </div>
 

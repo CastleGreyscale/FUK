@@ -331,7 +331,63 @@ CAPTIONS_DIR = Path(__file__).parent / "data" / "lora_captions"
 
 # Markers must be safe in a prompt textarea. Underscores, digits, hyphen.
 _MARKER_CHAR_RE = re.compile(r"[^A-Za-z0-9_\-]+")
-_MARKER_SCAN_RE = re.compile(r"#([A-Za-z0-9][A-Za-z0-9_\-]*)")
+# An optional `:framing` suffix picks one wording of the expansion (`#al:wide`).
+_MARKER_SCAN_RE = re.compile(r"#([A-Za-z0-9][A-Za-z0-9_\-]*)(?::([A-Za-z_]+))?")
+
+# Framing variants. A long character description drags every image back toward
+# a portrait, and one that mentions shoes puts shoes into a knees-up image (see
+# the Blender addon's framing.py), so a LoRA may carry narrower and wider
+# wordings of its inject text under `inject_variants`. All of it is optional:
+# an entry with no variants, or none for the framing asked for, expands to its
+# plain `inject_text` exactly as before.
+FRAMINGS = ("close", "medium", "wide")
+# The shot sizes the Blender addon measures (framing.EXTENT_PREFIX keys) and the
+# variant each one falls back to. A variant may also be keyed by the shot size
+# itself when one of them needs its own wording.
+SHOT_TO_FRAMING = {
+    "extreme_close_up": "close",
+    "close_up": "close",
+    "chest_up": "medium",
+    "waist_up": "medium",
+    "thighs_up": "medium",
+    "knees_up": "medium",
+    "full_body": "wide",
+    "wide": "wide",
+}
+_FRAMING_NAMES = set(FRAMINGS) | set(SHOT_TO_FRAMING)
+
+
+def _normalize_framing(framing: Optional[str]) -> str:
+    """A framing name as the variant tables spell it, or "" if it names none."""
+    f = (framing or "").strip().lower().replace("-", "_").replace(" ", "_")
+    return f if f in _FRAMING_NAMES else ""
+
+
+def _clean_variants(raw) -> dict:
+    """`inject_variants` from config -> {framing: text}, dropping blanks and unknown keys."""
+    if not isinstance(raw, dict):
+        return {}
+    out = {}
+    for key, value in raw.items():
+        name = _normalize_framing(key)
+        text = value.strip() if isinstance(value, str) else ""
+        if name and text:
+            out[name] = text
+    return out
+
+
+def _pick_variant(variants: Optional[dict], framing: Optional[str]) -> tuple[Optional[str], str]:
+    """(text, variant key used) for a framing, or (None, "") to use the default.
+
+    The exact name wins, then the close/medium/wide it belongs to.
+    """
+    f = _normalize_framing(framing)
+    if not variants or not f:
+        return None, ""
+    for key in (f, SHOT_TO_FRAMING.get(f)):
+        if key and key in variants:
+            return variants[key], key
+    return None, ""
 
 # Min share of captions a phrase must appear in to be surfaced as a token.
 CAPTION_MIN_DOC_SHARE = 0.05
@@ -460,6 +516,7 @@ def _lora_tokens(config_dir: Path, model_family: Optional[str]) -> List[dict]:
             "lora_keys": [lora_key],
             "model": entry_model or None,
             "default_strength": entry.get("default_strength"),
+            "variants": _clean_variants(entry.get("inject_variants")),
         }
     return list(by_marker.values())
 
@@ -630,8 +687,9 @@ def _storyboard_active_loras() -> List[str]:
         return []
 
 
-def _vocabulary_map(config_dir: Path, model_family: Optional[str]) -> dict:
-    """Build the `marker -> expansion` map used by compile and resolve.
+def _vocabulary(config_dir: Path, model_family: Optional[str]) -> tuple[dict, dict]:
+    """Build the `marker -> expansion` map used by compile and resolve, and
+    the `marker -> {framing: expansion}` variants for the markers that have any.
 
     Precedence (first one to claim a marker wins):
       1. Storyboard tags — project-local, live with the manifest.
@@ -643,6 +701,7 @@ def _vocabulary_map(config_dir: Path, model_family: Optional[str]) -> dict:
     """
     sb_tag_tokens, _ = _storyboard_context()
     marker_to_expansion: dict[str, str] = {}
+    marker_to_variants: dict[str, dict] = {}
     for tok in sb_tag_tokens:
         m = tok.get("marker")
         if m and m not in marker_to_expansion:
@@ -655,7 +714,16 @@ def _vocabulary_map(config_dir: Path, model_family: Optional[str]) -> dict:
         m = tok.get("marker")
         if m and m not in marker_to_expansion:
             marker_to_expansion[m] = tok["expansion"]
-    return marker_to_expansion
+            # Only for a marker the LoRA actually owns: a tag that shadows it
+            # must not be swapped for the LoRA's wording by a framing.
+            if tok.get("variants"):
+                marker_to_variants[m] = tok["variants"]
+    return marker_to_expansion, marker_to_variants
+
+
+def _vocabulary_map(config_dir: Path, model_family: Optional[str]) -> dict:
+    """The `marker -> expansion` half of `_vocabulary`."""
+    return _vocabulary(config_dir, model_family)[0]
 
 
 def _compile_prompt(
@@ -740,6 +808,7 @@ class ResolveRequest(BaseModel):
     model: Optional[str] = None
     active_loras: Optional[List[str]] = None
     apply_mood: Optional[bool] = True
+    framing: Optional[str] = None   # close | medium | wide, or a measured shot size
 
 
 # ----------------------------------------------------------------------------
@@ -811,21 +880,28 @@ def _resolve_prompt(
     model: Optional[str],
     active_loras: Optional[List[str]],
     apply_mood: bool = True,
+    framing: Optional[str] = None,
 ) -> dict:
     """Expand `#markers` and (optionally) append the storyboard's mood sentence.
 
     Called server-side just before generation. The result is what's actually
     sent to the model. Returns the resolved text plus enough provenance for
     metadata capture.
+
+    `framing` picks, for every marker that has framing variants, the wording
+    written for that framing. A `:framing` suffix on a marker (`#al:wide`)
+    overrides it for that marker and whatever it pulls in.
     """
     family = _model_family(model)
-    marker_to_expansion = _vocabulary_map(config_dir, family)
+    marker_to_expansion, marker_to_variants = _vocabulary(config_dir, family)
+    framing = _normalize_framing(framing)
 
     expanded_markers: List[str] = []
     unknown_markers: List[str] = []
+    variants_used: List[str] = []   # "#marker:variant" for each variant picked
     expanding: set = set()   # markers on the current expansion stack (cycle guard)
 
-    def _segment(src: str, path: List[str]) -> List[dict]:
+    def _segment(src: str, path: List[str], framing: str = framing) -> List[dict]:
         # Walk `src`, expanding #markers into labeled segments. `path` is the
         # chain of markers whose expansions produced this text — empty at the
         # top level, so author text stays "literal" and everything a marker
@@ -847,20 +923,34 @@ def _resolve_prompt(
         for m in _MARKER_SCAN_RE.finditer(src):
             if m.start() > pos:
                 out.append(_chunk(src[pos:m.start()]))
-            marker = m.group(0)
+            marker = "#" + m.group(1)
+            # A `:word` that names no framing is the author's own text
+            # ("#sarah:she turns"), so the marker ends before the colon.
+            asked = _normalize_framing(m.group(2))
+            end = m.end() if asked else m.end(1)
+            raw = src[m.start():end]
             if marker not in marker_to_expansion:
                 unknown_markers.append(marker)
-                out.append(_chunk(marker))
+                out.append(_chunk(raw))
             elif marker in expanding:
                 # Self-referential expansion (#a -> "#b", #b -> "#a"). Leave the
                 # marker raw rather than recurse forever.
-                out.append(_chunk(marker))
+                out.append(_chunk(raw))
             else:
                 expanded_markers.append(marker)
+                wanted = asked or framing
+                variant, used = _pick_variant(marker_to_variants.get(marker), wanted)
+                # The variant shows in the path, so the preview says which
+                # wording a span came from.
+                label = f"{marker}:{used}" if used else marker
+                if used:
+                    variants_used.append(label)
                 expanding.add(marker)
-                out.extend(_segment(marker_to_expansion[marker], path + [marker]))
+                out.extend(_segment(
+                    marker_to_expansion[marker] if variant is None else variant,
+                    path + [label], wanted))
                 expanding.discard(marker)
-            pos = m.end()
+            pos = end
         if pos < len(src):
             out.append(_chunk(src[pos:]))
         return out
@@ -908,6 +998,8 @@ def _resolve_prompt(
         "expanded_markers": expanded_markers,
         "unknown_markers": sorted(set(unknown_markers)),
         "mood_applied": mood_applied,
+        "framing": framing,
+        "variants_used": variants_used,
     }
 
 
@@ -1265,6 +1357,7 @@ def setup_llm_routes(app, *, resolve_input_path: Callable[[str], Path], log, con
             "tokens": tokens,
             "categories": categories,
             "model_family": family,
+            "framings": list(FRAMINGS),
             "active_lora_triggers": sorted(active_triggers),
             "mood": mood,
         }
@@ -1291,6 +1384,7 @@ def setup_llm_routes(app, *, resolve_input_path: Callable[[str], Path], log, con
             model=req.model,
             active_loras=req.active_loras,
             apply_mood=bool(req.apply_mood) if req.apply_mood is not None else True,
+            framing=req.framing,
         )
 
     @app.post("/api/prompt/expand")

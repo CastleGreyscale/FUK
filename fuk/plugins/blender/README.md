@@ -184,6 +184,13 @@ same vocabulary the FUK web UI uses.
 - **Preview** resolves the prompt exactly as generation will (expanding `#markers` and
   appending the storyboard mood) so you can see the final string; unknown markers are
   flagged in a warning.
+- **Framing variants.** A LoRA in `defaults_loras.json` may carry `inject_variants`
+  (`close`, `medium`, `wide`) beside its `inject_text`. With **Describe Shot** on, the
+  measured shot size is sent with the generation and each `#marker` expands to the
+  wording that fits: face only and head-and-shoulders use `close`, chest-up to knees-up
+  use `medium`, whole body and far use `wide`. `#marker:wide` in the prompt overrides
+  the measurement for that marker. A LoRA with no variant for the shot uses its
+  `inject_text`, as before.
 
 ### Result display
 

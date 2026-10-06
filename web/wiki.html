@@ -2483,12 +2483,66 @@
                 <ul>
                     <li><strong>Depth</strong> — the exact Z pass, normalized (near = white, far = black, background masked) to match the convention the control model expects.</li>
                     <li><strong>Normals</strong> — the normal pass, remapped.</li>
-                    <li><strong>OpenPose</strong> — from a view layer that renders your pose rig; falls back to FUK's estimator if no rig layer is set.</li>
-                    <li><strong>Canny</strong> — derived by FUK from the beauty render.</li>
+                    <li><strong>OpenPose</strong> — from a view layer that renders your pose rig (set it as the <strong>Rig Layer</strong>); falls back to FUK's estimator if no rig layer is set.</li>
+                    <li><strong>Canny</strong> — from a view layer that renders your line work (set it as the <strong>Canny Layer</strong>). The layer is used exactly as it renders, with no edge detection, so it should draw light lines on black. With no canny layer set, FUK derives the map from the beauty render instead.</li>
                 </ul>
+                <p>With a rig layer set, the skeleton is kept out of the main render, so it never appears in the depth map or the beauty.</p>
+
+                <h3>Combined Controls</h3>
+                <p>The control model reads a single control image, so to use more than one control the add-on layers them into one map before sending it. Four combinations are available in the <strong>Control</strong> dropdown:</p>
+                <ul>
+                    <li><strong>Depth + OpenPose</strong> — depth for the set, skeleton for the figure.</li>
+                    <li><strong>Depth + Canny</strong> — depth with line work drawn over it; useful for detail depth cannot carry, such as lettering on a flat wall.</li>
+                    <li><strong>Canny + OpenPose</strong></li>
+                    <li><strong>Depth + Canny + OpenPose</strong></li>
+                </ul>
+                <p>The layers are always stacked in the same order: depth at the bottom, canny lines over it, and the skeleton on top. Each part is also saved on its own (<code>depth.png</code>, <code>canny.png</code>, <code>openpose.png</code>) next to the combined map in the shot's working folder, so a map that isn't being followed can be traced to the part that is wrong.</p>
+                <div class="wiki-note">
+                    <p>A combined control needs every one of its view layers. If the Rig Layer or Canny Layer is missing, the panel says so and the render stops rather than sending a partial map. White canny lines also disappear against very bright (very near) depth, so keep line work on surfaces that sit further back, or use Canny + OpenPose without depth.</p>
+                </div>
+
+                <h3>The OpenPose Rig</h3>
+                <p>The pose skeleton is generated on top of an Auto-Rig Pro character by <code>fuk/plugins/blender/openpose_gn_prototype.py</code>. The rig file itself is not part of the repository; the script builds the skeleton, its view layer and its drivers into your own rig file.</p>
+                <ul>
+                    <li><strong>Sticks and dots hold their pixel size.</strong> OpenPose maps are drawn at fixed pixel widths, and a skeleton that grows as the camera moves in gets painted into the image as an object. The rig's widths are driven from the camera, so they stay at the standard size at any camera distance, lens, resolution or preview percentage.</li>
+                    <li><strong>Face landmarks.</strong> The rig draws the 70 OpenPose face points on the head. They appear once the face is at least 80 pixels wide in the map and are hidden below that, where they would merge into a blob. A <strong>Face</strong> checkbox on the <em>OP_Generator</em> modifier turns them off for shots where the face should be left to the prompt.</li>
+                    <li><strong>Expressions.</strong> Eleven shape-key sliders on the <em>OP_source</em> object move the face points: <code>jaw_open</code>, <code>smile</code>, <code>frown</code>, <code>pucker</code>, <code>brow_raise.L</code>, <code>brow_raise.R</code>, <code>brow_furrow</code>, <code>blink.L</code>, <code>blink.R</code>, <code>gaze_h</code> and <code>gaze_v</code>. They can be keyframed. Each runs from −3 to 3: values above 1 push past the natural range, and negative values do the opposite (a negative blink is a wide eye).</li>
+                </ul>
+                <p>To build the skeleton into a rig file, or to update one that already has it:</p>
+                <pre><code># first build, from an Auto-Rig Pro character
+blender MyRig.blend --background --python fuk/plugins/blender/openpose_gn_prototype.py -- --out MyRig_OP.blend
+
+# rebuild in place (needed for anything that changes the skeleton itself, e.g. the face)
+blender -b MyRig_OP.blend --python fuk/plugins/blender/openpose_gn_prototype.py -- --in-place
+
+# refresh only the size drivers and view-layer setup
+blender -b MyRig_OP.blend --python fuk/plugins/blender/openpose_gn_prototype.py -- --drive-only</code></pre>
+                <p>Options: <code>--no-face</code> builds the body and hands only, and <code>--face-min-px N</code> changes the size at which the face appears (<code>0</code> always draws it). Close Blender on the file before running these, or reload it afterwards without saving.</p>
+
+                <h3>Describe Shot</h3>
+                <p>A control map tells the model where the figure is, but it does not make the model want that composition. With a prompt that only describes the character and the place, a full-body skeleton usually still comes back as a head-and-shoulders portrait. The prompt has to agree with the map.</p>
+                <p><strong>Describe Shot</strong> (under the prompt, on by default) writes that part of the prompt for you. It needs a Rig Layer. At render time the add-on measures the camera against the rig and adds a short description around your prompt:</p>
+                <table class="wiki-table">
+                    <thead>
+                        <tr><th>Measured</th><th>From</th><th>Example of what is added</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>How much of the figure is in the image</td><td>Which parts of the body are inside the camera view</td><td><em>image from the waist up</em>; <em>image of the whole body from head to feet</em></td></tr>
+                        <tr><td>Camera angle</td><td>Camera height relative to what it is looking at</td><td><em>the camera is low, looking up</em></td></tr>
+                        <tr><td>Facing</td><td>The figure's forward direction against the camera</td><td><em>side view, the body in profile</em>; <em>seen from behind, facing away from the camera</em></td></tr>
+                        <tr><td>Placement</td><td>Where the figure sits across the image</td><td><em>positioned on the left side of the image</em></td></tr>
+                    </tbody>
+                </table>
+                <p>Plain cases add nothing: an eye-level, front-facing, centred figure only gets the line about how much of it is in the image. The size and angle go before your prompt; for views from mid-thigh outwards a second clause goes after it, and <em>standing</em> is added only when the rig's legs are actually upright. A few terms (<em>border, photo print, split panels…</em>) are also added to the negative prompt.</p>
+                <p>The panel shows the text that will be added for the current view, and <strong>Preview</strong> includes it. Your own prompt is never changed, in the panel or in the shot file. For video, the description is measured once, at the first frame.</p>
+                <p>With Describe Shot on, the measured size is also sent with the generation so that a LoRA <code>#tag</code> can use different wording for close, medium and wide views. See <code>inject_variants</code> in the add-on README.</p>
+                <div class="wiki-note">
+                    <p>How well the description works depends on the rest of the prompt. A short subject (<em>a man in a dim bar</em>) lets the pose, size, angle and facing follow the map. A long character description that dwells on the face and jacket pulls the image back toward a portrait, and one that mentions shoes will put shoes into a knees-up image. The wording lives in the constants at the top of <code>addons/fuk_blender/framing.py</code> if you want to tune it.</p>
+                </div>
 
                 <h3>Generating Stills</h3>
                 <p>Frame your camera, choose a control, and press <strong>Quick Preview</strong> (fast, low-res) or <strong>Render Full</strong>. The add-on renders the beauty and control passes, sends them to the control-union model, and returns the image. History policy: Quick Preview is ephemeral, Render Full saves a complete entry (result + control + source), and <strong>Save to History</strong> promotes any result on demand. The FUK web history auto-refreshes when Blender saves.</p>
+                <p>A saved entry records the prompt exactly as the model received it (tags expanded, shot description included), alongside your own draft, the description that was added and the measurements behind it.</p>
                 <p>Prompts support FUK's <code>#tags</code>: <strong>Insert #tag</strong> searches the vocabulary and <strong>Preview</strong> shows the resolved prompt.</p>
 
                 <h3>Result Display</h3>
@@ -2501,7 +2555,7 @@
                 <p>Animate a still with your scene's motion:</p>
                 <ol>
                     <li>Generate a <strong>still</strong> first — it becomes the VACE reference (the look).</li>
-                    <li>Set the scene <strong>frame range</strong> (the motion) and a depth / normals / openpose control.</li>
+                    <li>Set the scene <strong>frame range</strong> (the motion) and a control: depth, normals, openpose from a rig layer, canny from a canny layer, or any of the combined controls.</li>
                     <li>Set <strong>Video %</strong> (resolution scale) and press <strong>Generate Video</strong>.</li>
                 </ol>
                 <p>The add-on renders the control pass over the whole range into a folder (depth is normalized over a global range so it doesn't flicker) and runs <code>wan_vace_a14b</code> with that sequence as the control video and your still as the reference. The result loads into Blender's Video Sequencer. Video is slow and runs on demand — there is no live mode for it.</p>

@@ -102,12 +102,14 @@ class FukClient:
             path += "?" + urllib.parse.urlencode(query)
         return self.get(path, timeout=30.0)
 
-    def prompt_resolve(self, text: str, model: str | None = None, apply_mood: bool = True):
+    def prompt_resolve(self, text: str, model: str | None = None, apply_mood: bool = True,
+                       framing: str | None = None):
         """Resolve #markers (+ storyboard mood) — the same expansion used at gen time."""
         return self.post("/api/prompt/resolve", {
             "text": text,
             "model": model,
             "apply_mood": apply_mood,
+            "framing": framing,
         }, timeout=30.0)
 
     def generate_image(self, payload: dict):

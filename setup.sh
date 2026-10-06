@@ -1077,7 +1077,7 @@ echo "    ✓ fuk/config/defaults.json.template"
 
 cat > fuk/config/defaults_loras.json.template << 'EOL'
 {
-  "_comment": "defined_loras_path is the base directory for the curated 'loras' entries below — their 'path' is resolved relative to it. scanned_loras_path is swept for every .safetensors found and needs no entries here. 'model' accepts a single model key or a list of keys (a LoRA trained on Qwen 2512 usually applies to both the base and control-union 2512 entries in models.json).",
+  "_comment": "defined_loras_path is the base directory for the curated 'loras' entries below — their 'path' is resolved relative to it. scanned_loras_path is swept for every .safetensors found and needs no entries here. 'model' accepts a single model key or a list of keys (a LoRA trained on Qwen 2512 usually applies to both the base and control-union 2512 entries in models.json). 'inject_text' is what the LoRA's #marker (its trigger_word) expands to in a prompt. 'inject_variants' is optional and holds narrower or wider wordings of it under the keys close, medium and wide: a close-up wants the face and none of the shoes, a wide wants the silhouette and none of the eye colour. The Framing selector, a #marker:wide suffix, or the shot the Blender addon measures picks one; any key left out falls back to inject_text.",
 
   "defined_loras_path": "/path/to/your/models/loras",
   "scanned_loras_path": "/path/to/your/models/loras",
@@ -1098,6 +1098,19 @@ cat > fuk/config/defaults_loras.json.template << 'EOL'
       "default_strength": 0.7,
       "trigger_word": "example_style",
       "inject_text": "A cinematic still from an example_style movie"
+    },
+    {
+      "name": "example_character_2512",
+      "path": "example_character_2512.safetensors",
+      "model": ["qwen_image_2512", "qwen_image_control_union_2512"],
+      "default_strength": 1.0,
+      "trigger_word": "example_person",
+      "inject_text": "example_person, a bald man with a mustache and amber aviator glasses, in a brown plaid suit, a blue shirt and white dress shoes",
+      "inject_variants": {
+        "close": "example_person, a bald man with a mustache and amber aviator glasses",
+        "medium": "example_person, a bald man with a mustache and amber aviator glasses, in a brown plaid suit and a blue shirt",
+        "wide": "example_person, a bald man in a brown plaid suit and white dress shoes"
+      }
     },
 
     {

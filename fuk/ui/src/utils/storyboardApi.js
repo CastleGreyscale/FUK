@@ -154,7 +154,7 @@ export async function restoreSnapshot(filename) {
   return jsonOrThrow(res, 'Failed to restore snapshot');
 }
 
-export async function resolvePromptPreview({ text, model, activeLoras, applyMood }) {
+export async function resolvePromptPreview({ text, model, activeLoras, applyMood, framing }) {
   const res = await fetch(`${API_URL}/prompt/resolve`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -163,6 +163,7 @@ export async function resolvePromptPreview({ text, model, activeLoras, applyMood
       model: model || null,
       active_loras: activeLoras || [],
       apply_mood: applyMood !== false,
+      framing: framing || null,
     }),
   });
   return jsonOrThrow(res, 'Failed to resolve prompt');
