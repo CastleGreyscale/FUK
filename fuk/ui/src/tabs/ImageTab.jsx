@@ -11,6 +11,7 @@ import MediaUploader from '../components/MediaUploader';
 import ZoomableImage from '../components/ZoomableImage';
 import SeedControl from '../components/SeedControl';
 import GenerationModal from '../components/GenerationModal';
+import MaskPainter from '../components/MaskPainter';
 import { useGeneration } from '../hooks/useGeneration';
 // [LAYER STACK DISABLED]
 // import LayerStackPanel from '../components/LayerStackPanel';
@@ -75,6 +76,10 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
     control_image_paths: imageDefaults.control_image_paths ?? [],
     eligen_source: imageDefaults.eligen_source ?? '',
     eligen_alpha: imageDefaults.eligen_alpha ?? 1.0,
+    inpaint_image_path: imageDefaults.inpaint_image_path ?? '',
+    inpaint_mask_path: imageDefaults.inpaint_mask_path ?? '',
+    inpaint_feather: imageDefaults.inpaint_feather ?? 16,
+    inpaint_preserve: imageDefaults.inpaint_preserve ?? true,
     vram_preset: config?.models?.vram_preset_default ?? 'low',
     batchCount: 1,
   }), [imageDefaults]);
@@ -152,7 +157,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
       }
     } else {
       if (newData.model !== currentData.model) {
-        setLocalFormData({ ...newData, control_image_paths: [], eligen_source: '' });
+        setLocalFormData({ ...newData, control_image_paths: [], eligen_source: '', inpaint_image_path: '', inpaint_mask_path: '' });
       } else {
         setLocalFormData(newData);
       }
@@ -273,6 +278,8 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
   const [metaDragOver, setMetaDragOver] = useState(false);
   const [droppedPreview, setDroppedPreview] = useState(null);
   const [metaLoadedFrom, setMetaLoadedFrom] = useState(null);
+  const [maskPainterOpen, setMaskPainterOpen] = useState(false);
+  const canInpaint = modelSupports(formData.model, 'inpaint');
 
   // [LAYER STACK DISABLED]
   // const [stackId, setStackId] = useState(null);
@@ -340,6 +347,11 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
       exponential_shift_mu: formData.exponential_shift_mu,
       eligen_source: formData.eligen_source || null,
       eligen_alpha: (formData.eligen_source || modelSupports(formData.model, 'context_image')) ? (formData.eligen_alpha ?? 1.0) : null,
+      // A mask means nothing without the picture it was painted on.
+      inpaint_image_path: canInpaint ? (formData.inpaint_image_path || null) : null,
+      inpaint_mask_path: canInpaint && formData.inpaint_image_path ? (formData.inpaint_mask_path || null) : null,
+      inpaint_feather: formData.inpaint_feather ?? 16,
+      inpaint_preserve: formData.inpaint_preserve ?? true,
       lora: null,
       lora_multiplier: 1.0,
       loras: effectiveLoras,
@@ -417,6 +429,20 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
     setFormData(prev => ({ ...prev, control_image_paths: paths }));
   };
 
+  // A mask belongs to the picture it was painted on, so a new picture drops it.
+  const handleInpaintImageChange = (paths) => {
+    const next = paths[0] || '';
+    setFormData(prev => ({
+      ...prev,
+      inpaint_image_path: next,
+      inpaint_mask_path: next === prev.inpaint_image_path ? prev.inpaint_mask_path : '',
+    }));
+  };
+
+  const handleInpaintMaskChange = (paths) => {
+    setFormData(prev => ({ ...prev, inpaint_mask_path: paths[0] || '' }));
+  };
+
   // [LAYER STACK DISABLED]
   // const handleInitLayers = async () => { ... };
 
@@ -488,9 +514,20 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
       const ctrlPaths = meta.control_image_urls?.length
         ? meta.control_image_urls
         : (Array.isArray(meta.control_image) ? meta.control_image : []);
-      if (ctrlPaths.length) {
+      const inpaintImage = meta.inpaint_image_url || meta.inpaint_image || '';
+      const inpaintMask = meta.inpaint_mask_url || meta.inpaint_mask || '';
+      if (ctrlPaths.length || inpaintImage) {
         setTimeout(() => {
-          setFormData(prev => ({ ...prev, control_image_paths: ctrlPaths }));
+          setFormData(prev => ({
+            ...prev,
+            ...(ctrlPaths.length ? { control_image_paths: ctrlPaths } : {}),
+            ...(inpaintImage ? {
+              inpaint_image_path: inpaintImage,
+              inpaint_mask_path: inpaintMask,
+              inpaint_feather: meta.inpaint_feather ?? prev.inpaint_feather,
+              inpaint_preserve: meta.inpaint_preserve ?? prev.inpaint_preserve,
+            } : {}),
+          }));
         }, 0);
       }
 
@@ -865,13 +902,109 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                 </p>
               </>
 
-            ) : (
+            ) : !canInpaint ? (
               <div className="fuk-empty-state">
                 <Camera className="fuk-empty-state-icon" />
                 <p className="fuk-empty-state-text">
                   Select an Edit, Control, or EliGen model<br />to enable image tools
                 </p>
               </div>
+            ) : null}
+
+            {/* Inpaint — repaint a masked part of an existing picture */}
+            {canInpaint && (
+              <>
+                <div className="fuk-form-group-compact fuk-mt-4">
+                  <label className="fuk-label">Inpaint Image</label>
+                  <MediaUploader
+                    images={formData.inpaint_image_path ? [formData.inpaint_image_path] : []}
+                    onImagesChange={handleInpaintImageChange}
+                    disabled={generating}
+                    multiple={false}
+                    accept="images"
+                    detectSequences={false}
+                    label="Drop the image to repaint or click to browse"
+                    initialDir={project?.projectState?.lastState?.lastUploadDir}
+                    onDirectorySelected={(dir) => project?.updateLastState?.({ lastUploadDir: dir })}
+                  />
+                </div>
+
+                {formData.inpaint_image_path && (
+                  <>
+                    <div className="fuk-form-group-compact fuk-mt-2">
+                      <label className="fuk-label">Mask</label>
+                      <MediaUploader
+                        images={formData.inpaint_mask_path ? [formData.inpaint_mask_path] : []}
+                        onImagesChange={handleInpaintMaskChange}
+                        disabled={generating}
+                        multiple={false}
+                        accept="images"
+                        detectSequences={false}
+                        label="Drop a mask file or click to browse"
+                        initialDir={project?.projectState?.lastState?.lastUploadDir}
+                        onDirectorySelected={(dir) => project?.updateLastState?.({ lastUploadDir: dir })}
+                      />
+                      <button
+                        type="button"
+                        className="fuk-btn fuk-btn-secondary fuk-btn-full fuk-mt-2"
+                        onClick={() => setMaskPainterOpen(true)}
+                        disabled={generating}
+                      >
+                        {formData.inpaint_mask_path ? 'Edit Mask' : 'Paint Mask'}
+                      </button>
+                    </div>
+
+                    <div className="fuk-form-group-compact fuk-mt-2">
+                      <label className="fuk-label" title="Width of the soft edge between the repainted area and the rest.">
+                        Mask Feather <span className="fuk-label-description">(px)</span>
+                      </label>
+                      <div className="fuk-input-inline">
+                        <input
+                          type="range"
+                          className="fuk-slider fuk-input--flex-2"
+                          value={formData.inpaint_feather ?? 16}
+                          onChange={(e) => setFormData({...formData, inpaint_feather: parseInt(e.target.value)})}
+                          min={0}
+                          max={128}
+                          step={4}
+                        />
+                        <input
+                          type="number"
+                          className="fuk-input fuk-input--w-80"
+                          value={formData.inpaint_feather ?? 16}
+                          onChange={(e) => setFormData({...formData, inpaint_feather: parseInt(e.target.value) || 0})}
+                          min={0}
+                          max={128}
+                          step={4}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="fuk-form-group-compact fuk-mt-2">
+                      <label className="fuk-checkbox-group">
+                        <input
+                          type="checkbox"
+                          className="fuk-checkbox"
+                          checked={formData.inpaint_preserve ?? true}
+                          disabled={generating}
+                          onChange={(e) => setFormData({...formData, inpaint_preserve: e.target.checked})}
+                        />
+                        <div>
+                          <span className="fuk-label" title="Paste the original pixels back over everything outside the mask. Without this the whole picture comes back through the model's decoder and shifts slightly.">
+                            Keep original pixels outside the mask
+                          </span>
+                        </div>
+                      </label>
+                    </div>
+                  </>
+                )}
+
+                <p className="fuk-help-text fuk-mt-2">
+                  Paint over the part of the image to replace and describe what
+                  should be there. The output takes this image's size. White in
+                  a mask file is repainted, black is kept.
+                </p>
+              </>
             )}
           </div>
 
@@ -1237,6 +1370,18 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
         onCancel={cancel}
         onClose={closeModal}
       />
+
+      {maskPainterOpen && formData.inpaint_image_path && (
+        <MaskPainter
+          imagePath={formData.inpaint_image_path}
+          maskPath={formData.inpaint_mask_path || null}
+          onSave={(url) => {
+            setFormData(prev => ({ ...prev, inpaint_mask_path: url }));
+            setMaskPainterOpen(false);
+          }}
+          onClose={() => setMaskPainterOpen(false)}
+        />
+      )}
     </>
   );
 }

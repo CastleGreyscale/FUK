@@ -54,6 +54,11 @@ class Flux2PipelineRunner(PipelineRunner):
         mask_path: Optional[Path] = None,
         inpaint_blur_size: Optional[int] = None,
         inpaint_blur_sigma: Optional[float] = None,
+        # Soft mask edge in pixels. Drives the latent blur when the two blur
+        # values above are not given, and the feather of the pixel composite.
+        inpaint_feather: Optional[int] = None,
+        # Paste the original pixels back outside the mask after decoding.
+        inpaint_preserve: bool = True,
         # VRAM
         vram_preset: Optional[str] = None,
         # Misc
@@ -87,9 +92,13 @@ class Flux2PipelineRunner(PipelineRunner):
         denoise = (denoising_strength if denoising_strength is not None
                    else defaults.get("denoising_strength", 1.0))
 
-        # Inherit dimensions from first source image (matches Qwen edit behaviour)
-        if control_image:
-            source_path = control_image[0] if isinstance(control_image, list) else control_image
+        # Inherit dimensions from first source image (matches Qwen edit behaviour).
+        # When inpainting, the picture being repainted wins: its latents have to
+        # line up with the noise, where an edit image is only reference material.
+        inpainting = "inpaint" in supports and bool(input_image)
+        dim_source = input_image if inpainting else control_image
+        if dim_source:
+            source_path = dim_source[0] if isinstance(dim_source, list) else dim_source
             source_path = Path(str(source_path))
             if source_path.exists() and source_path.is_file():
                 try:
@@ -151,27 +160,14 @@ class Flux2PipelineRunner(PipelineRunner):
         if "edit_image" in pipe_kwargs:
             pipe_kwargs["edit_image_auto_resize"] = False
 
-        # Inpainting. The mask is resized to the latent grid by the pipeline's
-        # own unit, but the base image is loaded at the target size here so its
-        # latents line up with the noise.
-        if "inpaint" in supports and input_image:
-            base = self.load_image(input_image, width=width, height=height)
-            if base is not None:
-                pipe_kwargs["input_image"] = base
-            mask = self.load_image(mask_path, width=width, height=height) if mask_path else None
-            if mask is not None:
-                pipe_kwargs["inpaint_mask"] = mask
-                if inpaint_blur_size is not None:
-                    pipe_kwargs["inpaint_blur_size"] = inpaint_blur_size
-                if inpaint_blur_sigma is not None:
-                    pipe_kwargs["inpaint_blur_sigma"] = inpaint_blur_sigma
-                _log(self.log_prefix,
-                     f"  Inpaint → mask {mask.size}"
-                     + (f", blur {inpaint_blur_size}/{inpaint_blur_sigma}"
-                        if inpaint_blur_size else ""))
-            elif mask_path:
-                _log(self.log_prefix,
-                     f"Inpaint mask could not be loaded: {mask_path}", "warning")
+        # Inpainting. FLUX.2 resizes the mask to its 16 px latent grid.
+        inpaint_base = inpaint_mask = None
+        if inpainting:
+            inpaint_kwargs, inpaint_base, inpaint_mask = self.build_inpaint_inputs(
+                input_image, mask_path, width, height, latent_scale=16,
+                feather=inpaint_feather,
+                blur_size=inpaint_blur_size, blur_sigma=inpaint_blur_sigma)
+            pipe_kwargs.update(inpaint_kwargs)
 
         # Merge pipeline_kwargs from models.json
         pipe_kwargs.update(pipe_defaults)
@@ -182,6 +178,9 @@ class Flux2PipelineRunner(PipelineRunner):
         try:
             with torch.inference_mode():
                 image = pipe(**pipe_kwargs)
+            if inpaint_mask is not None and inpaint_preserve:
+                image = self.composite_inpaint(
+                    inpaint_base, image, inpaint_mask, feather=inpaint_feather or 0)
             image.save(output_path)
 
             elapsed = time.time() - start_time

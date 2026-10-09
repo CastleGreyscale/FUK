@@ -28,6 +28,7 @@
 @import './zoomable-image.css';
 @import './video-sync-controller.css';
 @import './generation-modal.css';
+@import './mask-painter.css';
 @import './animations.css';
 @import './prompt-panel.css';
 @import './storyboard.css';

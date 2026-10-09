@@ -658,6 +658,13 @@ class ImageGenerationRequest(BaseModel):
     embedded_guidance: Optional[float] = None  # FLUX.2 embedded guidance (null = use guidance_scale)
     eligen_source: Optional[str] = None  # Path to EliGen masks (directory, .psd, or .ora)
     eligen_alpha: Optional[float] = None  # Model LoRA strength (EliGen or control union)
+    # Inpainting, for models that list `inpaint`. The image is the picture being
+    # repainted (it also sets the output size); the mask is white where the
+    # model should repaint and black where the picture is kept.
+    inpaint_image_path: Optional[str] = None
+    inpaint_mask_path: Optional[str] = None
+    inpaint_feather: Optional[int] = None  # px of soft edge on the mask
+    inpaint_preserve: bool = True  # paste the original pixels back outside the mask
     live_preview: bool = False  # Decode a few mid-denoise previews (Blender live view)
     # Which wording of a LoRA's inject text `#markers` expand to: close, medium
     # or wide, or a shot size the Blender addon measured. None = the default text.
@@ -1118,13 +1125,51 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
                     eligen_source_abs = resolved
             if eligen_source_abs:
                 log.info("ImageGen", f"EliGen source: {eligen_source_abs}")
+
+        # Handle inpaint inputs. Only models that list `inpaint` get them — the
+        # other runners would read a stray input_image as something else.
+        inpaint_image = inpaint_mask = None
+        inpaint_image_url = inpaint_mask_url = None
+        if request.inpaint_image_path:
+            _entry = generation_backend.get_model_entry(
+                generation_backend.resolve_model_type(request.model))
+            if "inpaint" not in _entry.get("supports", []):
+                log.warning("ImageGen", f"{request.model} does not inpaint — ignoring inpaint image and mask")
+            else:
+                resolved = resolve_input_path(request.inpaint_image_path)
+                if resolved and resolved.exists():
+                    inpaint_image = resolved
+                else:
+                    log.warning("ImageGen", f"Inpaint image not found: {request.inpaint_image_path}")
+                if inpaint_image and request.inpaint_mask_path:
+                    resolved = resolve_input_path(request.inpaint_mask_path)
+                    if resolved and resolved.exists():
+                        inpaint_mask = resolved
+                    else:
+                        log.warning("ImageGen", f"Inpaint mask not found: {request.inpaint_mask_path}")
+        if inpaint_image:
+            log.info("ImageGen", f"Inpaint image: {inpaint_image}, mask: {inpaint_mask}")
+            # Same reason as the control copies above: keep the entry self-contained.
+            import shutil
+            control_dir = gen_dir / "control"
+            control_dir.mkdir(exist_ok=True)
+            try:
+                dest = control_dir / f"inpaint_image{inpaint_image.suffix or '.png'}"
+                shutil.copy(inpaint_image, dest)
+                inpaint_image_url = get_project_relative_url(dest)
+                if inpaint_mask:
+                    dest = control_dir / f"inpaint_mask{inpaint_mask.suffix or '.png'}"
+                    shutil.copy(inpaint_mask, dest)
+                    inpaint_mask_url = get_project_relative_url(dest)
+            except Exception as _e:
+                log.warning("ImageGen", f"Failed to copy inpaint inputs: {_e}")
         
         # --- Resolution inheritance from input images ---
         # When any input image is present, force generation to match its
         # dimensions. Eliminates mismatches between UI settings and source
         # image size that cause ghosting, cropping, and tensor shape errors.
-        # Priority: base_preview (layer edits) → first control image
-        _resolution_source = None
+        # Priority: base_preview (layer edits) → inpaint image → first control image
+        _resolution_source = inpaint_image
         # [LAYER STACK DISABLED] stack base_preview priority removed
         # if request.stack_id:
         #     _bp = get_project_cache_dir() / request.stack_id / "base_preview.png"
@@ -1226,6 +1271,10 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
             embedded_guidance=request.embedded_guidance,
             eligen_source=eligen_source_abs,
             eligen_alpha=request.eligen_alpha,
+            input_image=inpaint_image,
+            mask_path=inpaint_mask,
+            inpaint_feather=request.inpaint_feather,
+            inpaint_preserve=request.inpaint_preserve,
         )
         
         log.success("ImageGen", "Generation complete!")
@@ -1275,6 +1324,12 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
             ),
             eligen_source=str(eligen_source_abs) if eligen_source_abs else None,
             eligen_alpha=request.eligen_alpha,
+            inpaint_image=str(inpaint_image) if inpaint_image else None,
+            inpaint_mask=str(inpaint_mask) if inpaint_mask else None,
+            inpaint_image_url=inpaint_image_url,
+            inpaint_mask_url=inpaint_mask_url,
+            inpaint_feather=request.inpaint_feather if inpaint_mask else None,
+            inpaint_preserve=request.inpaint_preserve if inpaint_mask else None,
             prompt_source=prompt_source,
             prompt_expanded_markers=prompt_provenance["expanded_markers"],
             prompt_unknown_markers=prompt_provenance["unknown_markers"],
@@ -2673,6 +2728,49 @@ async def upscale_image(request: UpscaleRequest):
         
     except Exception as e:
         print(f"Upscaling failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class SaveMaskRequest(BaseModel):
+    image_data: str  # PNG as a data URL or bare base64
+
+@app.post("/api/image/mask")
+async def save_painted_mask(request: SaveMaskRequest):
+    """
+    Save a mask painted in the browser into the project cache.
+    The rest of the UI passes paths around rather than uploading, but a painted
+    mask exists nowhere on disk until this writes it.
+    """
+    try:
+        import base64
+        import io
+        from PIL import Image
+
+        encoded = request.image_data.split(",", 1)[-1]
+        try:
+            with Image.open(io.BytesIO(base64.b64decode(encoded))) as img:
+                mask = img.convert("L")
+        except Exception:
+            raise HTTPException(status_code=400, detail="image_data is not a readable image")
+
+        gen_dir = get_generation_output_dir("mask")
+        output_path = gen_dir / "mask.png"
+        mask.save(output_path)
+
+        output_url = get_project_relative_url(output_path)
+        print(f"[Mask] {mask.width}x{mask.height} saved: {output_url}")
+
+        return {
+            "success": True,
+            "output_url": output_url,
+            "size": {"width": mask.width, "height": mask.height},
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))

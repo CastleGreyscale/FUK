@@ -344,6 +344,82 @@
                 </div>
                 <p>Depth-map conditioning — preserves spatial layout and volume without constraining edge detail. See <a href="#preprocessors">Depth Estimation</a>.</p>
 
+                <h3 id="inpainting">Inpainting</h3>
+                <div class="wiki-video" data-vimeo="" data-title="Inpainting">
+                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
+                </div>
+                <p>Inpainting repaints one part of an existing picture and leaves the rest alone. You load the picture, paint a mask over the area to replace, and prompt for what should be there. Only the masked area is generated; everything outside it is the original image.</p>
+
+                <h4>Supported Models</h4>
+                <table class="wiki-table">
+                    <thead>
+                        <tr><th>Model</th><th>Notes</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>FLUX.2-klein 4B</td><td>Mask resolves to 16px blocks. Apache-2.0</td></tr>
+                        <tr><td>Flux 2 Dev</td><td>Mask resolves to 16px blocks. Non-commercial — see <a href="#licensing">Licensing</a></td></tr>
+                        <tr><td>Qwen Image</td><td>Mask resolves to 8px blocks</td></tr>
+                        <tr><td>Qwen Image 2512</td><td>Mask resolves to 8px blocks</td></tr>
+                        <tr><td>Qwen Image Edit 2511</td><td>Mask resolves to 8px blocks. Control images stay reference material — see the note below</td></tr>
+                    </tbody>
+                </table>
+                <p>Krea-2 and Qwen Image 2.1 cannot inpaint: their pipelines take no source image to blend against. The control-union and EliGen models are not enabled for it.</p>
+
+                <h4>Workflow</h4>
+                <ol>
+                    <li>Select a model from the table above. An <strong>Inpaint Image</strong> slot appears in the Image Tools card.</li>
+                    <li>Load the picture to repaint. It sets the output size, rounded up to 16px, and takes priority over any control image for that.</li>
+                    <li>Click <strong>Paint Mask</strong> and paint over the area to replace, then <strong>Save Mask</strong>. Or load a mask file into the <strong>Mask</strong> slot instead — white is repainted, black is kept.</li>
+                    <li>Write the prompt and generate.</li>
+                </ol>
+                <p>Loading a different inpaint image clears the mask, since a mask belongs to the picture it was painted on. <strong>Edit Mask</strong> reopens the current mask for more work, whether it was painted or loaded from a file.</p>
+
+                <h4>Mask Painter</h4>
+                <div class="wiki-video" data-vimeo="" data-title="Mask Painter">
+                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
+                </div>
+                <p>The painter shows the image fitted to the window with the mask in red over it. Brush size is in image pixels, so it means the same thing at any window size. There is no zoom or pan.</p>
+                <table class="wiki-table">
+                    <thead>
+                        <tr><th>Control</th><th>Shortcut</th><th>Action</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>Brush</td><td><kbd>B</kbd></td><td>Paint the mask</td></tr>
+                        <tr><td>Eraser</td><td><kbd>E</kbd></td><td>Remove mask. <kbd>X</kbd> swaps between brush and eraser</td></tr>
+                        <tr><td>Size</td><td><kbd>[</kbd> / <kbd>]</kbd></td><td>Brush size, from 2px up to half the image's long edge</td></tr>
+                        <tr><td>Undo</td><td><kbd>Ctrl+Z</kbd></td><td>Steps back through strokes and the three actions below, with no limit</td></tr>
+                        <tr><td>Invert</td><td>—</td><td>Swaps the painted and unpainted areas</td></tr>
+                        <tr><td>Fill</td><td>—</td><td>Masks the whole image</td></tr>
+                        <tr><td>Clear</td><td>—</td><td>Removes the whole mask</td></tr>
+                        <tr><td>Cancel</td><td><kbd>Esc</kbd></td><td>Closes without saving; asks first if there are unsaved changes</td></tr>
+                    </tbody>
+                </table>
+                <p>The app's own shortcuts are suspended while the painter is open. A saved mask is written to the project cache as <code>mask_NNN/mask.png</code> at the image's own resolution.</p>
+
+                <h4>Settings</h4>
+                <table class="wiki-table">
+                    <thead>
+                        <tr><th>Setting</th><th>Description</th><th>Notes</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>Mask Feather</td><td>Width in pixels of the soft edge between the repainted area and the rest</td><td>0–128, default 16. 0 gives a hard edge, which usually shows as a seam</td></tr>
+                        <tr><td>Keep original pixels outside the mask</td><td>Pastes the source pixels back over everything outside the mask after generation</td><td>On by default. Turn it off only to see what the model returned for the whole frame</td></tr>
+                        <tr><td><a href="#detail-bias">Detail Bias</a></td><td>Below 1.0 the masked area starts from a noised copy of the original rather than from pure noise</td><td>Use 1.0 to replace the content outright; lower values let the original's colour and layout carry through</td></tr>
+                    </tbody>
+                </table>
+
+                <h4>How It Works, and Its Limits</h4>
+                <p>The model inpaints in latent space: on every denoising step the area outside the mask is steered back to the source picture while the area inside it is generated. That has two consequences.</p>
+                <ul>
+                    <li><strong>The mask is coarse to the model.</strong> It is reduced to the latent grid — 16px blocks on FLUX.2, 8px on Qwen — so a block the brush only clips is partly regenerated. Fine brushwork is not what decides the result; coverage and the feather are.</li>
+                    <li><strong>The whole picture passes through the model's decoder</strong>, so the untouched area comes back very slightly altered. <em>Keep original pixels</em> fixes that by compositing the source back using the mask at full resolution, which also puts the edge where you painted it rather than on a block boundary.</li>
+                </ul>
+                <p>The latent saved alongside the image is the model's own output, from before that composite, so it will not match the PNG exactly outside the mask.</p>
+                <div class="wiki-note">
+                    <p>On Qwen Image Edit the inpaint image and the control images are separate inputs. To confine an edit to one region, load the same picture into both slots and mask the region: the control image tells the model what it is editing, and the mask stops the edit from touching anything else.</p>
+                </div>
+                <p>The inpaint image and mask are copied into the generation's folder, and dropping that generation from history onto the preview restores both, along with the feather and keep-original settings. A model gets the inpaint slot by listing <code>inpaint</code> under <code>supports</code> in <a href="#config-models">models.json</a>.</p>
+
                 <h3>Batch Generation</h3>
                 <p>FUK supports batch generation — queue multiple runs from the same settings in a single pass. Each result is saved as its own versioned output with its own metadata sidecar. Batch jobs run sequentially and can be monitored from the generation modal.</p>
             </div>
@@ -363,7 +439,7 @@
                     </thead>
                     <tbody>
                         <tr><td>Wan 2.2 I2V-A14B</td><td>Image + text prompt</td><td>Image anchors the first frame; motion is synthesized toward the prompt</td></tr>
-                        <tr><td>Wan 2.2 Fun Control</td><td>Control video + optional start/end images</td><td>Uses a reference video as a motion/structure guide</td></tr>
+                        <tr><td>Wan 2.2 Fun Control</td><td>Control video + optional start/end images</td><td>Uses a reference video as a motion/structure guide. Also extends a clip past its frame — see <a href="#outpainting">Outpainting</a></td></tr>
                         <tr><td>FFLF (Wan 2.2 Fun-A14B-InP)</td><td>Start image + end image + text prompt</td><td>Interpolates motion between two fixed frames; output lands on both. See <a href="#fflf">FFLF</a></td></tr>
                         <tr><td>Wan Animate</td><td>Image + text prompt</td><td>Animation-focused pipeline with enhanced character and object motion control</td></tr>
                         <tr><td>LTX-2.5</td><td>First frame + text prompt</td><td>22B audio-video at 48kHz — one denoise produces picture and a synchronized soundtrack. Function variants are LoRAs on one shared base rather than separate checkpoints, though upstream has published only one for 2.5 so far; see <a href="#ltx2-loras">LTX-2.5 Function LoRAs</a></td></tr>
@@ -451,6 +527,47 @@
                     <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
                 </div>
                 <p>Give the model a start image and an end image and it generates the motion between them, landing exactly on both. Useful for bridging two locked storyboard frames or holding a specific in and out pose. Frame count sets how long the transition takes — the same move over more frames is slower and smoother.</p>
+
+                <h3 id="outpainting">Outpainting (Wan 2.2 VACE)</h3>
+                <div class="wiki-video" data-vimeo="" data-title="Outpainting (Wan 2.2 VACE)">
+                    <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
+                </div>
+                <p>Outpainting extends a clip past its own frame. The source is placed on a larger canvas, the model generates only the area around it, and the original footage is pasted back over the result. Use it to change a clip's aspect ratio without cropping, or to pull the camera back from a shot that was framed too tight.</p>
+                <p>It runs on the Wan 2.2 VACE model — the control-video pipeline listed above as Fun Control. Outpainting uses that pipeline's video input for the padded source, so a clip cannot be outpainted and used as a structure guide in the same run.</p>
+
+                <h4>Workflow</h4>
+                <ol>
+                    <li>Select the Wan 2.2 VACE model and tick <strong>Outpaint</strong>. The control video slot becomes <strong>Source Video</strong>.</li>
+                    <li>Load the clip to extend.</li>
+                    <li>Choose an <strong>Output Aspect</strong>, a <strong>Source Scale</strong>, or both. At least one must leave room around the source.</li>
+                    <li>Position the source on the canvas if it should not be centred.</li>
+                    <li>Prompt for the whole scene, including what is already in the clip, and generate.</li>
+                </ol>
+
+                <h4>Controls</h4>
+                <table class="wiki-table">
+                    <thead>
+                        <tr><th>Control</th><th>Description</th><th>Notes</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>Output Aspect</td><td>Aspect ratio of the new frame</td><td><em>Same as source</em> by default. The list is the configured aspect ratios plus 4:5 and 9:16</td></tr>
+                        <tr><td>Source Scale</td><td>How much of the fitted size the source keeps. At 1 it touches the canvas on its tight axis; lower values leave room on every side</td><td>0.2–1.0, default 1</td></tr>
+                        <tr><td>Horizontal</td><td>Where the source sits across the canvas</td><td>0 = left, 0.5 = centred, 1 = right</td></tr>
+                        <tr><td>Vertical</td><td>Where the source sits down the canvas</td><td>0 = top, 0.5 = centred, 1 = bottom</td></tr>
+                        <tr><td>Edge Feather</td><td>Pixels over which the original footage fades into the generated area</td><td>0–128, default 16. 0 gives a hard edge</td></tr>
+                    </tbody>
+                </table>
+                <p>The canvas is the smallest frame of the chosen aspect that contains the source, enlarged by 1 / Source Scale. It then goes through the <strong>Resolution</strong> setting and the model's 16px grid like any other source size, and the Resolution label shows the canvas it is working from. With <em>Same as source</em> and a scale of 1 there is nothing to generate; the panel warns <em>Nothing to fill</em> and Generate stays disabled.</p>
+
+                <h4>What to Expect</h4>
+                <ul>
+                    <li><strong>The original area is the source, not a regeneration.</strong> The model returns the whole frame, with the kept region slightly altered by its decoder, so the placed source is composited back over it. If the canvas is smaller than the source needs, the source is scaled down to fit, and those scaled pixels are what is kept.</li>
+                    <li><strong>The feather is taken from inside the source edge.</strong> The blend gives up a sliver of original footage rather than showing generated pixels as if they were source. Edges that sit on the canvas border are not feathered, since there is nothing generated beyond them.</li>
+                    <li><strong>The source is snapped to an 8px grid</strong> so the mask edge lines up with the model's latent cells. That can leave it a few pixels off its true aspect.</li>
+                    <li><strong>A short source shortens the job.</strong> If the clip has fewer frames than the frame count, the run drops to the longest 4n+1 length the clip covers; frames past its end would be pure invention. A clip under 5 frames is refused.</li>
+                    <li><strong>A reference image is only a look guide.</strong> It can still be loaded, but the canvas, not the image, sets the output size.</li>
+                </ul>
+                <p>The placement that ran is recorded in the generation metadata under <code>outpaint</code>: the source rectangle on the canvas, the source's native size, and the feather. A model offers the Outpaint option by listing <code>vace_video_mask</code> under <code>supports</code> in <a href="#config-models">models.json</a>.</p>
 
                 <h3>Output Format</h3>
                 <p>Video is saved as a PNG frame sequence plus a composited MP4 for preview. The frame sequence is the primary output — import it directly into Nuke, After Effects, DaVinci Resolve, or any compositing application. EXR passes are generated per-frame when AOV export is enabled via the <a href="#layers-panel">Layers Panel</a>.</p>
@@ -1278,12 +1395,13 @@
                 <p>Displays the current generation result in a zoomable, pannable viewer. Shows the output dimensions and generation time. When no result is present, the placeholder displays the configured target dimensions. History items can be dragged from the Generation History panel and dropped here to reload their metadata into all parameter cards.</p>
 
                 <h3>Image Tools Card</h3>
-                <p>Visible when an edit or context model is selected. Contains controls for reference image input:</p>
+                <p>Visible when an edit, context, EliGen or inpaint-capable model is selected. Contains controls for reference image input:</p>
                 <ul>
                     <li><strong>Control Images</strong> — <a href="#media-input">Media Input</a> for one or more reference images used as conditioning; supports multi-image upload</li>
                     <li><strong>Edit Strength</strong> — how much the model deviates from the reference (0.0 = identical to reference, 1.0 = freely interprets); range 0.0–1.0</li>
                     <li><strong>Context Image</strong> (EliGen models) — optional scene-level reference; EliGen alpha (0.0–2.0) controls its influence</li>
                     <li><strong>Entity Masks</strong> (EliGen models) — path to a <code>.psd</code> or <code>.ora</code> file containing per-zone masks; each layer becomes an independent conditioning zone</li>
+                    <li><strong>Inpaint Image</strong> (inpaint-capable models) — the picture to repaint; sets the output size. Once loaded it reveals a <strong>Mask</strong> slot, the <strong>Paint Mask</strong> button, <strong>Mask Feather</strong> and <strong>Keep original pixels outside the mask</strong>. See <a href="#inpainting">Inpainting</a></li>
                 </ul>
                 <p>See <a href="#regional-conditioning">Regional Conditioning (EliGen)</a> for how zones are composited during denoising and how to author the mask files.</p>
 
@@ -1338,6 +1456,7 @@
                     <li><strong>Start Image</strong> (I2V) — required; the first frame of the video; <a href="#media-input">Media Input</a>; detected dimensions are shown and used to calculate output resolution</li>
                     <li><strong>End Image</strong> (I2V, optional) — if provided, the video will transition toward this image as the final frame</li>
                     <li><strong>Control Video</strong> (Fun Control) — required; a reference video that guides the motion and structure of the output; accepts video files or frame sequences</li>
+                    <li><strong>Outpaint</strong> (Wan 2.2 VACE) — turns the control video into the <strong>Source Video</strong> to extend, and reveals Output Aspect, Source Scale, Horizontal, Vertical and Edge Feather. See <a href="#outpainting">Outpainting</a></li>
                 </ul>
 
                 <h3>Frame Settings Card</h3>
@@ -1913,7 +2032,7 @@
                         <tr><td><code>category</code></td><td>string</td><td><code>image</code>, <code>video</code> or <code>threed</code> — determines which tab the model appears in</td></tr>
                         <tr><td><code>description</code></td><td>string</td><td>Human-readable label shown in the UI dropdown</td></tr>
                         <tr><td><code>aliases</code></td><td>array</td><td>Alternate names that resolve to this key — accepted on the CLI, in the API, and by anything replaying an older saved task string</td></tr>
-                        <tr><td><code>supports</code></td><td>array</td><td>Feature flags: <code>negative_prompt</code>, <code>edit_image</code>, <code>context_image</code>, <code>keyframes</code>, <code>control_video</code>, <code>eligen</code>, <code>tiled</code> and so on — controls which UI cards and input slots appear</td></tr>
+                        <tr><td><code>supports</code></td><td>array</td><td>Feature flags: <code>negative_prompt</code>, <code>edit_image</code>, <code>context_image</code>, <code>keyframes</code>, <code>control_video</code>, <code>eligen</code>, <code>inpaint</code>, <code>vace_video_mask</code>, <code>tiled</code> and so on — controls which UI cards and input slots appear</td></tr>
                         <tr><td><code>components</code></td><td>array</td><td>The weight files the model needs, as <code>{"pattern": …}</code> objects. <code>pattern</code> is a glob under the repo; add <code>model_id</code> to pull that one component from a different repo, or <code>quantize</code> to override the denoiser heuristic. Omit the whole field for models whose weights arrive another way — the 3D entries do</td></tr>
                         <tr><td><code>parameter_map</code></td><td>object</td><td>Maps FUK's generic input slots (<code>control_input</code>, <code>reference_image</code>, <code>edit_targets</code>, <code>end_image</code>) onto the names this model's pipeline expects</td></tr>
                         <tr><td><code>tokenizer</code></td><td>object</td><td><code>{"pattern": …}</code>, plus <code>model_id</code> when the tokenizer lives in a different repo from the weights</td></tr>
@@ -2211,6 +2330,22 @@
                         <tr><td><kbd>Shift+R</kbd></td><td>Set seed mode → Random</td><td></td></tr>
                         <tr><td><kbd>Shift+F</kbd></td><td>Set seed mode → Fixed</td><td></td></tr>
                         <tr><td><kbd>Shift+I</kbd></td><td>Set seed mode → Increment</td><td></td></tr>
+                    </tbody>
+                </table>
+
+                <h3>Mask Painter</h3>
+                <p>Active only while the painter is open, when every other shortcut is suspended. See <a href="#inpainting">Inpainting</a>.</p>
+                <table class="wiki-table">
+                    <thead>
+                        <tr><th>Shortcut</th><th>Action</th><th>Notes</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td><kbd>B</kbd></td><td>Brush</td><td></td></tr>
+                        <tr><td><kbd>E</kbd></td><td>Eraser</td><td></td></tr>
+                        <tr><td><kbd>X</kbd></td><td>Swap brush and eraser</td><td></td></tr>
+                        <tr><td><kbd>[</kbd> / <kbd>]</kbd></td><td>Shrink / grow the brush</td><td></td></tr>
+                        <tr><td><kbd>Ctrl+Z</kbd></td><td>Undo</td><td></td></tr>
+                        <tr><td><kbd>Esc</kbd></td><td>Close without saving</td><td>Asks first if there are unsaved changes</td></tr>
                     </tbody>
                 </table>
 

@@ -89,6 +89,18 @@ class QwenPipelineRunner(PipelineRunner):
         # EliGen — entity masks (directory of PNGs or .psd file)
         eligen_source: Optional[Union[str, Path]] = None,
         eligen_alpha: Optional[float] = None,  # Override model LoRA strength
+        # Inpainting. input_image is the picture being repainted and supplies
+        # the latents the mask blends against; on an edit model it sits
+        # alongside edit_image, which stays reference material.
+        input_image: Optional[Path] = None,
+        mask_path: Optional[Path] = None,
+        inpaint_blur_size: Optional[int] = None,
+        inpaint_blur_sigma: Optional[float] = None,
+        # Soft mask edge in pixels. Drives the latent blur when the two blur
+        # values above are not given, and the feather of the pixel composite.
+        inpaint_feather: Optional[int] = None,
+        # Paste the original pixels back outside the mask after decoding.
+        inpaint_preserve: bool = True,
         # VRAM
         vram_preset: Optional[str] = None,
         # Live diffusion preview: callback(step:int, total:int, pil_image) called a
@@ -125,7 +137,11 @@ class QwenPipelineRunner(PipelineRunner):
         # For edit with multiple inputs, first image is the master.
         # Keeps latent dimensions consistent with the source — avoids
         # VAE rounding mismatches in layer stacks and downstream compositing.
-        source_path = self._resolve_source_image(control_image, context_image, eligen_source)
+        # When inpainting, the picture being repainted wins: its latents have to
+        # line up with the noise, where an edit image is only reference material.
+        inpainting = "inpaint" in supports and bool(input_image)
+        source_path = self._resolve_source_image(
+            input_image if inpainting else control_image, context_image, eligen_source)
         if source_path:
             from PIL import Image as _PILImage
             try:
@@ -251,6 +267,15 @@ class QwenPipelineRunner(PipelineRunner):
             eligen_kwargs = self._load_eligen_entities(eligen_source, width, height)
             pipe_kwargs.update(eligen_kwargs)
 
+        # --- Inpainting. Qwen resizes the mask to its 8 px latent grid. ---
+        inpaint_base = inpaint_mask = None
+        if inpainting:
+            inpaint_kwargs, inpaint_base, inpaint_mask = self.build_inpaint_inputs(
+                input_image, mask_path, width, height, latent_scale=8,
+                feather=inpaint_feather,
+                blur_size=inpaint_blur_size, blur_sigma=inpaint_blur_sigma)
+            pipe_kwargs.update(inpaint_kwargs)
+
         # Merge pipeline_kwargs from models.json
         pipe_kwargs.update(pipe_defaults)
 
@@ -359,6 +384,9 @@ class QwenPipelineRunner(PipelineRunner):
             _log(self.log_prefix, f"[timing] pipe() denoise+decode: {_pipe_s:.1f}s")
             record_timing(f"denoise_per_step:{model_type}:{width}x{height}",
                           _pipe_s / max(1, num_steps))
+            if inpaint_mask is not None and inpaint_preserve:
+                image = self.composite_inpaint(
+                    inpaint_base, image, inpaint_mask, feather=inpaint_feather or 0)
             image.save(output_path)
 
             elapsed = time.time() - start_time

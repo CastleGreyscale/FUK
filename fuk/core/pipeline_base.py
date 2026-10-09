@@ -457,6 +457,71 @@ class PipelineRunner:
             img = img.resize((width, height))
         return img
 
+    def build_inpaint_inputs(
+        self, input_image, mask_path, width: int, height: int, latent_scale: int,
+        feather: Optional[int] = None,
+        blur_size: Optional[int] = None, blur_sigma: Optional[float] = None,
+    ):
+        """Load an inpaint picture and mask and build the pipe() kwargs for them.
+
+        Works for the pipelines that inpaint by blending latents against
+        `input_image` under `inpaint_mask` (FLUX.2, Qwen-Image). `latent_scale`
+        is how many pixels one latent cell covers on the grid the pipeline
+        resizes the mask to; it turns `feather` (pixels) into the pipeline's
+        blur, which is counted in cells. Explicit blur values win over it.
+
+        Returns (pipe_kwargs, base, mask). The picture is loaded at the target
+        size so its latents line up with the noise. mask is None when there is
+        none to apply, which leaves a plain image-to-image run.
+        """
+        base = self.load_image(input_image, width=width, height=height)
+        if base is None:
+            return {}, None, None
+        pipe_kwargs = {"input_image": base}
+        mask = self.load_image(mask_path, width=width, height=height) if mask_path else None
+        if mask is None:
+            if mask_path:
+                _log(self.log_prefix,
+                     f"Inpaint mask could not be loaded: {mask_path}", "warning")
+            return pipe_kwargs, base, None
+        pipe_kwargs["inpaint_mask"] = mask
+        if blur_size is None and feather:
+            cells = round(feather / latent_scale)
+            if cells >= 1:
+                blur_size, blur_sigma = cells, cells / 2
+        if blur_size is not None:
+            pipe_kwargs["inpaint_blur_size"] = blur_size
+        if blur_sigma is not None:
+            pipe_kwargs["inpaint_blur_sigma"] = blur_sigma
+        _log(self.log_prefix,
+             f"  Inpaint → mask {mask.size}"
+             + (f", blur {blur_size}/{blur_sigma}" if blur_size else ""))
+        return pipe_kwargs, base, mask
+
+    def composite_inpaint(
+        self, original: Image.Image, generated: Image.Image,
+        mask: Image.Image, feather: int = 0,
+    ) -> Image.Image:
+        """Paste the original pixels back outside an inpaint mask.
+
+        Latent inpainting sends the whole picture through the VAE and blends on
+        the latent grid, so the kept region comes back slightly altered and the
+        mask edge lands on latent-cell boundaries. This restores the untouched
+        pixels exactly and puts the edge where it was painted.
+
+        Mask convention: white = generated, black = original. `feather` is the
+        width in pixels of the soft edge between them.
+        """
+        from PIL import ImageFilter
+        if original.size != generated.size:
+            original = original.resize(generated.size, Image.LANCZOS)
+        alpha = mask.convert("L")
+        if alpha.size != generated.size:
+            alpha = alpha.resize(generated.size, Image.BILINEAR)
+        if feather and feather > 0:
+            alpha = alpha.filter(ImageFilter.GaussianBlur(feather / 2))
+        return Image.composite(generated.convert("RGB"), original.convert("RGB"), alpha)
+
     def resolve_image_list(
         self, control_image: Optional[Union[Path, List[Path]]],
         width: int = None, height: int = None,

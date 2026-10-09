@@ -1,0 +1,147 @@
+/**
+ * MaskPainter Styles
+ * Modal for painting an inpaint mask over an image
+ */
+
+.mask-painter-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: var(--spacing-xl);
+}
+
+.mask-painter {
+  background: var(--color-gray-900);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  max-width: 100%;
+  max-height: 100%;
+  min-width: min(640px, 100%);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.mask-painter-header,
+.mask-painter-toolbar,
+.mask-painter-footer {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-lg);
+  padding: var(--spacing-md) var(--spacing-lg);
+  flex-shrink: 0;
+}
+
+.mask-painter-header {
+  justify-content: space-between;
+  border-bottom: var(--border-width) solid var(--color-border);
+}
+
+.mask-painter-title {
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.mask-painter-close {
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: var(--spacing-xs);
+  border-radius: var(--radius-md);
+  display: flex;
+}
+
+.mask-painter-close:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text-primary);
+}
+
+.mask-painter-toolbar {
+  flex-wrap: wrap;
+  border-bottom: var(--border-width) solid var(--color-border);
+}
+
+.mask-painter-size {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  flex: 1;
+  min-width: 240px;
+}
+
+.mask-painter-size .fuk-label {
+  margin: 0;
+}
+
+.mask-painter-size .fuk-slider {
+  flex: 1;
+}
+
+/* Stage: the image at whatever size fits, the canvas stretched over it */
+.mask-painter-stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-lg);
+  overflow: hidden;
+}
+
+.mask-painter-frame {
+  position: relative;
+  display: inline-block;
+  line-height: 0;
+  overflow: hidden;
+}
+
+.mask-painter-image {
+  display: block;
+  max-width: 100%;
+  max-height: calc(100vh - 16rem);
+  user-select: none;
+}
+
+.mask-painter-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0.5;
+  cursor: none;
+  touch-action: none;
+}
+
+.mask-painter-cursor {
+  position: absolute;
+  border: 1px solid #fff;
+  outline: 1px solid rgba(0, 0, 0, 0.7);
+  border-radius: var(--radius-full);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.mask-painter-cursor--erase {
+  border-style: dashed;
+}
+
+.mask-painter-footer {
+  justify-content: space-between;
+  border-top: var(--border-width) solid var(--color-border);
+}
+
+.mask-painter-hint {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.mask-painter-error {
+  color: var(--color-error-400);
+}

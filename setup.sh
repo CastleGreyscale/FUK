@@ -370,7 +370,7 @@ cat > fuk/config/models.json.template << 'EOL'
     "category": "image",
     "description": "Qwen text-to-image",
     "aliases": ["qwen", "t2i"],
-    "supports": ["negative_prompt"],
+    "supports": ["negative_prompt", "inpaint"],
     "parameter_map": {},
     "components": [
       {"pattern": "transformer/diffusion_pytorch_model*.safetensors"},
@@ -386,7 +386,7 @@ cat > fuk/config/models.json.template << 'EOL'
     "category": "image",
     "description": "Qwen 2512 text-to-image",
     "aliases": ["qwen-2512"],
-    "supports": ["negative_prompt"],
+    "supports": ["negative_prompt", "inpaint"],
     "parameter_map": {},
     "components": [
       {"pattern": "transformer/diffusion_pytorch_model*.safetensors"},
@@ -402,7 +402,7 @@ cat > fuk/config/models.json.template << 'EOL'
     "category": "image",
     "description": "Qwen Edit 2511 image-editing",
     "aliases": ["qwen-edit", "edit-2511", "qwen_edit"],
-    "supports": ["edit_image", "negative_prompt"],
+    "supports": ["edit_image", "inpaint", "negative_prompt"],
     "parameter_map": {
       "edit_targets": "edit_image"
     },
