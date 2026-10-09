@@ -28,7 +28,7 @@ import { useLocalStorage } from '../../src/hooks/useLocalStorage';
 import { useSavedSeeds } from '../hooks/useSavedSeeds';
 import { useVideoPlayback } from '../hooks/useVideoPlayback';
 import { startVideoGeneration } from '../../src/utils/api';
-import { formatTime, snapFrames, snapDimension, frameLattice, applyResolutionPreset } from '../utils/helpers.js';
+import { formatTime, snapFrames, snapDimension, frameLattice, applyResolutionPreset, outpaintCanvas } from '../utils/helpers.js';
 import { 
   buildImageUrl, 
   SEED_MODES, 
@@ -139,6 +139,12 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
     batchCount: 1,
     frame_inherit: videoDefaults.frame_inherit ?? true,
     trim_frames: videoDefaults.trim_frames ?? null,
+    outpaint: videoDefaults.outpaint ?? false,
+    outpaint_aspect: videoDefaults.outpaint_aspect ?? null,
+    outpaint_scale: videoDefaults.outpaint_scale ?? 1.0,
+    outpaint_align_x: videoDefaults.outpaint_align_x ?? 0.5,
+    outpaint_align_y: videoDefaults.outpaint_align_y ?? 0.5,
+    outpaint_feather: videoDefaults.outpaint_feather ?? 16,
   }), [videoDefaults]);
   
   // Fallback localStorage for when no project is loaded
@@ -284,6 +290,17 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
   // Source video metadata (populated when control_path is a video)
   const [sourceVideoInfo, setSourceVideoInfo] = useState(null);
 
+  // Outpainting turns the control video into the clip being extended, and the
+  // output canvas is then derived from it rather than from a start image. A
+  // ref as well as a value because the image/video inheritance effects below
+  // resolve asynchronously and must see the current mode, not the one they
+  // were created under.
+  const supportsOutpaint = !!videoModels.find(m => m.key === formData.task)
+    ?.supports?.includes('vace_video_mask');
+  const outpaintOn = supportsOutpaint && !!formData.outpaint;
+  const outpaintOnRef = useRef(outpaintOn);
+  outpaintOnRef.current = outpaintOn;
+
   // Metadata reload from history drag
   const [metaDragOver, setMetaDragOver] = useState(false);
   const [droppedPreview, setDroppedPreview] = useState(null);
@@ -361,6 +378,10 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
         const width = snapDimension(img.width, spatialMultiple);
         const height = snapDimension(img.height, spatialMultiple);
 
+        // The outpaint canvas owns the dimensions; a reference image is only
+        // a look guide there and must not resize the job.
+        if (outpaintOnRef.current) return;
+
         setFormData(prev => {
           // Source keeps the true image size; output is that size taken to the
           // model's chosen long edge.
@@ -388,7 +409,13 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
       setSourceVideoInfo(null);
       return;
     }
-    const cleanPath = formData.control_path.replace(/^\/outputs\//, '').replace(/^\//, '');
+    // Only URL-style paths lose their leading slash. A clip picked from outside
+    // the project arrives as a real absolute path, and stripping that slash
+    // turns it into a relative one the server cannot find — no info, so no
+    // inherited frame count or dimensions.
+    const cleanPath = formData.control_path
+      .replace(/^\/outputs\//, '')
+      .replace(/^\/(?=api\/|project-cache\/)/, '');
     fetch(`/api/video/info?path=${encodeURIComponent(cleanPath)}`)
       .then(r => r.ok ? r.json() : Promise.reject())
       .then(info => {
@@ -405,7 +432,7 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
           // scaled. A start image stays the authority when the model has one
           // (Wan i2v, VACE with a reference), so this only takes over for the
           // models whose conditioning *is* the video, like Qwen-Video-Edit.
-          if (!prev.image_path && info.width && info.height) {
+          if (!outpaintOnRef.current && !prev.image_path && info.width && info.height) {
             const out = applyResolutionPreset(
               info.width, info.height, prev.resolution_preset, spatialMultiple);
             next.source_width = snapDimension(info.width, spatialMultiple);
@@ -433,6 +460,43 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
         return { ...newData, video_length: frames };
       }
       return newData;
+    });
+  };
+
+  // Outpaint canvas: the source clip grown to the chosen aspect and scale. It
+  // is written into source_width/height so the resolution preset scales the
+  // canvas exactly as it scales any other source.
+  useEffect(() => {
+    if (!outpaintOn || !sourceVideoInfo?.width || !sourceVideoInfo?.height) return;
+    const canvas = outpaintCanvas(
+      sourceVideoInfo.width, sourceVideoInfo.height,
+      formData.outpaint_aspect, formData.outpaint_scale);
+    const out = applyResolutionPreset(
+      canvas.width, canvas.height, formData.resolution_preset, spatialMultiple);
+    setFormData(prev => ({
+      ...prev,
+      source_width: snapDimension(canvas.width, spatialMultiple),
+      source_height: snapDimension(canvas.height, spatialMultiple),
+      width: out.width,
+      height: out.height,
+    }));
+  }, [outpaintOn, sourceVideoInfo, formData.outpaint_aspect, formData.outpaint_scale,
+      formData.resolution_preset, spatialMultiple]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Turning outpaint off hands the dimensions back to the clip itself. With a
+  // start image loaded the image stays the authority, as it was before.
+  const handleOutpaintToggle = (on) => {
+    setFormData(prev => {
+      const next = { ...prev, outpaint: on };
+      if (!on && !prev.image_path && sourceVideoInfo?.width && sourceVideoInfo?.height) {
+        const out = applyResolutionPreset(
+          sourceVideoInfo.width, sourceVideoInfo.height, prev.resolution_preset, spatialMultiple);
+        next.source_width = snapDimension(sourceVideoInfo.width, spatialMultiple);
+        next.source_height = snapDimension(sourceVideoInfo.height, spatialMultiple);
+        next.width = out.width;
+        next.height = out.height;
+      }
+      return next;
     });
   };
 
@@ -547,6 +611,9 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
       animate_inpaint_video: formData.animate_inpaint_video ? formData.animate_inpaint_video.replace(/^\/outputs\//, '') : null,
       animate_mask_video: formData.animate_mask_video ? formData.animate_mask_video.replace(/^\/outputs\//, '') : null,
       denoising_strength: 1.0,
+      // Explicit, not the spread value: the flag persists in the form when
+      // the model changes, and a model without mask support rejects it.
+      outpaint: outpaintOn,
       lora: null,
       lora_multiplier: 1.0,
       lora_bypass: undefined,
@@ -689,7 +756,8 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
   // arrive over the same three form fields (image_path, end_image_path,
   // control_path), so the gating maps every family's vocabulary onto those:
   //   Wan      input_image / vace_reference_image / vace_video / end_image
-  //   LTX-2    input_images (first frame) / in_context_videos (IC-LoRA driver)
+  //   LTX-2    input_images (first + optional last frame) /
+  //            in_context_videos (IC-LoRA driver)
   //   MiniMax  keyframes (first+last) / references (Ref2VA subject) /
   //            control_video (Fun ControlNet-Union)
   //   Qwen-VE  edit_video (the clip being edited — the only truly mandatory one)
@@ -705,7 +773,14 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
 
   // The video slot means something different per family, and only Wan's is
   // actually required, so it is labelled from the model rather than assumed.
-  const videoSlot = modelSupports.includes('edit_video')
+  const videoSlot = outpaintOn
+    ? {
+        label: 'Source Video',
+        required: true,
+        help: 'The clip to extend. It is placed on the larger canvas untouched '
+            + 'and the model fills in the area around it.',
+      }
+    : modelSupports.includes('edit_video')
     ? {
         label: 'Source Video',
         required: true,
@@ -751,9 +826,10 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
     || formData.task?.includes('inp')
     || modelSupports.includes('animate_pose_video');
   // MiniMax FL2VA interpolates between a first and last frame, the same shape
-  // as Wan's flf2v.
+  // as Wan's flf2v. LTX-2 takes a last frame too, as a soft target.
   const requiresEndImage = modelSupports.includes('end_image')
     || modelSupports.includes('keyframes')
+    || modelSupports.includes('input_images')
     || formData.task?.includes('flf2v');
 
   const requiresAnimatePoseVideo = modelSupports.includes('animate_pose_video');
@@ -765,7 +841,28 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
   // from a prompt alone — keyframes and references are both optional — so
   // gating Generate on an image would block valid work.
   const imageInputsOptional = modelSupports.includes('keyframes')
-    || modelSupports.includes('references');
+    || modelSupports.includes('references')
+    || outpaintOn;
+  // LTX-2 still needs its first frame, but the last one is a bonus.
+  const endImageOptional = imageInputsOptional
+    || modelSupports.includes('input_images');
+
+  // Same aspect at full scale leaves no padding for the model to fill.
+  const outpaintSourceRatio = sourceVideoInfo?.width && sourceVideoInfo?.height
+    ? sourceVideoInfo.width / sourceVideoInfo.height
+    : null;
+  const outpaintNothingToFill = outpaintOn && outpaintSourceRatio != null
+    && (formData.outpaint_scale ?? 1) >= 1
+    && (!formData.outpaint_aspect
+        || Math.abs(formData.outpaint_aspect - outpaintSourceRatio) < 0.01);
+  // The canvas is derived from the clip's own size, so without it there are no
+  // dimensions to post.
+  const outpaintSourceUnread = outpaintOn && !!formData.control_path && !outpaintSourceRatio;
+  const outpaintAspects = [
+    ...(config?.defaults?.aspect_ratios || []).map(a => ({ label: a.label, ratio: a.ratio })),
+    { label: '4:5 (Portrait)', ratio: 0.8 },
+    { label: '9:16 (Vertical)', ratio: 0.5625 },
+  ];
   const startImageLabel = (modelSupports.includes('references') || requiresAnimatePoseVideo)
     ? 'Reference Image'
     : 'Start Image';
@@ -1003,6 +1100,130 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
               </div>
             )}
 
+            {/* Outpaint — VACE with a mask: extend the control clip's frame */}
+            {supportsOutpaint && (
+              <div className="fuk-form-group-compact">
+                <label className="fuk-checkbox-group">
+                  <input
+                    type="checkbox"
+                    className="fuk-checkbox"
+                    checked={!!formData.outpaint}
+                    disabled={generating}
+                    onChange={(e) => handleOutpaintToggle(e.target.checked)}
+                  />
+                  <div>
+                    <span className="fuk-label" title="Extend the clip past its own frame instead of using it as a structure guide. The original footage is pasted back over the result, so only the new area is generated.">
+                      Outpaint <Info className="fuk-label-info" />
+                    </span>
+                  </div>
+                </label>
+              </div>
+            )}
+            {outpaintOn && (
+              <>
+                <div className="fuk-form-pair">
+                  <div className="fuk-form-group-compact">
+                    <label className="fuk-label">Output Aspect</label>
+                    <select
+                      className="fuk-select"
+                      value={formData.outpaint_aspect ?? ''}
+                      onChange={(e) => setFormData({
+                        ...formData,
+                        outpaint_aspect: e.target.value === '' ? null : parseFloat(e.target.value)
+                      })}
+                    >
+                      <option value="">Same as source</option>
+                      {outpaintAspects.map(a => (
+                        <option key={a.ratio} value={a.ratio}>{a.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="fuk-form-group-compact">
+                    <label className="fuk-label" title="How much of the fitted size the source keeps. 1 touches the canvas on its tight axis; lower pulls the camera back and leaves room on every side.">
+                      Source Scale <Info className="fuk-label-info" />
+                    </label>
+                    <input
+                      type="number"
+                      className="fuk-input"
+                      value={formData.outpaint_scale ?? 1}
+                      onChange={(e) => setFormData({
+                        ...formData,
+                        outpaint_scale: e.target.value ? parseFloat(e.target.value) : 1
+                      })}
+                      step={0.05}
+                      min={0.2}
+                      max={1}
+                    />
+                  </div>
+                </div>
+                <div className="fuk-form-pair">
+                  <div className="fuk-form-group-compact">
+                    <label className="fuk-label" title="Where the source sits across the canvas. 0 = left, 0.5 = centred, 1 = right.">
+                      Horizontal <Info className="fuk-label-info" />
+                    </label>
+                    <input
+                      type="number"
+                      className="fuk-input"
+                      value={formData.outpaint_align_x ?? 0.5}
+                      onChange={(e) => setFormData({
+                        ...formData,
+                        outpaint_align_x: e.target.value ? parseFloat(e.target.value) : 0
+                      })}
+                      step={0.1}
+                      min={0}
+                      max={1}
+                    />
+                  </div>
+                  <div className="fuk-form-group-compact">
+                    <label className="fuk-label" title="Where the source sits down the canvas. 0 = top, 0.5 = centred, 1 = bottom.">
+                      Vertical <Info className="fuk-label-info" />
+                    </label>
+                    <input
+                      type="number"
+                      className="fuk-input"
+                      value={formData.outpaint_align_y ?? 0.5}
+                      onChange={(e) => setFormData({
+                        ...formData,
+                        outpaint_align_y: e.target.value ? parseFloat(e.target.value) : 0
+                      })}
+                      step={0.1}
+                      min={0}
+                      max={1}
+                    />
+                  </div>
+                </div>
+                <div className="fuk-form-group-compact">
+                  <label className="fuk-label" title="Pixels over which the original footage fades into the generated area, measured inward from the source edge. 0 = hard edge.">
+                    Edge Feather (px) <Info className="fuk-label-info" />
+                  </label>
+                  <input
+                    type="number"
+                    className="fuk-input"
+                    value={formData.outpaint_feather ?? 16}
+                    onChange={(e) => setFormData({
+                      ...formData,
+                      outpaint_feather: e.target.value ? parseInt(e.target.value) : 0
+                    })}
+                    step={4}
+                    min={0}
+                    max={128}
+                  />
+                </div>
+                {outpaintSourceUnread && (
+                  <p className="fuk-help-text fuk-help-text--warning">
+                    <AlertCircle className="fuk-icon--sm" />
+                    Could not read the source video's size — the canvas cannot be worked out.
+                  </p>
+                )}
+                {outpaintNothingToFill && (
+                  <p className="fuk-help-text fuk-help-text--warning">
+                    <AlertCircle className="fuk-icon--sm" />
+                    Nothing to fill — pick a different output aspect or lower the source scale.
+                  </p>
+                )}
+              </>
+            )}
+
             {/* Animate Pose Video */}
             {requiresAnimatePoseVideo && (
               <div className="fuk-form-group-compact">
@@ -1111,7 +1332,7 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
                   <div className="fuk-form-group-compact fuk-mt-4">
                     <label className="fuk-label">
                       End Image{' '}
-                      {imageInputsOptional
+                      {endImageOptional
                         ? <span className="fuk-label-description">(Optional)</span>
                         : <span className="fuk-label-required">(Required for FLF2V)</span>}
                     </label>
@@ -1586,7 +1807,7 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
         onCancel={cancel}
         canGenerate={!!formData.prompt
           && (imageInputsOptional || !requiresStartImage || !!formData.image_path)
-          && (imageInputsOptional || !requiresEndImage || !!formData.end_image_path)
+          && (endImageOptional || !requiresEndImage || !!formData.end_image_path)
           && (!requiresAnimatePoseVideo || !!formData.animate_pose_video)
           && (!requiresAnimateFaceVideo || !!formData.animate_face_video)
           // A video slot the model marks required really is required — VACE's
@@ -1595,7 +1816,9 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
           // which fails at the request schema rather than anywhere useful.
           // Optional slots (LTX-2 in-context, MiniMax references) are exempt,
           // since videoSlot.required is false for those.
-          && (!requiresControlVideo || !videoSlot.required || !!formData.control_path)}
+          && (!requiresControlVideo || !videoSlot.required || !!formData.control_path)
+          && !outpaintNothingToFill
+          && !outpaintSourceUnread}
         generateLabel="Generate Video"
         generatingLabel={batchProgress ? `Generating ${batchProgress.current}/${batchProgress.total}...` : 'Generating...'}
         batchCount={formData.batchCount}

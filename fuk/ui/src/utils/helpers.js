@@ -113,6 +113,27 @@ export function applyResolutionPreset(sourceW, sourceH, longEdge, multiple = 16)
 }
 
 /**
+ * Native canvas size for outpainting a source clip.
+ *
+ * The canvas is the smallest frame of the target aspect that contains the
+ * source, then grown by 1/scale so the source occupies `scale` of that fit.
+ * A null ratio keeps the source aspect, leaving `scale` as the only thing that
+ * makes room. Unsnapped — feed the result through applyResolutionPreset, the
+ * same as any other source size. The runner redoes the placement from the
+ * final canvas, so this only has to agree with it on aspect.
+ */
+export function outpaintCanvas(sourceW, sourceH, ratio, scale = 1) {
+  const srcRatio = sourceW / sourceH;
+  const r = Number(ratio) > 0 ? Number(ratio) : srcRatio;
+  const s = Math.min(1, Math.max(0.05, Number(scale) || 1));
+  const wider = r >= srcRatio;
+  return {
+    width: (wider ? sourceH * r : sourceW) / s,
+    height: (wider ? sourceH : sourceW / r) / s,
+  };
+}
+
+/**
  * Format file size
  */
 export function formatFileSize(bytes) {

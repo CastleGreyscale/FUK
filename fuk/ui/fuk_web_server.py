@@ -680,6 +680,15 @@ class VideoGenerationRequest(BaseModel):
     end_image_path: Optional[str] = None
     control_path: Optional[str] = None
     input_video_path: Optional[str] = None  # init-video for HD-proxy conform
+    # Outpainting (Wan VACE). control_path is then the clip being extended and
+    # width/height the new canvas; the source is contain-fitted into it, shrunk
+    # by outpaint_scale and positioned by the align values (0 = left/top,
+    # 0.5 = centred, 1 = right/bottom). None = the runner's defaults.
+    outpaint: bool = False
+    outpaint_scale: Optional[float] = None
+    outpaint_align_x: Optional[float] = None
+    outpaint_align_y: Optional[float] = None
+    outpaint_feather: Optional[int] = None  # px blended inside the source edge
     lora: Optional[str] = None
     lora_multiplier: float = 1.0
     loras: Optional[List[Dict[str, Any]]] = None  # Multi-LoRA stack (LTX-2 camera moves, IC-LoRAs)
@@ -1455,6 +1464,11 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
             end_image_path=end_image_path_abs,
             control_path=control_path_abs,
             input_video_path=input_video_path_abs,
+            outpaint=request.outpaint,
+            outpaint_scale=request.outpaint_scale,
+            outpaint_align_x=request.outpaint_align_x,
+            outpaint_align_y=request.outpaint_align_y,
+            outpaint_feather=request.outpaint_feather,
             lora=request.lora,
             lora_multiplier=request.lora_multiplier,
             loras=request.loras,
@@ -1554,6 +1568,9 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
             start_image=request.image_path,
             end_image=request.end_image_path,
             control_path=request.control_path,
+            # Where the source landed on the canvas, from the runner: the rect
+            # is snapped to the VAE grid, so it is not derivable from the request.
+            outpaint=eff.get("outpaint"),
             sigma_shift=eff_shift,
             audio_flow_shift=eff.get("audio_flow_shift"),
             control_scale=eff.get("control_scale"),

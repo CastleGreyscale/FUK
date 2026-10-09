@@ -17,6 +17,12 @@ omit `image_path` and it denoises from noise — but it is not registered as a
 FUK model, because in a VFX pipeline the first frame is nearly always something
 you already have.
 
+A last frame can be given as well (`end_image_path`), and the two are not held
+equally. The first frame replaces the opening latent and is masked out of the
+denoise, so it comes back as supplied; the last is appended as a reference
+token stamped with the final frame's timestamp, which steers the clip toward it
+without pinning the pixels. `input_images_strength` reaches only the first.
+
 Function variants are LoRAs on one shared 42GB base rather than separate
 checkpoints. LTX-2's twelve (seven camera moves, five in-context controls) were
 19B and do not load here; upstream has reissued exactly one for 2.5 so far, the
@@ -69,8 +75,9 @@ class LTX2PipelineRunner(PipelineRunner):
         guidance_scale: Optional[float] = None,
         denoising_strength: Optional[float] = None,
         negative_prompt: Optional[str] = None,
-        # Image-to-video: the first frame
+        # Image-to-video: the first frame, and optionally the last
         image_path: Optional[Path] = None,
+        end_image_path: Optional[Path] = None,
         input_images_strength: float = 1.0,
         # In-context control video, for the IC-LoRAs
         control_path: Optional[Path] = None,
@@ -152,6 +159,7 @@ class LTX2PipelineRunner(PipelineRunner):
             "seed": seed,
             "mode": "two-stage" if two_stage else "distilled" if distilled else "one-stage",
             "first_frame": str(image_path) if image_path else None,
+            "last_frame": str(end_image_path) if end_image_path else None,
             "in_context_video": str(control_path) if control_path else None,
             "lora": f"{lora} (α={lora_multiplier})" if lora else None,
             "loras": [f"{l.get('name','?')} (α={l.get('alpha', 1.0)})" for l in (loras or [])],
@@ -179,14 +187,13 @@ class LTX2PipelineRunner(PipelineRunner):
         if "negative_prompt" in supports and negative_prompt:
             pipe_kwargs["negative_prompt"] = negative_prompt
 
-        # First frame (image-to-video)
-        if image_path:
-            first = self.load_image(image_path, width=width, height=height)
-            if first is not None:
-                pipe_kwargs["input_images"] = [first]
-                pipe_kwargs["input_images_indexes"] = [0]
-                pipe_kwargs["input_images_strength"] = input_images_strength
-                _log(self.log_prefix, f"  First frame → input_images ({width}x{height})")
+        # First and last frame (image-to-video)
+        frames, indexes = self._build_input_images(
+            image_path, end_image_path, width, height, num_frames)
+        if frames:
+            pipe_kwargs["input_images"] = frames
+            pipe_kwargs["input_images_indexes"] = indexes
+            pipe_kwargs["input_images_strength"] = input_images_strength
 
         # In-context control video, for the IC-LoRAs. The reference is encoded at
         # a reduced resolution: the LoRA name carries the factor it was trained
@@ -342,6 +349,27 @@ class LTX2PipelineRunner(PipelineRunner):
         _log(self.log_prefix,
              f"  Stage-2 LoRA parked in RAM ({time.perf_counter() - _t0:.1f}s) — "
              f"keeps the stage-1→2 handover off the GPU")
+
+    def _build_input_images(self, image_path, end_image_path, width, height, num_frames):
+        """Frame conditioning: first frame at index 0, last at num_frames - 1.
+
+        Either may be omitted — a first frame alone is ordinary image-to-video,
+        a last frame alone drives toward a target, and both together interpolate.
+        The last index is spelled out because the pipeline does not take
+        negative ones, and it has to be the snapped frame count.
+        """
+        frames, indexes = [], []
+        for path, index in ((image_path, 0), (end_image_path, num_frames - 1)):
+            if not path:
+                continue
+            img = self.load_image(path, width=width, height=height)
+            if img is not None:
+                frames.append(img)
+                indexes.append(index)
+        if frames:
+            _log(self.log_prefix,
+                 f"  Input images → frame indexes {indexes} at {width}x{height}")
+        return frames, indexes
 
     def _load_control_video(self, path, width, height, num_frames, downsample_factor):
         """Load an in-context driving video for the IC-LoRAs.

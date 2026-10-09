@@ -3,7 +3,7 @@ Wan Pipeline Runner for FUK
 
 Handles all Wan-family video generation:
   - wan_i2v_a14b (dual DiT image-to-video)
-  - wan_vace_a14b (VACE control video + reference)
+  - wan_vace_a14b (VACE control video + reference, or outpainting)
   - (future Wan variants go here)
 
 Wan-specific features: sigma_shift, sliding window,
@@ -20,6 +20,7 @@ from typing import Optional, Dict, Any, List, Union
 
 from pipeline_base import PipelineRunner, _log, _lora_label
 from perf_monitor import record_timing
+import outpaint as _outpaint
 
 
 def attention_backend() -> str:
@@ -122,6 +123,15 @@ class WanPipelineRunner(PipelineRunner):
         # a level set by `denoising_strength`, so generation denoises *from*
         # the proxy rather than from pure noise. Pass alongside control_path.
         input_video_path: Optional[Path] = None,
+        # Outpainting (VACE). `control_path` becomes the clip being extended
+        # rather than a structure guide, and width/height are the new canvas:
+        # the source is contain-fitted into it, shrunk by `outpaint_scale` and
+        # positioned by the align values (0 = left/top, 1 = right/bottom).
+        outpaint: bool = False,
+        outpaint_scale: Optional[float] = None,
+        outpaint_align_x: Optional[float] = None,
+        outpaint_align_y: Optional[float] = None,
+        outpaint_feather: Optional[int] = None,
         # LoRA
         lora: Optional[str] = None,
         lora_multiplier: float = 1.0,
@@ -193,6 +203,26 @@ class WanPipelineRunner(PipelineRunner):
         if tea_cache_thresh is not None and not tea_cache_model_id:
             tea_cache_model_id = self._tea_cache_model_id(model_type, height)
 
+        # --- Outpaint canvas ---
+        # Built before the header is logged because a short source clip
+        # shortens the job, and the log should show the frame count that runs.
+        outpaint_plan = None
+        if outpaint:
+            if "vace_video_mask" not in supports:
+                raise ValueError(
+                    f"{model_type} cannot outpaint: its models.json entry does not "
+                    f"list 'vace_video_mask' under supports.")
+            if not control_path:
+                raise ValueError("Outpainting needs a source video in control_path.")
+            outpaint_plan = self._plan_outpaint(
+                control_path, width, height, num_frames, entry,
+                scale=1.0 if outpaint_scale is None else outpaint_scale,
+                align_x=0.5 if outpaint_align_x is None else outpaint_align_x,
+                align_y=0.5 if outpaint_align_y is None else outpaint_align_y,
+                feather=16 if outpaint_feather is None else outpaint_feather,
+            )
+            num_frames = len(outpaint_plan["canvases"])
+
         # Apply before attention_backend() reads the flags, so the logged
         # backend is the one this run will actually use.
         apply_attention_override()
@@ -218,6 +248,11 @@ class WanPipelineRunner(PipelineRunner):
         }
         if tea_cache_thresh is not None:
             log_params["tea_cache"] = f"l1_thresh={tea_cache_thresh} (coeffs={tea_cache_model_id})"
+        if outpaint_plan:
+            x0, y0, x1, y1 = outpaint_plan["rect"]
+            log_params["outpaint"] = (
+                f"source {outpaint_plan['source_size'][0]}x{outpaint_plan['source_size'][1]} "
+                f"→ {x1 - x0}x{y1 - y0} at ({x0},{y0}), feather {outpaint_plan['feather']}px")
         # Add animate inputs if present
         if animate_pose_video:
             log_params["animate_pose_video"] = animate_pose_video
@@ -273,7 +308,12 @@ class WanPipelineRunner(PipelineRunner):
             semantic_inputs["reference_image"] = image_path
         if end_image_path:
             semantic_inputs["end_image"] = end_image_path
-        if control_path:
+        # When outpainting, the VACE video slot carries the padded source and
+        # its mask instead of a structure guide — the same clip cannot be both.
+        if outpaint_plan:
+            pipe_kwargs["vace_video"] = outpaint_plan["canvases"]
+            pipe_kwargs["vace_video_mask"] = outpaint_plan["masks"]
+        elif control_path:
             semantic_inputs["control_input"] = control_path
         # Animate video inputs
         if animate_pose_video:
@@ -321,6 +361,11 @@ class WanPipelineRunner(PipelineRunner):
             record_timing(f"denoise_per_step:{model_type}:{width}x{height}x{num_frames}",
                           _pipe_s / max(1, num_steps))
 
+            if outpaint_plan:
+                video = _outpaint.composite_source(
+                    video, outpaint_plan["canvases"], outpaint_plan["rect"],
+                    outpaint_plan["feather"])
+
             if progress_callback:
                 progress_callback("saving", 0, 1)
 
@@ -351,6 +396,10 @@ class WanPipelineRunner(PipelineRunner):
                     "attention_backend": attention_backend(),
                     "denoise_seconds": round(_pipe_s, 1),
                     "sec_per_step": round(_pipe_s / max(1, num_steps), 2),
+                    "outpaint": ({"rect": list(outpaint_plan["rect"]),
+                                  "source_size": list(outpaint_plan["source_size"]),
+                                  "feather": outpaint_plan["feather"]}
+                                 if outpaint_plan else None),
                 },
             )
         except Exception as e:
@@ -364,6 +413,49 @@ class WanPipelineRunner(PipelineRunner):
             # request completes — a second gc/empty_cache here just adds stalls.
             if cleanup_hook:
                 cleanup_hook()
+
+    # ------------------------------------------------------------------
+    # Outpainting
+    # ------------------------------------------------------------------
+
+    def _plan_outpaint(self, source, width, height, num_frames, entry,
+                       scale, align_x, align_y, feather) -> Dict[str, Any]:
+        """Load the source clip and lay it out on the output canvas.
+
+        The source is read at its native size — `_load_video_data` with a
+        target size would centre-crop it to the canvas aspect, which is exactly
+        the footage outpainting exists to keep.
+
+        A source shorter than the request shortens the job to the longest
+        length the frame lattice allows; there is no footage to put back on
+        the frames past its end, so they would be pure invention.
+        """
+        vd = self._load_video_data(source, None, None)
+        if vd is None or len(vd) == 0:
+            raise ValueError(f"Could not load outpaint source: {source}")
+
+        available = len(vd)
+        if available < num_frames:
+            c = self.get_constraints(entry)
+            factor = int(c.get("frame_factor", 4))
+            remainder = int(c.get("frame_remainder", 1))
+            min_frames = int(c.get("min_frames", factor + remainder))
+            fitted = ((available - remainder) // factor) * factor + remainder
+            if fitted < min_frames:
+                raise ValueError(
+                    f"Outpaint source has {available} frames; this model needs at "
+                    f"least {min_frames}.")
+            _log(self.log_prefix,
+                 f"  Outpaint source has {available} frames — running {fitted} "
+                 f"instead of {num_frames}")
+            num_frames = fitted
+
+        frames = [vd[i] for i in range(num_frames)]
+        src_w, src_h = frames[0].size
+        rect = _outpaint.fit_rect(src_w, src_h, width, height, scale, align_x, align_y)
+        canvases, masks = _outpaint.build_canvas(frames, width, height, rect)
+        return {"canvases": canvases, "masks": masks, "rect": rect,
+                "source_size": (src_w, src_h), "feather": int(feather)}
 
     # ------------------------------------------------------------------
     # TeaCache

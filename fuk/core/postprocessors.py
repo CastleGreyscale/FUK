@@ -151,11 +151,14 @@ class RealESRGANUpscaler:
             
         except ImportError as e:
             print(f"[Upscaler] Could not load Real-ESRGAN package: {e}")
-            print(f"[Upscaler] This is usually a torchvision compatibility issue.")
-            print(f"[Upscaler] Solutions:")
-            print(f"[Upscaler]   1. Install NCNN binary: realesrgan-ncnn-vulkan")
-            print(f"[Upscaler]   2. Fix packages: pip install basicsr==1.4.2 realesrgan==0.3.0")
-            print(f"[Upscaler]   3. Use 'lanczos' model (no AI, but works)")
+            # basicsr 1.4.2 imports torchvision.transforms.functional_tensor,
+            # which torchvision removed in 0.17 — so on a current torch this
+            # path cannot load, and reinstalling those packages does not help.
+            # It is only reached when the NCNN binary is missing or has failed;
+            # the NCNN error printed just above is the one to act on.
+            print(f"[Upscaler] The torch fallback needs basicsr + realesrgan, which do not")
+            print(f"[Upscaler] import against current torchvision. See the NCNN error above,")
+            print(f"[Upscaler] or use the 'lanczos' model (no AI, but works).")
             self.torch_model = None
         except Exception as e:
             print(f"[Upscaler] Error loading torch model: {e}")
@@ -195,7 +198,10 @@ class RealESRGANUpscaler:
             "-i", str(input_path),
             "-o", str(output_path),
             "-n", model_map.get(scale, "realesrgan-x4plus"),
-            "-s", str(min(scale, 4)),  # NCNN only supports up to 4x
+            # Always 4: x4plus is a fixed 4x network, and asking the binary for
+            # any other factor makes it stitch its tiles at the wrong pitch —
+            # exit code 0 and a scrambled picture. 2x is a 4x run halved below.
+            "-s", "4",
         ]
         
         # Add model path if using vendors directory
@@ -217,15 +223,27 @@ class RealESRGANUpscaler:
                 progress_callback(0.6, "Running second pass for 8x")
             
             temp_path = output_path.with_suffix('.temp.png')
-            shutil.move(output_path, temp_path)
-            
-            cmd[2] = str(temp_path)  # Input is now the 4x result
+            # Halve the 4x result before the second pass. Feeding it back
+            # whole is 4x of 4x — a 16x job, which on a 2K still means a
+            # 32768-wide output the binary cannot produce. 4x -> 2x -> 8x
+            # lands on the requested size with a second pass a quarter as big.
+            with Image.open(output_path) as img:
+                half = img.resize((img.width // 2, img.height // 2), Image.Resampling.LANCZOS)
+            half.save(temp_path)
+            output_path.unlink()
+
+            cmd[2] = str(temp_path)  # Input is now the 2x intermediate
             result = subprocess.run(cmd, capture_output=True, text=True)
             temp_path.unlink()
             
             if result.returncode != 0:
                 raise RuntimeError(f"NCNN upscale (2nd pass) failed: {result.stderr}")
         
+        if scale == 2:
+            with Image.open(output_path) as img:
+                half = img.resize((img.width // 2, img.height // 2), Image.Resampling.LANCZOS)
+            half.save(output_path)
+
         if progress_callback:
             progress_callback(1.0, "Complete")
         
