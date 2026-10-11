@@ -27,10 +27,28 @@ deliberately drops rather than forwarding into a TypeError:
     img2img path and no Detail-Bias noise scaling to patch.
   - exponential_shift_mu — the scheduler derives its shift from the latent
     sequence length and exposes no override.
-  - EliGen entity masks, in-context control, blockwise ControlNets — none of
-    them exist for this architecture yet. That is the one real gap versus
-    qwen_image_control_union, and why 2.1 supplements the Qwen entries rather
-    than replacing them.
+  - EliGen entity masks and in-context control — neither exists for this
+    architecture.
+
+CONTROL: structural control and inpainting come from a separate registry entry,
+qwen_image_21_control, which loads the PAI Fun ControlNet-Union weights as a
+fourth component (DiffSynth 2.1.9+). It is one branch doing both jobs — its
+input is control latents | mask | masked-image latents — so on that entry:
+
+  - the tab's control image is the control map (canny / depth / grayscale / hed /
+    lineart / mlsd / pose / scribble), NOT an edit reference. One map only; the
+    pipeline takes a single ControlNetInput.
+  - the tab's inpaint image + mask repaint the white part of the mask. This is
+    ControlNet inpainting, not the latent blend qwen_image and FLUX.2 do: there
+    is no input_image and no denoising strength, and without a mask the picture
+    is not used at all.
+  - both together work — the repainted region follows the control map.
+  - control_scale multiplies every control hint. 1.0 is what the adapter was
+    trained and demoed at and is the strongest; lower loosens it.
+
+The control branch recomputes its conditioning each step, so the pipeline turns
+the prefix KV cache off whenever a ControlNetInput is present. A controlled run
+is therefore slower per step than a plain one for two reasons, not one.
 
 CFG NOTE: cfg_scale defaults to 1.0 and the Image tab's guidance_scale is
 ignored on purpose. Upstream's inference examples, DiffSynth's default and every
@@ -87,8 +105,18 @@ class QwenImage21PipelineRunner(PipelineRunner):
         steps: Optional[int] = None,
         cfg_scale: Optional[float] = None,
         negative_prompt: Optional[str] = None,
-        # Reference / edit images (the tab's control image slots)
+        # Reference / edit images (the tab's control image slots). On a
+        # ControlNet entry the first one is the control map instead.
         control_image: Optional[Union[Path, List[Path]]] = None,
+        # ControlNet-Union: hint strength, and the inpaint picture + mask
+        control_scale: Optional[float] = None,
+        input_image: Optional[Path] = None,
+        mask_path: Optional[Path] = None,
+        # Feather (px) for the paste-back below. The ControlNet itself takes a
+        # hard mask, so this shapes only the composite.
+        inpaint_feather: Optional[int] = None,
+        # Paste the original pixels back outside the mask after generating.
+        inpaint_preserve: bool = True,
         # Per-layer KV cache under the block-causal condition. On by default
         # upstream; exposed only so it can be turned off while debugging.
         use_kv_cache: Optional[bool] = None,
@@ -152,6 +180,19 @@ class QwenImage21PipelineRunner(PipelineRunner):
         tile_size = tile_size or defaults.get("tile_size", 256)
         tile_stride = tile_stride or defaults.get("tile_stride", 192)
 
+        has_controlnet = "controlnet" in supports
+        c_scale = float(control_scale if control_scale is not None
+                        else defaults.get("control_scale", 1.0))
+        # The ControlNet inpaints only under a mask — a picture alone would be
+        # zero-padded away upstream, so it must not steer the output size either.
+        inpainting = (has_controlnet and "inpaint" in supports
+                      and bool(input_image) and bool(mask_path))
+        if has_controlnet and input_image and not mask_path:
+            _log(self.log_prefix,
+                 "Inpaint image given without a mask — Qwen-Image-2.1 has no "
+                 "image-to-image path, so the picture is ignored. Paint a mask "
+                 "to repaint part of it.", "warning")
+
         # --- Report the parameters this model has no use for ---------------
         # The Image tab posts one payload shape for every image model, so these
         # arrive on every call. Saying so beats both a silent drop (the result
@@ -170,7 +211,10 @@ class QwenImage21PipelineRunner(PipelineRunner):
         # an edit comes back at the source's size and composites cleanly. The
         # pipeline resizes the references themselves — each to the target AREA
         # at its own aspect ratio — so only the output size is set here.
-        source_path = self._resolve_source_image(control_image)
+        # When inpainting, the picture being repainted wins: the mask was painted
+        # on it and the paste-back needs the two to line up.
+        source_path = self._resolve_source_image(
+            input_image if inpainting else control_image)
         if source_path:
             try:
                 with Image.open(str(source_path)) as src:
@@ -196,6 +240,14 @@ class QwenImage21PipelineRunner(PipelineRunner):
             "loras": [_lora_label(spec) for spec in (loras or [])],
             "ignored_params": ", ".join(f"{k}={v}" for k, v in _ignored.items()) or None,
         }
+        if has_controlnet:
+            control_src = self._resolve_source_image(control_image)
+            log_params["control_image"] = str(control_src) if control_src else None
+            log_params["inpaint"] = (f"{input_image} under {mask_path}"
+                                     if inpainting else None)
+            if control_src or inpainting:
+                log_params["control_scale"] = c_scale
+                log_params["kv_cache"] = "off (ControlNet active)"
         self.log_generation_header("QWEN-IMAGE-2.1 GENERATION", model_type, entry, log_params)
         if _ignored:
             _log(self.log_prefix,
@@ -224,11 +276,28 @@ class QwenImage21PipelineRunner(PipelineRunner):
             pipe_kwargs["negative_prompt"] = negative_prompt
 
         # Reference images, via the registry's parameter_map like every other
-        # family. _map_single_input below is what keeps their alpha.
+        # family. _map_single_input below is what keeps their alpha. A
+        # ControlNet entry maps no edit_targets, so there the same slot falls
+        # through to the control branch instead.
         semantic_inputs = {}
         if control_image:
             semantic_inputs["edit_targets"] = control_image
         pipe_kwargs.update(self.map_inputs(model_type, semantic_inputs, width, height))
+
+        inpaint_base = inpaint_mask = None
+        if has_controlnet:
+            controlnet_input, inpaint_base, inpaint_mask = self._build_controlnet_input(
+                control_image, input_image if inpainting else None, mask_path,
+                width, height, c_scale)
+            if controlnet_input is not None:
+                pipe_kwargs["controlnet_inputs"] = [controlnet_input]
+            else:
+                # Loaded but idle: this still generates, as plain text-to-image
+                # carrying 7.5GB of ControlNet for nothing.
+                _log(self.log_prefix,
+                     "No control image or inpaint mask — the ControlNet is idle "
+                     "and this is a plain text-to-image run. qwen_image_21 does "
+                     "the same without loading it.", "warning")
 
         pipe_kwargs.update(pipe_defaults)
 
@@ -256,6 +325,13 @@ class QwenImage21PipelineRunner(PipelineRunner):
             record_timing(f"denoise_per_step:{model_type}:{width}x{height}",
                           _pipe_s / max(1, num_steps))
 
+            # The ControlNet sees the kept region only as VAE latents, so it
+            # comes back close but not identical. The paste-back flattens to
+            # RGB, which costs nothing here: the kept pixels are opaque.
+            if inpaint_mask is not None and inpaint_preserve:
+                image = self.composite_inpaint(
+                    inpaint_base, image, inpaint_mask, feather=inpaint_feather or 0)
+
             # The pipeline returns RGBA and output_path is a .png, so the alpha
             # survives the save untouched. Report whether the model actually
             # produced transparency — it is prompt-driven, so a fully opaque
@@ -274,8 +350,11 @@ class QwenImage21PipelineRunner(PipelineRunner):
                 params={
                     "prompt": prompt, "seed": seed, "steps": num_steps,
                     "size": f"{width}x{height}", "cfg_scale": effective_cfg,
-                    "use_kv_cache": bool(use_kv_cache),
+                    "use_kv_cache": (bool(use_kv_cache)
+                                     and "controlnet_inputs" not in pipe_kwargs),
                     "edit_images": len(pipe_kwargs.get("edit_image") or []),
+                    **({"control_scale": c_scale}
+                       if "controlnet_inputs" in pipe_kwargs else {}),
                 },
             )
         except GenerationCancelled:
@@ -347,6 +426,47 @@ class QwenImage21PipelineRunner(PipelineRunner):
                  "warning")
         _log(self.log_prefix, f"  Mapped {semantic_name} → edit_image: {len(images)} images")
         return {"edit_image": images}
+
+    def _build_controlnet_input(self, control_image, input_image, mask_path,
+                                width, height, scale):
+        """ControlNet-Union conditioning: a control map, an inpaint pair, or both.
+
+        Returns (ControlNetInput, inpaint_base, inpaint_mask); the first is None
+        when there is nothing to condition on, the other two are None unless
+        inpainting. Everything is loaded at the generation size — the pipeline
+        resizes again itself, but the paste-back needs base and mask to match
+        the output. Mask convention is FUK's and upstream's alike: white is
+        repainted, black is kept.
+        """
+        from diffsynth.diffusion.base_pipeline import ControlNetInput
+
+        paths = control_image if isinstance(control_image, list) else [control_image]
+        paths = [p for p in paths if p]
+        control = self.load_image(paths[0], width=width, height=height) if paths else None
+        if len(paths) > 1:
+            _log(self.log_prefix,
+                 f"  {len(paths)} control images — this ControlNet takes one map; "
+                 f"using {Path(str(paths[0])).name} and ignoring the rest", "warning")
+
+        base = mask = None
+        if input_image and mask_path:
+            base = self.load_image(input_image, width=width, height=height)
+            mask = self.load_image(mask_path, width=width, height=height) if base else None
+            if mask is None:
+                _log(self.log_prefix,
+                     f"Inpaint image or mask could not be loaded "
+                     f"({input_image}, {mask_path}) — inpainting skipped", "warning")
+                base = None
+
+        if control is None and mask is None:
+            return None, None, None
+        modes = [name for name, img in (("control map", control), ("inpaint", mask))
+                 if img is not None]
+        _log(self.log_prefix,
+             f"  ControlNet → {' + '.join(modes)} at {width}x{height}, scale {scale}")
+        return (ControlNetInput(image=control, inpaint_image=base,
+                                inpaint_mask=mask, scale=scale),
+                base, mask)
 
     @classmethod
     def _snap(cls, value: int) -> int:

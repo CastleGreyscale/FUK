@@ -121,7 +121,7 @@ echo "[4/7] Cloning vendor dependencies..."
 # upstream HEAD happened to be that day — that is how this tree ended up running
 # a DiffSynth seven months newer than the one its patches were written against.
 # Bump these deliberately, and re-run the regression matrix when you do.
-DIFFSYNTH_SHA=c458cb42ab1ee838bff85c6546e14bb01c3571e9   # 2.1.7, 2026-09-14
+DIFFSYNTH_SHA=acf2ad29c65f436633f57beec1caaa1296760331   # 2.1.9, 2026-10-09
 DEPTH_ANYTHING_3_SHA=2c21ea849ceec7b469a3e62ea0c0e270afc3281a
 SAM2_SHA=2b90b9f5ceec907a1c18123530e92e794ad901a4
 DSINE_SHA=ef0c2afa32b4dd19cb8ca4567c652802cd92591c

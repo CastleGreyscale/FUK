@@ -9,7 +9,12 @@ they are the only record of our changes, so they must stay version-controlled.
 
 ## Active patches — DiffSynth-Studio
 
-Base commit: `c458cb42ab1ee838bff85c6546e14bb01c3571e9` (version 2.1.7, 2026-09-14).
+Base commit: `acf2ad29c65f436633f57beec1caaa1296760331` (version 2.1.9, 2026-10-09).
+
+Moved from 2.1.7 for two things FUK runs that 2.1.7 does not have: Qwen-Image-2.1 itself
+(2.1.8) and the control branch `qwen_image_21_control` loads as a fourth component (2.1.9,
+PR #1730). None of the three patched files changed between the two, so all three patches
+apply unmodified.
 
 ### `0001-wan-vace-seq-len-clamp.patch`
 
@@ -83,6 +88,35 @@ Regression signal when upgrading: run any LTX-2.5 generation on the `low` preset
 text encoder resident. If upstream fixes this themselves — by moving the block's own
 tensors in the wrapper, by leaving `layer_scalar` a buffer, or by dropping
 `Gemma4UnifiedTextDecoderLayer` from the map — drop this patch.
+
+### `0004-ltx2-ref-list-aliasing.patch`
+
+`diffsynth/pipelines/ltx2_audio_video.py` — `model_fn_ltx2`, added when every LTX-2.5
+generation that combined a control video with a last frame died with a CUDA OOM of
+1-2GB partway into the denoise, at sizes that run fine without the control video.
+
+Upstream builds the reference-token list with
+`total_ref_latents = ref_frames_latents if ref_frames_latents is not None else []` and
+then `total_ref_latents += [in_context_video_latents]`. When `ref_frames_latents` is a
+real list that is an alias, not a copy, and `+=` on a list extends in place — so the
+in-context latents are appended to the list living in `inputs_shared`, and it is never
+reset. Every forward pass (two per step with CFG on) therefore adds one more copy of the
+control video to the sequence. The positions list has the same bug.
+
+It needs both inputs to bite, which is why it reads as "openpose is broken" rather than
+"LTX is broken": `ref_frames_latents` is only a list when a keyframe other than index 0 is
+given (FUK's last frame), and nothing is appended unless `in_context_videos` is set. A
+control video alone starts from a fresh `[]` each call, and a last frame alone appends
+nothing.
+
+Measured on CPU with a stub DiT at 832x480x81 (control at half resolution): the video
+sequence should be 5824 tokens every call and instead went 5824, 6968, 8112, 9256… —
++1144 per call, about 12x the intended length by the end of a 30-step CFG run. After the
+patch it holds at 5824.
+
+The patch copies both lists before extending them. Regression signal when upgrading: an
+LTX-2.5 job with a first frame, a last frame and a control video; watch that per-step time
+stays flat instead of climbing. Drop the patch if upstream stops mutating its arguments.
 
 ## Dropped patches
 

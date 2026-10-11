@@ -658,6 +658,9 @@ class ImageGenerationRequest(BaseModel):
     embedded_guidance: Optional[float] = None  # FLUX.2 embedded guidance (null = use guidance_scale)
     eligen_source: Optional[str] = None  # Path to EliGen masks (directory, .psd, or .ora)
     eligen_alpha: Optional[float] = None  # Model LoRA strength (EliGen or control union)
+    # ControlNet hint strength, for models that list `controlnet`. None = the
+    # family default in defaults.json.
+    control_scale: Optional[float] = None
     # Inpainting, for models that list `inpaint`. The image is the picture being
     # repainted (it also sets the output size); the mask is white where the
     # model should repaint and black where the picture is kept.
@@ -1271,6 +1274,7 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
             embedded_guidance=request.embedded_guidance,
             eligen_source=eligen_source_abs,
             eligen_alpha=request.eligen_alpha,
+            control_scale=request.control_scale,
             input_image=inpaint_image,
             mask_path=inpaint_mask,
             inpaint_feather=request.inpaint_feather,
@@ -1324,6 +1328,7 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
             ),
             eligen_source=str(eligen_source_abs) if eligen_source_abs else None,
             eligen_alpha=request.eligen_alpha,
+            control_scale=request.control_scale,
             inpaint_image=str(inpaint_image) if inpaint_image else None,
             inpaint_mask=str(inpaint_mask) if inpaint_mask else None,
             inpaint_image_url=inpaint_image_url,

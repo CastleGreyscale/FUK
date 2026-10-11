@@ -76,6 +76,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
     control_image_paths: imageDefaults.control_image_paths ?? [],
     eligen_source: imageDefaults.eligen_source ?? '',
     eligen_alpha: imageDefaults.eligen_alpha ?? 1.0,
+    control_scale: imageDefaults.control_scale ?? 1.0,
     inpaint_image_path: imageDefaults.inpaint_image_path ?? '',
     inpaint_mask_path: imageDefaults.inpaint_mask_path ?? '',
     inpaint_feather: imageDefaults.inpaint_feather ?? 16,
@@ -347,6 +348,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
       exponential_shift_mu: formData.exponential_shift_mu,
       eligen_source: formData.eligen_source || null,
       eligen_alpha: (formData.eligen_source || modelSupports(formData.model, 'context_image')) ? (formData.eligen_alpha ?? 1.0) : null,
+      control_scale: modelSupports(formData.model, 'controlnet') ? (formData.control_scale ?? 1.0) : null,
       // A mask means nothing without the picture it was painted on.
       inpaint_image_path: canInpaint ? (formData.inpaint_image_path || null) : null,
       inpaint_mask_path: canInpaint && formData.inpaint_image_path ? (formData.inpaint_mask_path || null) : null,
@@ -477,6 +479,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
       if (meta.infer_steps != null)       updates.steps                 = meta.infer_steps;
       if (meta.denoising_strength != null) updates.detail_bias          = meta.denoising_strength;
       if (meta.exponential_shift_mu != null) updates.exponential_shift_mu = meta.exponential_shift_mu;
+      if (meta.control_scale != null)     updates.control_scale         = meta.control_scale;
       // Prefer full loras array; fall back to legacy single lora field
       if (meta.loras?.length > 0) {
         updates.loras = meta.loras;
@@ -544,6 +547,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
   // --- Source image dimension check (for non-text-to-image modes) ---
   const isTextToImage = !modelSupports(formData.model, 'edit_image') &&
     !modelSupports(formData.model, 'context_image') &&
+    !modelSupports(formData.model, 'controlnet') &&
     !modelSupports(formData.model, 'eligen');
 
   const [sourceImageDims, setSourceImageDims] = useState(null);
@@ -701,7 +705,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
       <div className="fuk-settings-area">
         <div className="fuk-settings-grid">
           {/* Preprocessed Image Card */}
-          {project?.projectState?.lastState?.lastPreprocessedImage && modelSupports(formData.model, 'edit_image') && (
+          {project?.projectState?.lastState?.lastPreprocessedImage && (modelSupports(formData.model, 'edit_image') || modelSupports(formData.model, 'controlnet')) && (
             <div className="fuk-card">
               <h3 className="fuk-card-title fuk-card-title--highlight fuk-mb-3">
                 Last Preprocessed Image
@@ -750,8 +754,8 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
           <div className="fuk-card">
             <h3 className="fuk-card-title fuk-mb-3">Image Tools</h3>
             
-            {/* Control Images — for edit and control-union models */}
-            {(modelSupports(formData.model, 'edit_image') || modelSupports(formData.model, 'context_image')) ? (
+            {/* Control Images — for edit, control-union and ControlNet models */}
+            {(modelSupports(formData.model, 'edit_image') || modelSupports(formData.model, 'context_image') || modelSupports(formData.model, 'controlnet')) ? (
               <>
                 <div className="fuk-form-group-compact">
                   <label className="fuk-label">
@@ -792,8 +796,43 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                   </div>
                 )}
 
+                {modelSupports(formData.model, 'controlnet') && (
+                  <div className="fuk-form-group-compact fuk-mt-4">
+                    <label className="fuk-label">Control Strength</label>
+                    <div className="fuk-input-inline">
+                      <input
+                        type="range"
+                        className="fuk-slider fuk-input--flex-2"
+                        value={formData.control_scale ?? 1.0}
+                        onChange={(e) => setFormData({...formData, control_scale: parseFloat(e.target.value)})}
+                        min={0}
+                        max={1.5}
+                        step={0.05}
+                      />
+                      <input
+                        type="number"
+                        className="fuk-input fuk-input--w-80"
+                        value={formData.control_scale ?? 1.0}
+                        onChange={(e) => setFormData({...formData, control_scale: parseFloat(e.target.value)})}
+                        step={0.05}
+                        min={0}
+                        max={1.5}
+                      />
+                    </div>
+                  </div>
+                )}
+
                 <p className="fuk-help-text">
-                  Upload one or more images to guide the generation.
+                  {modelSupports(formData.model, 'controlnet') ? (
+                    <>One control map — canny, depth, grayscale, HED, lineart,
+                    MLSD, pose or scribble; the first image is used. Control
+                    Strength 1.0 is the tightest the ControlNet was trained for;
+                    lower it to loosen the structure. Add an inpaint image and
+                    mask below to repaint part of a picture, with or without a
+                    control map.</>
+                  ) : (
+                    <>Upload one or more images to guide the generation.</>
+                  )}
                   {modelSupports(formData.model, 'context_image') && (
                     <> Control on this model is itself a LoRA, and any character
                     LoRAs you add stack onto the same weights — so a strong one can

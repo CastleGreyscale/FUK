@@ -1,0 +1,20 @@
+diff --git a/diffsynth/pipelines/ltx2_audio_video.py b/diffsynth/pipelines/ltx2_audio_video.py
+index 61f24dc..3fec259 100644
+--- a/diffsynth/pipelines/ltx2_audio_video.py
++++ b/diffsynth/pipelines/ltx2_audio_video.py
+@@ -760,8 +760,13 @@ def model_fn_ltx2(
+         video_timesteps = denoise_mask_video * video_timesteps
+ 
+     # Reference conditioning by appending the reference video or frame latents
+-    total_ref_latents = ref_frames_latents if ref_frames_latents is not None else []
+-    total_ref_positions = ref_frames_positions if ref_frames_positions is not None else []
++    # FUK patch: copy before extending. Upstream aliases the caller's lists and
++    # then `+=`s the in-context latents onto them, so with a non-first keyframe
++    # present (ref_frames_latents is a real list in inputs_shared) every forward
++    # pass appended another copy of the control video and the sequence grew
++    # until the card ran out.
++    total_ref_latents = list(ref_frames_latents) if ref_frames_latents is not None else []
++    total_ref_positions = list(ref_frames_positions) if ref_frames_positions is not None else []
+     total_ref_latents += [in_context_video_latents] if in_context_video_latents is not None else []
+     total_ref_positions += [in_context_video_positions] if in_context_video_positions is not None else []
+     if len(total_ref_latents) > 0:
