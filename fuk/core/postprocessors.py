@@ -29,6 +29,7 @@ import time
 import json
 from core.film_interpolator import FILMInterpolator
 from core import seedvr2_backend
+from core import ltx_hdr_backend
 
 # ============================================================================
 # Upscaler Models
@@ -1059,6 +1060,7 @@ class PostProcessorManager:
         permanently unavailable.
         """
         seedvr2 = seedvr2_backend.availability()
+        hdr = ltx_hdr_backend.availability()
 
         return {
             "upscaling": {
@@ -1085,7 +1087,14 @@ class PostProcessorManager:
                 "models": ["film"],
                 "target_fps": [24, 30, 60],
                 "precision": "float32" if self.interpolator.precision == torch.float32 else "float16",
-            }
+            },
+            "hdr_conversion": {
+                "available": hdr["available"],
+                "backend": "ltx_hdr",
+                "exr_colorspaces": list(ltx_hdr_backend.EXR_COLORSPACES),
+                "missing": hdr["missing"],
+                "hint": hdr["hint"],
+            },
         }
     
     def cleanup(self):

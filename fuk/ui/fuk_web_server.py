@@ -4252,7 +4252,7 @@ async def start_task(request: TaskRequest, background_tasks: BackgroundTasks):
 
     Supported task_types:
       preprocess, preprocess_video,
-      upscale, upscale_video,
+      upscale, upscale_video, hdr_video,
       interpolate,
       layers, layers_video,
       export_exr, export_exr_sequence
@@ -4353,6 +4353,10 @@ async def _dispatch_task(task_type: str, payload: dict, generation_id: str) -> d
     # ---- Upscale (video) ----
     elif task_type == "upscale_video":
         return await _forward_to_endpoint("/api/postprocess/upscale/video", payload)
+
+    # ---- SDR -> HDR (video) ----
+    elif task_type == "hdr_video":
+        return await _forward_to_endpoint("/api/postprocess/hdr/video", payload)
 
     # ---- Frame interpolation ----
     elif task_type == "interpolate":

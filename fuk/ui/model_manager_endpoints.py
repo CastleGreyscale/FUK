@@ -6,7 +6,7 @@ primary way to acquire and enable models. The script stays for headless runs.
 
 Two kinds of thing appear in the panel and they behave differently on purpose:
 
-  Tools    Ollama, SeedVR2, TRELLIS, VGGT, SAM2, Depth-Anything-3, DSINE.
+  Tools    Ollama, SeedVR2, LTX SDR→HDR, TRELLIS, VGGT, SAM2, Depth-Anything-3, DSINE.
            Read-only status, green or red, exactly as they already report
            elsewhere in the app. They are installed by setup.sh, not from here,
            so the panel surfaces their existing availability checks and the
@@ -569,6 +569,16 @@ def _tool_status(generation_backend, log) -> List[dict]:
     add("seedvr2", "SeedVR2 — video restoration",
         "Upscales a sequence as a sequence, so it does not flicker like per-frame models.",
         _seedvr2, docs_url="https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler")
+
+    # LTX-2.5 SDR -> HDR — Postprocess. Upstream ltx-pipelines, not DiffSynth.
+    def _ltx_hdr():
+        from core import ltx_hdr_backend
+        st = ltx_hdr_backend.availability()
+        return {**st, "detail": "EXR (ACEScg) + HLG master" if st["available"] else None}
+
+    add("ltx_hdr", "LTX-2.5 — SDR → HDR",
+        "IC-LoRA that rebuilds the range an SDR clip clipped away; writes EXR plus an HLG master.",
+        _ltx_hdr, docs_url="https://huggingface.co/Lightricks/LTX-2.5-22b-IC-LoRA-SDR-To-HDR")
 
     # 3D reconstruction.
     def _trellis():

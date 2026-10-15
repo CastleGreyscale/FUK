@@ -228,6 +228,51 @@ def download_seedvr2(models_root: str):
     return result
 
 
+def download_ltx_hdr(models_root: str):
+    """
+    Fetch what the LTX-2.5 SDR -> HDR conversion needs beyond the ltx2 entry.
+
+    The HDR IC-LoRA was trained on the *distilled* transformer, which the ltx2
+    models.json entry does not pull (it runs the dev DiT), so this is ~43GB on
+    a machine that has never run distilled 2.5 — the LoRA and its scene
+    embedding are 1.3GB of it. The video VAE is shared with ltx2.
+
+    Returns {"fetched", "failed"}, or None when the LTX-2 pipelines are not
+    vendored — skipped quietly, as with SeedVR2.
+    """
+    print(f"\n\n{'#'*80}")
+    print("# Processing: LTX-2.5 SDR → HDR")
+    print(f"{'#'*80}")
+
+    fuk_dir = Path(__file__).resolve().parent.parent
+    if str(fuk_dir) not in sys.path:
+        sys.path.insert(0, str(fuk_dir))
+
+    try:
+        from core import ltx_hdr_backend
+    except ImportError as exc:
+        print(f"\n  (LTX HDR backend unavailable: {exc} — skipping)")
+        return None
+
+    if not all(p.exists() for p in ltx_hdr_backend._ENGINE_SRC):
+        print("\n  (fuk/vendor/LTX-2 not present — skipping; run setup.sh to enable)")
+        return None
+
+    root = Path(models_root)
+    fetched, failed = [], []
+    for key, (model_id, pattern) in ltx_hdr_backend.WEIGHTS.items():
+        if (root / model_id / pattern).exists():
+            print(f"\n  ✓ already present: {pattern}")
+            fetched.append(key)
+            continue
+        got = download_model_component(model_id, pattern, component_name=f"LTX HDR {key}")
+        (fetched if got else failed).append(key)
+
+    if failed:
+        print(f"\n  ⚠ Could not fetch: {', '.join(failed)}")
+    return {"fetched": fetched, "failed": failed}
+
+
 # ---------------------------------------------------------------------------
 # Add-on LoRAs
 #
@@ -467,6 +512,10 @@ def main():
     # first video upscale stalls on a silent 3.4GB download.
     seedvr2_result = download_seedvr2(models_root)
 
+    # The SDR -> HDR LoRA runs on upstream ltx-pipelines rather than DiffSynth,
+    # so it is not a models.json entry either.
+    ltx_hdr_result = download_ltx_hdr(models_root)
+
     # LTX-2's function LoRAs are likewise invisible to the models.json loop —
     # they are LoRAs resolved by path, not pipeline components. defaults_loras
     # lives beside defaults.json, so read it from the same directory.
@@ -491,6 +540,9 @@ def main():
     if ltx2_lora_result is not None:
         got, bad = ltx2_lora_result
         print(f"LTX-2 function LoRAs ready: {got}/{got + bad}")
+    if ltx_hdr_result is not None:
+        got = len(ltx_hdr_result["fetched"])
+        print(f"LTX-2.5 SDR → HDR weights ready: {got}/{got + len(ltx_hdr_result['failed'])}")
 
     if failures:
         print(f"\nFailed on every source ({len(failures)}):")

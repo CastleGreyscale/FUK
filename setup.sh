@@ -128,6 +128,7 @@ DSINE_SHA=ef0c2afa32b4dd19cb8ca4567c652802cd92591c
 VGGT_SHA=a288dd0f14786c93483e45524328726ab7b1b4ce
 TRELLIS_SHA=442aa1e1afb9014e80681d3bf604e8d728a86ee7
 SEEDVR2_SHA=4490bd1f482e026674543386bb2a4d176da245b9
+LTX2_SHA=be6d6d0a69d11a0a399c462ed92606692e5f8697   # ltx-pipelines 1.4.2, 2026-10-13
 
 # clone_pinned <dir-name> <url> <sha> [extra git-clone args...]
 # Clones at the pinned commit. If the directory already exists it is left alone,
@@ -214,6 +215,15 @@ clone_pinned TRELLIS https://github.com/microsoft/TRELLIS.git "$TRELLIS_SHA" --r
 # first use, SHA256-validated, into {models_root}/seedvr2.
 clone_pinned SeedVR2 https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler.git "$SEEDVR2_SHA" || true
 
+# LTX-2 (Lightricks' official ltx-core / ltx-pipelines) — source only, for the
+# LTX-2.5 SDR -> HDR IC-LoRA, which needs upstream's keyframe-aware diffusion
+# VAE decode that DiffSynth does not have. Generation still runs on DiffSynth.
+# Not pip-installed: ltx_hdr_backend puts packages/*/src on the subprocess's
+# PYTHONPATH. Do NOT `uv sync` it or install its natten extra — that pins
+# torch 2.13/cu132 and would replace this venv's torch. Its three extra deps
+# (colour-science, openimageio, cloudpickle) are in pyproject.toml.
+clone_pinned LTX-2 https://github.com/Lightricks/LTX-2.git "$LTX2_SHA" || true
+
 # ── Vendor packages ───────────────────────────────────────────────────────────
 echo ""
 echo "[5/7] Installing vendor packages..."
@@ -257,6 +267,12 @@ if python -c "import sys; sys.path.insert(0, 'fuk'); from core import seedvr2_ba
     echo "    ✓ SeedVR2 ready (runs in this venv, weights fetch on first use)"
 else
     echo "    ⚠  SeedVR2 unavailable — video upscaling falls back to per-frame Real-ESRGAN"
+fi
+
+if python -c "import sys; sys.path.insert(0, 'fuk'); from core import ltx_hdr_backend as h; import sys as _s; _s.exit(0 if h.availability()['available'] else 1)" 2>/dev/null; then
+    echo "    ✓ LTX-2.5 SDR → HDR ready"
+else
+    echo "    ⚠  LTX-2.5 SDR → HDR not ready — needs fuk/vendor/LTX-2 and its weights (download_models.sh)"
 fi
 
 if [ -f "fuk/vendor/TRELLIS_ENV/READY" ]; then

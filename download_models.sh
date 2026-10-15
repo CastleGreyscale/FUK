@@ -77,6 +77,13 @@ if [ -d "fuk/vendor/SeedVR2" ]; then
 else
     echo "  Skipping SeedVR2 — engine not vendored (run setup.sh to enable)"
 fi
+# LTX-2.5 SDR -> HDR: the IC-LoRA (1.3GB) plus the 2.5 *distilled* transformer
+# it was trained on (42GB), which the ltx2 entry does not pull.
+if [ -d "fuk/vendor/LTX-2" ]; then
+    echo "  Also fetching: LTX-2.5 SDR → HDR (IC-LoRA 1.3GB + distilled DiT 42GB if absent)"
+else
+    echo "  Skipping LTX-2.5 SDR → HDR — pipelines not vendored (run setup.sh to enable)"
+fi
 echo ""
 
 python fuk/utils/download_models.py "$@"

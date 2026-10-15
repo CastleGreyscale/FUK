@@ -86,6 +86,7 @@ FUK treats AI generation as source material that enters a professional pipeline,
 **Post-Processing:**
 - Upscaling: Real-ESRGAN (X4 models)
 - Frame interpolation: FILM (Google's Frame Interpolation for Large Motion)
+- SDR → HDR: LTX-2.5 IC-LoRA rebuilds clipped range — ACEScg EXR sequence + BT.2020/HLG master
 - Video stabilization and temporal coherence
 - Sequence-aware processing
 
@@ -355,7 +356,7 @@ The interface follows a left-to-right pipeline:
 1. **Image Tab** - Text-to-image, image-to-image, editing
 2. **Video Tab** - Image-to-video, video generation
 3. **Preprocess Tab** - Depth, normals, cryptomatte, pose
-4. **Postprocess Tab** - Upscale, interpolate, temporal processing
+4. **Postprocess Tab** - Upscale, interpolate, SDR → HDR, temporal processing
 5. **Layers Tab** - Multi-layer EXR assembly
 6. **Export Tab** - Project delivery and packaging
 7. **LoRA Dataset Tab** - Training dataset generation and curation

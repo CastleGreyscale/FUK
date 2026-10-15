@@ -50,6 +50,16 @@ const DEFAULT_SETTINGS = {
   targetFramerate: 24,
   sourceFramerate: 16,
 
+  // SDR → HDR (LTX-2.5 IC-LoRA). The EXR sequence is the deliverable; the
+  // HLG master and SDR preview are written beside it.
+  hdrExrColorspace: 'acescg',
+  // Seam keyframes are the trained default — upstream warns against turning
+  // them off except to compare.
+  hdrKeyframes: true,
+  hdrHighQuality: false,
+  hdrMemoryMode: 'auto',
+  hdrSeed: 42,
+
   // Video output mode
   videoOutputMode: 'mp4',
 };
@@ -123,6 +133,7 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
   // swapped from RIFE to FILM, leaving the badge permanently dark.
   const seedvr2Available = capabilities?.video_restoration?.available ?? false;
   const isSeedVR2 = isVideo && settings.videoUpscaleMethod === 'seedvr2';
+  const hdrAvailable = capabilities?.hdr_conversion?.available ?? false;
 
 
   // Reset restoration flag when leaving the tab
@@ -178,8 +189,13 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
       targetFps: meta.targetFps,
       sourceFps: meta.sourceFps,
       multiplier: meta.multiplier,
+      isHdr: meta.isHdr,
+      exrDir: meta.exrDir,
+      exrFrames: meta.exrFrames,
+      exrColorspace: meta.exrColorspace,
+      hlgPath: meta.hlgPath,
     });
-    
+
     // Clear restoring flag after state has settled
     setTimeout(() => {
       isRestoringRef.current = false;
@@ -289,6 +305,11 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
         targetFps: newResult.targetFps,
         sourceFps: newResult.sourceFps,
         multiplier: newResult.multiplier,
+        isHdr: newResult.isHdr,
+        exrDir: newResult.exrDir,
+        exrFrames: newResult.exrFrames,
+        exrColorspace: newResult.exrColorspace,
+        hlgPath: newResult.hlgPath,
       },
       activeTab: 'postprocess',
     });
@@ -362,9 +383,36 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
     }
   };
 
+  const handleHdr = async () => {
+    if (!sourceInput) {
+      setLocalError('Please select a source video');
+      return;
+    }
+
+    setLocalError(null);
+    setResult(null);
+
+    try {
+      const data = await startTask('hdr_video', {
+        source_path: sourceInput,
+        exr_colorspace: settings.hdrExrColorspace,
+        keyframes: settings.hdrKeyframes,
+        high_quality: settings.hdrHighQuality,
+        memory_mode: settings.hdrMemoryMode,
+        seed: settings.hdrSeed,
+      });
+      startGeneration(data.generation_id);
+    } catch (err) {
+      console.error('[PostProcess] HDR error:', err);
+      setLocalError(err.message);
+    }
+  };
+
   const handleProcess = async () => {
     if (activeProcess === 'upscale') {
       await handleUpscale();
+    } else if (activeProcess === 'hdr') {
+      await handleHdr();
     } else {
       await handleInterpolate();
     }
@@ -382,7 +430,24 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
     console.log('[PostProcess] Task complete:', data);
 
     let newResult;
-    if (data.frame_count) {
+    if (data.is_hdr) {
+      // SDR → HDR. What plays here is a tonemapped preview; the EXRs and the
+      // HLG master are the outputs.
+      newResult = {
+        type: 'video',
+        url: data.output_url,
+        path: data.output_path,
+        inputSize: data.input_size,
+        outputSize: data.output_size,
+        method: data.method,
+        frameCount: data.frame_count,
+        isHdr: true,
+        exrDir: data.exr_dir,
+        exrFrames: data.exr_frames,
+        exrColorspace: data.exr_colorspace,
+        hlgPath: data.hlg_path,
+      };
+    } else if (data.frame_count) {
       // Video result
       newResult = {
         type: 'video',
@@ -430,20 +495,33 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
     }));
   }, [genResult]);
 
-  const canProcess = sourceInput && !generating;
+  const canProcess = sourceInput && !generating && (activeProcess !== 'hdr' || (isVideo && hdrAvailable));
   const inputAspectRatio = inputDimensions.width / inputDimensions.height;
   const inputAspectStyle = { '--preview-aspect': inputAspectRatio };
-  
+
+  const PROCESS_LABELS = {
+    upscale: { output: 'Upscaled', placeholder: 'Select image or video to upscale',
+               help: 'Drag from History or upload an image/video to enhance' },
+    interpolate: { output: 'Interpolated', placeholder: 'Select video to interpolate',
+                   help: 'Drag from History or upload a video to interpolate' },
+    hdr: { output: 'HDR (SDR preview)', placeholder: 'Select an SDR video to convert',
+           help: 'Drag from History or upload an SDR video to convert to HDR' },
+  };
+  const labels = PROCESS_LABELS[activeProcess];
+
   const getInputInfo = () => {
     if (!sourceInput) return null;
-    if (activeProcess === 'upscale') {
+    if (activeProcess === 'upscale' || activeProcess === 'hdr') {
       return `${inputDimensions.width}×${inputDimensions.height}${isVideo ? ' (video)' : ''}`;
     }
     return `${settings.sourceFramerate} fps`;
   };
-  
+
   const getOutputInfo = () => {
     if (!result) return null;
+    if (result.isHdr) {
+      return `${result.exrFrames ?? result.frameCount} EXR frames (${result.exrColorspace}) + HLG`;
+    }
     if (result.type === 'image') {
       return `${result.outputSize.width}×${result.outputSize.height} (${result.scale}x)`;
     }
@@ -507,7 +585,7 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                     <Film className="fuk-placeholder-icon" />
                   )}
                   <p className="fuk-placeholder-text">
-                    {activeProcess === 'upscale' ? 'Select image or video to upscale' : 'Select video to interpolate'}
+                    {labels.placeholder}
                   </p>
                 </div>
               </div>
@@ -530,7 +608,7 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
           <div className="fuk-preview-pane">
             <div className="fuk-preview-pane-header">
               <h3 className="fuk-preview-pane-title">
-                {activeProcess === 'upscale' ? 'Upscaled' : 'Interpolated'}
+                {labels.output}
               </h3>
               {result && (
                 <div className="fuk-status-complete">
@@ -565,7 +643,7 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                 </span>
               </div>
             ) : (
-              <div 
+              <div
                 className="fuk-placeholder-card fuk-placeholder-card--ratio"
                 style={sourceInput ? inputAspectStyle : undefined}
               >
@@ -574,13 +652,22 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                   <p className="fuk-placeholder-text">
                     {generating ? `generating... ${formatTime(elapsedSeconds)}` : 'Result will appear here'}
                   </p>
-                  {generating && isVideo && (
+                  {generating && isVideo && activeProcess !== 'hdr' && (
                     <p className="fuk-placeholder-subtext">
                       generating video frame-by-frame
                     </p>
                   )}
                 </div>
               </div>
+            )}
+
+            {/* The playable clip is a tonemap; the deliverables are on disk. */}
+            {result?.isHdr && (
+              <p className="fuk-help-text">
+                Tonemapped for display — browsers cannot show HLG.
+                <br />EXRs: {result.exrDir}
+                {result.hlgPath && <><br />HLG master: {result.hlgPath}</>}
+              </p>
             )}
           </div>
         </div>
@@ -592,23 +679,21 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                     {/* Input Source Card */}
           <div className="fuk-card">
             <h3 className="fuk-card-title fuk-mb-3">
-              {activeProcess === 'upscale' ? 'Image/Video Input' : 'Video Input'}
+              {activeProcess === 'upscale' ? 'Image/Video Input'
+                : activeProcess === 'hdr' ? 'SDR Video Input' : 'Video Input'}
             </h3>
             
             <MediaUploader
               media={sourceInput ? [{ path: sourceInput }] : []}
               onMediaChange={handleSourceChange}
               disabled={generating}
-              accept={activeProcess === 'interpolate' ? 'videos' : 'all'}
+              accept={activeProcess === 'upscale' ? 'all' : 'videos'}
               initialDir={project?.projectState?.lastState?.lastUploadDir}
               onDirectorySelected={(dir) => project?.updateLastState?.({ lastUploadDir: dir })}
             />
-            
+
             <p className="fuk-help-text">
-              {activeProcess === 'upscale' 
-                ? 'Drag from History or upload an image/video to enhance'
-                : 'Drag from History or upload a video to interpolate'
-              }
+              {labels.help}
             </p>
             
             {isVideo && activeProcess === 'upscale' && (
@@ -697,6 +782,27 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                   </span>
                 </div>
               </label>
+
+              <label className={`fuk-radio-card ${activeProcess === 'hdr' ? 'fuk-radio-card--active' : ''}`}>
+                <input
+                  type="radio"
+                  className="fuk-radio"
+                  checked={activeProcess === 'hdr'}
+                  onChange={() => {
+                    setActiveProcess('hdr');
+                    setResult(null);
+                  }}
+                />
+                <div className="fuk-radio-card-content">
+                  <span className="fuk-radio-card-title">
+                    <Enhance className="fuk-icon" />
+                    SDR → HDR
+                  </span>
+                  <span className="fuk-radio-card-desc">
+                    Rebuild clipped range as EXR + HLG (LTX-2.5)
+                  </span>
+                </div>
+              </label>
             </div>
             
             {/* Capability indicators.
@@ -716,6 +822,9 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                   </span>
                   <span className={capabilities.interpolation?.film_available ? 'fuk-capability-item--active' : 'fuk-capability-item'}>
                     {capabilities.interpolation?.film_available ? '✓' : '○'} FILM
+                  </span>
+                  <span className={hdrAvailable ? 'fuk-capability-item--active' : 'fuk-capability-item'}>
+                    {hdrAvailable ? '✓' : '○'} LTX HDR
                   </span>
                 </div>
               </div>
@@ -999,6 +1108,96 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
               </div>
             </div>
           )}
+
+          {/* SDR → HDR Settings */}
+          {activeProcess === 'hdr' && (
+            <div className="fuk-card">
+              <h3 className="fuk-card-title fuk-mb-3">HDR Conversion</h3>
+
+              {!hdrAvailable && capabilities?.hdr_conversion && (
+                <div className="fuk-alert fuk-alert--error fuk-mb-3">
+                  <AlertCircle className="fuk-alert-icon" />
+                  <span className="fuk-alert-text">
+                    Unavailable: {(capabilities.hdr_conversion.missing || []).join(', ')}.
+                    {' '}{capabilities.hdr_conversion.hint}
+                  </span>
+                </div>
+              )}
+
+              <div className="fuk-form-group-compact">
+                <label className="fuk-label">EXR Colour Space</label>
+                <select
+                  className="fuk-select"
+                  value={settings.hdrExrColorspace}
+                  onChange={(e) => updateSettings({ hdrExrColorspace: e.target.value })}
+                  disabled={generating}
+                >
+                  <option value="acescg">ACEScg — scene-linear (Recommended)</option>
+                  <option value="srgb_linear">Linear Rec.709 / sRGB</option>
+                  <option value="acescct">ACEScct — log codes</option>
+                </select>
+                <p className="fuk-help-text">
+                  Half-float EXR frames, the deliverable for grading. A 10-bit
+                  BT.2020/HLG master is written alongside whichever you pick.
+                </p>
+              </div>
+
+              <div className="fuk-form-group-compact">
+                <label className="fuk-label">Seam Keyframes</label>
+                <select
+                  className="fuk-select"
+                  value={settings.hdrKeyframes ? 'on' : 'off'}
+                  onChange={(e) => updateSettings({ hdrKeyframes: e.target.value === 'on' })}
+                  disabled={generating}
+                >
+                  <option value="on">On — 0.95 (trained default)</option>
+                  <option value="off">Off — plain IC-LoRA</option>
+                </select>
+                <p className="fuk-help-text">
+                  Pins an SDR guide and a generated HDR frame at every 24/32-frame
+                  seam and decodes against them. Only engages past ~24 frames.
+                  Leave on unless comparing.
+                </p>
+              </div>
+
+              <div className="fuk-form-group-compact">
+                <label className="fuk-label">Quality</label>
+                <select
+                  className="fuk-select"
+                  value={settings.hdrHighQuality ? 'high' : 'standard'}
+                  onChange={(e) => updateSettings({ hdrHighQuality: e.target.value === 'high' })}
+                  disabled={generating}
+                >
+                  <option value="standard">Standard</option>
+                  <option value="high">High — 2x frames internally, ~2x time</option>
+                </select>
+                <p className="fuk-help-text">
+                  High generates every frame twice and keeps every other one, for
+                  fewer temporal artifacts. Doubles memory too — on a 24GB card
+                  keep clips short.
+                </p>
+              </div>
+
+              <div className="fuk-form-group-compact">
+                <label className="fuk-label">Memory Mode</label>
+                <select
+                  className="fuk-select"
+                  value={settings.hdrMemoryMode}
+                  onChange={(e) => updateSettings({ hdrMemoryMode: e.target.value })}
+                  disabled={generating}
+                >
+                  <option value="auto">Auto — resident if it fits, else offload</option>
+                  <option value="resident">Resident FP8 — needs a 32GB+ card</option>
+                  <option value="offload">CPU offload — streams weights from RAM</option>
+                </select>
+                <p className="fuk-help-text">
+                  The 22B transformer does not fit 24GB even at FP8, so Auto goes
+                  straight to offload there. Runs at the source's own resolution
+                  and length; if decode runs out of memory, trim the clip.
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -1012,8 +1211,10 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
         onGenerate={handleProcess}
         onCancel={cancel}
         canGenerate={canProcess}
-        generateLabel={activeProcess === 'upscale' ? (isVideo ? 'Upscale Video' : 'Upscale') : 'Interpolate'}
-        generatingLabel={activeProcess === 'upscale' ? (isVideo ? 'Upscaling Video...' : 'Upscaling...') : 'Interpolating...'}
+        generateLabel={activeProcess === 'upscale' ? (isVideo ? 'Upscale Video' : 'Upscale')
+          : activeProcess === 'hdr' ? 'Convert to HDR' : 'Interpolate'}
+        generatingLabel={activeProcess === 'upscale' ? (isVideo ? 'Upscaling Video...' : 'Upscaling...')
+          : activeProcess === 'hdr' ? 'Converting to HDR...' : 'Interpolating...'}
       />
       <GenerationModal
         isOpen={showModal}

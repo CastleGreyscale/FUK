@@ -106,6 +106,19 @@ class VideoUpscaleRequest(BaseModel):
     motion_protection: float = 0.7
 
 
+class VideoHDRRequest(BaseModel):
+    """Request to convert an SDR video to HDR (LTX-2.5 SDR-To-HDR IC-LoRA)"""
+    source_path: str
+    exr_colorspace: str = "acescg"   # acescg | srgb_linear | acescct (log codes)
+    seed: int = 42
+    # Seam keyframes are the trained default; upstream warns against 0 strength.
+    keyframes: bool = True
+    keyframe_strength: float = 0.95
+    # 2N-1 internal frames, every other one kept. ~2x time, fewer temporal artifacts.
+    high_quality: bool = False
+    memory_mode: str = "auto"        # auto | resident | offload
+
+
 class VideoLayersRequest(BaseModel):
     """Request to generate layers from a video"""
     video_path: str
@@ -806,9 +819,116 @@ def setup_video_routes(
             raise HTTPException(status_code=500, detail=str(e))
     
     # ========================================================================
+    # SDR -> HDR Endpoint
+    # ========================================================================
+
+    @app.post("/api/postprocess/hdr/video")
+    async def convert_video_hdr(request: VideoHDRRequest):
+        """
+        Convert an SDR clip to HDR with the LTX-2.5 SDR-To-HDR IC-LoRA.
+
+        Writes an EXR sequence (the deliverable) and an HLG master beside it;
+        the URL handed back for display is an SDR tonemap of the master, since
+        browsers cannot show HLG.
+        """
+        from core import ltx_hdr_backend
+
+        try:
+            input_path = resolve_input_path(request.source_path)
+            if input_path is None:
+                raise HTTPException(status_code=400, detail="No video path provided")
+            if not input_path.exists():
+                raise HTTPException(status_code=404, detail=f"Video not found: {request.source_path}")
+
+            log.header("SDR → HDR (LTX-2.5)")
+            log.info("VideoHDR", f"Input: {input_path}")
+            log.info("VideoHDR", f"EXR colour space: {request.exr_colorspace}, "
+                                 f"keyframes: {request.keyframes}, "
+                                 f"high quality: {request.high_quality}, "
+                                 f"memory mode: {request.memory_mode}")
+
+            gen_dir = get_generation_output_dir("hdr_video")
+            # Upstream names the EXR folder after this: hdr_<colourspace>_exr/
+            hlg_path = gen_dir / "hdr.mp4"
+
+            start_time = time.time()
+            result = await asyncio.to_thread(
+                ltx_hdr_backend.convert_to_hdr,
+                input_path=input_path,
+                output_path=hlg_path,
+                exr_colorspace=request.exr_colorspace,
+                seed=request.seed,
+                keyframes=request.keyframes,
+                keyframe_strength=request.keyframe_strength,
+                high_quality=request.high_quality,
+                memory_mode=request.memory_mode,
+            )
+            elapsed = time.time() - start_time
+
+            preview_path = Path(result["preview_path"]) if result.get("preview_path") else hlg_path
+            _generate_thumbnail(preview_path)
+            size = result.get("size", {})
+
+            log.timing("VideoHDR", start_time,
+                       f"Complete - {result.get('frame_count', 0)} frames "
+                       f"({result.get('memory_rung')})")
+
+            save_generation_metadata(
+                gen_dir=gen_dir,
+                prompt="SDR → HDR (LTX-2.5 IC-LoRA)",
+                model="ltx_hdr",
+                seed=request.seed,
+                image_size=(size.get("width", 0), size.get("height", 0)),
+                source_image=str(request.source_path),
+                parameters={
+                    "model": "ltx_hdr",
+                    "exr_colorspace": request.exr_colorspace,
+                    "exr_dir": result.get("exr_dir"),
+                    "hlg_path": result.get("hlg_path"),
+                    "keyframes": request.keyframes,
+                    "keyframe_strength": result.get("keyframe_strength"),
+                    "high_quality": request.high_quality,
+                    "memory_rung": result.get("memory_rung"),
+                    "frame_count": result.get("frame_count", 0),
+                    "padded_frames": result.get("padded_frames"),
+                    "fps": result.get("fps"),
+                    "peak_vram_gb": result.get("peak_vram_gb"),
+                },
+            )
+
+            exr_dir = result.get("exr_dir")
+            return {
+                "success": True,
+                "output_path": str(preview_path),
+                "output_url": get_project_relative_url(preview_path),
+                "preview_url": get_project_relative_url(preview_path),
+                "hlg_path": result.get("hlg_path"),
+                "hlg_url": get_project_relative_url(hlg_path),
+                "exr_dir": exr_dir,
+                "exr_url": get_project_relative_url(Path(exr_dir)) if exr_dir else None,
+                "exr_frames": result.get("exr_frames", 0),
+                "exr_colorspace": request.exr_colorspace,
+                "method": "ltx_hdr",
+                "is_hdr": True,
+                "memory_rung": result.get("memory_rung"),
+                "input_size": size,
+                "output_size": size,
+                "frame_count": result.get("frame_count", 0),
+                "fps": result.get("fps"),
+                "elapsed_seconds": elapsed,
+                "peak_vram_gb": result.get("peak_vram_gb"),
+            }
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            log.exception("VideoHDR", e)
+            raise HTTPException(status_code=500, detail=str(e))
+
+    # ========================================================================
     # Video Layers Endpoint
     # ========================================================================
-    
+
     @app.post("/api/layers/video/generate")
     async def generate_video_layers(request: VideoLayersRequest):
         """
