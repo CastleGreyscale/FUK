@@ -666,7 +666,7 @@ export default function UtilitiesTab({ activeTab, setActiveTab, config, project 
         {subTab === 'models' && <ModelManager />}
         {subTab === 'spec' && <SpecTool config={config} />}
         {subTab === 'lora' && <LoraDatasetBuilder config={config} />}
-        {subTab === 'describe' && <ImageDescribeTool />}
+        {subTab === 'describe' && <ImageDescribeTool project={project} />}
         {subTab === 'threed' && <ThreeDReconstruct config={config} project={project} />}
       </div>
 

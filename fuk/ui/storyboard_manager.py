@@ -10,6 +10,7 @@ that sits alongside the per-shot project files. It stores:
   - globals.active_loras: project-wide active LoRA keys
   - sequence: ordered shot IDs
   - panels: per-shot metadata (imagery prompt, action prompt, duration, ...)
+  - tag_history: superseded versions of project tags (see tag_history.py)
 
 Globals are *live*: editing a tag's value changes how `#sarah` resolves the
 next time any shot is generated. Markers are NOT expanded at "send to tab"
@@ -26,12 +27,18 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import tag_history as th
+
 
 MANIFEST_VERSION = "1.0"
 
 # Mirror the marker rules used in llm_endpoints._name_to_marker so project
 # tag markers slug identically to workspace tag markers.
 _MARKER_CHAR_RE = re.compile(r"[^A-Za-z0-9_\-]+")
+
+# Project tags autosave while typing; an edit version younger than this is an
+# in-progress draft, not worth keeping in tag history.
+TAG_HISTORY_COALESCE_SECONDS = 60
 
 # Same shape as project_endpoints._SHOT_ID_RE — shot ids are part of the
 # filename `{project}_shot{id}_{version}.json` so the regex MUST match.
@@ -101,6 +108,7 @@ def empty_manifest() -> Dict[str, Any]:
         },
         "sequence": [],
         "panels": {},
+        "tag_history": {},
     }
 
 
@@ -190,6 +198,9 @@ def _migrate(data: Dict[str, Any]) -> Dict[str, Any]:
     }
     out["sequence"] = list(data.get("sequence") or [])
     out["panels"] = dict(data.get("panels") or {})
+    out["tag_history"] = {
+        k: list(v) for k, v in (data.get("tag_history") or {}).items() if isinstance(v, list)
+    }
     return out
 
 
@@ -215,6 +226,10 @@ def validate_tag(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {"name": name, "value": value, "category": category, "marker": marker}
 
 
+def _history(manifest: Dict[str, Any]) -> Dict[str, List[dict]]:
+    return manifest.setdefault("tag_history", {})
+
+
 def add_tag(manifest: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str, Any]:
     clean = validate_tag(payload)
     tags = manifest["globals"].setdefault("tags", [])
@@ -233,6 +248,8 @@ def update_tag(manifest: Dict[str, Any], tag_id: str, payload: Dict[str, Any]) -
         if t.get("id") == tag_id:
             if any(o.get("marker") == clean["marker"] and o.get("id") != tag_id for o in tags):
                 raise ValueError(f"Tag with marker {clean['marker']} already exists")
+            if not th.same_content(t, clean):
+                th.record(_history(manifest), t, "edit", TAG_HISTORY_COALESCE_SECONDS)
             tags[i] = {
                 "id": tag_id,
                 **clean,
@@ -245,9 +262,93 @@ def update_tag(manifest: Dict[str, Any], tag_id: str, payload: Dict[str, Any]) -
 
 def remove_tag(manifest: Dict[str, Any], tag_id: str) -> bool:
     tags = manifest["globals"].setdefault("tags", [])
-    before = len(tags)
+    gone = next((t for t in tags if t.get("id") == tag_id), None)
+    if gone is None:
+        return False
+    th.record(_history(manifest), gone, "delete")
     manifest["globals"]["tags"] = [t for t in tags if t.get("id") != tag_id]
-    return len(manifest["globals"]["tags"]) < before
+    return True
+
+
+def restore_tag_version(manifest: Dict[str, Any], tag_id: str, vid: str) -> Dict[str, Any]:
+    """Bring a tag back to one of its history versions.
+
+    A live tag is updated in place (its current content goes into history, so
+    the restore can itself be undone); a deleted tag is recreated under its
+    old id.
+    """
+    version = th.find_version(_history(manifest), tag_id, vid)
+    if version is None:
+        raise KeyError(f"Version {vid} not found")
+    clean = validate_tag(version)
+    tags = manifest["globals"].setdefault("tags", [])
+    if any(o.get("marker") == clean["marker"] and o.get("id") != tag_id for o in tags):
+        raise ValueError(f"Another tag already uses {clean['marker']}")
+    now = _now()
+    for i, t in enumerate(tags):
+        if t.get("id") == tag_id:
+            th.record(_history(manifest), t, "restore")
+            tags[i] = {"id": tag_id, **clean, "created": t.get("created") or now, "updated": now}
+            return tags[i]
+    entry = {"id": tag_id, **clean, "created": now, "updated": now}
+    tags.append(entry)
+    return entry
+
+
+def tag_versions(manifest: Dict[str, Any], tag_id: str) -> List[dict]:
+    return th.versions(_history(manifest), tag_id)
+
+
+def deleted_tags(manifest: Dict[str, Any]) -> List[dict]:
+    live = [t.get("id") for t in manifest["globals"].get("tags") or []]
+    return th.deleted(_history(manifest), live)
+
+
+def import_tags(
+    manifest: Dict[str, Any],
+    incoming: List[Dict[str, Any]],
+    overwrite: bool = False,
+    source_history: Optional[Dict[str, List[dict]]] = None,
+) -> Dict[str, List[dict]]:
+    """Copy workspace tags into the project.
+
+    A tag whose marker is free is added under its workspace id, carrying its
+    workspace history along. One whose marker the project already uses is
+    `unchanged` if the values match, replaced when `overwrite` is set, and
+    otherwise reported as a conflict and left alone. Each result row is
+    `{id, name, marker}` with `id` the *workspace* id, so the caller can tell
+    which tags actually landed.
+    """
+    tags = manifest["globals"].setdefault("tags", [])
+    hist = _history(manifest)
+    out: Dict[str, List[dict]] = {"added": [], "replaced": [], "unchanged": [], "conflicts": []}
+    for src in incoming:
+        clean = validate_tag(src)
+        row = {"id": src.get("id"), "name": clean["name"], "marker": clean["marker"]}
+        existing = next((t for t in tags if t.get("marker") == clean["marker"]), None)
+        if existing is not None:
+            if (existing.get("value") or "").strip() == clean["value"]:
+                out["unchanged"].append(row)
+            elif overwrite:
+                # An overwrite is deliberate, so keep the project's version even
+                # inside the autosave window; update_tag then sees it on file.
+                th.record(hist, existing, "replaced")
+                update_tag(manifest, existing["id"], clean)
+                out["replaced"].append(row)
+            else:
+                out["conflicts"].append(row)
+            continue
+        now = _now()
+        src_id = src.get("id")
+        tag_id = src_id if src_id and not any(t.get("id") == src_id for t in tags) else uuid.uuid4().hex
+        tags.append({
+            "id": tag_id, **clean,
+            "created": src.get("created") or now, "updated": now,
+        })
+        if source_history and src_id in source_history and tag_id not in hist:
+            hist[tag_id] = [dict(v) for v in source_history[src_id]]
+        out["added"].append(row)
+    return out
 
 
 _SEED_MAX = 2**32 - 1
@@ -513,6 +614,18 @@ def restore_snapshot(project_folder: Path, filename: str) -> Dict[str, Any]:
     with open(path) as f:
         data = json.load(f)
     m = _migrate(data)
+    # Tag history is append-only knowledge, so the live store wins over the
+    # snapshot's older copy. Live tags the restore changes or drops are
+    # recorded first, keeping them recoverable from the tag history too.
+    live = load_manifest(project_folder)
+    if live is not None:
+        hist = live.get("tag_history") or {}
+        restored = {t.get("id"): t for t in m["globals"]["tags"]}
+        for t in live["globals"]["tags"]:
+            r = restored.get(t.get("id"))
+            if r is None or not th.same_content(r, t):
+                th.record(hist, t, "snapshot")
+        m["tag_history"] = hist
     # Drop the snapshot-only meta fields before writing as the live manifest
     m["meta"].pop("snapshot", None)
     m["meta"].pop("snapshotAt", None)

@@ -27,6 +27,8 @@ from fastapi import HTTPException, Query
 from PIL import Image
 from pydantic import BaseModel
 
+import tag_history as th
+
 
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
 LLM_MODEL = os.environ.get("FUK_LLM_MODEL", "qwen3-vl:8b")
@@ -163,6 +165,8 @@ class DescribeRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 TAGS_FILE = Path(__file__).parent / "data" / "prompt_tags.json"
+# Superseded and deleted tag versions, `{tag_id: [version, ...]}` — see tag_history.py.
+TAG_HISTORY_FILE = Path(__file__).parent / "data" / "prompt_tag_history.json"
 CATEGORIES_FILE = Path(__file__).parent / "data" / "prompt_tag_categories.json"
 _NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _\-]{0,63}$")
 
@@ -186,6 +190,12 @@ class TagPayload(BaseModel):
     category: Optional[str] = None
 
 
+class TagPushPayload(BaseModel):
+    ids: List[str]
+    move: bool = False        # remove from the workspace once the tag is in the project
+    overwrite: bool = False   # replace project tags whose marker collides
+
+
 def _load_tags() -> List[dict]:
     if not TAGS_FILE.exists():
         return []
@@ -201,6 +211,23 @@ def _save_tags(tags: List[dict]) -> None:
     TAGS_FILE.parent.mkdir(parents=True, exist_ok=True)
     with open(TAGS_FILE, "w") as f:
         json.dump({"tags": tags}, f, indent=2)
+
+
+def _load_tag_history() -> dict:
+    if not TAG_HISTORY_FILE.exists():
+        return {}
+    try:
+        with open(TAG_HISTORY_FILE) as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_tag_history(history: dict) -> None:
+    TAG_HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(TAG_HISTORY_FILE, "w") as f:
+        json.dump(history, f, indent=2)
 
 
 def _normalize_name(name: str) -> str:
@@ -1285,23 +1312,122 @@ def setup_llm_routes(app, *, resolve_input_path: Callable[[str], Path], log, con
             for i, t in enumerate(tags)
         ):
             raise HTTPException(status_code=409, detail=f"Tag '{name}' already exists")
-        tags[idx].update({
-            "name": name,
-            "value": value,
-            "category": category,
-            "updated": datetime.now().isoformat(),
-        })
+        new = {"name": name, "value": value, "category": category}
+        if not th.same_content(tags[idx], new):
+            history = _load_tag_history()
+            if th.record(history, tags[idx], "edit"):
+                _save_tag_history(history)
+        tags[idx].update({**new, "updated": datetime.now().isoformat()})
         _save_tags(tags)
         return tags[idx]
 
     @app.delete("/api/tags/{tag_id}")
     async def delete_tag(tag_id: str):
         tags = _load_tags()
-        new_tags = [t for t in tags if t.get("id") != tag_id]
-        if len(new_tags) == len(tags):
+        gone = next((t for t in tags if t.get("id") == tag_id), None)
+        if gone is None:
             raise HTTPException(status_code=404, detail="Tag not found")
-        _save_tags(new_tags)
+        history = _load_tag_history()
+        th.record(history, gone, "delete")
+        _save_tag_history(history)
+        _save_tags([t for t in tags if t.get("id") != tag_id])
         return {"success": True}
+
+    @app.get("/api/tags/deleted")
+    async def list_deleted_tags():
+        """Deleted (or moved-to-project) tags still restorable from history."""
+        live = [t.get("id") for t in _load_tags()]
+        return {"tags": th.deleted(_load_tag_history(), live)}
+
+    @app.get("/api/tags/{tag_id}/history")
+    async def get_tag_history(tag_id: str):
+        """Superseded versions of a tag, newest first."""
+        return {"versions": th.versions(_load_tag_history(), tag_id)}
+
+    @app.post("/api/tags/{tag_id}/history/{vid}/restore")
+    async def restore_tag_version(tag_id: str, vid: str):
+        """Restore a version. A live tag is updated in place, its current
+        content going into history so the restore can be undone; a deleted
+        tag is recreated under its old id."""
+        history = _load_tag_history()
+        version = th.find_version(history, tag_id, vid)
+        if version is None:
+            raise HTTPException(status_code=404, detail="Version not found")
+        name, value, category = _validate_payload(TagPayload(
+            name=version.get("name") or "",
+            value=version.get("value") or "",
+            category=version.get("category"),
+        ))
+        tags = _load_tags()
+        if any(
+            t.get("id") != tag_id and _normalize_name(t.get("name", "")) == name
+            for t in tags
+        ):
+            raise HTTPException(status_code=409, detail=f"Another tag is already named '{name}'")
+        now = datetime.now().isoformat()
+        idx = next((i for i, t in enumerate(tags) if t.get("id") == tag_id), -1)
+        if idx >= 0:
+            th.record(history, tags[idx], "restore")
+            tags[idx].update({"name": name, "value": value, "category": category, "updated": now})
+            entry = tags[idx]
+        else:
+            entry = {
+                "id": tag_id, "name": name, "value": value, "category": category,
+                "created": now, "updated": now,
+            }
+            tags.append(entry)
+        _save_tag_history(history)
+        _save_tags(tags)
+        log.info("LLM", f"tag restored: {name}")
+        return entry
+
+    @app.post("/api/tags/push-to-storyboard")
+    async def push_tags_to_storyboard(payload: TagPushPayload):
+        """Copy (or move) workspace tags into the active project's storyboard.
+
+        Collisions with an existing project marker come back as `conflicts`
+        and are left alone unless `overwrite` is set. On a move, only tags
+        that actually landed in the project leave the workspace, and each is
+        recorded in history as `moved` so it can be restored.
+        """
+        # Lazy for the same reason as _storyboard_context.
+        import storyboard_manager as sm
+        from project_endpoints import get_project_folder
+        folder = get_project_folder()
+        if not folder:
+            raise HTTPException(status_code=400, detail="No project folder set")
+
+        tags = _load_tags()
+        wanted = set(payload.ids)
+        selected = [t for t in tags if t.get("id") in wanted]
+        if not selected:
+            raise HTTPException(status_code=404, detail="No matching tags")
+
+        history = _load_tag_history()
+        manifest = sm.ensure_manifest(folder)
+        try:
+            result = sm.import_tags(manifest, selected, payload.overwrite, history)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        sm.save_manifest(folder, manifest)
+
+        moved: List[str] = []
+        if payload.move:
+            landed = {r["id"] for k in ("added", "replaced", "unchanged") for r in result[k]}
+            for t in selected:
+                if t.get("id") in landed:
+                    th.record(history, t, "moved")
+                    moved.append(t["id"])
+            if moved:
+                _save_tag_history(history)
+                _save_tags([t for t in tags if t.get("id") not in set(moved)])
+        log.info(
+            "LLM",
+            f"tags pushed to storyboard: {len(result['added'])} added, "
+            f"{len(result['replaced'])} replaced, {len(result['conflicts'])} conflicts, "
+            f"{len(moved)} moved",
+        )
+        return {**result, "moved": moved}
 
     # -----------------------------------------------------------------------
     # Unified prompt tokens — tags + LoRA triggers + caption phrases

@@ -13,6 +13,7 @@ import LayersTab from './tabs/LayersTab';
 import ExportTab from './tabs/ExportTab';
 import UtilitiesTab from './tabs/UtilitiesTab';
 import StoryboardTab from './tabs/StoryboardTab';
+import TagManagerModal from './components/TagManagerModal';
 import { fetchConfig } from './utils/api';
 import { useProject } from './hooks/useProject';
 import { GenerationHistory } from './components';
@@ -27,6 +28,8 @@ export default function App() {
   const [historyCollapsed, setHistoryCollapsed] = useState(false);
   const [historyFullscreen, setHistoryFullscreen] = useState(false);
   const [playbackFPS, setPlaybackFPS] = useState(24); // Video playback FPS (6-48)
+  // Tag manager popup: null when closed, else the TagManager focusRequest.
+  const [tagModal, setTagModal] = useState(null);
 
   useKeyboardShortcuts({
     activeTab,
@@ -37,6 +40,24 @@ export default function App() {
     setHistoryFullscreen,
   });
   
+  // `fuk-open-tag-manager` (anything, detail `{marker, history}`) and the
+  // `t` / Alt+T shortcut open the tag popup. A bare `t` while it's open is
+  // left to the modal, which closes itself after a dirty-form check.
+  useEffect(() => {
+    const handler = (e) => {
+      const { marker = null, history = false } = e.detail || {};
+      setTagModal(cur => (
+        cur && !marker && e.type === 'fuk-shortcut-tag-manager' ? cur : { marker, history }
+      ));
+    };
+    window.addEventListener('fuk-open-tag-manager', handler);
+    window.addEventListener('fuk-shortcut-tag-manager', handler);
+    return () => {
+      window.removeEventListener('fuk-open-tag-manager', handler);
+      window.removeEventListener('fuk-shortcut-tag-manager', handler);
+    };
+  }, []);
+
   // Convert FPS to playback rate (assuming 24fps source)
   const playbackSpeed = playbackFPS / 24;
 
@@ -194,6 +215,14 @@ export default function App() {
                 />
               </label>
             </div>
+
+            <button
+              className="fuk-btn fuk-btn-secondary fuk-header-tags-btn"
+              onClick={() => setTagModal({ marker: null, history: false })}
+              title="Manage tags (t)"
+            >
+              # Tags
+            </button>
           </div>
         </div>
       </header>
@@ -229,6 +258,14 @@ export default function App() {
           playbackSpeed={playbackSpeed}
           onPlaybackSpeedChange={(speed) => setPlaybackFPS(Math.round(speed * 24))}
         />
+
+      {tagModal && (
+        <TagManagerModal
+          project={project}
+          focusRequest={tagModal}
+          onClose={() => setTagModal(null)}
+        />
+      )}
     </div>
   );
 }

@@ -5,6 +5,8 @@
  *   1. Image describe — vision LLM produces a cinematographer-style description.
  *   2. Prompt tags — save a description fragment as a named shorthand so it
  *      can be re-injected into prompts later (storyboard / prompt construction).
+ *      The tag editor is the shared TagManager, also available as a popup
+ *      from any tab (TagManagerModal).
  *
  * The description is shown in a textarea so the user can edit before selecting
  * a span to promote into a tag. Selection is captured via the textarea's
@@ -12,18 +14,12 @@
  */
 
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { FolderOpen, X, Trash2 } from '../components/Icons';
-import MarkerTextarea from '../components/MarkerTextarea';
-import { notifyPromptTokensChanged } from '../utils/promptApi';
+import { FolderOpen, X } from '../components/Icons';
+import TagManager from '../components/TagManager';
 
 const API_URL = '/api';
 
 const VIDEO_EXTS = ['.mp4', '.mov', '.webm', '.mkv', '.avi', '.m4v'];
-
-// Hard cap on a tag value — mirrors the backend's limit in llm_endpoints.py
-// (_validate_payload). Surfaced in the UI as a live character count so a long
-// description can be trimmed to fit before Save rather than failing on submit.
-const TAG_VALUE_MAX = 4000;
 
 // Quick-focus chips. Clicking one appends its phrase to the focus field (or
 // removes it if already present), letting the description concentrate on that
@@ -54,7 +50,7 @@ function isVideoPath(path) {
   return VIDEO_EXTS.some(ext => lower.endsWith(ext));
 }
 
-export default function ImageDescribeTool() {
+export default function ImageDescribeTool({ project }) {
   const [imagePath, setImagePath] = useState(null);
   const [browsing, setBrowsing] = useState(false);
   const [running, setRunning] = useState(false);
@@ -63,21 +59,10 @@ export default function ImageDescribeTool() {
   const [error, setError] = useState(null);
   const [health, setHealth] = useState(null);
   const [copied, setCopied] = useState(false);
-
-  // Tag panel state
-  const [tags, setTags] = useState([]);
-  const [categories, setCategories] = useState([]);
-  const [tagsLoading, setTagsLoading] = useState(false);
-  const [tagName, setTagName] = useState('');
-  const [tagValue, setTagValue] = useState('');
-  const [tagCategory, setTagCategory] = useState('');
-  const [editingId, setEditingId] = useState(null);
-  const [tagError, setTagError] = useState(null);
-  const [tagSaving, setTagSaving] = useState(false);
-  const [tagFilter, setTagFilter] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState('all');
+  const [selectionError, setSelectionError] = useState(null);
 
   const descRef = useRef(null);
+  const tagManagerRef = useRef(null);
 
   // ---- LLM health ---------------------------------------------------------
 
@@ -93,102 +78,6 @@ export default function ImageDescribeTool() {
 
   useEffect(() => { checkHealth(); }, [checkHealth]);
 
-  // ---- Tag CRUD -----------------------------------------------------------
-
-  const loadTags = useCallback(async () => {
-    setTagsLoading(true);
-    try {
-      const res = await fetch(`${API_URL}/tags`);
-      const data = await res.json();
-      setTags(data.tags || []);
-    } catch (e) {
-      setTagError(`Could not load tags: ${e.message}`);
-    } finally {
-      setTagsLoading(false);
-    }
-  }, []);
-
-  const loadCategories = useCallback(async () => {
-    try {
-      const res = await fetch(`${API_URL}/tags/categories`);
-      const data = await res.json();
-      setCategories(data.categories || []);
-    } catch (e) {
-      // Non-fatal — form just won't have suggestions
-      console.warn('Could not load tag categories:', e);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadTags();
-    loadCategories();
-  }, [loadTags, loadCategories]);
-
-  const resetTagForm = useCallback(() => {
-    setEditingId(null);
-    setTagName('');
-    setTagValue('');
-    setTagCategory('');
-    setTagError(null);
-  }, []);
-
-  const handleSaveTag = useCallback(async () => {
-    if (!tagName.trim() || !tagValue.trim()) {
-      setTagError('Name and value are required.');
-      return;
-    }
-    setTagSaving(true);
-    setTagError(null);
-    try {
-      const url = editingId ? `${API_URL}/tags/${editingId}` : `${API_URL}/tags`;
-      const method = editingId ? 'PUT' : 'POST';
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: tagName.trim(),
-          value: tagValue.trim(),
-          category: tagCategory.trim() || null,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || `Save failed: ${res.status}`);
-      resetTagForm();
-      await loadTags();
-      // Let open `#` autocompletes (including this panel's own) pick up the
-      // new/edited tag without a reload.
-      notifyPromptTokensChanged();
-    } catch (e) {
-      setTagError(e.message);
-    } finally {
-      setTagSaving(false);
-    }
-  }, [editingId, tagName, tagValue, tagCategory, loadTags, resetTagForm]);
-
-  const handleDeleteTag = useCallback(async (id) => {
-    if (!window.confirm('Delete this tag?')) return;
-    try {
-      const res = await fetch(`${API_URL}/tags/${id}`, { method: 'DELETE' });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.detail || `Delete failed: ${res.status}`);
-      }
-      if (editingId === id) resetTagForm();
-      await loadTags();
-      notifyPromptTokensChanged();
-    } catch (e) {
-      setTagError(e.message);
-    }
-  }, [editingId, loadTags, resetTagForm]);
-
-  const handleEditTag = useCallback((tag) => {
-    setEditingId(tag.id);
-    setTagName(tag.name);
-    setTagValue(tag.value);
-    setTagCategory(tag.category || '');
-    setTagError(null);
-  }, []);
-
   // ---- Selection → tag draft ---------------------------------------------
 
   const captureSelection = useCallback(() => {
@@ -202,22 +91,17 @@ export default function ImageDescribeTool() {
   const handleUseSelection = useCallback(() => {
     const sel = captureSelection();
     if (!sel) {
-      setTagError('Select some text in the description first.');
+      setSelectionError('Select some text in the description first.');
       return;
     }
-    setTagValue(sel);
-    setEditingId(null);
-    setTagError(null);
-    // Move focus to the name input if it exists
-    const nameInput = document.querySelector('.image-describe-tag-name');
-    if (nameInput) nameInput.focus();
+    setSelectionError(null);
+    tagManagerRef.current?.startDraft(sel);
   }, [captureSelection]);
 
   const handleUseFullDescription = useCallback(() => {
     if (!description.trim()) return;
-    setTagValue(description.trim());
-    setEditingId(null);
-    setTagError(null);
+    setSelectionError(null);
+    tagManagerRef.current?.startDraft(description.trim());
   }, [description]);
 
   // ---- Browse / describe / copy ------------------------------------------
@@ -306,27 +190,6 @@ export default function ImageDescribeTool() {
     : !health.available ? `Ollama unavailable: ${health.error || 'no response'}`
     : !health.model_present ? `Model ${health.model} not pulled. Run: ollama pull ${health.model}`
     : `Ready · ${health.model}`;
-
-  const filteredTags = tags.filter(t => {
-    if (categoryFilter !== 'all') {
-      const tc = (t.category || '').toLowerCase();
-      if (categoryFilter === '__none__' ? tc !== '' : tc !== categoryFilter) return false;
-    }
-    const q = tagFilter.trim().toLowerCase();
-    if (!q) return true;
-    return t.name.toLowerCase().includes(q)
-      || (t.category || '').toLowerCase().includes(q)
-      || t.value.toLowerCase().includes(q);
-  });
-
-  const tagCountsByCategory = categories.reduce((acc, c) => {
-    acc[c] = tags.filter(t => (t.category || '').toLowerCase() === c).length;
-    return acc;
-  }, {});
-  const uncategorizedCount = tags.filter(t => !t.category).length;
-
-  const tagValueLen = tagValue.length;
-  const tagValueOver = tagValueLen - TAG_VALUE_MAX;   // >0 when the value exceeds the cap
 
   // ---- Render -------------------------------------------------------------
 
@@ -513,134 +376,13 @@ export default function ImageDescribeTool() {
 
       </div>
 
-      {/* Tag manager */}
+      {/* Tag manager — same component as the popup (TagManagerModal) */}
       <div className="fuk-card image-describe-tag-panel">
         <div className="image-describe-tag-panel-header">
-          <span className="fuk-label">
-            Prompt Tags
-            <span className="image-describe-tag-count">{tags.length}</span>
-          </span>
-          <div className="image-describe-tag-filters">
-            <select
-              className="fuk-select image-describe-tag-cat-filter"
-              value={categoryFilter}
-              onChange={(e) => setCategoryFilter(e.target.value)}
-            >
-              <option value="all">All categories ({tags.length})</option>
-              {categories.map(c => (
-                <option key={c} value={c}>{c} ({tagCountsByCategory[c] || 0})</option>
-              ))}
-              <option value="__none__">uncategorized ({uncategorizedCount})</option>
-            </select>
-            <input
-              type="text"
-              className="fuk-input image-describe-tag-filter"
-              placeholder="Filter…"
-              value={tagFilter}
-              onChange={(e) => setTagFilter(e.target.value)}
-            />
-          </div>
+          <span className="fuk-label">Prompt Tags</span>
+          {selectionError && <span className="image-describe-error">{selectionError}</span>}
         </div>
-
-        <div className="image-describe-tag-body">
-
-          {/* Form */}
-          <div className="image-describe-tag-form">
-            <div className="image-describe-tag-form-row">
-              <div className="image-describe-tag-field">
-                <span className="fuk-label">Name</span>
-                <input
-                  type="text"
-                  className="fuk-input image-describe-tag-name"
-                  placeholder="e.g. fat man"
-                  value={tagName}
-                  onChange={(e) => setTagName(e.target.value)}
-                  maxLength={64}
-                />
-              </div>
-              <div className="image-describe-tag-field">
-                <span className="fuk-label">Category</span>
-                <select
-                  className="fuk-select"
-                  value={tagCategory}
-                  onChange={(e) => setTagCategory(e.target.value)}
-                >
-                  <option value="">— uncategorized —</option>
-                  {categories.map(c => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div className="image-describe-tag-value-label">
-              <span className="fuk-label">Value</span>
-              <span className={`image-describe-tag-value-count ${tagValueOver > 0 ? 'image-describe-tag-value-count--over' : ''}`}>
-                {tagValueLen.toLocaleString()} / {TAG_VALUE_MAX.toLocaleString()}
-                {tagValueOver > 0 && ` — ${tagValueOver.toLocaleString()} over, trim to save`}
-              </span>
-            </div>
-            <MarkerTextarea
-              className="fuk-input image-describe-tag-value"
-              placeholder="Full text the tag should expand to. Type # to reference another tag, or use 'Tag selection' above."
-              value={tagValue}
-              onChange={setTagValue}
-              autoResize={false}
-            />
-
-            {tagError && <div className="image-describe-error">{tagError}</div>}
-
-            <div className="image-describe-tag-form-actions">
-              <button
-                className="fuk-btn fuk-btn-primary"
-                onClick={handleSaveTag}
-                disabled={tagSaving || !tagName.trim() || !tagValue.trim() || tagValueOver > 0}
-              >
-                {tagSaving ? 'Saving…' : editingId ? 'Update Tag' : 'Save Tag'}
-              </button>
-              {(editingId || tagName || tagValue || tagCategory) && (
-                <button className="fuk-btn fuk-btn-secondary" onClick={resetTagForm}>
-                  {editingId ? 'Cancel Edit' : 'Clear'}
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* List */}
-          <div className="image-describe-tag-list">
-            {tagsLoading ? (
-              <div className="image-describe-placeholder">Loading tags…</div>
-            ) : filteredTags.length === 0 ? (
-              <div className="image-describe-placeholder">
-                {tags.length === 0 ? 'No tags yet. Describe an image, select text, and save your first tag.' : 'No tags match the filter.'}
-              </div>
-            ) : (
-              filteredTags.map(tag => (
-                <div key={tag.id} className={`image-describe-tag-item ${editingId === tag.id ? 'image-describe-tag-item--editing' : ''}`}>
-                  <div className="image-describe-tag-item-head">
-                    <span className="image-describe-tag-name-chip">{tag.name}</span>
-                    {tag.category && <span className="image-describe-tag-cat">{tag.category}</span>}
-                    <div className="image-describe-tag-item-actions">
-                      <button className="fuk-btn fuk-btn-secondary image-describe-mini" onClick={() => handleEditTag(tag)}>
-                        Edit
-                      </button>
-                      <button
-                        className="fuk-btn fuk-btn-secondary image-describe-mini image-describe-tag-remove"
-                        onClick={() => handleDeleteTag(tag.id)}
-                        title="Remove tag"
-                      >
-                        <Trash2 />
-                        Remove
-                      </button>
-                    </div>
-                  </div>
-                  <div className="image-describe-tag-value-preview">{tag.value}</div>
-                </div>
-              ))
-            )}
-          </div>
-
-        </div>
+        <TagManager ref={tagManagerRef} project={project} />
       </div>
 
     </div>

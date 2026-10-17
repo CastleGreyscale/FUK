@@ -1,0 +1,472 @@
+/**
+ * TagManager + TagManagerModal
+ * Shared by Describe & Tag (inline) and the global tag popup.
+ */
+
+.tag-manager {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-height: 0;
+}
+
+/* --- Scope switch ----------------------------------------------------------- */
+
+.tag-manager-scopebar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.tag-manager-scopes {
+  display: inline-flex;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.tag-manager-scope {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.85rem;
+  font-size: 0.78rem;
+  background: transparent;
+  border: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.tag-manager-scope + .tag-manager-scope {
+  border-left: 1px solid var(--color-border);
+}
+
+.tag-manager-scope:hover:not(:disabled) {
+  color: var(--color-text);
+}
+
+.tag-manager-scope--active {
+  background: var(--color-accent);
+  color: #fff;
+}
+
+.tag-manager-scope:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.tag-manager-count {
+  font-size: 0.68rem;
+  padding: 0 0.4rem;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.tag-manager-scope-hint {
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+}
+
+/* --- Form (full width, across the top) --------------------------------------- */
+
+.tag-manager-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.7rem;
+  background: var(--color-bg-elevated, rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  transition: border-color 0.12s ease;
+}
+
+.tag-manager-form--editing {
+  border-color: var(--color-accent);
+}
+
+.tag-manager-form-row {
+  display: grid;
+  grid-template-columns: minmax(200px, 1.4fr) minmax(160px, 0.8fr) auto;
+  gap: 0.6rem;
+  align-items: end;
+}
+
+@media (max-width: 760px) {
+  .tag-manager-form-row {
+    grid-template-columns: 1fr 1fr;
+  }
+  .tag-manager-form-actions {
+    grid-column: 1 / -1;
+  }
+}
+
+.tag-manager-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.tag-manager-form-marker {
+  margin-left: 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--color-accent);
+}
+
+.tag-manager-form-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.tag-manager-value-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 0.2rem;
+}
+
+.tag-manager-value-count {
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.tag-manager-value-count--over {
+  color: #e57373;
+  font-weight: 600;
+}
+
+.tag-manager-value {
+  width: 100%;
+  min-height: 110px;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  resize: vertical;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+/* --- Toolbar + selection --------------------------------------------------------- */
+
+.tag-manager-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.tag-manager-search {
+  flex: 1;
+  min-width: 180px;
+  font-size: 0.8rem;
+}
+
+.tag-manager-cat-filter {
+  font-size: 0.8rem;
+  max-width: 220px;
+}
+
+.tag-manager-check {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.tag-manager-deleted-toggle--on {
+  border-color: var(--color-accent) !important;
+  color: var(--color-text) !important;
+}
+
+.tag-manager-selection-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.78rem;
+  border: 1px solid var(--color-accent);
+  border-radius: 4px;
+  background: rgba(90, 159, 255, 0.08);
+}
+
+.tag-manager-selection-bar > span {
+  margin-right: auto;
+}
+
+.tag-manager-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.tag-manager-notice {
+  font-size: 0.78rem;
+  color: #81c784;
+}
+
+.tag-manager-error {
+  font-size: 0.8rem;
+  color: #e57373;
+  white-space: pre-wrap;
+}
+
+.tag-manager-placeholder {
+  font-size: 0.82rem;
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+/* --- List ------------------------------------------------------------------------- */
+
+.tag-manager-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  max-height: 520px;
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}
+
+.tag-manager-item {
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 0.5rem 0.7rem;
+  background: var(--color-bg-elevated, rgba(255, 255, 255, 0.02));
+  transition: border-color 0.12s ease;
+}
+
+.tag-manager-item--editing {
+  border-color: var(--color-accent);
+}
+
+.tag-manager-item--selected {
+  background: rgba(90, 159, 255, 0.07);
+}
+
+.tag-manager-item--deleted .tag-manager-marker {
+  text-decoration: line-through;
+  opacity: 0.75;
+}
+
+.tag-manager-item-head {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.tag-manager-marker {
+  font-size: 0.8rem;
+  font-weight: 600;
+  font-family: monospace;
+  background: var(--color-accent-soft, rgba(90, 159, 255, 0.15));
+  color: var(--color-accent, #5a9fff);
+  padding: 0.1rem 0.45rem;
+  border-radius: 3px;
+}
+
+.tag-manager-cat {
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tag-manager-when {
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.tag-manager-item-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.tag-manager-mini {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.7rem !important;
+  padding: 0.2rem 0.55rem !important;
+}
+
+.tag-manager-mini svg {
+  width: 0.9em;
+  height: 0.9em;
+}
+
+.tag-manager-mini--on {
+  border-color: var(--color-accent) !important;
+  color: var(--color-text) !important;
+}
+
+.tag-manager-remove:hover {
+  color: #e57373;
+  border-color: rgba(229, 115, 115, 0.5);
+  background: rgba(229, 115, 115, 0.1);
+}
+
+.tag-manager-value-preview {
+  margin-top: 0.35rem;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: var(--color-text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  cursor: text;
+}
+
+/* --- History drawer --------------------------------------------------------------- */
+
+.tag-manager-history {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0.5rem 0 0 0.75rem;
+  border-top: 1px dashed var(--color-border);
+  border-left: 2px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.tag-manager-version-head {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.tag-manager-version-reason {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-secondary);
+}
+
+.tag-manager-version-diff {
+  font-size: 0.7rem;
+  padding: 0 0.4rem;
+  border-radius: 3px;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+}
+
+.tag-manager-version-value {
+  margin-top: 0.25rem;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: var(--color-text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 9.5em;
+  overflow-y: auto;
+}
+
+/* --- Modal --------------------------------------------------------------------------- */
+
+/* Below GenerationModal (1000) and the MarkerTextarea dropdown (1000). */
+.tag-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 950;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(3px);
+  animation: gen-modal-fade-in 0.15s ease-out;
+}
+
+.tag-modal {
+  width: 100%;
+  max-width: 1100px;
+  height: min(88vh, 1000px);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem;
+  box-sizing: border-box;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  animation: gen-modal-slide-up 0.15s ease-out;
+}
+
+.tag-modal-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.tag-modal-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.tag-modal-hint {
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+}
+
+.tag-modal-hint kbd {
+  font-family: monospace;
+  font-size: 0.7rem;
+  padding: 0 0.3rem;
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+}
+
+.tag-modal-close {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  padding: 0.25rem;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.tag-modal-close:hover {
+  color: var(--color-text);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.tag-manager--modal {
+  flex: 1;
+}
+
+.tag-manager--modal .tag-manager-list {
+  flex: 1;
+  max-height: none;
+}
+
+/* Header launcher */
+.fuk-header-tags-btn {
+  font-size: 0.78rem !important;
+  padding: 0.25rem 0.7rem !important;
+  font-family: monospace;
+}

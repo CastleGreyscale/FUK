@@ -10,6 +10,18 @@ const inInput = () => {
 const dispatch = (name, detail) =>
   window.dispatchEvent(new CustomEvent(name, detail !== undefined ? { detail } : undefined));
 
+// The `#marker` the caret sits in or right after, in the focused text field.
+const markerAtCaret = () => {
+  const el = document.activeElement;
+  if (el?.tagName !== 'TEXTAREA' && el?.tagName !== 'INPUT') return null;
+  const text = el.value || '';
+  const caret = el.selectionStart ?? text.length;
+  for (const m of text.matchAll(/#[A-Za-z0-9_-]+/g)) {
+    if (caret >= m.index && caret <= m.index + m[0].length) return m[0];
+  }
+  return null;
+};
+
 // Tab order matches footer bar left-to-right
 const TAB_KEYS = {
   '1': 'utilities',
@@ -57,6 +69,18 @@ export function useKeyboardShortcuts({
       // 1–7: switch tabs
       if (!shift && !ctrl && !inInput() && TAB_KEYS[key]) {
         setActiveTab(TAB_KEYS[key]);
+        return;
+      }
+
+      // T: toggle the tag manager popup. Alt+T works inside a prompt too and
+      // opens straight onto the #marker under the caret.
+      if (code === 'KeyT' && e.altKey && !ctrl && !shift) {
+        e.preventDefault();
+        dispatch('fuk-shortcut-tag-manager', { marker: markerAtCaret() });
+        return;
+      }
+      if (key === 't' && !e.altKey && !ctrl && !inInput()) {
+        dispatch('fuk-shortcut-tag-manager', { marker: null });
         return;
       }
 

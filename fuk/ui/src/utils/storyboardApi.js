@@ -56,6 +56,28 @@ export async function deleteStoryboardTag(id) {
   return jsonOrThrow(res, 'Failed to delete tag');
 }
 
+export async function fetchStoryboardGlobals() {
+  const res = await fetch(`${API_URL}/storyboard/globals`);
+  return jsonOrThrow(res, 'Failed to load storyboard globals');
+}
+
+export async function fetchStoryboardTagHistory(id) {
+  const res = await fetch(`${API_URL}/storyboard/globals/tags/${id}/history`);
+  return jsonOrThrow(res, 'Failed to load tag history');
+}
+
+export async function fetchDeletedStoryboardTags() {
+  const res = await fetch(`${API_URL}/storyboard/globals/tags/deleted`);
+  return jsonOrThrow(res, 'Failed to load deleted tags');
+}
+
+export async function restoreStoryboardTagVersion(id, vid) {
+  const res = await fetch(`${API_URL}/storyboard/globals/tags/${id}/history/${vid}/restore`, {
+    method: 'POST',
+  });
+  return jsonOrThrow(res, 'Failed to restore tag');
+}
+
 export async function saveMood(mood) {
   const res = await fetch(`${API_URL}/storyboard/globals/mood`, {
     method: 'PUT',

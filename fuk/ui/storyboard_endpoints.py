@@ -109,6 +109,32 @@ async def delete_tag(tag_id: str):
     return {"success": True}
 
 
+@router.get("/globals/tags/deleted")
+async def list_deleted_tags():
+    """Deleted project tags that can still be restored from their history."""
+    return {"tags": sm.deleted_tags(_load_or_create())}
+
+
+@router.get("/globals/tags/{tag_id}/history")
+async def get_tag_history(tag_id: str):
+    """Superseded versions of a project tag, newest first."""
+    return {"versions": sm.tag_versions(_load_or_create(), tag_id)}
+
+
+@router.post("/globals/tags/{tag_id}/history/{vid}/restore")
+async def restore_tag_version(tag_id: str, vid: str):
+    """Restore a version — updates a live tag, or recreates a deleted one."""
+    m = _load_or_create()
+    try:
+        entry = sm.restore_tag_version(m, tag_id, vid)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Version not found")
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    _save(m)
+    return entry
+
+
 @router.put("/globals/mood")
 async def put_mood(payload: Dict[str, Any] = Body(...)):
     m = _load_or_create()

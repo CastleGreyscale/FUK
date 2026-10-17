@@ -15,11 +15,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Footer from '../components/Footer';
-import { Plus, Trash2, Camera, Film, Loader2, AlertCircle, CheckCircle, Image as ImageIcon, X } from '../components/Icons';
+import { Plus, Trash2, Camera, Film, Loader2, AlertCircle, CheckCircle, Clock, Image as ImageIcon, X } from '../components/Icons';
 import { useStoryboard } from '../hooks/useStoryboard';
 import { sendPanelToImage, sendPanelToVideo, snapshotStoryboard, fetchSnapshots, restoreSnapshot } from '../utils/storyboardApi';
 import MarkerTextarea from '../components/MarkerTextarea';
-import { buildImageUrl, generateRandomSeed } from '../utils/constants';
+import { buildImageUrl, generateRandomSeed, PROJECT_TAG_KINDS } from '../utils/constants';
 
 // Debounce window for autosave. Short enough to feel snappy, long enough to
 // coalesce a paragraph of typing into one PUT.
@@ -365,10 +365,9 @@ function ActiveLorasPicker({ sb, active, available }) {
 
 // ---------------------------------------------------------------------------
 // Tags: project-local `#marker` shorthand. Lives in the storyboard manifest,
-// shadows workspace tags on marker collision.
+// shadows workspace tags on marker collision. History, restore and moving
+// tags in from the library live in the tag popup (TagManagerModal).
 // ---------------------------------------------------------------------------
-
-const TAG_KINDS = ['character', 'prop', 'location', 'other'];
 
 function TagsEditor({ sb, tags }) {
   const [draft, setDraft] = useState({ name: '', value: '', category: 'character' });
@@ -402,6 +401,14 @@ function TagsEditor({ sb, tags }) {
       </div>
       <p className="storyboard-section-hint">
         Project-local <code>#markers</code> — characters, props, locations, or anything else. Lives with the storyboard, not the global tag library. Shadows workspace tags on marker collision.
+        {' '}
+        <button
+          type="button"
+          className="tag-manager-link"
+          onClick={() => window.dispatchEvent(new CustomEvent('fuk-open-tag-manager'))}
+        >
+          manage, restore, or move in from library
+        </button>
       </p>
       <ul className="storyboard-subject-list">
         {tags.map(t => (
@@ -425,7 +432,7 @@ function TagsEditor({ sb, tags }) {
           onChange={e => setDraft(d => ({ ...d, category: e.target.value }))}
           disabled={submitting}
         >
-          {TAG_KINDS.map(k => <option key={k} value={k}>{k}</option>)}
+          {PROJECT_TAG_KINDS.map(k => <option key={k} value={k}>{k}</option>)}
         </select>
         <MarkerTextarea
           className="fuk-textarea"
@@ -491,6 +498,12 @@ function TagRow({ tag, sb }) {
     }
   }, [sb, tag.id, tag.name]);
 
+  // A tag moved in from the library can carry a library category (e.g.
+  // "lighting"); offer it so the select doesn't silently show another kind.
+  const kindOptions = PROJECT_TAG_KINDS.includes(draft.category)
+    ? PROJECT_TAG_KINDS
+    : [...PROJECT_TAG_KINDS, draft.category];
+
   if (editing) {
     return (
       <li className="storyboard-subject-row storyboard-subject-row--editing">
@@ -504,7 +517,7 @@ function TagRow({ tag, sb }) {
           value={draft.category}
           onChange={e => setDraft(d => ({ ...d, category: e.target.value }))}
         >
-          {TAG_KINDS.map(k => <option key={k} value={k}>{k}</option>)}
+          {kindOptions.map(k => <option key={k} value={k}>{k}</option>)}
         </select>
         <MarkerTextarea
           className="fuk-textarea"
@@ -529,6 +542,13 @@ function TagRow({ tag, sb }) {
       </div>
       <div className="storyboard-subject-row-actions">
         <button className="fuk-btn fuk-btn-secondary" onClick={() => setEditing(true)} disabled={busy}>Edit</button>
+        <button
+          className="fuk-btn fuk-btn-secondary"
+          onClick={() => window.dispatchEvent(new CustomEvent('fuk-open-tag-manager', { detail: { marker: tag.marker, history: true } }))}
+          title="Earlier versions"
+        >
+          <Clock />
+        </button>
         <button className="fuk-btn fuk-btn-secondary" onClick={handleDelete} disabled={busy}><Trash2 /></button>
       </div>
     </li>

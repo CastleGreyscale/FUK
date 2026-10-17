@@ -92,6 +92,41 @@ export async function deleteTag(id) {
   return data;
 }
 
+export async function fetchTagHistory(id) {
+  const res = await fetch(`${API_URL}/tags/${id}/history`);
+  return _jsonOrThrow(res, 'Failed to load tag history');
+}
+
+export async function fetchDeletedTags() {
+  const res = await fetch(`${API_URL}/tags/deleted`);
+  return _jsonOrThrow(res, 'Failed to load deleted tags');
+}
+
+export async function restoreTagVersion(id, vid) {
+  const res = await fetch(`${API_URL}/tags/${id}/history/${vid}/restore`, { method: 'POST' });
+  const data = await _jsonOrThrow(res, 'Failed to restore tag');
+  notifyPromptTokensChanged();
+  return data;
+}
+
+/**
+ * Copy (or move) workspace tags into the active project's storyboard.
+ * Returns `{added, replaced, unchanged, conflicts, moved}`; conflicts are
+ * project markers that already exist with a different value, left alone
+ * unless `overwrite` is set.
+ */
+export async function pushTagsToStoryboard(ids, { move = false, overwrite = false } = {}) {
+  const res = await fetch(`${API_URL}/tags/push-to-storyboard`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids, move, overwrite }),
+  });
+  const data = await _jsonOrThrow(res, 'Failed to push tags to storyboard');
+  notifyPromptTokensChanged();
+  window.dispatchEvent(new CustomEvent('fuk-storyboard-changed'));
+  return data;
+}
+
 export async function compilePrompt({ text, model, activeLoras, styleChips, styleLabel }) {
   const res = await fetch(`${API_URL}/prompt/compile`, {
     method: 'POST',
