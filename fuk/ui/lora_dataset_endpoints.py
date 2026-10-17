@@ -219,6 +219,10 @@ async def get_job(job_id: str):
         enriched_variations.append({
             **v,
             "image_url": str(img_path) if ready else None,
+            # A rerun overwrites generated.png in place, so the path never changes
+            # and the browser keeps showing its cached copy. The mtime goes on the
+            # URL as a version so a rewritten file gets a fresh request.
+            "image_version": img_path.stat().st_mtime_ns if ready else None,
         })
 
     cur_idx = job.get("current_idx", 0)

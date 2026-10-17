@@ -17,9 +17,12 @@ const toLabel = key => key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCas
 // ============================================================================
 
 
-function variationImageUrl(path) {
+// version is the file's mtime from the server — reruns overwrite generated.png
+// at the same path, so without it the browser serves the cached old image.
+function variationImageUrl(path, version) {
   if (!path) return null;
-  return buildImageUrl(path);
+  const url = buildImageUrl(path);
+  return version ? `${url}?v=${version}` : url;
 }
 
 // ============================================================================
@@ -733,7 +736,7 @@ function CurationPhase({ jobId }) {
 }
 
 function CurationCard({ variation, onApprove, onRerun, isRerunning }) {
-  const imgUrl = variation.image_url ? variationImageUrl(variation.image_url) : null;
+  const imgUrl = variation.image_url ? variationImageUrl(variation.image_url, variation.image_version) : null;
   const approved = variation.approved;
   const isFailed = variation.status === 'failed';
   const isRunning = variation.status === 'running' || isRerunning;
