@@ -127,6 +127,8 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
     lastUsedSeed: videoDefaults.lastUsedSeed ?? null,
     image_path: videoDefaults.image_path ?? null,
     end_image_path: videoDefaults.end_image_path ?? null,
+    end_image_frame: videoDefaults.end_image_frame ?? null,
+    extra_frames: videoDefaults.extra_frames ?? [],
     animate_pose_video: videoDefaults.animate_pose_video ?? null,
     animate_face_video: videoDefaults.animate_face_video ?? null,
     animate_inpaint_video: videoDefaults.animate_inpaint_video ?? null,
@@ -283,6 +285,32 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
       );
     }
   }, [project?.isProjectLoaded, project?.updateTabState, setLocalFormData, familyDefaultsFor]);
+
+  // Apply recalled settings (history drop) that may also switch model. Through
+  // setFormData a model switch loads the new model's saved settings and drops
+  // everything else in the update, so here the values are written onto the
+  // new model's entry in the same update that activates it.
+  const applyRecalledSettings = useCallback((updates) => {
+    const currentData = formDataRef.current;
+    const newModel = updates.task ?? currentData.task;
+    if (newModel === currentData.task) {
+      setFormData(prev => ({ ...prev, ...updates }));
+      return;
+    }
+    if (project?.isProjectLoaded && project?.updateTabState) {
+      const existingModelSettings = projectTabRef.current?.modelSettings || {};
+      project.updateTabState('video', {
+        activeModel: newModel,
+        modelSettings: {
+          ...existingModelSettings,
+          [currentData.task]: currentData,
+          [newModel]: { ...(existingModelSettings[newModel] || {}), ...updates, task: newModel },
+        },
+      });
+    } else {
+      setLocalFormData({ ...currentData, ...familyDefaultsFor(newModel), ...updates });
+    }
+  }, [project?.isProjectLoaded, project?.updateTabState, setFormData, setLocalFormData, familyDefaultsFor]);
 
   // Frame input state (for controlled input before validation)
   const [frameInput, setFrameInput] = useState(String(formData.video_length || 81));
@@ -628,6 +656,17 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
       use_two_stage_pipeline: constraints.supports_two_stage
         ? !!formData.use_two_stage_pipeline
         : null,
+      // Frame placement is LTX-2 only, and an end frame means nothing
+      // without an end image. Rows still waiting for an image are left out.
+      end_image_frame: supportsFrameIndexes && formData.end_image_path
+        ? (formData.end_image_frame ?? null)
+        : null,
+      extra_frames: supportsFrameIndexes && placedExtraFrames.length
+        ? placedExtraFrames.map(f => ({
+            path: f.path.replace(/^\/outputs\//, ''),
+            frame: f.frame,
+          }))
+        : null,
     };
 
     // Build seed queue for batch
@@ -726,6 +765,32 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
 
   const handleEndImageChange = (paths) => {
     setFormData(prev => ({ ...prev, end_image_path: paths[0] || null }));
+  };
+
+  const updateExtraFrame = (i, patch) => {
+    setFormData(prev => ({
+      ...prev,
+      extra_frames: (prev.extra_frames || []).map((f, j) => (j === i ? { ...f, ...patch } : f)),
+    }));
+  };
+
+  const addExtraFrame = () => {
+    setFormData(prev => ({
+      ...prev,
+      // Midway is as good a first guess as any, and never collides with
+      // the start or the default end frame.
+      extra_frames: [
+        ...(prev.extra_frames || []),
+        { path: null, frame: Math.floor(Math.max(0, (prev.video_length ?? 1) - 1) / 2) },
+      ],
+    }));
+  };
+
+  const removeExtraFrame = (i) => {
+    setFormData(prev => ({
+      ...prev,
+      extra_frames: (prev.extra_frames || []).filter((_, j) => j !== i),
+    }));
   };
 
   const handleControlPathChange = (paths) => {
@@ -847,6 +912,26 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
   const endImageOptional = imageInputsOptional
     || modelSupports.includes('input_images');
 
+  // LTX-2 places each conditioning image on a frame of its own: the start
+  // image is always frame 0, the end image defaults to the last frame but can
+  // move, and extra keyframes go wherever they are put. Indexes are clamped
+  // into the clip the same way the runner clamps them, so a clash shown here
+  // is exactly the one the runner would refuse.
+  const supportsFrameIndexes = modelSupports.includes('input_images');
+  const lastFrameIndex = Math.max(0, (formData.video_length ?? 1) - 1);
+  const clampFrame = (f) => Math.min(Math.max(f, 0), lastFrameIndex);
+  const placedExtraFrames = (formData.extra_frames || [])
+    .filter(f => f.path && Number.isInteger(f.frame));
+  const usedFrames = [
+    ...(formData.image_path ? [0] : []),
+    ...(formData.end_image_path ? [clampFrame(formData.end_image_frame ?? lastFrameIndex)] : []),
+    ...placedExtraFrames.map(f => clampFrame(f.frame)),
+  ];
+  const clashingFrames = supportsFrameIndexes
+    ? [...new Set(usedFrames.filter((f, i) => usedFrames.indexOf(f) !== i))]
+    : [];
+  const frameTime = (f) => `${(f / modelFps).toFixed(2)}s`;
+
   // Same aspect at full scale leaves no padding for the model to fill.
   const outpaintSourceRatio = sourceVideoInfo?.width && sourceVideoInfo?.height
     ? sourceVideoInfo.width / sourceVideoInfo.height
@@ -901,8 +986,9 @@ export default function VideoTab({ config, activeTab, setActiveTab, project, pla
       const draftPrompt = meta.prompt_source || meta.prompt;
       if (draftPrompt)                     updates.prompt              = draftPrompt;
       if (meta.negative_prompt)            updates.negative_prompt     = meta.negative_prompt;
-      // Video model is stored as 'model' but the tab uses 'task'
-      if (meta.model)                      updates.task                = meta.model;
+      // Video model is stored as 'model' but the tab uses 'task'. Only video
+      // models — an image gen dropped here keeps the current one.
+      if (meta.model && videoModels.some(m => m.key === meta.model)) updates.task = meta.model;
       if (meta.guidance_scale != null)     updates.guidance_scale      = meta.guidance_scale;
       if (meta.infer_steps != null)        updates.steps               = meta.infer_steps;
       if (meta.video_length != null)       updates.video_length        = meta.video_length;
@@ -939,7 +1025,7 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
       if (meta.animate_inpaint_video) updates.animate_inpaint_video = meta.animate_inpaint_video;
       if (meta.animate_mask_video)    updates.animate_mask_video    = meta.animate_mask_video;
 
-      setFormData(prev => ({ ...prev, ...updates }));
+      applyRecalledSettings(updates);
 
       if (meta.video_length != null) setFrameInput(String(meta.video_length));
 
@@ -950,7 +1036,7 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
     } catch (err) {
       console.error('[VideoTab] Metadata reload failed:', err);
     }
-  }, [setFormData]);
+  }, [applyRecalledSettings, videoModels]);
 
   return (
     <>
@@ -1343,6 +1429,100 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
                       multiple={false}
                       accept="all"
                     />
+                    {supportsFrameIndexes && formData.end_image_path && (
+                      <div className="fuk-form-group-compact fuk-mt-2">
+                        <label className="fuk-label" title="Which frame the end image lands on. Leave empty for the last frame. Anywhere but frame 0 it is a soft target the clip moves toward, not a pinned frame.">
+                          End Frame <Info className="fuk-label-info" />
+                        </label>
+                        <input
+                          type="number"
+                          className="fuk-input"
+                          value={formData.end_image_frame ?? ''}
+                          placeholder={`last (${lastFrameIndex})`}
+                          onChange={(e) => setFormData(prev => ({
+                            ...prev,
+                            end_image_frame: e.target.value === '' ? null : parseInt(e.target.value, 10),
+                          }))}
+                          step={1}
+                          min={0}
+                          max={lastFrameIndex}
+                          disabled={generating}
+                        />
+                        <p className="fuk-help-text">
+                          {frameTime(clampFrame(formData.end_image_frame ?? lastFrameIndex))} into the clip
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* LTX-2 extra keyframes — images pinned to frames in between */}
+                {supportsFrameIndexes && (
+                  <div className="fuk-form-group-compact fuk-mt-4">
+                    <label className="fuk-label" title="More images for the clip to pass through, each on its own frame. Like the end image they steer rather than pin, so expect the clip to land near them, not on them exactly.">
+                      Keyframes <span className="fuk-label-description">(Optional)</span>{' '}
+                      <Info className="fuk-label-info" />
+                    </label>
+                    {(formData.extra_frames || []).map((f, i) => (
+                      <div key={i} className="fuk-mt-2">
+                        <div className="fuk-form-pair">
+                          <div className="fuk-form-group-compact">
+                            <label className="fuk-label">Frame</label>
+                            <input
+                              type="number"
+                              className="fuk-input"
+                              value={f.frame ?? ''}
+                              onChange={(e) => updateExtraFrame(i, {
+                                frame: e.target.value === '' ? null : parseInt(e.target.value, 10),
+                              })}
+                              step={1}
+                              min={0}
+                              max={lastFrameIndex}
+                              disabled={generating}
+                            />
+                          </div>
+                          <div className="fuk-form-group-compact">
+                            <label className="fuk-label">&nbsp;</label>
+                            <button
+                              type="button"
+                              className="fuk-btn fuk-btn-secondary fuk-btn-sm"
+                              onClick={() => removeExtraFrame(i)}
+                              disabled={generating}
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        </div>
+                        <MediaUploader
+                          images={f.path ? [f.path] : []}
+                          onImagesChange={(paths) => updateExtraFrame(i, { path: paths[0] || null })}
+                          disabled={generating}
+                          multiple={false}
+                          accept="all"
+                        />
+                        {Number.isInteger(f.frame) && (
+                          <p className="fuk-help-text">
+                            {f.frame > lastFrameIndex
+                              ? `Past the last frame (${lastFrameIndex}) — will be placed on it`
+                              : `${frameTime(clampFrame(f.frame))} into the clip`}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      className="fuk-btn fuk-btn-secondary fuk-btn-sm fuk-mt-2"
+                      onClick={addExtraFrame}
+                      disabled={generating}
+                    >
+                      Add Keyframe
+                    </button>
+                    {clashingFrames.length > 0 && (
+                      <p className="fuk-help-text fuk-help-text--warning">
+                        <AlertCircle className="fuk-icon--sm" />
+                        Two images on frame {clashingFrames.join(', ')} — each needs its own frame
+                      </p>
+                    )}
                   </div>
                 )}
 
@@ -1818,7 +1998,8 @@ if (meta.denoising_strength != null) updates.denoising_strength  = meta.denoisin
           // since videoSlot.required is false for those.
           && (!requiresControlVideo || !videoSlot.required || !!formData.control_path)
           && !outpaintNothingToFill
-          && !outpaintSourceUnread}
+          && !outpaintSourceUnread
+          && clashingFrames.length === 0}
         generateLabel="Generate Video"
         generatingLabel={batchProgress ? `Generating ${batchProgress.current}/${batchProgress.total}...` : 'Generating...'}
         batchCount={formData.batchCount}

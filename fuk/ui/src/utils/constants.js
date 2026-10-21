@@ -7,10 +7,6 @@
 // API base - in dev, Vite proxies /api to localhost:8000
 export const API_URL = '/api';
 
-// Suggested categories for project (storyboard) tags. Not enforced server-side —
-// tags pushed in from the workspace library keep their own category.
-export const PROJECT_TAG_KINDS = ['character', 'prop', 'location', 'other'];
-
 // Seed mode options (enum - structure won't change)
 export const SEED_MODES = {
   FIXED: 'fixed',       // Use exact seed value

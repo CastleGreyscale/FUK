@@ -118,6 +118,30 @@ The patch copies both lists before extending them. Regression signal when upgrad
 LTX-2.5 job with a first frame, a last frame and a control video; watch that per-step time
 stays flat instead of climbing. Drop the patch if upstream stops mutating its arguments.
 
+### `0005-minimax-h3-control-keyframe-rows.patch`
+
+`diffsynth/pipelines/minimax_h3_audio_video.py` — `model_fn_minimax_h3_controlnet`, added
+when every `minimax_h3_control` job with a first or last frame failed on the first step
+with *"control_rows hold 57040 rows but the packed sequence has 58880 video rows"*.
+
+In FL2VA keyframe mode the packed sequence puts the keyframe anchor rows at the front of
+`img_pos`, ahead of the target video (`model_fn_minimax_h3` writes them to
+`img_pos[:cond_rows_count]`). `control_rows` come from the control clip alone, so they
+cover only the target rows. Upstream still hands the ControlNet the full `img_pos`, and
+its one-row-per-video-row check fails. The gap is exactly the anchors: 1840 rows = two
+keyframes x 920 at 1280x736. Upstream's only ControlNet example has no keyframes, which
+is why it never shows up there.
+
+The patch hands the ControlNet `img_pos[cond_rows_count:]`, so control rows land on the
+target video, and zeroes the hints on the anchor rows. Without that, the anchors would
+carry the control stream's copy of the main embedding plus a residual the ControlNet was
+never trained to produce, and the clean keyframes would no longer be clean. With no
+keyframes `cond_rows_count` is 0 and nothing changes.
+
+Regression signal when upgrading: a `minimax_h3_control` job with a control video and a
+first frame. Drop the patch if upstream starts building anchor rows into `control_rows`
+or slicing `img_pos` itself.
+
 ## Dropped patches
 
 ### `0003-ltx25-optional-gemma4-import.patch` — dropped at the LTX-2.5 swap

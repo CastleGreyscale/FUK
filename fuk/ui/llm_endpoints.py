@@ -169,18 +169,29 @@ TAGS_FILE = Path(__file__).parent / "data" / "prompt_tags.json"
 TAG_HISTORY_FILE = Path(__file__).parent / "data" / "prompt_tag_history.json"
 CATEGORIES_FILE = Path(__file__).parent / "data" / "prompt_tag_categories.json"
 _NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _\-]{0,63}$")
+_SUBCATEGORY_RE = re.compile(r"^[a-z0-9][a-z0-9 _\-]{0,31}$")
 
-# Starter category set. Auto-written to CATEGORIES_FILE on first run; the user
-# can edit that file freely afterwards — it is the source of truth from then on.
-DEFAULT_CATEGORIES = [
-    "composition",
-    "subject",
-    "lighting",
-    "camera",
-    "color",
-    "style",
-    "atmosphere",
-    "setting",
+# Two-level categories: a prime category plus an optional free-text
+# subcategory. The prime list is shared by workspace and project (storyboard)
+# tags so a tag keeps its category when it moves between them. Subcategories
+# listed here are only suggestions — any subcategory already in use is offered
+# too. Auto-written to CATEGORIES_FILE on first run; the user can edit that
+# file freely afterwards — it is the source of truth from then on.
+CATEGORIES_VERSION = 2
+DEFAULT_CATEGORY_TREE = [
+    {"name": "subject",     "subcategories": []},
+    {"name": "character",   "subcategories": []},
+    {"name": "wardrobe",    "subcategories": ["outfit", "top", "bottom", "outerwear", "footwear", "accessories"]},
+    {"name": "prop",        "subcategories": []},
+    {"name": "location",    "subcategories": []},
+    {"name": "setting",     "subcategories": ["interior", "exterior"]},
+    {"name": "lighting",    "subcategories": ["key", "fill", "rim", "practical", "natural", "time of day"]},
+    {"name": "composition", "subcategories": ["framing", "shot size", "angle", "depth"]},
+    {"name": "camera",      "subcategories": ["lens", "movement", "focus"]},
+    {"name": "color",       "subcategories": ["palette", "grade"]},
+    {"name": "style",       "subcategories": []},
+    {"name": "atmosphere",  "subcategories": ["weather", "haze"]},
+    {"name": "other",       "subcategories": []},
 ]
 
 
@@ -188,6 +199,13 @@ class TagPayload(BaseModel):
     name: str
     value: str
     category: Optional[str] = None
+    subcategory: Optional[str] = None
+
+
+class TagRecategorizePayload(BaseModel):
+    ids: List[str]
+    category: Optional[str] = None
+    subcategory: Optional[str] = None
 
 
 class TagPushPayload(BaseModel):
@@ -234,26 +252,101 @@ def _normalize_name(name: str) -> str:
     return " ".join(name.strip().split()).lower()
 
 
-def _load_categories() -> List[str]:
-    """Read user-editable category list, seeding the file on first run."""
+def _clean_tree(raw) -> List[dict]:
+    """Normalize a category file's list — `"name"` or `{name, subcategories}`
+    entries — into `[{name, subcategories}]`, dropping blanks and duplicates."""
+    out: List[dict] = []
+    seen = set()
+    for entry in raw or []:
+        if isinstance(entry, dict):
+            name, subs = entry.get("name"), entry.get("subcategories") or []
+        else:
+            name, subs = entry, []
+        name = str(name or "").strip().lower()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        clean_subs = list(dict.fromkeys(
+            str(x).strip().lower() for x in subs if str(x).strip()
+        ))
+        out.append({"name": name, "subcategories": clean_subs})
+    return out
+
+
+def _write_category_tree(tree: List[dict]) -> None:
+    CATEGORIES_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(CATEGORIES_FILE, "w") as f:
+        json.dump({"version": CATEGORIES_VERSION, "categories": tree}, f, indent=2)
+
+
+def _load_category_tree() -> List[dict]:
+    """Read the user-editable category tree, seeding the file on first run.
+
+    A version-1 file (a flat name list) is upgraded once, in place: the default
+    categories it lacks are added in the default order, the user's own extras
+    are kept after them, and known categories get their suggested
+    subcategories. After that the file is left alone, so a category the user
+    deletes stays deleted.
+    """
     if not CATEGORIES_FILE.exists():
-        CATEGORIES_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with open(CATEGORIES_FILE, "w") as f:
-            json.dump({"categories": DEFAULT_CATEGORIES}, f, indent=2)
-        return list(DEFAULT_CATEGORIES)
+        tree = _clean_tree(DEFAULT_CATEGORY_TREE)
+        _write_category_tree(tree)
+        return tree
     try:
         with open(CATEGORIES_FILE) as f:
             data = json.load(f)
-        cats = data.get("categories", []) if isinstance(data, dict) else []
-        return [str(c).strip().lower() for c in cats if str(c).strip()]
     except Exception:
-        return list(DEFAULT_CATEGORIES)
+        return _clean_tree(DEFAULT_CATEGORY_TREE)
+    data = data if isinstance(data, dict) else {}
+    tree = _clean_tree(data.get("categories"))
+    if (data.get("version") or 1) < CATEGORIES_VERSION:
+        defaults = {c["name"]: c for c in _clean_tree(DEFAULT_CATEGORY_TREE)}
+        upgraded = [
+            {"name": n, "subcategories": list(dict.fromkeys(
+                defaults[n]["subcategories"]
+                + next((c["subcategories"] for c in tree if c["name"] == n), [])
+            ))}
+            for n in defaults
+        ]
+        upgraded += [c for c in tree if c["name"] not in defaults]
+        tree = upgraded
+        try:
+            _write_category_tree(tree)
+        except Exception:
+            pass
+    return tree
 
 
-def _validate_payload(payload: TagPayload) -> tuple[str, str, Optional[str]]:
+def _load_categories() -> List[str]:
+    """Prime category names, in display order."""
+    return [c["name"] for c in _load_category_tree()]
+
+
+def _clean_category(category: Optional[str], subcategory: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    """Validate a (category, subcategory) pair against the shared prime list."""
+    category = (category or "").strip().lower() or None
+    subcategory = " ".join((subcategory or "").strip().lower().split()) or None
+    if category is not None:
+        allowed = _load_categories()
+        if category not in allowed:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown category '{category}'. Allowed: {', '.join(allowed)}",
+            )
+    if subcategory is not None:
+        if category is None:
+            raise HTTPException(status_code=400, detail="A subcategory needs a category")
+        if not _SUBCATEGORY_RE.match(subcategory):
+            raise HTTPException(
+                status_code=400,
+                detail="Subcategory: 1-32 chars, letters/digits/space/underscore/hyphen",
+            )
+    return category, subcategory
+
+
+def _validate_payload(payload: TagPayload) -> tuple[str, str, Optional[str], Optional[str]]:
     name = _normalize_name(payload.name)
     value = payload.value.strip()
-    category = (payload.category or "").strip().lower() or None
     if not name:
         raise HTTPException(status_code=400, detail="Tag name is required")
     if not _NAME_RE.match(name):
@@ -265,14 +358,8 @@ def _validate_payload(payload: TagPayload) -> tuple[str, str, Optional[str]]:
         raise HTTPException(status_code=400, detail="Tag value is required")
     if len(value) > 4000:
         raise HTTPException(status_code=400, detail="Tag value too long (max 4000 chars)")
-    if category is not None:
-        allowed = _load_categories()
-        if category not in allowed:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Unknown category '{category}'. Allowed: {', '.join(allowed)}",
-            )
-    return name, value, category
+    category, subcategory = _clean_category(payload.category, payload.subcategory)
+    return name, value, category, subcategory
 
 
 def _encode_image_for_describe(image_path: Path, max_size: int) -> str:
@@ -500,6 +587,7 @@ def _tag_tokens() -> List[dict]:
             "marker": marker,
             "expansion": value,
             "category": t.get("category"),
+            "subcategory": t.get("subcategory"),
         })
     return out
 
@@ -1059,7 +1147,7 @@ def _vocabulary_list(config_dir: Path, model_family: Optional[str], char_budget:
         return True
 
     for t in _tag_tokens():
-        cat = t.get("category") or "tag"
+        cat = "/".join(filter(None, (t.get("category"), t.get("subcategory")))) or "tag"
         if not _add(f"[tag:{cat}]", t["name"], t["expansion"]):
             break
 
@@ -1272,17 +1360,29 @@ def setup_llm_routes(app, *, resolve_input_path: Callable[[str], Path], log, con
 
     @app.get("/api/tags/categories")
     async def list_tag_categories():
-        return {"categories": _load_categories()}
+        """Prime categories (shared by workspace and project tags) and, per
+        category, subcategory suggestions: the file's plus any already in use
+        by a workspace or project tag."""
+        tree = _load_category_tree()
+        subs = {c["name"]: list(c["subcategories"]) for c in tree}
+        sb_tag_toks, _ = _storyboard_context()
+        for t in [*_load_tags(), *sb_tag_toks]:
+            cat, sub = t.get("category"), t.get("subcategory")
+            if cat and sub and sub not in subs.setdefault(cat, []):
+                subs[cat].append(sub)
+        return {"categories": [c["name"] for c in tree], "subcategories": subs}
 
     @app.get("/api/tags")
     async def list_tags():
         tags = _load_tags()
-        tags.sort(key=lambda t: ((t.get("category") or "~"), t.get("name", "")))
+        tags.sort(key=lambda t: (
+            (t.get("category") or "~"), (t.get("subcategory") or ""), t.get("name", ""),
+        ))
         return {"tags": tags}
 
     @app.post("/api/tags")
     async def create_tag(payload: TagPayload):
-        name, value, category = _validate_payload(payload)
+        name, value, category, subcategory = _validate_payload(payload)
         tags = _load_tags()
         if any(_normalize_name(t.get("name", "")) == name for t in tags):
             raise HTTPException(status_code=409, detail=f"Tag '{name}' already exists")
@@ -1292,6 +1392,7 @@ def setup_llm_routes(app, *, resolve_input_path: Callable[[str], Path], log, con
             "name": name,
             "value": value,
             "category": category,
+            "subcategory": subcategory,
             "created": now,
             "updated": now,
         }
@@ -1302,7 +1403,7 @@ def setup_llm_routes(app, *, resolve_input_path: Callable[[str], Path], log, con
 
     @app.put("/api/tags/{tag_id}")
     async def update_tag(tag_id: str, payload: TagPayload):
-        name, value, category = _validate_payload(payload)
+        name, value, category, subcategory = _validate_payload(payload)
         tags = _load_tags()
         idx = next((i for i, t in enumerate(tags) if t.get("id") == tag_id), -1)
         if idx < 0:
@@ -1312,7 +1413,7 @@ def setup_llm_routes(app, *, resolve_input_path: Callable[[str], Path], log, con
             for i, t in enumerate(tags)
         ):
             raise HTTPException(status_code=409, detail=f"Tag '{name}' already exists")
-        new = {"name": name, "value": value, "category": category}
+        new = {"name": name, "value": value, "category": category, "subcategory": subcategory}
         if not th.same_content(tags[idx], new):
             history = _load_tag_history()
             if th.record(history, tags[idx], "edit"):
@@ -1332,6 +1433,30 @@ def setup_llm_routes(app, *, resolve_input_path: Callable[[str], Path], log, con
         _save_tag_history(history)
         _save_tags([t for t in tags if t.get("id") != tag_id])
         return {"success": True}
+
+    @app.post("/api/tags/recategorize")
+    async def recategorize_tags(payload: TagRecategorizePayload):
+        """Set category + subcategory on many tags at once. Each changed tag's
+        previous version goes into its history, same as a single edit."""
+        category, subcategory = _clean_category(payload.category, payload.subcategory)
+        wanted = set(payload.ids)
+        tags = _load_tags()
+        history = _load_tag_history()
+        now = datetime.now().isoformat()
+        changed = 0
+        for t in tags:
+            if t.get("id") not in wanted:
+                continue
+            new = {**t, "category": category, "subcategory": subcategory}
+            if th.same_content(t, new):
+                continue
+            th.record(history, t, "edit")
+            t.update({"category": category, "subcategory": subcategory, "updated": now})
+            changed += 1
+        if changed:
+            _save_tag_history(history)
+            _save_tags(tags)
+        return {"changed": changed}
 
     @app.get("/api/tags/deleted")
     async def list_deleted_tags():
@@ -1353,10 +1478,11 @@ def setup_llm_routes(app, *, resolve_input_path: Callable[[str], Path], log, con
         version = th.find_version(history, tag_id, vid)
         if version is None:
             raise HTTPException(status_code=404, detail="Version not found")
-        name, value, category = _validate_payload(TagPayload(
+        name, value, category, subcategory = _validate_payload(TagPayload(
             name=version.get("name") or "",
             value=version.get("value") or "",
             category=version.get("category"),
+            subcategory=version.get("subcategory"),
         ))
         tags = _load_tags()
         if any(
@@ -1368,12 +1494,15 @@ def setup_llm_routes(app, *, resolve_input_path: Callable[[str], Path], log, con
         idx = next((i for i, t in enumerate(tags) if t.get("id") == tag_id), -1)
         if idx >= 0:
             th.record(history, tags[idx], "restore")
-            tags[idx].update({"name": name, "value": value, "category": category, "updated": now})
+            tags[idx].update({
+                "name": name, "value": value, "category": category,
+                "subcategory": subcategory, "updated": now,
+            })
             entry = tags[idx]
         else:
             entry = {
                 "id": tag_id, "name": name, "value": value, "category": category,
-                "created": now, "updated": now,
+                "subcategory": subcategory, "created": now, "updated": now,
             }
             tags.append(entry)
         _save_tag_history(history)

@@ -23,6 +23,11 @@ denoise, so it comes back as supplied; the last is appended as a reference
 token stamped with the final frame's timestamp, which steers the clip toward it
 without pinning the pixels. `input_images_strength` reaches only the first.
 
+The last frame does not have to sit at the end: `end_image_frame` moves it to
+any frame index, and `extra_frames` adds more images at indexes of their own.
+Every image away from frame 0 is the same kind of soft reference token, so a
+clip can be steered through several poses rather than just toward one.
+
 Function variants are LoRAs on one shared 42GB base rather than separate
 checkpoints. LTX-2's twelve (seven camera moves, five in-context controls) were
 19B and do not load here; upstream has reissued exactly one for 2.5 so far, the
@@ -75,9 +80,13 @@ class LTX2PipelineRunner(PipelineRunner):
         guidance_scale: Optional[float] = None,
         denoising_strength: Optional[float] = None,
         negative_prompt: Optional[str] = None,
-        # Image-to-video: the first frame, and optionally the last
+        # Image-to-video: the first frame, and optionally the last. The "last"
+        # one lands on end_image_frame when given, and extra_frames adds more
+        # ({"path", "frame"} each) — all frame indexes into the output clip.
         image_path: Optional[Path] = None,
         end_image_path: Optional[Path] = None,
+        end_image_frame: Optional[int] = None,
+        extra_frames: Optional[List[Dict[str, Any]]] = None,
         input_images_strength: float = 1.0,
         # In-context control video, for the IC-LoRAs
         control_path: Optional[Path] = None,
@@ -159,12 +168,22 @@ class LTX2PipelineRunner(PipelineRunner):
             "seed": seed,
             "mode": "two-stage" if two_stage else "distilled" if distilled else "one-stage",
             "first_frame": str(image_path) if image_path else None,
-            "last_frame": str(end_image_path) if end_image_path else None,
+            "last_frame": (f"{end_image_path} @ frame "
+                           f"{end_image_frame if end_image_frame is not None else 'last'}"
+                           if end_image_path else None),
+            "extra_frames": [f"{f.get('path')} @ frame {f.get('frame')}"
+                             for f in (extra_frames or [])] or None,
             "in_context_video": str(control_path) if control_path else None,
             "lora": f"{lora} (α={lora_multiplier})" if lora else None,
             "loras": [f"{l.get('name','?')} (α={l.get('alpha', 1.0)})" for l in (loras or [])],
         }
         self.log_generation_header("LTX-2 GENERATION", model_type, entry, log_params)
+
+        # First, last and any extra frames (image-to-video). Built before the
+        # pipeline so a frame clash fails without paying for the model load.
+        frames, indexes = self._build_input_images(
+            image_path, end_image_path, width, height, num_frames,
+            end_image_frame=end_image_frame, extra_frames=extra_frames)
 
         # Pipeline + LoRA
         pipe = self.get_pipeline(model_type, vram_preset=vram_preset)
@@ -187,9 +206,6 @@ class LTX2PipelineRunner(PipelineRunner):
         if "negative_prompt" in supports and negative_prompt:
             pipe_kwargs["negative_prompt"] = negative_prompt
 
-        # First and last frame (image-to-video)
-        frames, indexes = self._build_input_images(
-            image_path, end_image_path, width, height, num_frames)
         if frames:
             pipe_kwargs["input_images"] = frames
             pipe_kwargs["input_images_indexes"] = indexes
@@ -278,6 +294,9 @@ class LTX2PipelineRunner(PipelineRunner):
                     "size": f"{width}x{height}", "frames": num_frames, "fps": fps,
                     "cfg_scale": effective_cfg, "denoising_strength": denoise,
                     "mode": log_params["mode"],
+                    # The frame each conditioning image actually landed on,
+                    # after clamping to the snapped clip length.
+                    "input_frame_indexes": indexes or None,
                 },
                 has_audio=audio is not None,
                 audio_wav=wav_path,
@@ -350,22 +369,51 @@ class LTX2PipelineRunner(PipelineRunner):
              f"  Stage-2 LoRA parked in RAM ({time.perf_counter() - _t0:.1f}s) — "
              f"keeps the stage-1→2 handover off the GPU")
 
-    def _build_input_images(self, image_path, end_image_path, width, height, num_frames):
-        """Frame conditioning: first frame at index 0, last at num_frames - 1.
+    def _build_input_images(self, image_path, end_image_path, width, height, num_frames,
+                            end_image_frame=None, extra_frames=None):
+        """Frame conditioning: first frame at index 0, the rest where asked.
 
-        Either may be omitted — a first frame alone is ordinary image-to-video,
-        a last frame alone drives toward a target, and both together interpolate.
-        The last index is spelled out because the pipeline does not take
-        negative ones, and it has to be the snapped frame count.
+        Any of them may be omitted — a first frame alone is ordinary
+        image-to-video, a last frame alone drives toward a target, and more
+        images pin poses in between. The end image defaults to num_frames - 1:
+        spelled out because the pipeline does not take negative indexes, and
+        it has to be the snapped frame count.
+
+        Requested indexes are clamped into the snapped clip, since the frame
+        count can move under them (8n+1 snapping, or the length being cut
+        after the keyframes were placed). Two images on one frame is an error
+        rather than a silent drop — the pipeline would refuse it anyway, but
+        only after the model had loaded.
         """
-        frames, indexes = [], []
-        for path, index in ((image_path, 0), (end_image_path, num_frames - 1)):
+        last = num_frames - 1
+        wanted = [(image_path, 0, "start image")]
+        if end_image_path:
+            wanted.append((end_image_path,
+                           last if end_image_frame is None else end_image_frame,
+                           "end image"))
+        for i, extra in enumerate(extra_frames or []):
+            if extra.get("path"):
+                wanted.append((extra["path"], extra.get("frame", 0), f"keyframe {i + 1}"))
+
+        frames, indexes, owners = [], [], {}
+        for path, index, label in wanted:
             if not path:
                 continue
+            index = int(index)
+            clamped = min(max(index, 0), last)
+            if clamped != index:
+                _log(self.log_prefix,
+                     f"  {label}: frame {index} is outside 0-{last}, using {clamped}",
+                     "warning")
+            if clamped in owners:
+                raise ValueError(
+                    f"{label} and {owners[clamped]} are both on frame {clamped} "
+                    f"— each conditioning image needs its own frame")
             img = self.load_image(path, width=width, height=height)
             if img is not None:
                 frames.append(img)
-                indexes.append(index)
+                indexes.append(clamped)
+                owners[clamped] = label
         if frames:
             _log(self.log_prefix,
                  f"  Input images → frame indexes {indexes} at {width}x{height}")

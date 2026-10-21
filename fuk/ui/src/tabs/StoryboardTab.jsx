@@ -19,7 +19,9 @@ import { Plus, Trash2, Camera, Film, Loader2, AlertCircle, CheckCircle, Clock, I
 import { useStoryboard } from '../hooks/useStoryboard';
 import { sendPanelToImage, sendPanelToVideo, snapshotStoryboard, fetchSnapshots, restoreSnapshot } from '../utils/storyboardApi';
 import MarkerTextarea from '../components/MarkerTextarea';
-import { buildImageUrl, generateRandomSeed, PROJECT_TAG_KINDS } from '../utils/constants';
+import { buildImageUrl, generateRandomSeed } from '../utils/constants';
+import { SubcategoryInput } from '../components/TagManager';
+import { useTagCategories, categoryLabel } from '../hooks/useTagCategories';
 
 // Debounce window for autosave. Short enough to feel snappy, long enough to
 // coalesce a paragraph of typing into one PUT.
@@ -369,8 +371,23 @@ function ActiveLorasPicker({ sb, active, available }) {
 // tags in from the library live in the tag popup (TagManagerModal).
 // ---------------------------------------------------------------------------
 
+// Prime categories are shared with the library (prompt_tag_categories.json);
+// a tag's own category stays offered even if the list no longer has it.
+function categoryChoices(categories, current) {
+  return current && !categories.includes(current) ? [...categories, current] : categories;
+}
+
+function subsFor(subcategories, tags, cat) {
+  if (!cat) return [];
+  const used = tags.filter(t => t.category === cat && t.subcategory).map(t => t.subcategory);
+  return [...new Set([...(subcategories[cat] || []), ...used])];
+}
+
+const EMPTY_TAG_DRAFT = { name: '', value: '', category: 'character', subcategory: '' };
+
 function TagsEditor({ sb, tags }) {
-  const [draft, setDraft] = useState({ name: '', value: '', category: 'character' });
+  const { categories, subcategories } = useTagCategories();
+  const [draft, setDraft] = useState(EMPTY_TAG_DRAFT);
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState(null);
 
@@ -384,8 +401,9 @@ function TagsEditor({ sb, tags }) {
         name: draft.name,
         value: draft.value,
         category: draft.category || null,
+        subcategory: (draft.category && draft.subcategory.trim()) || null,
       });
-      setDraft({ name: '', value: '', category: 'character' });
+      setDraft(EMPTY_TAG_DRAFT);
     } catch (e) {
       setErr(e.message);
     } finally {
@@ -412,7 +430,7 @@ function TagsEditor({ sb, tags }) {
       </p>
       <ul className="storyboard-subject-list">
         {tags.map(t => (
-          <TagRow key={t.id} tag={t} sb={sb} />
+          <TagRow key={t.id} tag={t} sb={sb} categories={categories} subcategories={subcategories} tags={tags} />
         ))}
         {tags.length === 0 && (
           <li className="storyboard-empty-hint">No project tags yet. Add one below to create a <code>#marker</code> scoped to this storyboard.</li>
@@ -429,11 +447,18 @@ function TagsEditor({ sb, tags }) {
         <select
           className="fuk-input"
           value={draft.category}
-          onChange={e => setDraft(d => ({ ...d, category: e.target.value }))}
+          onChange={e => setDraft(d => ({ ...d, category: e.target.value, subcategory: '' }))}
           disabled={submitting}
         >
-          {PROJECT_TAG_KINDS.map(k => <option key={k} value={k}>{k}</option>)}
+          <option value="">— uncategorized —</option>
+          {categoryChoices(categories, draft.category).map(k => <option key={k} value={k}>{k}</option>)}
         </select>
+        <SubcategoryInput
+          value={draft.subcategory}
+          onChange={(v) => setDraft(d => ({ ...d, subcategory: v }))}
+          suggestions={subsFor(subcategories, tags, draft.category)}
+          disabled={submitting || !draft.category}
+        />
         <MarkerTextarea
           className="fuk-textarea"
           placeholder="value — what #marker expands to at generation time"
@@ -455,14 +480,16 @@ function TagsEditor({ sb, tags }) {
   );
 }
 
-function TagRow({ tag, sb }) {
+const tagDraft = (tag) => ({ ...tag, category: tag.category || '', subcategory: tag.subcategory || '' });
+
+function TagRow({ tag, sb, categories, subcategories, tags }) {
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState({ ...tag, category: tag.category || 'other' });
+  const [draft, setDraft] = useState(() => tagDraft(tag));
   const [status, setStatus] = useState('idle');
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (!editing) setDraft({ ...tag, category: tag.category || 'other' });
+    if (!editing) setDraft(tagDraft(tag));
   }, [tag, editing]);
 
   useDebouncedEffect(draft, AUTOSAVE_MS, async (current) => {
@@ -470,7 +497,8 @@ function TagRow({ tag, sb }) {
     if (
       current.name === tag.name &&
       current.value === tag.value &&
-      (current.category || '') === (tag.category || '')
+      (current.category || '') === (tag.category || '') &&
+      current.subcategory.trim() === (tag.subcategory || '')
     ) return;
     if (!current.name.trim() || !current.value.trim()) return;
     setStatus('saving');
@@ -479,6 +507,7 @@ function TagRow({ tag, sb }) {
         name: current.name,
         value: current.value,
         category: current.category || null,
+        subcategory: (current.category && current.subcategory.trim()) || null,
       });
       setStatus('saved');
     } catch (e) {
@@ -498,12 +527,6 @@ function TagRow({ tag, sb }) {
     }
   }, [sb, tag.id, tag.name]);
 
-  // A tag moved in from the library can carry a library category (e.g.
-  // "lighting"); offer it so the select doesn't silently show another kind.
-  const kindOptions = PROJECT_TAG_KINDS.includes(draft.category)
-    ? PROJECT_TAG_KINDS
-    : [...PROJECT_TAG_KINDS, draft.category];
-
   if (editing) {
     return (
       <li className="storyboard-subject-row storyboard-subject-row--editing">
@@ -515,10 +538,17 @@ function TagRow({ tag, sb }) {
         <select
           className="fuk-input"
           value={draft.category}
-          onChange={e => setDraft(d => ({ ...d, category: e.target.value }))}
+          onChange={e => setDraft(d => ({ ...d, category: e.target.value, subcategory: '' }))}
         >
-          {kindOptions.map(k => <option key={k} value={k}>{k}</option>)}
+          <option value="">— uncategorized —</option>
+          {categoryChoices(categories, draft.category).map(k => <option key={k} value={k}>{k}</option>)}
         </select>
+        <SubcategoryInput
+          value={draft.subcategory}
+          onChange={(v) => setDraft(d => ({ ...d, subcategory: v }))}
+          suggestions={subsFor(subcategories, tags, draft.category)}
+          disabled={!draft.category}
+        />
         <MarkerTextarea
           className="fuk-textarea"
           rows={2}
@@ -527,7 +557,7 @@ function TagRow({ tag, sb }) {
         />
         <div className="storyboard-subject-row-actions">
           <SaveStatus state={status} />
-          <button className="fuk-btn fuk-btn-secondary" onClick={() => { setDraft({ ...tag, category: tag.category || 'other' }); setEditing(false); setStatus('idle'); }}>Done</button>
+          <button className="fuk-btn fuk-btn-secondary" onClick={() => { setDraft(tagDraft(tag)); setEditing(false); setStatus('idle'); }}>Done</button>
         </div>
       </li>
     );
@@ -537,7 +567,7 @@ function TagRow({ tag, sb }) {
     <li className="storyboard-subject-row">
       <div className="storyboard-subject-summary">
         <code className="storyboard-subject-marker">{tag.marker}</code>
-        <span className="storyboard-subject-kind">{tag.category || 'other'}</span>
+        <span className="storyboard-subject-kind">{categoryLabel(tag.category, tag.subcategory) || 'other'}</span>
         <span className="storyboard-subject-desc">{tag.value}</span>
       </div>
       <div className="storyboard-subject-row-actions">

@@ -227,15 +227,22 @@ class DiffSynthBackend:
         """
         # Auto-detect runner from model pipeline type when possible
         model_name = kwargs.get("model") or kwargs.get("task")
+        runner = None
         if model_name:
+            # Only the lookup is guarded. The generate() call must stay outside
+            # the try: a runner's own ValueError/KeyError (a shape check deep in
+            # the pipeline, say) would otherwise be swallowed and the request
+            # silently re-run on the family runner — which then calls the cached
+            # pipeline with the wrong family's kwargs and buries the real error
+            # under an "unexpected keyword argument".
             try:
                 model_type = self.resolve_model_type(model_name)
-                entry = self.get_model_entry(model_type)
-                pipeline_type = entry.get("pipeline")
-                if pipeline_type and pipeline_type in self.runners:
-                    return self.runners[pipeline_type].generate(**kwargs)
+                pipeline_type = self.get_model_entry(model_type).get("pipeline")
+                runner = self.runners.get(pipeline_type) if pipeline_type else None
             except (ValueError, KeyError):
                 pass
+        if runner:
+            return runner.generate(**kwargs)
 
         runner = self.runners.get(family)
         if runner:

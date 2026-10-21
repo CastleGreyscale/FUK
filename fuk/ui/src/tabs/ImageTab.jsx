@@ -165,6 +165,35 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
     }
   }, [project?.isProjectLoaded, project?.updateTabState, setLocalFormData]);
 
+  // Apply recalled settings (history drop) that may also switch model. Through
+  // setFormData a model switch loads the new model's saved settings and drops
+  // everything else in the update, so here the values are written onto the
+  // new model's entry in the same update that activates it.
+  const applyRecalledSettings = useCallback((updates) => {
+    const currentData = formDataRef.current;
+    const newModel = updates.model ?? currentData.model;
+    if (newModel === currentData.model) {
+      setFormData(prev => ({ ...prev, ...updates }));
+      return;
+    }
+    if (project?.isProjectLoaded && project?.updateTabState) {
+      const existingModelSettings = projectTabRef.current?.modelSettings || {};
+      project.updateTabState('image', {
+        activeModel: newModel,
+        modelSettings: {
+          ...existingModelSettings,
+          [currentData.model]: currentData,
+          [newModel]: { ...(existingModelSettings[newModel] || {}), ...updates, model: newModel },
+        },
+      });
+    } else {
+      setLocalFormData({
+        ...currentData, control_image_paths: [], eligen_source: '', inpaint_image_path: '', inpaint_mask_path: '',
+        ...updates,
+      });
+    }
+  }, [project?.isProjectLoaded, project?.updateTabState, setFormData, setLocalFormData]);
+
   // Generation state
   const {
     generating,
@@ -474,7 +503,8 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
       const draftPrompt = meta.prompt_source || meta.prompt;
       if (draftPrompt)                    updates.prompt                = draftPrompt;
       if (meta.negative_prompt)           updates.negative_prompt       = meta.negative_prompt;
-      if (meta.model)                     updates.model                 = resolveModelKey(meta.model);
+      // Only image models — a preprocess or import records its own tool here.
+      if (meta.model && getSelectedModel(meta.model)) updates.model = resolveModelKey(meta.model);
       if (meta.guidance_scale != null)    updates.guidance_scale        = meta.guidance_scale;
       if (meta.infer_steps != null)       updates.steps                 = meta.infer_steps;
       if (meta.denoising_strength != null) updates.detail_bias          = meta.denoising_strength;
@@ -506,33 +536,22 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
         updates.width = meta.image_size[0];
       }
 
-      setFormData(prev => ({ ...prev, ...updates }));
-
       // Restore control images from the copies saved alongside the gen. Prefer
       // the stable in-project cache URLs; fall back to the raw control_image
-      // paths for older entries generated before the copies existed. This is
-      // applied in a follow-up tick because a model switch above recomputes the
-      // form from the new model's saved settings (and clears control images) —
-      // by the next tick that switch has settled, so the paths survive.
+      // paths for older entries generated before the copies existed.
       const ctrlPaths = meta.control_image_urls?.length
         ? meta.control_image_urls
         : (Array.isArray(meta.control_image) ? meta.control_image : []);
+      if (ctrlPaths.length) updates.control_image_paths = ctrlPaths;
       const inpaintImage = meta.inpaint_image_url || meta.inpaint_image || '';
-      const inpaintMask = meta.inpaint_mask_url || meta.inpaint_mask || '';
-      if (ctrlPaths.length || inpaintImage) {
-        setTimeout(() => {
-          setFormData(prev => ({
-            ...prev,
-            ...(ctrlPaths.length ? { control_image_paths: ctrlPaths } : {}),
-            ...(inpaintImage ? {
-              inpaint_image_path: inpaintImage,
-              inpaint_mask_path: inpaintMask,
-              inpaint_feather: meta.inpaint_feather ?? prev.inpaint_feather,
-              inpaint_preserve: meta.inpaint_preserve ?? prev.inpaint_preserve,
-            } : {}),
-          }));
-        }, 0);
+      if (inpaintImage) {
+        updates.inpaint_image_path = inpaintImage;
+        updates.inpaint_mask_path = meta.inpaint_mask_url || meta.inpaint_mask || '';
+        if (meta.inpaint_feather != null)  updates.inpaint_feather  = meta.inpaint_feather;
+        if (meta.inpaint_preserve != null) updates.inpaint_preserve = meta.inpaint_preserve;
       }
+
+      applyRecalledSettings(updates);
 
       // Show the dropped gen's preview — droppedPreview takes priority over existing result
       const previewPath = gen.preview || gen.path;
@@ -542,7 +561,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
     } catch (err) {
       console.error('[ImageTab] Metadata reload failed:', err);
     }
-  }, [resolveModelKey, setFormData, aspectRatios]);
+  }, [resolveModelKey, applyRecalledSettings, aspectRatios]);
 
   // --- Source image dimension check (for non-text-to-image modes) ---
   const isTextToImage = !modelSupports(formData.model, 'edit_image') &&

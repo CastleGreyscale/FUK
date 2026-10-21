@@ -87,14 +87,17 @@
 
 .tag-manager-form-row {
   display: grid;
-  grid-template-columns: minmax(200px, 1.4fr) minmax(160px, 0.8fr) auto;
+  grid-template-columns: minmax(180px, 1.3fr) minmax(140px, 0.7fr) minmax(140px, 0.7fr) auto;
   gap: 0.6rem;
   align-items: end;
 }
 
-@media (max-width: 760px) {
+@media (max-width: 900px) {
   .tag-manager-form-row {
     grid-template-columns: 1fr 1fr;
+  }
+  .tag-manager-field--name {
+    grid-column: 1 / -1;
   }
   .tag-manager-form-actions {
     grid-column: 1 / -1;
@@ -197,8 +200,27 @@
   background: rgba(90, 159, 255, 0.08);
 }
 
+.tag-manager-selection-bar {
+  flex-wrap: wrap;
+}
+
 .tag-manager-selection-bar > span {
   margin-right: auto;
+}
+
+.tag-manager-bulk-category {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-right: 0.4rem;
+}
+
+.tag-manager-bulk-category .fuk-select,
+.tag-manager-bulk-category .fuk-input {
+  font-size: 0.75rem;
+  padding-top: 0.2rem;
+  padding-bottom: 0.2rem;
+  width: 140px;
 }
 
 .tag-manager-link {

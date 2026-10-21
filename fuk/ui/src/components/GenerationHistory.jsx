@@ -657,6 +657,15 @@ function useGenerationMetadata(id) {
   return { meta, loading };
 }
 
+// The prompt as typed (with #markers) and as sent to the model. The expanded
+// form is only returned when it differs, i.e. when markers or a mood were
+// actually resolved into it.
+function promptTexts(meta) {
+  const expanded = meta && isPresent(meta.prompt) ? meta.prompt : '';
+  const draft = meta && isPresent(meta.prompt_source) ? meta.prompt_source : expanded;
+  return { draft, expanded: expanded !== draft ? expanded : '' };
+}
+
 // Renders the full set of generation settings from a loaded metadata.json.
 function GenerationSettings({ meta, loading }) {
   if (loading && !meta) {
@@ -667,10 +676,10 @@ function GenerationSettings({ meta, loading }) {
   const rows = collectSettingRows(meta);
   const gridRows = rows.filter(r => !isWideValue(r.value));
   const wideRows = rows.filter(r =>  isWideValue(r.value));
-  const hasPrompt = isPresent(meta.prompt);
+  const prompt = promptTexts(meta);
   const hasNeg = isPresent(meta.negative_prompt);
 
-  if (!rows.length && !hasPrompt && !hasNeg) return null;
+  if (!rows.length && !prompt.draft && !hasNeg) return null;
 
   return (
     <div className="gallery-detail-settings">
@@ -694,10 +703,16 @@ function GenerationSettings({ meta, loading }) {
         </div>
       ))}
 
-      {hasPrompt && (
+      {prompt.draft && (
         <div className="gallery-detail-text">
           <span className="gallery-detail-text-label">Prompt</span>
-          <div className="gallery-detail-text-body">{meta.prompt}</div>
+          <div className="gallery-detail-text-body">{prompt.draft}</div>
+        </div>
+      )}
+      {prompt.expanded && (
+        <div className="gallery-detail-text">
+          <span className="gallery-detail-text-label">Expanded</span>
+          <div className="gallery-detail-text-body">{prompt.expanded}</div>
         </div>
       )}
       {hasNeg && (
@@ -734,11 +749,13 @@ function CompareSettings({ metaA, metaB, loading }) {
     return { key, label: (ra || rb).label, va, vb, diff: va !== vb };
   });
 
-  const promptA = metaA && isPresent(metaA.prompt) ? metaA.prompt : '';
-  const promptB = metaB && isPresent(metaB.prompt) ? metaB.prompt : '';
+  const promptA = promptTexts(metaA);
+  const promptB = promptTexts(metaB);
   const negA = metaA && isPresent(metaA.negative_prompt) ? metaA.negative_prompt : '';
   const negB = metaB && isPresent(metaB.negative_prompt) ? metaB.negative_prompt : '';
-  const showPrompt = promptA || promptB;
+  const showPrompt = promptA.draft || promptB.draft;
+  // A side without markers expands to its own draft, so compare full texts.
+  const showExpanded = promptA.expanded || promptB.expanded;
   const showNeg = negA || negB;
 
   if (!rows.length && !showPrompt && !showNeg) return null;
@@ -777,7 +794,9 @@ function CompareSettings({ metaA, metaB, loading }) {
         ))}
       </div>
 
-      {showPrompt && textPair('Prompt', promptA, promptB)}
+      {showPrompt && textPair('Prompt', promptA.draft, promptB.draft)}
+      {showExpanded && textPair('Expanded',
+        promptA.expanded || promptA.draft, promptB.expanded || promptB.draft)}
       {showNeg && textPair('Negative', negA, negB)}
     </div>
   );

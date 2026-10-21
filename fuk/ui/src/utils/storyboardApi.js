@@ -66,6 +66,15 @@ export async function fetchStoryboardTagHistory(id) {
   return jsonOrThrow(res, 'Failed to load tag history');
 }
 
+export async function recategorizeStoryboardTags(ids, { category, subcategory }) {
+  const res = await fetch(`${API_URL}/storyboard/globals/tags/recategorize`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids, category: category || null, subcategory: subcategory || null }),
+  });
+  return jsonOrThrow(res, 'Failed to recategorize tags');
+}
+
 export async function fetchDeletedStoryboardTags() {
   const res = await fetch(`${API_URL}/storyboard/globals/tags/deleted`);
   return jsonOrThrow(res, 'Failed to load deleted tags');

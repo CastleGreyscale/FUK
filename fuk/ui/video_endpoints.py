@@ -66,7 +66,7 @@ class VideoPreprocessRequest(BaseModel):
     depth_range_min: float = 0.0
     depth_range_max: float = 1.0
     depth_process_res: Optional[int] = None
-    depth_process_res_method: str = "lower_bound_resize"
+    depth_process_res_method: Optional[str] = None
 
     # Normals parameters
     normals_method: str = "from_depth"
@@ -117,6 +117,8 @@ class VideoHDRRequest(BaseModel):
     # 2N-1 internal frames, every other one kept. ~2x time, fewer temporal artifacts.
     high_quality: bool = False
     memory_mode: str = "auto"        # auto | resident | offload
+    # Set by the task dispatcher so progress reaches that task's bar.
+    generation_id: Optional[str] = None
 
 
 class VideoLayersRequest(BaseModel):
@@ -170,8 +172,9 @@ def setup_video_routes(
     NormalsMethod,
     SAMModel,
     log,
-    clear_vram,            
-    cleanup_failed_generation
+    clear_vram,
+    cleanup_failed_generation,
+    active_generations=None,
 ):
     """
     Setup video routes with access to server resources
@@ -851,6 +854,20 @@ def setup_video_routes(
             # Upstream names the EXR folder after this: hdr_<colourspace>_exr/
             hlg_path = gen_dir / "hdr.mp4"
 
+            # Drive the task's progress bar. Without it the only sign of life
+            # is console lines, and a conversion can run for many minutes.
+            progress_callback = None
+            gen = (active_generations or {}).get(request.generation_id or "")
+            if gen is not None:
+                from datetime import datetime
+
+                def progress_callback(fraction: float, label: str) -> None:
+                    gen.update({
+                        "phase": label,
+                        "progress": float(fraction),
+                        "updated_at": datetime.now().isoformat(),
+                    })
+
             start_time = time.time()
             result = await asyncio.to_thread(
                 ltx_hdr_backend.convert_to_hdr,
@@ -862,6 +879,7 @@ def setup_video_routes(
                 keyframe_strength=request.keyframe_strength,
                 high_quality=request.high_quality,
                 memory_mode=request.memory_mode,
+                progress_callback=progress_callback,
             )
             elapsed = time.time() - start_time
 

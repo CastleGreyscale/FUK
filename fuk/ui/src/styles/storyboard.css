@@ -137,10 +137,11 @@
 
 .storyboard-subject-form {
   display: grid;
-  grid-template-columns: 1fr 8rem;
+  grid-template-columns: 1fr 8rem 8rem;
   gap: 0.5rem;
 }
 .storyboard-subject-form textarea,
+.storyboard-subject-form .marker-textarea-wrapper,
 .storyboard-subject-form button {
   grid-column: 1 / -1;
 }

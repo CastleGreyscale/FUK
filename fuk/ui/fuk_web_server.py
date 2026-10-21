@@ -676,6 +676,11 @@ class ImageGenerationRequest(BaseModel):
     # stack_id: Optional[str] = None       # e.g. "img_edit_001"
     # layer_name: Optional[str] = None     # Human label for the new layer
     
+class ExtraFrame(BaseModel):
+    """A conditioning image pinned to one frame of the output clip."""
+    path: str
+    frame: int
+
 class VideoGenerationRequest(BaseModel):
     prompt: str
     task: str = "i2v-14B"
@@ -688,6 +693,11 @@ class VideoGenerationRequest(BaseModel):
     seed: Optional[int] = None
     image_path: Optional[str] = None
     end_image_path: Optional[str] = None
+    # LTX-2 frame placement. end_image_frame moves the end image off the last
+    # frame (None = last); extra_frames adds more images, each pinned to its
+    # own frame index. Other families ignore both.
+    end_image_frame: Optional[int] = None
+    extra_frames: Optional[List[ExtraFrame]] = None
     control_path: Optional[str] = None
     input_video_path: Optional[str] = None  # init-video for HD-proxy conform
     # Outpainting (Wan VACE). control_path is then the clip being extended and
@@ -783,8 +793,8 @@ class PreprocessRequest(BaseModel):
     depth_normalize: bool = True
     depth_range_min: float = 0.0
     depth_range_max: float = 1.0
-    depth_process_res: int = 756  # NEW - higher res for better quality
-    depth_process_res_method: str = "lower_bound_resize"  # NEW
+    depth_process_res: Optional[int] = None    # None = use DA3 config default
+    depth_process_res_method: Optional[str] = None
 
 # ============================================================================
 # Progress Tracking
@@ -1481,10 +1491,15 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
         end_image_path_abs = resolve_input_path(request.end_image_path)
         control_path_abs = resolve_input_path(request.control_path)
         input_video_path_abs = resolve_input_path(request.input_video_path)
+        extra_frames_abs = [
+            {"path": resolve_input_path(f.path), "frame": f.frame}
+            for f in (request.extra_frames or []) if f.path
+        ]
 
         log.paths("Resolved paths", {
             "image_path": f"{request.image_path} -> {image_path_abs}",
             "end_image_path": f"{request.end_image_path} -> {end_image_path_abs}",
+            **{f"extra_frame@{f['frame']}": str(f["path"]) for f in extra_frames_abs},
             "control_path": f"{request.control_path} -> {control_path_abs}",
             "input_video_path": f"{request.input_video_path} -> {input_video_path_abs}",
         })
@@ -1500,7 +1515,14 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
             
             if end_image_path_abs and end_image_path_abs.exists():
                 shutil.copy(end_image_path_abs, control_dir / "end_image.png")
-        
+
+        for extra in extra_frames_abs:
+            if extra["path"] and extra["path"].exists():
+                import shutil
+                control_dir = gen_dir / "control"
+                control_dir.mkdir(exist_ok=True)
+                shutil.copy(extra["path"], control_dir / f"frame_{extra['frame']:04d}.png")
+
         # Create progress callback
         progress_cb = ProgressCallback(generation_id)
         
@@ -1522,6 +1544,8 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
             negative_prompt=request.negative_prompt,
             image_path=image_path_abs,
             end_image_path=end_image_path_abs,
+            end_image_frame=request.end_image_frame,
+            extra_frames=extra_frames_abs or None,
             control_path=control_path_abs,
             input_video_path=input_video_path_abs,
             outpaint=request.outpaint,
@@ -1627,6 +1651,10 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
             loras=request.loras,
             start_image=request.image_path,
             end_image=request.end_image_path,
+            end_image_frame=request.end_image_frame,
+            extra_frames=[f.model_dump() for f in request.extra_frames] if request.extra_frames else None,
+            # Where each image actually landed — clamped to the snapped length.
+            input_frame_indexes=eff.get("input_frame_indexes"),
             control_path=request.control_path,
             # Where the source landed on the canvas, from the runner: the rect
             # is snapped to the VAE grid, so it is not derivable from the request.
@@ -3029,8 +3057,8 @@ class PreprocessRequest(BaseModel):
     depth_normalize: bool = True
     depth_range_min: float = 0.0
     depth_range_max: float = 1.0
-    depth_process_res: Optional[int] = None    # None = use DA3 config default (1344)
-    depth_process_res_method: str = "lower_bound_resize"
+    depth_process_res: Optional[int] = None    # None = use DA3 config default
+    depth_process_res_method: Optional[str] = None
 
     # Normals parameters
     normals_method: str = "from_depth"  # 'from_depth' or 'dsine'
@@ -3130,8 +3158,10 @@ async def preprocess_image(request: PreprocessRequest):
                 normalize=request.depth_normalize,
                 range_min=request.depth_range_min,
                 range_max=request.depth_range_max,
-                process_res=request.depth_process_res or 1344,
-                process_res_method=request.depth_process_res_method,
+                **{k: v for k, v in (
+                    ("process_res", request.depth_process_res),
+                    ("process_res_method", request.depth_process_res_method),
+                ) if v is not None},
             )
         
         elif request.method == "normals":
@@ -4067,7 +4097,8 @@ setup_video_routes(
     SAMModel=SAMModel,
     log=log,
     clear_vram=clear_vram,
-    cleanup_failed_generation=cleanup_failed_generation
+    cleanup_failed_generation=cleanup_failed_generation,
+    active_generations=active_generations,
 )
 
 # LLM / Ollama routes (image describe; prompt construction later)
@@ -4356,7 +4387,9 @@ async def _dispatch_task(task_type: str, payload: dict, generation_id: str) -> d
 
     # ---- SDR -> HDR (video) ----
     elif task_type == "hdr_video":
-        return await _forward_to_endpoint("/api/postprocess/hdr/video", payload)
+        # The id lets the endpoint drive this task's progress bar directly.
+        return await _forward_to_endpoint("/api/postprocess/hdr/video",
+                                          {**payload, "generation_id": generation_id})
 
     # ---- Frame interpolation ----
     elif task_type == "interpolate":

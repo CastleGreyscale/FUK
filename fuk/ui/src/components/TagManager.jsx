@@ -10,24 +10,28 @@
  * editor is reachable from any tab. Layout is form across the top, then the
  * search/filter bar, then the list.
  *
+ * Categories have two levels: a prime category from the shared list (same for
+ * both scopes) and an optional free-text subcategory, e.g. `lighting › rim`.
+ *
  * Every save, delete and move keeps the superseded version in the tag's
  * server-side history, so the History drawer and the Deleted view can bring
- * any of them back. Library tags can be ticked and moved (or copied) into the
- * project to keep project-specific shorthand out of the shared library.
+ * any of them back. Ticked tags can be re-categorized in bulk, and library
+ * tags moved (or copied) into the project to keep project-specific shorthand
+ * out of the shared library.
  */
 
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useId, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { Trash2, Clock } from './Icons';
 import MarkerTextarea from './MarkerTextarea';
 import {
   fetchTags,
-  fetchTagCategories,
   createTag,
   updateTag,
   deleteTag,
   fetchTagHistory,
   fetchDeletedTags,
   restoreTagVersion,
+  recategorizeTags,
   pushTagsToStoryboard,
   notifyPromptTokensChanged,
   PROMPT_TOKENS_CHANGED_EVENT,
@@ -40,8 +44,9 @@ import {
   fetchStoryboardTagHistory,
   fetchDeletedStoryboardTags,
   restoreStoryboardTagVersion,
+  recategorizeStoryboardTags,
 } from '../utils/storyboardApi';
-import { PROJECT_TAG_KINDS } from '../utils/constants';
+import { useTagCategories, categoryLabel } from '../hooks/useTagCategories';
 
 // Hard cap on a library tag value — mirrors llm_endpoints._validate_payload.
 // Project tags have no cap.
@@ -71,6 +76,7 @@ const SCOPES = {
     history: async (id) => (await fetchTagHistory(id)).versions || [],
     deleted: async () => (await fetchDeletedTags()).tags || [],
     restore: restoreTagVersion,
+    recategorize: recategorizeTags,
   },
   project: {
     label: 'Project',
@@ -81,6 +87,7 @@ const SCOPES = {
     history: async (id) => (await fetchStoryboardTagHistory(id)).versions || [],
     deleted: async () => (await fetchDeletedStoryboardTags()).tags || [],
     restore: broadcastProject(restoreStoryboardTagVersion),
+    recategorize: broadcastProject(recategorizeStoryboardTags),
   },
 };
 
@@ -102,6 +109,9 @@ export function tagMarker(name) {
 }
 
 const markerOf = (tag) => tag.marker || tagMarker(tag.name);
+
+// Joins prime and subcategory in the category-filter value ('lighting›rim').
+const SUB_SEP = '\u203a';
 
 function formatWhen(iso) {
   if (!iso) return '';
@@ -128,7 +138,7 @@ const TagManager = forwardRef(function TagManager({ project, focusRequest, class
 
   const [tags, setTags] = useState([]);
   const [deleted, setDeleted] = useState([]);
-  const [libraryCategories, setLibraryCategories] = useState([]);
+  const { categories, subcategories } = useTagCategories();
   const [loading, setLoading] = useState(false);
   const [listError, setListError] = useState(null);
   const [notice, setNotice] = useState(null);
@@ -138,6 +148,7 @@ const TagManager = forwardRef(function TagManager({ project, focusRequest, class
   const [name, setName] = useState('');
   const [value, setValue] = useState('');
   const [category, setCategory] = useState('');
+  const [subcategory, setSubcategory] = useState('');
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState(null);
 
@@ -150,6 +161,8 @@ const TagManager = forwardRef(function TagManager({ project, focusRequest, class
   const [historyLoading, setHistoryLoading] = useState(false);
   const [selected, setSelected] = useState(() => new Set());
   const [pushing, setPushing] = useState(false);
+  const [bulkCategory, setBulkCategory] = useState('');
+  const [bulkSubcategory, setBulkSubcategory] = useState('');
 
   const nameRef = useRef(null);
   const listRef = useRef(null);
@@ -192,12 +205,6 @@ const TagManager = forwardRef(function TagManager({ project, focusRequest, class
   }, [load]);
 
   useEffect(() => {
-    fetchTagCategories()
-      .then(data => setLibraryCategories(data.categories || []))
-      .catch(e => console.warn('Could not load tag categories:', e));
-  }, []);
-
-  useEffect(() => {
     if (!hasProject && scope === 'project') setScope('library');
   }, [hasProject, scope]);
 
@@ -226,6 +233,7 @@ const TagManager = forwardRef(function TagManager({ project, focusRequest, class
     setName('');
     setValue('');
     setCategory('');
+    setSubcategory('');
     setFormError(null);
   }, []);
 
@@ -234,6 +242,7 @@ const TagManager = forwardRef(function TagManager({ project, focusRequest, class
     setName(tag.name || '');
     setValue(tag.value || '');
     setCategory(tag.category || '');
+    setSubcategory(tag.subcategory || '');
     setFormError(null);
   }, []);
 
@@ -244,7 +253,10 @@ const TagManager = forwardRef(function TagManager({ project, focusRequest, class
 
   const editingTag = tags.find(t => t.id === editingId) || null;
   const dirty = editingTag
-    ? name !== editingTag.name || value !== editingTag.value || (category || '') !== (editingTag.category || '')
+    ? name !== editingTag.name
+      || value !== editingTag.value
+      || (category || '') !== (editingTag.category || '')
+      || subcategory.trim() !== (editingTag.subcategory || '')
     : !!(name || value);
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
@@ -281,7 +293,12 @@ const TagManager = forwardRef(function TagManager({ project, focusRequest, class
     setSaving(true);
     setFormError(null);
     try {
-      const payload = { name: name.trim(), value: value.trim(), category: category.trim() || null };
+      const payload = {
+        name: name.trim(),
+        value: value.trim(),
+        category: category.trim() || null,
+        subcategory: (category && subcategory.trim()) || null,
+      };
       if (editingId) await api.update(editingId, payload);
       else await api.create(payload);
       resetForm();
@@ -291,7 +308,7 @@ const TagManager = forwardRef(function TagManager({ project, focusRequest, class
     } finally {
       setSaving(false);
     }
-  }, [api, editingId, name, value, category, resetForm, load]);
+  }, [api, editingId, name, value, category, subcategory, resetForm, load]);
 
   const handleFormKeyDown = useCallback((e) => {
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
@@ -424,16 +441,43 @@ const TagManager = forwardRef(function TagManager({ project, focusRequest, class
     }
   }, [selected, editingId, resetForm, load]);
 
+  const handleRecategorize = useCallback(async () => {
+    const ids = [...selected];
+    if (!ids.length) return;
+    setPushing(true);
+    setListError(null);
+    try {
+      const { changed } = await api.recategorize(ids, {
+        category: bulkCategory || null,
+        subcategory: (bulkCategory && bulkSubcategory.trim()) || null,
+      });
+      const label = categoryLabel(bulkCategory, bulkSubcategory.trim()) || 'uncategorized';
+      setNotice(`Set ${plural(changed, 'tag')} to ${label}`);
+      setSelected(new Set());
+      await load();
+    } catch (e) {
+      setListError(e.message);
+    } finally {
+      setPushing(false);
+    }
+  }, [api, selected, bulkCategory, bulkSubcategory, load]);
+
   // ---- Derived ---------------------------------------------------------------
 
-  const categoryOptions = useMemo(() => {
-    // Library categories are validated server-side; project ones are free, so
-    // also offer whatever the project's tags already use (e.g. pushed-in
-    // library categories).
-    const base = scope === 'library' ? libraryCategories : PROJECT_TAG_KINDS;
-    const extra = scope === 'project' ? tags.map(t => t.category).filter(Boolean) : [];
-    return [...new Set([...base, ...extra])];
-  }, [scope, libraryCategories, tags]);
+  // The shared prime list, plus any category a tag already uses that the list
+  // lacks (an older project kind, or one removed from the categories file).
+  const categoryOptions = useMemo(
+    () => [...new Set([...categories, ...tags.map(t => t.category).filter(Boolean)])],
+    [categories, tags],
+  );
+
+  // Subcategories per prime: the server's suggestions (file + used anywhere)
+  // plus whatever this list uses, so a just-saved one shows straight away.
+  const subsFor = useCallback((cat) => {
+    if (!cat) return [];
+    const used = tags.filter(t => t.category === cat && t.subcategory).map(t => t.subcategory);
+    return [...new Set([...(subcategories[cat] || []), ...used])];
+  }, [subcategories, tags]);
 
   const formCategoryOptions = category && !categoryOptions.includes(category)
     ? [...categoryOptions, category]
@@ -443,23 +487,35 @@ const TagManager = forwardRef(function TagManager({ project, focusRequest, class
   const matches = (t) => !q
     || (t.name || '').toLowerCase().includes(q)
     || (t.category || '').toLowerCase().includes(q)
+    || (t.subcategory || '').toLowerCase().includes(q)
     || (t.value || '').toLowerCase().includes(q);
 
+  // categoryFilter: 'all' | '__none__' | 'cat' | 'cat\u203asub'
+  const [filterCat, filterSub] = categoryFilter.split(SUB_SEP);
   const filteredTags = tags.filter(t => {
-    if (categoryFilter !== 'all') {
-      const tc = (t.category || '').toLowerCase();
-      if (categoryFilter === '__none__' ? tc !== '' : tc !== categoryFilter) return false;
+    if (categoryFilter === '__none__') {
+      if (t.category) return false;
+    } else if (categoryFilter !== 'all') {
+      if ((t.category || '') !== filterCat) return false;
+      if (filterSub !== undefined && (t.subcategory || '') !== filterSub) return false;
     }
     return matches(t);
   });
   const filteredDeleted = deleted.filter(matches);
 
-  const countsByCategory = categoryOptions.reduce((acc, c) => {
-    acc[c] = tags.filter(t => (t.category || '').toLowerCase() === c).length;
-    return acc;
-  }, {});
+  // Filter tree: each prime with its count, then the subcategories in use.
+  const filterTree = categoryOptions.map(c => {
+    const inCat = tags.filter(t => t.category === c);
+    const subs = [...new Set(inCat.map(t => t.subcategory).filter(Boolean))].sort();
+    return {
+      name: c,
+      count: inCat.length,
+      subs: subs.map(sub => ({ name: sub, count: inCat.filter(t => t.subcategory === sub).length })),
+    };
+  });
   const uncategorizedCount = tags.filter(t => !t.category).length;
 
+  const canSelect = view === 'live';
   const canPush = scope === 'library' && hasProject && view === 'live';
   const allShownSelected = filteredTags.length > 0 && filteredTags.every(t => selected.has(t.id));
 
@@ -468,10 +524,10 @@ const TagManager = forwardRef(function TagManager({ project, focusRequest, class
   const formMarker = tagMarker(name);
 
   const scopeHint = scope === 'project'
-    ? 'This project only. Shadows a library tag with the same marker.'
+    ? 'This project only. Shadows a library tag with the same marker. Tick tags to set their category.'
     : hasProject
-      ? 'Shared across all projects. Tick tags to move them into this project.'
-      : 'Shared across all projects. Open a project to move tags into its storyboard.';
+      ? 'Shared across all projects. Tick tags to set their category or move them into this project.'
+      : 'Shared across all projects. Tick tags to set their category; open a project to move them into it.';
 
   // ---- Render ----------------------------------------------------------------
 
@@ -520,10 +576,24 @@ const TagManager = forwardRef(function TagManager({ project, focusRequest, class
           </label>
           <label className="tag-manager-field tag-manager-field--category">
             <span className="fuk-label">Category</span>
-            <select className="fuk-select" value={category} onChange={(e) => setCategory(e.target.value)}>
+            <select
+              className="fuk-select"
+              value={category}
+              onChange={(e) => { setCategory(e.target.value); setSubcategory(''); }}
+            >
               <option value="">— uncategorized —</option>
               {formCategoryOptions.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
+          </label>
+          <label className="tag-manager-field tag-manager-field--category">
+            <span className="fuk-label">Subcategory</span>
+            <SubcategoryInput
+              value={subcategory}
+              onChange={setSubcategory}
+              suggestions={subsFor(category)}
+              disabled={!category}
+              onKeyDown={handleFormKeyDown}
+            />
           </label>
           <div className="tag-manager-form-actions">
             <button
@@ -534,7 +604,7 @@ const TagManager = forwardRef(function TagManager({ project, focusRequest, class
             >
               {saving ? 'Saving…' : editingId ? 'Update' : 'Save tag'}
             </button>
-            {(editingId || name || value || category) && (
+            {(editingId || name || value || category || subcategory) && (
               <button className="fuk-btn fuk-btn-secondary" onClick={resetForm}>
                 {editingId ? 'Cancel' : 'Clear'}
               </button>
@@ -564,7 +634,7 @@ const TagManager = forwardRef(function TagManager({ project, focusRequest, class
 
       {/* Search / filter */}
       <div className="tag-manager-toolbar">
-        {canPush && (
+        {canSelect && (
           <input
             type="checkbox"
             className="tag-manager-check"
@@ -577,7 +647,7 @@ const TagManager = forwardRef(function TagManager({ project, focusRequest, class
         <input
           type="text"
           className="fuk-input tag-manager-search"
-          placeholder={view === 'deleted' ? 'Search deleted…' : 'Search name, category or text…'}
+          placeholder={view === 'deleted' ? 'Search deleted…' : 'Search name, category, subcategory or text…'}
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
         />
@@ -588,9 +658,14 @@ const TagManager = forwardRef(function TagManager({ project, focusRequest, class
             onChange={(e) => setCategoryFilter(e.target.value)}
           >
             <option value="all">All categories ({tags.length})</option>
-            {categoryOptions.map(c => (
-              <option key={c} value={c}>{c} ({countsByCategory[c] || 0})</option>
-            ))}
+            {filterTree.map(c => [
+              <option key={c.name} value={c.name}>{c.name} ({c.count})</option>,
+              ...c.subs.map(sub => (
+                <option key={`${c.name}${SUB_SEP}${sub.name}`} value={`${c.name}${SUB_SEP}${sub.name}`}>
+                  {'\u00a0\u00a0\u00a0'}› {sub.name} ({sub.count})
+                </option>
+              )),
+            ])}
             <option value="__none__">uncategorized ({uncategorizedCount})</option>
           </select>
         )}
@@ -604,15 +679,40 @@ const TagManager = forwardRef(function TagManager({ project, focusRequest, class
         </button>
       </div>
 
-      {canPush && selected.size > 0 && (
+      {canSelect && selected.size > 0 && (
         <div className="tag-manager-selection-bar">
           <span>{plural(selected.size, 'tag')} selected</span>
-          <button className="fuk-btn fuk-btn-primary tag-manager-mini" onClick={() => handlePush(true)} disabled={pushing}>
-            {pushing ? 'Working…' : 'Move to project'}
-          </button>
-          <button className="fuk-btn fuk-btn-secondary tag-manager-mini" onClick={() => handlePush(false)} disabled={pushing}>
-            Copy to project
-          </button>
+          <div className="tag-manager-bulk-category">
+            <select
+              className="fuk-select"
+              value={bulkCategory}
+              onChange={(e) => { setBulkCategory(e.target.value); setBulkSubcategory(''); }}
+              disabled={pushing}
+            >
+              <option value="">— uncategorized —</option>
+              {categoryOptions.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <SubcategoryInput
+              value={bulkSubcategory}
+              onChange={setBulkSubcategory}
+              suggestions={subsFor(bulkCategory)}
+              disabled={!bulkCategory || pushing}
+              placeholder="subcategory"
+            />
+            <button className="fuk-btn fuk-btn-secondary tag-manager-mini" onClick={handleRecategorize} disabled={pushing}>
+              Set category
+            </button>
+          </div>
+          {canPush && (
+            <>
+              <button className="fuk-btn fuk-btn-primary tag-manager-mini" onClick={() => handlePush(true)} disabled={pushing}>
+                {pushing ? 'Working…' : 'Move to project'}
+              </button>
+              <button className="fuk-btn fuk-btn-secondary tag-manager-mini" onClick={() => handlePush(false)} disabled={pushing}>
+                Copy to project
+              </button>
+            </>
+          )}
           <button className="tag-manager-link" onClick={() => setSelected(new Set())} disabled={pushing}>clear</button>
         </div>
       )}
@@ -632,7 +732,7 @@ const TagManager = forwardRef(function TagManager({ project, focusRequest, class
             <div key={row.id} data-tag-id={row.id} className="tag-manager-item tag-manager-item--deleted">
               <div className="tag-manager-item-head">
                 <span className="tag-manager-marker">{markerOf(row)}</span>
-                {row.category && <span className="tag-manager-cat">{row.category}</span>}
+                {row.category && <span className="tag-manager-cat">{categoryLabel(row.category, row.subcategory)}</span>}
                 <span className="tag-manager-when">
                   {REASON_LABEL[row.reason] || row.reason} · {formatWhen(row.deleted_at)}
                 </span>
@@ -673,7 +773,7 @@ const TagManager = forwardRef(function TagManager({ project, focusRequest, class
             className={`tag-manager-item ${editingId === tag.id ? 'tag-manager-item--editing' : ''} ${selected.has(tag.id) ? 'tag-manager-item--selected' : ''}`}
           >
             <div className="tag-manager-item-head">
-              {canPush && (
+              {canSelect && (
                 <input
                   type="checkbox"
                   className="tag-manager-check"
@@ -682,7 +782,7 @@ const TagManager = forwardRef(function TagManager({ project, focusRequest, class
                 />
               )}
               <span className="tag-manager-marker">{markerOf(tag)}</span>
-              {tag.category && <span className="tag-manager-cat">{tag.category}</span>}
+              {tag.category && <span className="tag-manager-cat">{categoryLabel(tag.category, tag.subcategory)}</span>}
               <div className="tag-manager-item-actions">
                 <button className="fuk-btn fuk-btn-secondary tag-manager-mini" onClick={() => beginEdit(tag)}>
                   Edit
@@ -747,8 +847,11 @@ function HistoryDrawer({ versions, loading, current, onRestore, onLoad }) {
             <span className="tag-manager-when">{formatWhen(v.replaced_at)}</span>
             <span className="tag-manager-version-reason">{REASON_LABEL[v.reason] || v.reason}</span>
             {v.name !== current.name && <span className="tag-manager-version-diff">was {tagMarker(v.name)}</span>}
-            {(v.category || '') !== (current.category || '') && (
-              <span className="tag-manager-version-diff">{v.category || 'uncategorized'}</span>
+            {((v.category || '') !== (current.category || '')
+              || (v.subcategory || '') !== (current.subcategory || '')) && (
+              <span className="tag-manager-version-diff">
+                {categoryLabel(v.category, v.subcategory) || 'uncategorized'}
+              </span>
             )}
             {v.value === current.value && v.name === current.name && (
               <span className="tag-manager-version-diff">same text as now</span>
@@ -768,5 +871,29 @@ function HistoryDrawer({ versions, loading, current, onRestore, onLoad }) {
         </li>
       ))}
     </ol>
+  );
+}
+
+// Free-text subcategory with the known ones as suggestions. A datalist keeps
+// it typeable — a new subcategory is just whatever you type.
+export function SubcategoryInput({ value, onChange, suggestions, disabled, placeholder, onKeyDown }) {
+  const listId = useId();
+  return (
+    <>
+      <input
+        type="text"
+        className="fuk-input"
+        list={listId}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={onKeyDown}
+        placeholder={disabled ? 'pick a category first' : (placeholder || 'optional, e.g. rim')}
+        disabled={disabled}
+        maxLength={32}
+      />
+      <datalist id={listId}>
+        {suggestions.map(sub => <option key={sub} value={sub} />)}
+      </datalist>
+    </>
   );
 }

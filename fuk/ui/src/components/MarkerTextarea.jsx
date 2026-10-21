@@ -19,6 +19,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchPromptTokens, PROMPT_TOKENS_CHANGED_EVENT } from '../utils/promptApi';
+import { categoryLabel } from '../hooks/useTagCategories';
 
 // Match a `#` immediately before the caret followed by an in-progress word,
 // which may run on into a `:framing` suffix (`#al:wi`).
@@ -61,6 +62,7 @@ function scoreToken(token, query) {
   if (name.includes(q)) return 50;
   const cat = (token.category || '').toLowerCase();
   if (cat.startsWith(q)) return 30;
+  if ((token.subcategory || '').toLowerCase().startsWith(q)) return 25;
   return -1;
 }
 
@@ -328,7 +330,7 @@ function TokenDropdown({ tokens, selected, onPick, onHover, style }) {
             <span className={`prompt-token-badge ${badge.className}`}>{badge.label}</span>
             <span className="prompt-token-name">{t.marker || t.name}</span>
             {t.category && (
-              <span className="prompt-token-category">{t.category}</span>
+              <span className="prompt-token-category">{categoryLabel(t.category, t.subcategory)}</span>
             )}
             {t.expansion && t.expansion !== t.name && (
               <span className="prompt-token-expansion">{t.expansion}</span>

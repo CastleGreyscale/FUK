@@ -1,0 +1,45 @@
+diff --git a/diffsynth/pipelines/minimax_h3_audio_video.py b/diffsynth/pipelines/minimax_h3_audio_video.py
+index a89dd8e..11864c6 100644
+--- a/diffsynth/pipelines/minimax_h3_audio_video.py
++++ b/diffsynth/pipelines/minimax_h3_audio_video.py
+@@ -891,6 +891,7 @@ def model_fn_minimax_h3_controlnet(
+     use_gradient_checkpointing_offload=False,
+     controlnet=None,
+     control_rows=None,
++    cond_rows_count=0,
+     **kwargs,
+ ) -> tuple[torch.Tensor, torch.Tensor]:
+     inverse_indices = inverse_indices.view(-1).to(torch.long)
+@@ -925,10 +926,12 @@ def model_fn_minimax_h3_controlnet(
+     inverse_indices = inverse_indices.to(device)
+ 
+     cu_seqlens = cu_seqlens.to(device)
++    # Keyframe / reference anchor rows lead img_pos; control_rows cover only the
++    # target video, so hand the ControlNet the target rows alone.
+     control_hints = controlnet(
+         decoder_input,
+         control_rows,
+-        img_pos.to(device),
++        img_pos[cond_rows_count:].to(device),
+         audio_pos.to(device),
+         t_emb=t_emb,
+         combined_indices=combined_indices,
+@@ -938,6 +941,10 @@ def model_fn_minimax_h3_controlnet(
+         use_gradient_checkpointing=use_gradient_checkpointing,
+         use_gradient_checkpointing_offload=use_gradient_checkpointing_offload,
+     )
++    if cond_rows_count:
++        # Leave the clean anchors exactly as the DiT expects them.
++        anchor_pos = img_pos[:cond_rows_count].to(device)
++        control_hints = tuple(hint.index_fill(0, anchor_pos, 0) for hint in control_hints)
+     return control_hints
+ 
+ 
+@@ -1031,6 +1038,7 @@ def model_fn_minimax_h3(
+             use_gradient_checkpointing_offload=use_gradient_checkpointing_offload,
+             controlnet=controlnet,
+             control_rows=control_rows,
++            cond_rows_count=cond_rows_count,
+         )
+         control_hints = {}
+         for block_id in range(len(dit.blocks)):

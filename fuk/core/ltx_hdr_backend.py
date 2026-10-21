@@ -58,6 +58,7 @@ import re
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -96,10 +97,23 @@ LADDER: List[Dict[str, Any]] = [
     {"name": "resident", "label": "resident FP8", "offload": "none",
      "quantize": True, "min_vram_gb": 30},
     # Upstream disables quantization whenever offload is on, so this streams
-    # bf16 — slower per step than resident FP8, but more faithful.
-    {"name": "offload", "label": "CPU offload", "offload": "cpu",
+    # bf16 — slower per step than resident FP8, but more faithful. Upstream
+    # calls it "cpu" offload, but only the weights live there: every layer is
+    # computed on the GPU. The label says so, because "CPU offload" next to a
+    # 2%-busy CPU reads as a hang.
+    {"name": "offload", "label": "GPU, weights streamed from RAM", "offload": "cpu",
      "quantize": False, "min_vram_gb": 0},
 ]
+
+# Seconds of subprocess silence before the host prints a "still working" line.
+_HEARTBEAT_AFTER_S = 60
+
+# Largest clip measured to fit one denoise window on a 24GB card, in latent
+# tokens: (frames-1)/8+1 latent frames x (H/32) x (W/32). 121 frames of
+# 1920x1088 (16 x 34 x 60 = 32,640) fits; 225 frames (29 x 34 x 60 = 59,160)
+# OOMs on the first step. The true ceiling is somewhere between — this is a
+# hint for the error message, not a gate.
+_KNOWN_GOOD_TOKENS_24GB = 32_640
 
 # tqdm step lines: " 38%|███▊      | 3/8 [00:06<00:09,  1.84s/it]"
 _TQDM_STEP_RE = re.compile(r"\|\s*(\d+)/(\d+)\s*\[")
@@ -163,6 +177,38 @@ def _total_vram_gb() -> float:
     except ImportError:
         pass
     return 0.0
+
+
+def _warm_page_cache(paths: List[Path], log: Callable[[str], None],
+                     progress: Optional[Callable[[float, str], None]] = None) -> None:
+    """
+    Read the weights sequentially so the subprocess finds them in page cache.
+
+    Upstream's offload path fills its pinned RAM copy of the transformer by
+    reading tensors through safetensors' mmap. On a cold cache that faults the
+    file in a page at a time: measured on the 980 PRO, the 42GB DiT loaded at
+    ~42MB/s (≈10k reads/s of 4KB) and took over eight minutes, while a plain
+    sequential read of the same file ran at 5.2GB/s and took 8s. Every run
+    in a fresh session paid that, and the silent load also tripped the
+    progress stream's 5-minute idle timeout.
+
+    Already-cached files read at memory speed, so this costs a few seconds when
+    it is not needed. The cache is ordinary reclaimable memory.
+    """
+    total = sum(p.stat().st_size for p in paths)
+    done = 0
+    buf = memoryview(bytearray(64 << 20))
+    start = time.perf_counter()
+    for path in paths:
+        with open(path, "rb", buffering=0) as fh:
+            os.posix_fadvise(fh.fileno(), 0, 0, os.POSIX_FADV_SEQUENTIAL)
+            while n := fh.readinto(buf):
+                done += n
+                if progress and done % (2 << 30) < n:
+                    progress(done / total, f"Reading weights {done / 1e9:.0f}/{total / 1e9:.0f}GB")
+    elapsed = time.perf_counter() - start
+    log(f"Weights read into page cache: {total / 1e9:.1f}GB in {elapsed:.1f}s "
+        f"({total / 1e9 / max(elapsed, 1e-3):.1f}GB/s)")
 
 
 def _exact_frame_count(path: Path) -> int:
@@ -262,9 +308,25 @@ def _run_once(cmd: List[str], rung_label: str, progress_callback: Optional[Calla
         ("encoding bt.2020/hlg", 0.90, "Writing EXR + HLG"),
     )
 
+    last = {"frac": 0.0, "label": "Starting", "at": time.monotonic()}
+
     def _emit(frac: float, label: str) -> None:
+        last.update(frac=frac, label=label)
         if progress_callback:
             progress_callback(progress_base + progress_span * frac, f"{rung_label}: {label}")
+
+    # Upstream can be silent for minutes — a long denoise step, pinning 42GB of
+    # weights. Say so, both for whoever is watching and because the progress
+    # stream closes after five minutes without an update.
+    stop_heartbeat = threading.Event()
+
+    def _heartbeat() -> None:
+        while not stop_heartbeat.wait(30):
+            quiet = time.monotonic() - last["at"]
+            if quiet >= _HEARTBEAT_AFTER_S:
+                print(f"[LTX-HDR] still working: {last['label']} "
+                      f"(no output for {quiet:.0f}s)", flush=True)
+                _emit(last["frac"], last["label"])
 
     pythonpath = os.pathsep.join(str(p) for p in _ENGINE_SRC)
     if os.environ.get("PYTHONPATH"):
@@ -300,12 +362,14 @@ def _run_once(cmd: List[str], rung_label: str, progress_callback: Optional[Calla
         watchdog = threading.Timer(timeout, _kill_on_timeout)
         watchdog.daemon = True
         watchdog.start()
+        threading.Thread(target=_heartbeat, daemon=True, name="ltx-hdr-heartbeat").start()
 
         try:
             for line in process.stdout:
                 line = line.rstrip()
                 if not line:
                     continue
+                last["at"] = time.monotonic()
 
                 if line.startswith("FUK_RESULT "):
                     result = json.loads(line[len("FUK_RESULT "):])
@@ -336,16 +400,43 @@ def _run_once(cmd: List[str], rung_label: str, progress_callback: Optional[Calla
             code = process.wait()
         finally:
             watchdog.cancel()
+            stop_heartbeat.set()
     finally:
         if process and process.poll() is None:
             process.kill()
 
-    return {"code": code, "tail": tail, "timed_out": timed_out, "result": result}
+    return {"code": code, "tail": tail, "timed_out": timed_out, "result": result,
+            "phase": phase}
 
 
 def _is_oom(tail: List[str]) -> bool:
     joined = "\n".join(tail).lower()
     return any(marker in joined for marker in _OOM_MARKERS)
+
+
+def _oom_message(phase: Optional[str], frames: int, width: int, height: int,
+                 high_quality: bool) -> str:
+    """Say where it ran out and what will actually fix it."""
+    if phase in ("Decoding HDR", "Decode OOM, retrying with smaller tiles", "Writing EXR + HLG"):
+        # The runner has already retried decode at smaller tiles by now.
+        return ("SDR -> HDR denoised, but ran out of VRAM decoding even at the "
+                "smallest tiling. Trim the clip or lower its resolution.")
+
+    # Out in (or before) the denoise: the whole clip is one attention window,
+    # so no tiling helps — only fewer frames or fewer pixels.
+    gen_frames = 2 * frames - 1 if high_quality else frames
+    per_frame = max(1, ((height + 31) // 32) * ((width + 31) // 32))
+    tokens = ((gen_frames - 1) // 8 + 1) * per_frame
+    fit_frames = (max(1, _KNOWN_GOOD_TOKENS_24GB // per_frame) - 1) * 8 + 1
+    if high_quality:
+        fit_frames = (fit_frames + 1) // 2
+    return (
+        f"SDR -> HDR ran out of VRAM in the denoise: {frames} frames at {width}x{height}"
+        f"{' (high quality doubles that)' if high_quality else ''} is ~{tokens:,} latent "
+        f"tokens, all denoised as one window, and the model has no smaller window to "
+        f"fall back to. On a 24GB card about {fit_frames} frames at this resolution is "
+        f"known to fit — split the clip into shots of that length or less."
+    )
 
 
 def _make_preview(hlg_path: Path, preview_path: Path, log: Callable[[str], None]) -> Optional[Path]:
@@ -450,7 +541,12 @@ def convert_to_hdr(
 
     _free_vram_for_seedvr2(log)
     if progress_callback:
-        progress_callback(0.03, "Starting LTX-2.5 SDR → HDR")
+        progress_callback(0.02, "Reading weights")
+    paths = weight_paths()
+    _warm_page_cache(
+        [paths["transformer"], paths["hdr_lora"], paths["video_vae"]], log,
+        (lambda f, label: progress_callback(0.02 + 0.06 * f, label)) if progress_callback else None,
+    )
 
     last: Optional[Dict[str, Any]] = None
     rung = rungs[0]
@@ -460,9 +556,9 @@ def convert_to_hdr(
             log(f"Attempt {index + 1}/{len(rungs)} — {label}")
             cmd = _build_command(padded, frames, output_path, rung, exr_colorspace, seed,
                                  keyframes, keyframe_strength, high_quality)
-            span = 0.92 / len(rungs)
+            span = 0.87 / len(rungs)
             last = _run_once(cmd, label, progress_callback,
-                             progress_base=0.03 + span * index, progress_span=span,
+                             progress_base=0.08 + span * index, progress_span=span,
                              timeout=timeout)
 
             if last["timed_out"]:
@@ -479,13 +575,8 @@ def convert_to_hdr(
 
             detail = "\n".join(last["tail"][-15:])
             if _is_oom(last["tail"]):
-                # Upstream's own troubleshooting: OOM usually lands in decode,
-                # after a successful denoise, and shorter trims are the fix. The
-                # runner has already retried decode at smaller tiles by now.
-                raise RuntimeError(
-                    "SDR -> HDR ran out of VRAM, even after retrying the decode with "
-                    "smaller tiles. Trim the clip or lower its resolution.\n" + detail
-                )
+                raise RuntimeError(_oom_message(last.get("phase"), frames, width, height,
+                                                high_quality) + "\n" + detail)
             raise RuntimeError(f"SDR -> HDR exited with code {last['code']}\n{detail}")
     finally:
         if padded != input_path:

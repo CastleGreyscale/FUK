@@ -100,7 +100,7 @@ def empty_manifest() -> Dict[str, Any]:
             "resolution": [1920, 1080],
         },
         "globals": {
-            "tags": [],           # [{id, name, marker, value, category, created, updated}]
+            "tags": [],           # [{id, name, marker, value, category, subcategory, created, updated}]
             "mood": "",           # freeform style+environment sentence
             "active_loras": [],   # LoRA names whose triggers/captions surface in `#` autocomplete
             "image_seed": None,   # uint32 seeded into a new shot's image tab on first send; null = no inheritance
@@ -212,10 +212,23 @@ def _normalize_tag_name(name: str) -> str:
     return " ".join((name or "").strip().split()).lower()
 
 
+def _clean_category(category: Any, subcategory: Any) -> tuple[Optional[str], Optional[str]]:
+    """Normalize a (category, subcategory) pair. Project categories aren't
+    checked against the shared prime list (llm_endpoints owns that) so older
+    manifests with ad-hoc kinds keep loading; the UI only offers the list."""
+    category = str(category or "").strip().lower() or None
+    subcategory = " ".join(str(subcategory or "").strip().lower().split()) or None
+    if subcategory and not category:
+        raise ValueError("A subcategory needs a category")
+    if subcategory and len(subcategory) > 32:
+        raise ValueError("Subcategory: max 32 chars")
+    return category, subcategory
+
+
 def validate_tag(payload: Dict[str, Any]) -> Dict[str, Any]:
     name = _normalize_tag_name(payload.get("name", ""))
     value = (payload.get("value") or "").strip()
-    category = (payload.get("category") or "").strip() or None
+    category, subcategory = _clean_category(payload.get("category"), payload.get("subcategory"))
     if not name:
         raise ValueError("Tag name is required")
     if not value:
@@ -223,7 +236,11 @@ def validate_tag(payload: Dict[str, Any]) -> Dict[str, Any]:
     marker = _slug_marker(name)
     if not marker:
         raise ValueError("Tag name cannot be slugged into a marker")
-    return {"name": name, "value": value, "category": category, "marker": marker}
+    return {
+        "name": name, "value": value,
+        "category": category, "subcategory": subcategory,
+        "marker": marker,
+    }
 
 
 def _history(manifest: Dict[str, Any]) -> Dict[str, List[dict]]:
@@ -242,10 +259,14 @@ def add_tag(manifest: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str, Any]
 
 
 def update_tag(manifest: Dict[str, Any], tag_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-    clean = validate_tag(payload)
     tags = manifest["globals"].setdefault("tags", [])
     for i, t in enumerate(tags):
         if t.get("id") == tag_id:
+            # A caller that doesn't know about subcategories (an older client)
+            # leaves it as it was; send `subcategory: null` to clear it.
+            if "subcategory" not in payload:
+                payload = {**payload, "subcategory": t.get("subcategory")}
+            clean = validate_tag(payload)
             if any(o.get("marker") == clean["marker"] and o.get("id") != tag_id for o in tags):
                 raise ValueError(f"Tag with marker {clean['marker']} already exists")
             if not th.same_content(t, clean):
@@ -258,6 +279,27 @@ def update_tag(manifest: Dict[str, Any], tag_id: str, payload: Dict[str, Any]) -
             }
             return tags[i]
     raise KeyError(f"Tag {tag_id} not found")
+
+
+def recategorize_tags(
+    manifest: Dict[str, Any], ids: List[str], category: Any, subcategory: Any,
+) -> int:
+    """Set category + subcategory on many project tags. Each changed tag's
+    previous version goes into its history. Returns how many changed."""
+    category, subcategory = _clean_category(category, subcategory)
+    wanted = set(ids or [])
+    now = _now()
+    changed = 0
+    for t in manifest["globals"].setdefault("tags", []):
+        if t.get("id") not in wanted:
+            continue
+        new = {**t, "category": category, "subcategory": subcategory}
+        if th.same_content(t, new):
+            continue
+        th.record(_history(manifest), t, "edit")
+        t.update({"category": category, "subcategory": subcategory, "updated": now})
+        changed += 1
+    return changed
 
 
 def remove_tag(manifest: Dict[str, Any], tag_id: str) -> bool:
@@ -523,6 +565,7 @@ def tag_tokens(manifest: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "marker": marker,
             "expansion": value,
             "category": t.get("category"),
+            "subcategory": t.get("subcategory"),
         })
     return out
 

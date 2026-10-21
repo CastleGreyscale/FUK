@@ -109,6 +109,21 @@ async def delete_tag(tag_id: str):
     return {"success": True}
 
 
+@router.post("/globals/tags/recategorize")
+async def recategorize_tags(payload: Dict[str, Any] = Body(...)):
+    """Set `category` + `subcategory` on the project tags listed in `ids`."""
+    m = _load_or_create()
+    try:
+        changed = sm.recategorize_tags(
+            m, list(payload.get("ids") or []), payload.get("category"), payload.get("subcategory"),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if changed:
+        _save(m)
+    return {"changed": changed}
+
+
 @router.get("/globals/tags/deleted")
 async def list_deleted_tags():
     """Deleted project tags that can still be restored from their history."""

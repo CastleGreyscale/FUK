@@ -58,27 +58,29 @@ export async function fetchTags() {
   return _jsonOrThrow(res, 'Failed to load tags');
 }
 
+/** `{categories: [prime...], subcategories: {prime: [suggestion...]}}` —
+ *  shared by workspace and project tags. */
 export async function fetchTagCategories() {
   const res = await fetch(`${API_URL}/tags/categories`);
   return _jsonOrThrow(res, 'Failed to load tag categories');
 }
 
-export async function createTag({ name, value, category }) {
+export async function createTag({ name, value, category, subcategory }) {
   const res = await fetch(`${API_URL}/tags`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, value, category: category || null }),
+    body: JSON.stringify({ name, value, category: category || null, subcategory: subcategory || null }),
   });
   const data = await _jsonOrThrow(res, 'Failed to create tag');
   notifyPromptTokensChanged();
   return data;
 }
 
-export async function updateTag(id, { name, value, category }) {
+export async function updateTag(id, { name, value, category, subcategory }) {
   const res = await fetch(`${API_URL}/tags/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, value, category: category || null }),
+    body: JSON.stringify({ name, value, category: category || null, subcategory: subcategory || null }),
   });
   const data = await _jsonOrThrow(res, 'Failed to update tag');
   notifyPromptTokensChanged();
@@ -88,6 +90,18 @@ export async function updateTag(id, { name, value, category }) {
 export async function deleteTag(id) {
   const res = await fetch(`${API_URL}/tags/${id}`, { method: 'DELETE' });
   const data = await _jsonOrThrow(res, 'Failed to delete tag');
+  notifyPromptTokensChanged();
+  return data;
+}
+
+/** Set category + subcategory on many workspace tags (each change is versioned). */
+export async function recategorizeTags(ids, { category, subcategory }) {
+  const res = await fetch(`${API_URL}/tags/recategorize`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids, category: category || null, subcategory: subcategory || null }),
+  });
+  const data = await _jsonOrThrow(res, 'Failed to recategorize tags');
   notifyPromptTokensChanged();
   return data;
 }

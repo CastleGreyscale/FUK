@@ -114,9 +114,20 @@ DA3_GLOBAL_SCALE_MODELS = {
 }
 
 # Hardcoded fallback defaults (used if config not found)
+#
+# Keep the processed resolution near what DA3 was trained at (504 long side).
+# Pushed much past it the backbone's interpolated position embedding stops
+# behaving and depth gets squeezed along the processing X axis — independent of
+# input aspect (a square crop does it too) and following the axis if the image
+# is transposed. Measured on a round well shot down its axis, as height/width of
+# the iso-depth contours (1.00 = round):
+#   upper_bound 504-1008 -> ~1.00    upper_bound 1344 -> ~1.10
+#   upper_bound 1904     -> ~1.20    lower_bound 1344 -> ~1.35 (2394x1344 on 16:9)
+# upper_bound bounds the LONG side, so widescreen and scope frames can't blow
+# the token grid up the way lower_bound does.
 _FALLBACK_DEFAULTS = {
-    "process_res": 1344,
-    "process_res_method": "lower_bound_resize",
+    "process_res": 1008,
+    "process_res_method": "upper_bound_resize",
     "chunk_size": 0,        # 0 = auto-size from free VRAM
     "chunk_overlap": 2,     # frames re-inferred per chunk (multi-view models only)
 }

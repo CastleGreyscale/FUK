@@ -5,7 +5,7 @@ tags (the storyboard manifest).
 A history store is a plain dict `{tag_id: [version, ...]}`, oldest first. Each
 version is a superseded copy of a tag:
 
-    {vid, name, value, category, updated, replaced_at, reason}
+    {vid, name, value, category, subcategory, updated, replaced_at, reason}
 
 `updated` is when that version was written, `replaced_at` when it was
 superseded, and `reason` what superseded it (edit / delete / moved / restore /
@@ -34,7 +34,12 @@ def _now() -> str:
 
 
 def _content(tag: Dict[str, Any]) -> tuple:
-    return (tag.get("name") or "", tag.get("value") or "", tag.get("category") or None)
+    return (
+        tag.get("name") or "",
+        tag.get("value") or "",
+        tag.get("category") or None,
+        tag.get("subcategory") or None,
+    )
 
 
 def same_content(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
@@ -78,6 +83,7 @@ def record(
         "name": tag.get("name") or "",
         "value": tag.get("value") or "",
         "category": tag.get("category") or None,
+        "subcategory": tag.get("subcategory") or None,
         "updated": tag.get("updated"),
         "replaced_at": _now(),
         "reason": reason,
@@ -113,6 +119,7 @@ def deleted(history: Dict[str, List[dict]], live_ids: Iterable[str]) -> List[dic
             "name": last.get("name"),
             "value": last.get("value"),
             "category": last.get("category"),
+            "subcategory": last.get("subcategory"),
             "deleted_at": last.get("replaced_at"),
             "reason": last.get("reason"),
             "version_count": len(vs),
