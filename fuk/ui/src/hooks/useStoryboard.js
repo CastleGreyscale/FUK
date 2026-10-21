@@ -11,9 +11,6 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   fetchManifest,
   saveSpecs,
-  createStoryboardTag as apiCreateTag,
-  updateStoryboardTag as apiUpdateTag,
-  deleteStoryboardTag as apiDeleteTag,
   saveMood as apiSaveMood,
   saveGlobalImageSeed as apiSaveImageSeed,
   saveGlobalVideoSeed as apiSaveVideoSeed,
@@ -66,38 +63,6 @@ export function useStoryboard(project) {
   const updateSpecs = useCallback(async (specs) => {
     const next = await saveSpecs(specs);
     setManifest(next);
-  }, []);
-
-  const createTag = useCallback(async (payload) => {
-    const entry = await apiCreateTag(payload);
-    setManifest(m => m && ({ ...m, globals: { ...m.globals, tags: [...(m.globals?.tags || []), entry] } }));
-    notifyPromptTokensChanged();
-    return entry;
-  }, []);
-
-  const updateTag = useCallback(async (id, payload) => {
-    const entry = await apiUpdateTag(id, payload);
-    setManifest(m => m && ({
-      ...m,
-      globals: {
-        ...m.globals,
-        tags: (m.globals?.tags || []).map(t => t.id === id ? entry : t),
-      },
-    }));
-    notifyPromptTokensChanged();
-    return entry;
-  }, []);
-
-  const deleteTag = useCallback(async (id) => {
-    await apiDeleteTag(id);
-    setManifest(m => m && ({
-      ...m,
-      globals: {
-        ...m.globals,
-        tags: (m.globals?.tags || []).filter(t => t.id !== id),
-      },
-    }));
-    notifyPromptTokensChanged();
   }, []);
 
   const updateMood = useCallback(async (mood) => {
@@ -165,9 +130,6 @@ export function useStoryboard(project) {
     error,
     refresh,
     updateSpecs,
-    createTag,
-    updateTag,
-    deleteTag,
     updateMood,
     updateImageSeed,
     updateVideoSeed,

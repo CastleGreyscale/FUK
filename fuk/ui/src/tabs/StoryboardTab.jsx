@@ -1,9 +1,9 @@
 /**
  * Storyboard Tab
  *
- * Project-level pre-production: shot list, panel grid, live globals (subjects
- * + mood). Subjects become `#markers` available across all shots; mood is
- * appended to every prompt at generation time.
+ * Project-level pre-production: shot list, panel grid, live globals (mood,
+ * seeds, active LoRAs). Mood is appended to every prompt at generation time.
+ * Project tags still live in the manifest but are edited in Describe & Tag.
  *
  * The storyboard does NOT replace per-shot files — it sits above them. Each
  * panel maps to one shot. "Send to Image/Video" pushes the panel's prompt
@@ -15,13 +15,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Footer from '../components/Footer';
-import { Plus, Trash2, Camera, Film, Loader2, AlertCircle, CheckCircle, Clock, Image as ImageIcon, X } from '../components/Icons';
+import { Plus, Camera, Film, Loader2, AlertCircle, CheckCircle, Image as ImageIcon, X } from '../components/Icons';
 import { useStoryboard } from '../hooks/useStoryboard';
 import { sendPanelToImage, sendPanelToVideo, snapshotStoryboard, fetchSnapshots, restoreSnapshot } from '../utils/storyboardApi';
 import MarkerTextarea from '../components/MarkerTextarea';
 import { buildImageUrl, generateRandomSeed } from '../utils/constants';
-import { SubcategoryInput } from '../components/TagManager';
-import { useTagCategories, categoryLabel } from '../hooks/useTagCategories';
 
 // Debounce window for autosave. Short enough to feel snappy, long enough to
 // coalesce a paragraph of typing into one PUT.
@@ -229,12 +227,9 @@ function GlobalsSection({ sb, manifest, config }) {
     <section className="storyboard-globals">
       <h2 className="storyboard-section-title">Globals</h2>
       <p className="storyboard-section-hint">
-        Project tags become <code>#markers</code> available in every shot. Mood is appended to every prompt at generation. Active LoRAs surface their trigger markers and caption phrases in <code>#</code> autocomplete across the project. Type <code>#</code> in any field below to reference an existing marker.
+        Mood is appended to every prompt at generation. Active LoRAs surface their trigger markers and caption phrases in <code>#</code> autocomplete across the project. Type <code>#</code> in any field below to reference an existing marker — project tags are edited in Describe &amp; Tag.
       </p>
-      <div className="storyboard-globals-grid">
-        <TagsEditor sb={sb} tags={manifest.globals?.tags || []} />
-        <MoodEditor sb={sb} mood={manifest.globals?.mood || ''} />
-      </div>
+      <MoodEditor sb={sb} mood={manifest.globals?.mood || ''} />
       <GlobalSeedsEditor
         sb={sb}
         imageSeed={manifest.globals?.image_seed ?? null}
@@ -362,226 +357,6 @@ function ActiveLorasPicker({ sb, active, available }) {
       )}
       {err && <div className="storyboard-error">{err}</div>}
     </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Tags: project-local `#marker` shorthand. Lives in the storyboard manifest,
-// shadows workspace tags on marker collision. History, restore and moving
-// tags in from the library live in the tag popup (TagManagerModal).
-// ---------------------------------------------------------------------------
-
-// Prime categories are shared with the library (prompt_tag_categories.json);
-// a tag's own category stays offered even if the list no longer has it.
-function categoryChoices(categories, current) {
-  return current && !categories.includes(current) ? [...categories, current] : categories;
-}
-
-function subsFor(subcategories, tags, cat) {
-  if (!cat) return [];
-  const used = tags.filter(t => t.category === cat && t.subcategory).map(t => t.subcategory);
-  return [...new Set([...(subcategories[cat] || []), ...used])];
-}
-
-const EMPTY_TAG_DRAFT = { name: '', value: '', category: 'character', subcategory: '' };
-
-function TagsEditor({ sb, tags }) {
-  const { categories, subcategories } = useTagCategories();
-  const [draft, setDraft] = useState(EMPTY_TAG_DRAFT);
-  const [submitting, setSubmitting] = useState(false);
-  const [err, setErr] = useState(null);
-
-  const handleAdd = useCallback(async (e) => {
-    e.preventDefault();
-    if (!draft.name.trim() || !draft.value.trim()) return;
-    setSubmitting(true);
-    setErr(null);
-    try {
-      await sb.createTag({
-        name: draft.name,
-        value: draft.value,
-        category: draft.category || null,
-        subcategory: (draft.category && draft.subcategory.trim()) || null,
-      });
-      setDraft(EMPTY_TAG_DRAFT);
-    } catch (e) {
-      setErr(e.message);
-    } finally {
-      setSubmitting(false);
-    }
-  }, [draft, sb]);
-
-  return (
-    <div className="storyboard-tags">
-      <div className="storyboard-subsection-header">
-        <h3>Project tags</h3>
-        <span className="storyboard-count">{tags.length}</span>
-      </div>
-      <p className="storyboard-section-hint">
-        Project-local <code>#markers</code> — characters, props, locations, or anything else. Lives with the storyboard, not the global tag library. Shadows workspace tags on marker collision.
-        {' '}
-        <button
-          type="button"
-          className="tag-manager-link"
-          onClick={() => window.dispatchEvent(new CustomEvent('fuk-open-tag-manager'))}
-        >
-          manage, restore, or move in from library
-        </button>
-      </p>
-      <ul className="storyboard-subject-list">
-        {tags.map(t => (
-          <TagRow key={t.id} tag={t} sb={sb} categories={categories} subcategories={subcategories} tags={tags} />
-        ))}
-        {tags.length === 0 && (
-          <li className="storyboard-empty-hint">No project tags yet. Add one below to create a <code>#marker</code> scoped to this storyboard.</li>
-        )}
-      </ul>
-      <form className="storyboard-subject-form" onSubmit={handleAdd}>
-        <input
-          className="fuk-input"
-          placeholder="name (e.g. sarah, studio_kettle)"
-          value={draft.name}
-          onChange={e => setDraft(d => ({ ...d, name: e.target.value }))}
-          disabled={submitting}
-        />
-        <select
-          className="fuk-input"
-          value={draft.category}
-          onChange={e => setDraft(d => ({ ...d, category: e.target.value, subcategory: '' }))}
-          disabled={submitting}
-        >
-          <option value="">— uncategorized —</option>
-          {categoryChoices(categories, draft.category).map(k => <option key={k} value={k}>{k}</option>)}
-        </select>
-        <SubcategoryInput
-          value={draft.subcategory}
-          onChange={(v) => setDraft(d => ({ ...d, subcategory: v }))}
-          suggestions={subsFor(subcategories, tags, draft.category)}
-          disabled={submitting || !draft.category}
-        />
-        <MarkerTextarea
-          className="fuk-textarea"
-          placeholder="value — what #marker expands to at generation time"
-          rows={2}
-          value={draft.value}
-          onChange={(v) => setDraft(d => ({ ...d, value: v }))}
-          disabled={submitting}
-        />
-        <button
-          type="submit"
-          className="fuk-btn fuk-btn-primary"
-          disabled={submitting || !draft.name.trim() || !draft.value.trim()}
-        >
-          {submitting ? <Loader2 className="animate-spin" /> : <Plus />} Add tag
-        </button>
-        {err && <div className="storyboard-error">{err}</div>}
-      </form>
-    </div>
-  );
-}
-
-const tagDraft = (tag) => ({ ...tag, category: tag.category || '', subcategory: tag.subcategory || '' });
-
-function TagRow({ tag, sb, categories, subcategories, tags }) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(() => tagDraft(tag));
-  const [status, setStatus] = useState('idle');
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    if (!editing) setDraft(tagDraft(tag));
-  }, [tag, editing]);
-
-  useDebouncedEffect(draft, AUTOSAVE_MS, async (current) => {
-    if (!editing) return;
-    if (
-      current.name === tag.name &&
-      current.value === tag.value &&
-      (current.category || '') === (tag.category || '') &&
-      current.subcategory.trim() === (tag.subcategory || '')
-    ) return;
-    if (!current.name.trim() || !current.value.trim()) return;
-    setStatus('saving');
-    try {
-      await sb.updateTag(tag.id, {
-        name: current.name,
-        value: current.value,
-        category: current.category || null,
-        subcategory: (current.category && current.subcategory.trim()) || null,
-      });
-      setStatus('saved');
-    } catch (e) {
-      setStatus('error');
-    }
-  });
-
-  const handleDelete = useCallback(async () => {
-    if (!confirm(`Delete tag "${tag.name}"?`)) return;
-    setBusy(true);
-    try {
-      await sb.deleteTag(tag.id);
-    } catch (e) {
-      alert(e.message);
-    } finally {
-      setBusy(false);
-    }
-  }, [sb, tag.id, tag.name]);
-
-  if (editing) {
-    return (
-      <li className="storyboard-subject-row storyboard-subject-row--editing">
-        <input
-          className="fuk-input"
-          value={draft.name}
-          onChange={e => setDraft(d => ({ ...d, name: e.target.value }))}
-        />
-        <select
-          className="fuk-input"
-          value={draft.category}
-          onChange={e => setDraft(d => ({ ...d, category: e.target.value, subcategory: '' }))}
-        >
-          <option value="">— uncategorized —</option>
-          {categoryChoices(categories, draft.category).map(k => <option key={k} value={k}>{k}</option>)}
-        </select>
-        <SubcategoryInput
-          value={draft.subcategory}
-          onChange={(v) => setDraft(d => ({ ...d, subcategory: v }))}
-          suggestions={subsFor(subcategories, tags, draft.category)}
-          disabled={!draft.category}
-        />
-        <MarkerTextarea
-          className="fuk-textarea"
-          rows={2}
-          value={draft.value}
-          onChange={(v) => setDraft(d => ({ ...d, value: v }))}
-        />
-        <div className="storyboard-subject-row-actions">
-          <SaveStatus state={status} />
-          <button className="fuk-btn fuk-btn-secondary" onClick={() => { setDraft(tagDraft(tag)); setEditing(false); setStatus('idle'); }}>Done</button>
-        </div>
-      </li>
-    );
-  }
-
-  return (
-    <li className="storyboard-subject-row">
-      <div className="storyboard-subject-summary">
-        <code className="storyboard-subject-marker">{tag.marker}</code>
-        <span className="storyboard-subject-kind">{categoryLabel(tag.category, tag.subcategory) || 'other'}</span>
-        <span className="storyboard-subject-desc">{tag.value}</span>
-      </div>
-      <div className="storyboard-subject-row-actions">
-        <button className="fuk-btn fuk-btn-secondary" onClick={() => setEditing(true)} disabled={busy}>Edit</button>
-        <button
-          className="fuk-btn fuk-btn-secondary"
-          onClick={() => window.dispatchEvent(new CustomEvent('fuk-open-tag-manager', { detail: { marker: tag.marker, history: true } }))}
-          title="Earlier versions"
-        >
-          <Clock />
-        </button>
-        <button className="fuk-btn fuk-btn-secondary" onClick={handleDelete} disabled={busy}><Trash2 /></button>
-      </div>
-    </li>
   );
 }
 
