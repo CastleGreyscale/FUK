@@ -212,12 +212,12 @@ class LTX2PipelineRunner(PipelineRunner):
             pipe_kwargs["input_images_strength"] = input_images_strength
 
         # In-context control video, for the IC-LoRAs. The reference is encoded at
-        # a reduced resolution: the LoRA name carries the factor it was trained
-        # with (union-control-ref0.5 => half), and the pipeline downsamples by
-        # in_context_downsample_factor on top.
+        # the stage-1 size divided by in_context_downsample_factor — see
+        # _load_control_video for why that has to be matched exactly.
         if control_path:
             ctx = self._load_control_video(
-                control_path, width, height, num_frames, in_context_downsample_factor)
+                pipe, control_path, width, height, num_frames,
+                in_context_downsample_factor, two_stage)
             if ctx is not None:
                 pipe_kwargs["in_context_videos"] = [ctx]
                 pipe_kwargs["in_context_downsample_factor"] = in_context_downsample_factor
@@ -419,16 +419,27 @@ class LTX2PipelineRunner(PipelineRunner):
                  f"  Input images → frame indexes {indexes} at {width}x{height}")
         return frames, indexes
 
-    def _load_control_video(self, path, width, height, num_frames, downsample_factor):
+    def _load_control_video(self, pipe, path, width, height, num_frames,
+                            downsample_factor, two_stage):
         """Load an in-context driving video for the IC-LoRAs.
 
-        Loaded at half the target resolution divided by the downsample factor,
-        matching what the IC-LoRA examples do — the reference only has to carry
-        structure, and encoding it full-size wastes VRAM for no benefit.
+        Loaded at exactly the size the pipeline's InContextVideoEmbedder will
+        want: the stage-1 resolution divided by the downsample factor, rounded
+        up to its /32 grid. Anything else gets resized again in there with a
+        plain stretch, on top of VideoData's aspect-preserving crop.
+
+        The upstream IC-LoRA examples load at `size // factor // 2`, but every
+        one of them runs two-stage, where the pipeline halves the size before
+        that unit sees it. Copying the extra /2 into one-stage loaded the clip
+        at a quarter size and had the pipeline scale it back up 2x, which
+        softened thin structure like pose skeletons for no saving — the latent
+        ends up the same size either way.
         """
         from diffsynth.utils.data import VideoData
-        h = max(32, height // downsample_factor // 2)
-        w = max(32, width // downsample_factor // 2)
+        stage1_h, stage1_w = (height // 2, width // 2) if two_stage else (height, width)
+        h, w = pipe.check_resize_height_width(
+            max(32, stage1_h // downsample_factor),
+            max(32, stage1_w // downsample_factor), verbose=0)
         try:
             data = VideoData(str(path), height=h, width=w).raw_data()
         except Exception as e:
