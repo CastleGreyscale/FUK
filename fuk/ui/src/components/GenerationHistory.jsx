@@ -10,7 +10,6 @@ import { useVideoPlayback } from '../hooks/useVideoPlayback';
 import ZoomableImage from './ZoomableImage';
 import CompareImage from './CompareImage';
 import VideoSyncController from './VideoSyncController';
-import ConformHDButton from './ConformHDButton';
 import { setPanelPreview, upsertPanel } from '../utils/storyboardApi';
 import { saveGenerationToLocation } from '../utils/historyApi';
 
@@ -358,7 +357,6 @@ function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned, onHov
           <PinIcon />
         </button>
         <div className="gen-history-actions-bar-right">
-          <ConformHDButton generation={generation} variant="compact" />
           <SaveButton generation={generation} variant="compact" />
           {onSendToStoryboard && (
             <button
@@ -918,7 +916,6 @@ function GalleryLargeView({ generation, generations, isPinned, vote, onTogglePin
             onClick={() => onVote(generation, vote === -1 ? 0 : -1)}
           ><ThumbsDown />Bad</button>
           <SaveButton generation={generation} variant="large" />
-          <ConformHDButton generation={generation} variant="large" />
           <button
             className="gen-history-delete"
             onClick={() => onDelete(generation)}

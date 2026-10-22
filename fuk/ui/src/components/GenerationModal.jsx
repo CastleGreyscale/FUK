@@ -23,7 +23,6 @@ const TYPE_LABELS = {
   interpolate: 'Interpolation',
   hdr: 'SDR → HDR',
   hdr_video: 'SDR → HDR',
-  hd_conform: 'HD Conform',
   layers: 'Layer Generation',
   layers_video: 'Video Layer Generation',
   export: 'EXR Export',

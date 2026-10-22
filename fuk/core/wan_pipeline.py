@@ -118,11 +118,6 @@ class WanPipelineRunner(PipelineRunner):
         animate_face_video: Optional[Path] = None,
         animate_inpaint_video: Optional[Path] = None,
         animate_mask_video: Optional[Path] = None,
-        # Optional init-video (for the HD-proxy conform path). When present,
-        # the pipeline VAE-encodes the video and the scheduler adds noise at
-        # a level set by `denoising_strength`, so generation denoises *from*
-        # the proxy rather than from pure noise. Pass alongside control_path.
-        input_video_path: Optional[Path] = None,
         # Outpainting (VACE). `control_path` becomes the clip being extended
         # rather than a structure guide, and width/height are the new canvas:
         # the source is contain-fitted into it, shrunk by `outpaint_scale` and
@@ -327,19 +322,6 @@ class WanPipelineRunner(PipelineRunner):
 
         mapped_inputs = self.map_inputs(model_type, semantic_inputs, width, height)
         pipe_kwargs.update(mapped_inputs)
-
-        # Init-video latent path (HD-proxy conform). Materialize the proxy
-        # video to a list of PIL frames at target spatial dimensions; the
-        # downstream pipeline VAE-encodes and partial-noises per
-        # denoising_strength.
-        if input_video_path:
-            init_vd = self._load_video_data(input_video_path, height, width)
-            if init_vd is not None:
-                frames = [init_vd[i] for i in range(min(len(init_vd), num_frames))]
-                pipe_kwargs["input_video"] = frames
-                _log(self.log_prefix, f"  Init video: {len(frames)} frames @ {width}x{height}")
-            else:
-                _log(self.log_prefix, f"  Failed to load input_video_path: {input_video_path}", "warning")
 
         # Tiled inference
         if "tiled" in supports and "tiled" not in pipe_defaults:

@@ -71,7 +71,6 @@ from project_endpoints import (
     get_project_cache_dir,
     cleanup_failed_generation
 )
-from hd_proxy_endpoints import setup_hd_proxy_routes
 from llm_endpoints import setup_llm_routes, _resolve_prompt as resolve_prompt_for_generation
 from storyboard_endpoints import setup_storyboard_routes
 
@@ -699,7 +698,6 @@ class VideoGenerationRequest(BaseModel):
     end_image_frame: Optional[int] = None
     extra_frames: Optional[List[ExtraFrame]] = None
     control_path: Optional[str] = None
-    input_video_path: Optional[str] = None  # init-video for HD-proxy conform
     # Outpainting (Wan VACE). control_path is then the clip being extended and
     # width/height the new canvas; the source is contain-fitted into it, shrunk
     # by outpaint_scale and positioned by the align values (0 = left/top,
@@ -1490,7 +1488,6 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
         image_path_abs = resolve_input_path(request.image_path)
         end_image_path_abs = resolve_input_path(request.end_image_path)
         control_path_abs = resolve_input_path(request.control_path)
-        input_video_path_abs = resolve_input_path(request.input_video_path)
         extra_frames_abs = [
             {"path": resolve_input_path(f.path), "frame": f.frame}
             for f in (request.extra_frames or []) if f.path
@@ -1501,7 +1498,6 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
             "end_image_path": f"{request.end_image_path} -> {end_image_path_abs}",
             **{f"extra_frame@{f['frame']}": str(f["path"]) for f in extra_frames_abs},
             "control_path": f"{request.control_path} -> {control_path_abs}",
-            "input_video_path": f"{request.input_video_path} -> {input_video_path_abs}",
         })
         
         # Copy control inputs for reference
@@ -1547,7 +1543,6 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
             end_image_frame=request.end_image_frame,
             extra_frames=extra_frames_abs or None,
             control_path=control_path_abs,
-            input_video_path=input_video_path_abs,
             outpaint=request.outpaint,
             outpaint_scale=request.outpaint_scale,
             outpaint_align_x=request.outpaint_align_x,
@@ -4106,17 +4101,6 @@ setup_llm_routes(app, resolve_input_path=resolve_input_path, log=log, config_dir
 
 # Storyboard manifest routes (project-level shot list + live globals)
 setup_storyboard_routes(app)
-
-# HD Proxy conform — VACE re-render of an i2v proxy at source-still resolution
-setup_hd_proxy_routes(
-    app,
-    get_cache_root=get_cache_root,
-    get_project_cache_dir=get_project_cache_dir,
-    active_generations=active_generations,
-    video_request_cls=VideoGenerationRequest,
-    run_video_generation=run_video_generation,
-    log=log,
-)
 
 # ============================================================================
 # Layer Stack Endpoints
