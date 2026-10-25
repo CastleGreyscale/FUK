@@ -1215,6 +1215,17 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
                 # PSD and other image files — let PIL handle them below
                 _resolution_source = eligen_source_abs
 
+        # Eligen mask folder: every mask is canvas-sized, so the first one gives
+        # the size (the same files the loader reads — it skips . and _ names)
+        if _resolution_source is None and eligen_source_abs and eligen_source_abs.is_dir():
+            _masks = sorted(
+                f for f in eligen_source_abs.iterdir()
+                if f.suffix.lower() in {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"}
+                and not f.name.startswith((".", "_"))
+            )
+            if _masks:
+                _resolution_source = _masks[0]
+
         if _resolution_source:
             from PIL import Image as _PILImage
             try:
@@ -4133,6 +4144,18 @@ setup_dataset_routes(
 
 from blender_endpoints import setup_blender_routes
 setup_blender_routes(app)
+
+from photocraft_endpoints import setup_photocraft_routes
+setup_photocraft_routes(
+    app,
+    preprocessor_manager=preprocessor_manager,
+    DepthModel=DepthModel,
+    resolve_input_path=resolve_input_path,
+    active_generations=active_generations,
+    clear_vram=clear_vram,
+    defaults=DEFAULTS,
+    log=log,
+)
 
 # ============================================================================
 # Generic Task System

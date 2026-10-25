@@ -12,6 +12,7 @@ import CompareImage from './CompareImage';
 import VideoSyncController from './VideoSyncController';
 import { setPanelPreview, upsertPanel } from '../utils/storyboardApi';
 import { saveGenerationToLocation } from '../utils/historyApi';
+import { sendToPhotoCraft } from '../utils/photocraftApi';
 
 // Pin-to-storyboard glyph: stacked thumbnails with an arrow.
 const StoryboardPinIcon = ({ className, style }) => (
@@ -55,6 +56,41 @@ function SaveButton({ generation, variant = 'compact' }) {
     >
       <Download />
       {isLarge && <span>{busy ? 'Saving…' : 'Save'}</span>}
+    </button>
+  );
+}
+
+// Send-to-PhotoCraft button: adds the entry's image to the active PhotoCraft
+// document as a new layer. Same variants as SaveButton; hidden for videos.
+function SendToPhotoCraftButton({ generation, variant = 'compact' }) {
+  const [state, setState] = useState(null);   // null | 'busy' | {ok, text}
+
+  if (isGenVideo(generation)) return null;
+
+  const handleSend = async (e) => {
+    e.stopPropagation();
+    if (state === 'busy') return;
+    setState('busy');
+    try {
+      const res = await sendToPhotoCraft(generation.path || generation.preview);
+      setState({ ok: true, text: `Added “${res.name}” to ${res.doc_name}` });
+    } catch (err) {
+      setState({ ok: false, text: err.message });
+      if (variant === 'compact') alert(`Send to PhotoCraft failed: ${err.message}`);
+    }
+  };
+
+  const isLarge = variant === 'large';
+  const title = state && state !== 'busy' ? state.text : 'Add to the active PhotoCraft document as a new layer';
+  return (
+    <button
+      className={`gen-history-photocraft${isLarge ? ' large' : ''}${state?.ok ? ' sent' : ''}`}
+      onClick={handleSend}
+      disabled={state === 'busy'}
+      title={title}
+    >
+      <Layers />
+      {isLarge && <span>{state === 'busy' ? 'Sending…' : 'PhotoCraft'}</span>}
     </button>
   );
 }
@@ -358,6 +394,7 @@ function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned, onHov
         </button>
         <div className="gen-history-actions-bar-right">
           <SaveButton generation={generation} variant="compact" />
+          <SendToPhotoCraftButton generation={generation} variant="compact" />
           {onSendToStoryboard && (
             <button
               className="gen-history-pin-storyboard"
@@ -494,6 +531,7 @@ function GalleryThumb({ generation, isPinned, isSelected, isMultiSelected, compa
         ><PinIcon /></button>
         <div className="gen-history-actions-bar-right">
           <SaveButton generation={generation} variant="compact" />
+          <SendToPhotoCraftButton generation={generation} variant="compact" />
           {onSendToStoryboard && (
             <button
               className="gen-history-pin-storyboard"
@@ -916,6 +954,7 @@ function GalleryLargeView({ generation, generations, isPinned, vote, onTogglePin
             onClick={() => onVote(generation, vote === -1 ? 0 : -1)}
           ><ThumbsDown />Bad</button>
           <SaveButton generation={generation} variant="large" />
+          <SendToPhotoCraftButton generation={generation} variant="large" />
           <button
             className="gen-history-delete"
             onClick={() => onDelete(generation)}

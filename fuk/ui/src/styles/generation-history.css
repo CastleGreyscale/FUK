@@ -1484,6 +1484,48 @@
   height: 0.7rem;
 }
 
+/* Send-to-PhotoCraft button (mirrors .gen-history-save) */
+.gen-history-photocraft {
+  background: transparent;
+  border: none;
+  padding: 0.2rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  transition: all var(--transition-base);
+  color: var(--color-text-muted);
+}
+
+.gen-history-photocraft svg {
+  width: 0.6rem;
+  height: 0.6rem;
+}
+
+.gen-history-photocraft:hover,
+.gen-history-photocraft.sent {
+  color: var(--color-info-400);
+}
+
+.gen-history-photocraft:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.gen-history-photocraft.large {
+  font-size: 0.65rem;
+  padding: 0.3rem 0.5rem;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-hover);
+}
+
+.gen-history-photocraft.large svg {
+  width: 0.7rem;
+  height: 0.7rem;
+}
+
 /* ── A/B compare ── */
 
 .gallery-compare-btn {

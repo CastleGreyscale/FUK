@@ -12,6 +12,9 @@ import ZoomableImage from '../components/ZoomableImage';
 import SeedControl from '../components/SeedControl';
 import GenerationModal from '../components/GenerationModal';
 import MaskPainter from '../components/MaskPainter';
+import PhotoCraftButton from '../components/PhotoCraftButton';
+import PhotoCraftCard from '../components/PhotoCraftCard';
+import { pullEligenFromPhotoCraft, sendToPhotoCraft } from '../utils/photocraftApi';
 import { useGeneration } from '../hooks/useGeneration';
 // [LAYER STACK DISABLED]
 // import LayerStackPanel from '../components/LayerStackPanel';
@@ -474,6 +477,58 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
     setFormData(prev => ({ ...prev, inpaint_mask_path: paths[0] || '' }));
   };
 
+  // ── PhotoCraft bridge ──
+  // An image and the mask made with it arrive together, so they are set in one
+  // update (handleInpaintImageChange would drop the mask).
+  const handlePhotoCraftInpaint = ({ image, mask }) => {
+    setFormData(prev => ({
+      ...prev,
+      inpaint_image_path: image.url,
+      inpaint_mask_path: mask?.url || '',
+    }));
+  };
+
+  const handlePhotoCraftMask = ({ image, mask }) => {
+    setFormData(prev => ({
+      ...prev,
+      inpaint_image_path: prev.inpaint_image_path || image.url,
+      inpaint_mask_path: mask.url,
+    }));
+  };
+
+  // EliGen masks need an EliGen model; applyRecalledSettings switches model
+  // and sets the source in one update.
+  const eligenModelKey = imageModels.find(m => m.supports?.includes('eligen'))?.key;
+  const handlePhotoCraftEligen = (res) => {
+    const model = modelSupports(formData.model, 'eligen') ? formData.model : eligenModelKey;
+    if (!model) return;
+    applyRecalledSettings({ model, eligen_source: res.eligen_source });
+  };
+
+  const [eligenPullState, setEligenPullState] = useState(null);
+  const pullEligenHere = async () => {
+    setEligenPullState('Pulling…');
+    try {
+      const res = await pullEligenFromPhotoCraft({});
+      setFormData(prev => ({ ...prev, eligen_source: res.eligen_source }));
+      setEligenPullState(`${res.entities.length} entities: ${res.entities.map(e => e.prompt).join(', ')}`);
+    } catch (err) {
+      setEligenPullState(err.message);
+    }
+  };
+
+  const [sendState, setSendState] = useState(null);
+  useEffect(() => { setSendState(null); }, [previewImage]);
+  const handleSendToPhotoCraft = async () => {
+    setSendState('Sending…');
+    try {
+      const res = await sendToPhotoCraft(previewImage);
+      setSendState(`→ ${res.name}`);
+    } catch (err) {
+      setSendState(err.message);
+    }
+  };
+
   // [LAYER STACK DISABLED]
   // const handleInitLayers = async () => { ... };
 
@@ -665,6 +720,15 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
               <div className="fuk-preview-info">
                 <div className="fuk-preview-info-row">
                   <span>{dims.width}x{dims.height}</span>
+                  <button
+                    type="button"
+                    className="fuk-photocraft-send"
+                    onClick={handleSendToPhotoCraft}
+                    disabled={sendState === 'Sending…'}
+                    title={sendState && sendState !== 'Sending…' ? sendState : 'Add this image to the active PhotoCraft document as a new layer'}
+                  >
+                    {sendState === 'Sending…' ? 'Sending…' : '→ PhotoCraft'}
+                  </button>
                   {result?.outputs?.png && (
                     <>
                       <span>Complete</span>
@@ -723,6 +787,12 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
       {/* Settings Area */}
       <div className="fuk-settings-area">
         <div className="fuk-settings-grid">
+          <PhotoCraftCard
+            active={activeTab === 'image'}
+            disabled={generating}
+            onEligen={handlePhotoCraftEligen}
+          />
+
           {/* Preprocessed Image Card */}
           {project?.projectState?.lastState?.lastPreprocessedImage && (modelSupports(formData.model, 'edit_image') || modelSupports(formData.model, 'controlnet')) && (
             <div className="fuk-card">
@@ -786,6 +856,15 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                     disabled={generating}
                     initialDir={project?.projectState?.lastState?.lastUploadDir}
                     onDirectorySelected={(dir) => project?.updateLastState?.({ lastUploadDir: dir })}
+                  />
+                  <PhotoCraftButton
+                    mode="image"
+                    disabled={generating}
+                    onPulled={(url) => setFormData(prev => (
+                      prev.control_image_paths.includes(url)
+                        ? prev
+                        : { ...prev, control_image_paths: [...prev.control_image_paths, url] }
+                    ))}
                   />
                 </div>
                 
@@ -922,6 +1001,18 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                       Browse File
                     </button>
                   </div>
+                  <button
+                    type="button"
+                    className="fuk-btn fuk-btn-secondary fuk-btn-full fuk-mt-2"
+                    disabled={generating || eligenPullState === 'Pulling…'}
+                    onClick={pullEligenHere}
+                    title="Layers named @<prompt> in the active PhotoCraft document become entities"
+                  >
+                    {eligenPullState === 'Pulling…' ? eligenPullState : 'From PhotoCraft (@ layers)'}
+                  </button>
+                  {eligenPullState && eligenPullState !== 'Pulling…' && (
+                    <p className="fuk-help-text fuk-mt-2">{eligenPullState}</p>
+                  )}
                 </div>
                 
                 {formData.eligen_source && (
@@ -985,6 +1076,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                     initialDir={project?.projectState?.lastState?.lastUploadDir}
                     onDirectorySelected={(dir) => project?.updateLastState?.({ lastUploadDir: dir })}
                   />
+                  <PhotoCraftButton mode="inpaint" disabled={generating} onPulled={handlePhotoCraftInpaint} />
                 </div>
 
                 {formData.inpaint_image_path && (
@@ -1010,6 +1102,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                       >
                         {formData.inpaint_mask_path ? 'Edit Mask' : 'Paint Mask'}
                       </button>
+                      <PhotoCraftButton mode="mask" disabled={generating} onPulled={handlePhotoCraftMask} />
                     </div>
 
                     <div className="fuk-form-group-compact fuk-mt-2">

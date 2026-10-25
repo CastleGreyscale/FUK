@@ -1,0 +1,125 @@
+/*
+ * PhotoCraft bridge controls (PhotoCraftCard, PhotoCraftButton, the
+ * "→ PhotoCraft" result button). History buttons live in generation-history.css.
+ */
+
+.fuk-photocraft-button {
+  position: relative;
+  margin-top: 0.5rem;
+}
+
+.fuk-photocraft-menu {
+  position: absolute;
+  z-index: 50;
+  top: calc(100% + 0.25rem);
+  left: 0;
+  right: 0;
+  max-height: 16rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 0.25rem;
+  background: var(--color-surface);
+  border: var(--border-width) solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.fuk-photocraft-menu button {
+  background: transparent;
+  border: none;
+  color: var(--color-text);
+  text-align: left;
+  font-size: 0.75rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fuk-photocraft-menu button:hover {
+  background: var(--color-surface-hover);
+}
+
+.fuk-photocraft-menu button.hidden-layer {
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+.fuk-photocraft-menu-title {
+  font-size: 0.65rem;
+  color: var(--color-text-secondary);
+  padding: 0.25rem 0.5rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fuk-photocraft-menu-sep {
+  height: 1px;
+  margin: 0.25rem 0;
+  background: var(--color-border);
+}
+
+.fuk-photocraft-menu-error,
+.fuk-photocraft-error,
+.fuk-photocraft-msg.error {
+  color: var(--color-error-400);
+}
+
+.fuk-photocraft-menu-error {
+  font-size: 0.75rem;
+  padding: 0.35rem 0.5rem;
+}
+
+.fuk-photocraft-msg.ok {
+  color: var(--color-success-400);
+}
+
+.fuk-photocraft-msg.warn {
+  color: var(--color-warning-400);
+}
+
+.fuk-photocraft-card .fuk-card-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.fuk-photocraft-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.fuk-photocraft-dot.on {
+  background: var(--color-success-500);
+}
+
+.fuk-photocraft-dot.off {
+  background: var(--color-gray-600);
+}
+
+.fuk-photocraft-send {
+  background: transparent;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: 0.7rem;
+  padding: 0.1rem 0.4rem;
+  cursor: pointer;
+  transition: all var(--transition-base);
+}
+
+.fuk-photocraft-send:hover {
+  color: var(--color-info-400);
+  border-color: var(--color-info-400);
+}
+
+.fuk-photocraft-send:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
