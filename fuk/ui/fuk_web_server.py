@@ -3611,6 +3611,9 @@ class ExportEXRRequest(BaseModel):
     noise_bracket_sigmas: Optional[List[float]] = None
     bracket_fusion: Optional[str] = None  # mertens | debevec | average
     bracket_seed: Optional[int] = None    # noise-bracket RNG seed
+    # Tiled VAE decode: fits on the GPU instead of falling back to CPU, but
+    # seams can show when black levels are lifted. Off keeps the old behaviour.
+    tiled_decode: bool = False
 
     # Output naming and location
     filename: Optional[str] = None  # Custom filename (without extension)
@@ -3644,6 +3647,7 @@ class EXRSequenceExportRequest(BaseModel):
     noise_bracket_sigmas: Optional[List[float]] = None
     bracket_fusion: Optional[str] = None  # mertens | debevec | average
     bracket_seed: Optional[int] = None
+    tiled_decode: bool = False  # see ExportEXRRequest
 
 
 @app.post("/api/export/exr")
@@ -3751,7 +3755,7 @@ async def export_to_exr(request: ExportEXRRequest):
             if latent_path and 'beauty' in resolved_layers and len(resolved_layers) == 1:
                 # TRUE LATENT PATH - bypasses PNG entirely
                 decode_mode = "noise-bracketed" if request.noise_bracketed_latent else ("bracketed" if request.bracketed_latent else "standard")
-                log.info("Export", f"TRUE LATENT path | latent={latent_path.name} | decode={decode_mode} | brackets={bracket_kwargs or 'defaults'}")
+                log.info("Export", f"TRUE LATENT path | latent={latent_path.name} | decode={decode_mode} | tiled={request.tiled_decode} | brackets={bracket_kwargs or 'defaults'}")
                 try:
                     result = exporter.export_from_latent(
                         latent_path=latent_path,
@@ -3766,6 +3770,7 @@ async def export_to_exr(request: ExportEXRRequest):
                         color_space=request.color_space,
                         bracketed=request.bracketed_latent,
                         noise_bracketed=request.noise_bracketed_latent,
+                        tiled=request.tiled_decode,
                         **bracket_kwargs,
                     )
                     result["is_true_latent"] = True
@@ -3983,6 +3988,8 @@ async def export_exr_sequence(request: EXRSequenceExportRequest):
         if request.bracketed_latent or request.noise_bracketed_latent:
             mode = "noise-bracketed" if request.noise_bracketed_latent else "bracketed"
             log.info("SeqExport", f"decode={mode} | brackets={bracket_kwargs or 'defaults'}")
+        if request.tiled_decode:
+            log.info("SeqExport", "tiled VAE decode")
 
         result = exporter.export_video_sequence(
             beauty_latent=beauty_latent,
@@ -3997,9 +4004,10 @@ async def export_exr_sequence(request: EXRSequenceExportRequest):
             model_type=request.model_type,
             bracketed=request.bracketed_latent,
             noise_bracketed=request.noise_bracketed_latent,
+            tiled=request.tiled_decode,
             **bracket_kwargs,
         )
-        
+
         log.success("SeqExport", f"Exported {result['frame_count']} frames (LATENT-ONLY)")
 
         color_result = result.get("color") or {}

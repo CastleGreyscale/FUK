@@ -36,6 +36,8 @@ const DEFAULT_SETTINGS = {
   bracketSigmas: '',
   bracketSeed: '',
   bracketFusion: 'mertens',
+  // Tiled VAE decode. Off by default: seams show when blacks are lifted.
+  tiledDecode: false,
   // Video sequence settings
   sequenceStartFrame: 1,
   sequencePattern: '{name}.{frame:04d}',
@@ -291,6 +293,7 @@ const {
         bracket_scales: parseFloatList(settings.bracketScales),
         noise_bracket_sigmas: parseFloatList(settings.bracketSigmas),
         bracket_seed: settings.bracketSeed === '' ? null : parseInt(settings.bracketSeed, 10),
+        tiled_decode: settings.tiledDecode,
       };
 
       let payload;
@@ -726,6 +729,25 @@ const {
                       + 'pip install opencolorio'}
                 </p>
               )}
+
+              <label className="fuk-checkbox-group" style={{alignItems: 'flex-start'}}>
+                  <input
+                    type="checkbox"
+                    className="fuk-checkbox"
+                    checked={settings.tiledDecode}
+                    onChange={(e) => updateSettings({ tiledDecode: e.target.checked })}
+                    disabled={exporting}
+                    style={{marginTop: '0.1rem'}}
+                  />
+                  <div>
+                    <span className="fuk-label">Tiled Decode</span>
+                    <p className="fuk-help-text fuk-help-text--sm">
+                      Decode in tiles so it fits on the GPU instead of falling
+                      back to a slow CPU decode. Tile seams can show when black
+                      levels are lifted in grade
+                    </p>
+                  </div>
+                </label>
 
               <label className="fuk-checkbox-group" style={{alignItems: 'flex-start'}}>
                   <input

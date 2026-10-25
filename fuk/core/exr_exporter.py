@@ -372,13 +372,19 @@ class EXRExporter:
               f"from {channels} channels")
         return candidates[0]
 
-    def _load_vae_only(self, backend, model_type: str):
+    def _load_vae_only(self, backend, model_type: str, tiled: bool = False):
         """
         Load ONLY the picture VAE for a model — no DiT, no text encoder.
 
         Loads the single decoder component through DiffSynth's model pool
         rather than the pipeline's from_pretrained, which would also pull in
         tokenizers and processors this path never uses.
+
+        `tiled` asks a decoder that tiles only on request (Wan, Qwen-Image-2.1,
+        LTX) to tile. Off by default: tile seams are invisible at normal
+        exposure but show as a grid once black levels are lifted in grade.
+        On, the decode usually fits on the GPU instead of falling back to a
+        CPU decode that takes many times longer.
 
         Returns:
             (vae, decode_fn, value_range) — the module, a callable taking
@@ -394,15 +400,19 @@ class EXRExporter:
         def _wrap(module):
             decode = getattr(module, method_name)
             params = inspect.signature(decode).parameters
+            if tiled and 'tiled' not in params:
+                print(f"  ⚠️  {type(module).__name__}.{method_name} has no tiled "
+                      f"mode — decoding untiled")
 
             def decode_fn(latent, device):
                 kwargs = {}
                 if 'device' in params:
                     kwargs['device'] = device
-                # Wan and Qwen tile only on request and are faster untiled; the
-                # audio-video VAEs default to tiling and need it at these sizes.
-                if 'tiled' in params and params['tiled'].default is False:
-                    kwargs['tiled'] = False
+                # Decoders that tile only on request are faster untiled and
+                # seam-free, so they stay untiled unless asked; those that
+                # default to tiling need it at these sizes and are left alone.
+                if 'tiled' in params and (tiled or params['tiled'].default is False):
+                    kwargs['tiled'] = tiled
                 return decode(latent, **kwargs)
 
             return module, decode_fn, spec["value_range"]
@@ -490,6 +500,7 @@ class EXRExporter:
         sigmas: Optional[List[float]] = None,
         seed: int = BRACKET_SEED,
         fusion: str = BRACKET_FUSION,
+        tiled: bool = False,
     ) -> List[np.ndarray]:
         """
         Decode beauty pass latents to float32 scene-linear numpy arrays.
@@ -498,6 +509,8 @@ class EXRExporter:
         times with scale or noise perturbations and fuses each frame via
         _fuse_brackets (see there for what `fusion` trades off).  The VAE is
         loaded once and reused for all passes.
+
+        `tiled` — see _load_vae_only.
         """
         import torch
 
@@ -518,9 +531,10 @@ class EXRExporter:
             model_type = backend.resolve_model_type(model_type)
 
         decode_mode = ("noise" if noise_bracketed else "scale" if bracketed else "standard")
-        print(f"  📄 Latent shape: {latent.shape}, model: {model_type}, decode: {decode_mode}")
+        print(f"  📄 Latent shape: {latent.shape}, model: {model_type}, decode: {decode_mode}"
+              f"{', tiled' if tiled else ''}")
 
-        vae, decode_fn, (v_min, v_max) = self._load_vae_only(backend, model_type)
+        vae, decode_fn, (v_min, v_max) = self._load_vae_only(backend, model_type, tiled=tiled)
         vae = vae.eval()
         # Pre-quantized (NF4) VAEs cannot be cast or run on the CPU — leave them
         # in their native dtype and match the latent to it.
@@ -660,6 +674,7 @@ class EXRExporter:
         sigmas: Optional[List[float]] = None,
         seed: int = BRACKET_SEED,
         fusion: str = BRACKET_FUSION,
+        tiled: bool = False,
     ) -> Dict[str, Any]:
         """
         Export video sequence to multilayer EXR (LATENT-ONLY VERSION)
@@ -679,7 +694,8 @@ class EXRExporter:
             start_frame: Starting frame number
             model_type: Model type for decoding ("auto", or explicit pipeline key)
             progress_callback: Optional callback(current_frame, total_frames)
-            
+            tiled: Tiled VAE decode — see _load_vae_only for the trade-off
+
         Returns:
             Dict with sequence info
             
@@ -723,6 +739,7 @@ class EXRExporter:
             sigmas=sigmas,
             seed=seed,
             fusion=fusion,
+            tiled=tiled,
         )
 
         total_frames = len(beauty_decoded_frames)
@@ -1612,11 +1629,13 @@ class EXRExporter:
         sigmas: Optional[List[float]] = None,
         seed: int = BRACKET_SEED,
         fusion: str = BRACKET_FUSION,
+        tiled: bool = False,
     ) -> Dict[str, Any]:
         """
         Decode a .latent.pt file directly to an EXR using the DiffSynth VAE.
 
         Uses _load_vae_only — the decoder on its own, no full pipeline load.
+        `tiled` is passed through to it.
 
         Decode modes:
           - default: single clean decode
@@ -1656,7 +1675,7 @@ class EXRExporter:
             model_type = backend.resolve_model_type(model_type)
 
         # Load VAE via DiffSynth (reuses cached pipeline if already loaded)
-        vae, decode_fn, (v_min, v_max) = self._load_vae_only(backend, model_type)
+        vae, decode_fn, (v_min, v_max) = self._load_vae_only(backend, model_type, tiled=tiled)
         vae = vae.eval()
         # NF4 VAEs cannot be cast or run on the CPU — see _decode_beauty_latents.
         quantized = self._is_quantized(vae)
@@ -1799,6 +1818,7 @@ class EXRExporter:
             "bracketed": bracketed,
             "noise_bracketed": noise_bracketed,
             "fusion": fusion if (bracketed or noise_bracketed) else None,
+            "tiled": tiled,
             "linear_range": [float(arr.min()), float(arr.max())],
             "color": color_info,
         }
