@@ -42,6 +42,16 @@ def set_dataset_model(model: Optional[str], options: Optional[Dict] = None):
     }
 
 
+# "negative_prompt" in the lora_dataset block. Without it the builder inherits
+# the Image tab's negative, which has nothing against drawn styles.
+_dataset_negative_prompt: str = ""
+
+
+def set_dataset_negative_prompt(negative_prompt: Optional[str]):
+    global _dataset_negative_prompt
+    _dataset_negative_prompt = negative_prompt or ""
+
+
 def get_dataset_models() -> List[str]:
     """Models a job may be created with: the default plus every configured option."""
     return list(dict.fromkeys([_dataset_model, *_dataset_model_options]))
@@ -55,6 +65,8 @@ def _generation_kwargs(params: Dict) -> Dict[str, Any]:
     (Qwen-Image-2.1 is CFG-free and has no img2img), and omitting them keeps
     its runner from logging a dropped-parameter warning on every variation.
     Jobs saved before the model switch have neither key and get the old values.
+    Jobs saved before the dataset negative prompt existed get the current one;
+    an empty negative is not sent, so the runner falls back to its family default.
     """
     kwargs = {
         "model": params.get("model") or "qwen_edit",
@@ -62,6 +74,9 @@ def _generation_kwargs(params: Dict) -> Dict[str, Any]:
         "lora": params.get("lora") or None,
         "lora_multiplier": params.get("lora_alpha", 1.0),
     }
+    negative = params.get("negative_prompt", _dataset_negative_prompt)
+    if negative:
+        kwargs["negative_prompt"] = negative
     cfg = params.get("cfg_scale", 5.0)
     if cfg is not None:
         kwargs["guidance_scale"] = cfg
@@ -212,6 +227,7 @@ def create_dataset_job(
     # even if the config changes underneath it.
     if not params.get("model"):
         params["model"] = _dataset_model
+    params.setdefault("negative_prompt", _dataset_negative_prompt)
 
     seed_strategy = params.get("seed_strategy", "fixed")
     base_seed = params.get("seed", 42)

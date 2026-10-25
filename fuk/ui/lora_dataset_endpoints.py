@@ -18,6 +18,7 @@ from lora_dataset_manager import (
     get_variation_presets,
     set_prompt_config,
     set_dataset_model,
+    set_dataset_negative_prompt,
     get_dataset_models,
     dataset_jobs,
     create_dataset_job,
@@ -322,6 +323,7 @@ def setup_dataset_routes(app, generation_backend, datasets_root: Path, defaults:
     _prompt_config = lora_dataset_cfg.get("variation_prompts")
     set_prompt_config(_prompt_config)
     set_dataset_model(lora_dataset_cfg.get("model"), lora_dataset_cfg.get("model_options"))
+    set_dataset_negative_prompt(lora_dataset_cfg.get("negative_prompt"))
     _resolve_path = resolve_input_path
     _datasets_root.mkdir(parents=True, exist_ok=True)
     app.include_router(router)
