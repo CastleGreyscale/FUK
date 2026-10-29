@@ -89,8 +89,16 @@
         </div>
         <div class="hero-content">
             <p class="hero-tagline">Local-first rendering pipeline for professional AI generation</p>
-            <a href="https://github.com/CastleGreyscale/FUK" class="hero-cta">View on GitHub</a>
+            <a href="./wiki.html" class="hero-cta">Get Started</a>
         </div>
+    </section>
+
+    <!-- Download Section -->
+    <section id="download">
+        <h2>Available Now on GitHub</h2>
+        <p>Clone the repo and run the setup script to get FUK running on your machine. The wiki walks through installation step by step.</p>
+        <a href="https://github.com/CastleGreyscale/FUK" target="_blank" rel="noopener" class="secondary-cta">View on GitHub</a>
+        <p class="installer-note">A more user-friendly installer is coming soon.</p>
     </section>
 
 <section id="status">
@@ -125,7 +133,7 @@
                 <h4>Storage Space</h4>
                 <ul>
                     <li>Base Install: ~15GB</li>
-                    <li>Models: ~500GB (depending on selection)</li>
+                    <li>Models: 50-900GB (depending on selection)</li>
                 </ul>
             </div>
             
@@ -177,7 +185,7 @@
             </div>
             <div class="feature-card">
                 <h3>Post-Processing</h3>
-                <p>Upscaling via Real-ESRGAN and frame interpolation via FILM. Professional quality enhancement for generated content.</p>
+                <p>Upscaling via Real-ESRGAN or SeedVR2 and frame interpolation via FILM. Professional quality enhancement for generated content.</p>
             </div>
             <div class="feature-card">
                 <h3>Local Control</h3>
@@ -215,6 +223,11 @@
                 <p>Drive FUK straight from Blender's viewport &mdash; scene-accurate control passes, live IPR-style preview, and VACE video generation from your camera moves.</p>
                 <a class="feature-link" href="./wiki.html#blender-plugin">Read more in the wiki &rarr;</a>
             </div>
+            <div class="feature-card">
+                <h3>Professional Outputs</h3>
+                <p>SDR &rarr; HDR via the LTX-2.5 IC-LoRA rebuilds clipped highlight range, and ACES color management via OpenColorIO writes ACEScg or ACES2065-1 for your facility's config. All of it lands in multi-layer 32-bit float EXR.</p>
+                <a class="feature-link" href="./wiki.html#exr-export">Read more in the wiki &rarr;</a>
+            </div>
         </div>
     </section>
 
@@ -228,18 +241,18 @@
                 <div class="roadmap-column-header now">Now</div>
                 <ul class="roadmap-list">
                     <li>AOV quality improvements</li>
-                    <li>Bit-depth improvements</li>
                     <li>Quality of life improvements</li>
-                    <li>Localized data collection</li>
                     <li>Speed &amp; optimization</li>
+                    <li>ArtCraft Bridge</li>
                 </ul>
             </div>
             <div class="roadmap-column">
                 <div class="roadmap-column-header next">Next</div>
                 <ul class="roadmap-list">
-                    <li>Scene creator</li>
                     <li>DaVinci Resolve integration</li>
-                    <li>Blender integration</li>
+                    <li>Easy Installer</li>
+                    <li>Standalone App</li>
+                    <li>RunPod Offloading</li>
                 </ul>
             </div>
             <div class="roadmap-column">

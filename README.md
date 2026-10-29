@@ -132,9 +132,11 @@ FUK treats AI generation as source material that enters a professional pipeline,
 
 ## Installation
 
+> **Planned:** A simpler install is in the works. It will be a single `fuk` command built on `uv`, which manages Python and picks the right CUDA build of PyTorch for you, plus `fuk doctor` to point out exactly what's broken. Native Windows will work without WSL or admin rights.
+
 ### System Requirements
 
-- **OS:** Linux (primary), macOS, Windows with WSL2
+- **OS:** Linux (primary), Windows with WSL2
 - **Python:** 3.10 or 3.11 (3.12+ not yet tested)
 - **GPU:** NVIDIA GPU with 12GB+ VRAM (24GB recommended for video)
 - **CUDA:** 11.8 or 12.1+
@@ -143,7 +145,7 @@ FUK treats AI generation as source material that enters a professional pipeline,
 
 ### Quick Install
 
-#### Linux/macOS
+#### Linux
 
 ```bash
 # Clone repository
@@ -154,16 +156,14 @@ cd FUK
 chmod +x setup.sh
 ./setup.sh
 
-# Edit configuration files using a code editor
-config/models.json     # Remove unwanted models
-config/defaults.json   # Set model and lora root directories
-
-# Download models (separate step, allows config review first)
-./download_models.sh
+# Edit configuration in a code editor
+fuk/config/defaults.json   # Set models_root
 
 # Start the server
 ./start.sh
 ```
+
+Then download models from **Utilities → Models** in the UI. See the [Model Manager](https://fuk-ai.io/wiki.html#model-manager) wiki page. It downloads one model at a time, shows the size before fetching, and resumes interrupted downloads.
 
 The setup script handles:
 - Python dependencies from pyproject.toml
@@ -173,7 +173,7 @@ The setup script handles:
 - Frontend dependencies (npm/bun)
 - Configuration file initialization
 
-**Model downloading is separate** to allow you to review and modify `config/models.json` first (set your preferred model directory, select which models to download, etc.)
+For headless installs, `./download_models.sh` still works. It downloads everything listed in `fuk/config/models.json`, so remove unwanted entries first.
 
 #### Windows
 
@@ -209,16 +209,14 @@ cd fuk/ui
 npm install  # or: bun install
 cd ../..
 
-# Edit configs
-notepad config\models.json
-notepad config\defaults.json
-
-# Download models
-python scripts\download_models.py
+# Edit config (set models_root)
+notepad fuk\config\defaults.json
 
 # Start server
-python fuk\fuk_web_server.py
+python fuk\ui\fuk_web_server.py
 ```
+
+Then download models from **Utilities → Models**, as on Linux.
 
 ### Optional: Real-ESRGAN Upscaling Binary
 
@@ -244,15 +242,17 @@ Frame interpolation (FILM) downloads automatically on first use — no binary re
 
 FUK uses DiffSynth-Studio for direct model access. Models are downloaded via Hugging Face.
 
-### Automated Download (Recommended)
+### Model Manager (Recommended)
 
-After editing `config/models.json` to set your model root directory:
+After setting `models_root` in `fuk/config/defaults.json`, start FUK and open **Utilities → Models**. See the [Model Manager](https://fuk-ai.io/wiki.html#model-manager) wiki page.
+
+### Headless Download
 
 ```bash
-python utils/download_models.py
+./download_models.sh
 ```
 
-This downloads all configured models from Hugging Face to your specified directory.
+This downloads every model listed in `fuk/config/models.json` to your `models_root`.
 
 ### Manual Download
 

@@ -72,6 +72,7 @@
                         <a href="#preprocessors" class="sidebar-link">Preprocessors</a>
                         <a href="#regional-conditioning" class="sidebar-link">Regional Conditioning</a>
                         <a href="#post-processors" class="sidebar-link">Post-Processors</a>
+                        <a href="#sdr-to-hdr" class="sidebar-link">SDR &rarr; HDR</a>
                         <a href="#aovs" class="sidebar-link">AOVs &amp; Passes</a>
                         <a href="#exr-export" class="sidebar-link">EXR Export</a>
                         <a href="#lora-dataset-builder" class="sidebar-link">LoRA Dataset Builder</a>
@@ -144,6 +145,7 @@
                     <div class="sidebar-links" hidden="">
                         <a href="#plugins" class="sidebar-link">Overview</a>
                         <a href="#blender-plugin" class="sidebar-link">Blender Bridge</a>
+                        <a href="#photocraft-plugin" class="sidebar-link">PhotoCraft Bridge (Beta)</a>
                     </div>
                 </div>
 
@@ -156,12 +158,13 @@
             <!-- Overview -->
             <div class="wiki-section" id="overview">
                 <h2>Overview</h2>
-                <p>FUK (Framework for Unified Kreation) is a local-first AI rendering pipeline built for VFX professionals. It provides a structured, stable environment for image and video generation that integrates cleanly into existing production pipelines — without telemetry, cloud dependencies, or workflows designed around consumer use cases.</p>
+                <p>FUK (Framework for Unified Kreation) is a local-first AI rendering pipeline built for professionals. It provides a structured, stable environment for image and video generation that integrates cleanly into existing production pipelines. With direct integration with profesional applications in active development. Without telemetry, cloud dependencies, or workflows designed around consumer use cases.</p>
                 <p>FUK runs entirely on your hardware. Models, outputs, and project data stay on your machine.</p>
 
                 <h3>Design Philosophy</h3>
-                <p>Most AI generation tools are built around exploration — infinite scroll, quick iterations, no project structure. FUK is built around production. Every output lives in a project/shot/version hierarchy. Every generation captures complete metadata. Nothing is ephemeral unless you want it to be.</p>
-                <p>The pipeline is intentionally minimal in its interface and maximal in its output. Controls are exposed where they matter. Defaults are sane. The goal is repeatability and composability with downstream tools, not hiding complexity behind a friendly UI.</p>
+                <p>Most AI generation tools are built around exploration, quick iterations, no project structure. FUK is built around production. Every output lives in a project/shot/version hierarchy. Every generation captures complete metadata. Nothing is ephemeral unless you want it to be.</p>
+                
+                <p>The pipeline is intentionally minimal in its interface and maximal in its output. Controls are exposed where they matter. Defaults are sane. The housekeeping (spec compliance, versioning, metadata, handoff between tools) is automated so it never becomes your job. The goal isn’t to hide what’s under the hood. It’s to stop making you rebuild it every time you need a shot. Complexity isn’t sophistication, and the less time you spend in FUK, the more time you spend on the work.</p>
 
                 <h3>What FUK Is Not</h3>
                 <ul>
@@ -183,6 +186,10 @@
                     <span class="wiki-video-ph">▶ Video breakdown — coming soon</span>
                 </div>
 
+                <div class="wiki-note">
+                    <p><strong>Planned:</strong> A simpler install is in the works. It will be a single <code>fuk</code> command built on <code>uv</code>, which manages Python and picks the right CUDA build of PyTorch for you, plus <code>fuk doctor</code> to point out exactly what's broken. Native Windows will work without WSL or admin rights.</p>
+                </div>
+
                 <h3>Prerequisites</h3>
                 <ul>
                     <li>Python 3.10+</li>
@@ -196,14 +203,14 @@
                     <li>Clone the repository:<br><code>git clone https://github.com/CastleGreyscale/FUK</code></li>
                     <li>Install dependencies:<br><code>pip install -e .</code></li>
                     <li>Run setup:<br><code>chmod +x setup.sh &amp;&amp; ./setup.sh</code></li>
-                    <li>Configure models — edit <code>config/models.json</code> to select which models to use, remove entries for any you don't want</li>
                     <li>Set model root — edit <code>config/defaults.json</code> and set the model root directory to wherever your models live</li>
-                    <li>Download models:<br><code>./download_models.sh</code></li>
                     <li>Launch FUK:<br><code>./start.sh</code></li>
+                    <li>Download models from <strong>Utilities → Models</strong>. See the <a href="#model-manager">Model Manager</a></li>
                 </ol>
+                <p>For headless installs, <code>./download_models.sh</code> still works. It downloads everything listed in <code>config/models.json</code>, so remove unwanted entries first.</p>
 
                 <h3>If Model Downloads Are Slow</h3>
-                <p>Models come from one of two hosts. DiffSynth defaults to <strong>ModelScope</strong>, which is often slow and prone to dropped connections outside China. Most models are also on <strong>HuggingFace</strong>, which is usually far faster:</p>
+                <p>Models come from one of two hosts. DiffSynth defaults to <strong>ModelScope</strong>, which is often slow and prone to dropped connections outside China. Most models are also on <strong>HuggingFace</strong>, which is usually far faster. The Model Manager already prefers HuggingFace; for the script, set it explicitly:</p>
                 <pre><code>DIFFSYNTH_DOWNLOAD_SOURCE=huggingface ./download_models.sh</code></pre>
                 <p>A few repositories exist only on ModelScope — the <code>PAI/*</code> models and DiffSynth-Studio's converted Wan safetensors. The downloader falls back per component, so either choice completes; those specific files just come over the slower link.</p>
 
@@ -825,6 +832,58 @@
                     <li>Generated at 12fps → interpolated to 24fps is the most common workflow</li>
                     <li>Interpolation does not generate new content — it synthesizes in-between frames; it cannot recover motion that wasn't present in the original generation</li>
                     <li>Interpolation runs on the frame sequence, not the MP4 preview — load the sequence directory, not the video file</li>
+                </ul>
+            </div>
+
+            <!-- SDR to HDR -->
+            <div class="wiki-section" id="sdr-to-hdr">
+                <h2>SDR &rarr; HDR</h2>
+                <p>Converts a finished 8-bit SDR clip into scene-linear HDR using Lightricks' <strong>LTX-2.5 SDR-To-HDR IC-LoRA</strong>. It runs in the <a href="#postprocess-panel">Postprocess Panel</a> and writes a half-float EXR sequence (ACEScg by default) plus a 10-bit BT.2020/HLG master, saved as a new version alongside the original.</p>
+
+                <h4>Why this is different from EXR export</h4>
+                <p>The <a href="#exr-export">latent &rarr; EXR</a> path recovers <em>precision</em>, not range. Its ceiling is the VAE's [0, 1] clamp, and bracketed decodes can only redistribute what the latent already held. Highlights that SDR clipped are simply not there to recover.</p>
+                <p>This model was trained on paired SDR/HDR plates and <em>synthesises</em> the range SDR threw away: blown skies, practicals, speculars. That makes it the real range path, and a different kind of operation. The highlights it writes are a learned reconstruction, not measured light, so judge them on the shot.</p>
+
+                <h4>How it works</h4>
+                <p>The SDR clip is the whole control signal. There is no prompt, no CFG and no text encoder; the LoRA ships a precomputed embedding of the one caption it was trained on.</p>
+                <p>FUK's LTX-2.5 normally runs through DiffSynth, but the HDR LoRA depends on more than a LoRA: an ACEScct input transform, seam keyframes at every 24/32-frame border, and a keyframe-aware diffusion VAE decode. Rather than port that, FUK runs Lightricks' own <code>ltx-pipelines</code> from a pinned checkout in <code>fuk/vendor/LTX-2</code>, in a subprocess, the same arrangement as SeedVR2.</p>
+
+                <h4>Outputs</h4>
+                <table class="wiki-table">
+                    <thead>
+                        <tr><th>File</th><th>Description</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>EXR sequence</td><td>Half-float frames in the chosen colour space. <strong>The deliverable</strong> for grading and comp</td></tr>
+                        <tr><td>HLG master</td><td>10-bit HEVC, BT.2020 primaries, HLG transfer. Written whichever EXR colour space you pick</td></tr>
+                        <tr><td>SDR preview</td><td>Hable-tonemapped H.264 for in-app playback only. Browsers on Linux mostly cannot decode 10-bit HEVC, and none show HLG as HLG on an SDR panel</td></tr>
+                    </tbody>
+                </table>
+
+                <h4>Parameters</h4>
+                <table class="wiki-table">
+                    <thead>
+                        <tr><th>Parameter</th><th>Description</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>EXR Colour Space</td><td><code>ACEScg</code> (scene-linear, recommended), <code>Linear Rec.709 / sRGB</code>, or <code>ACEScct</code> (the VAE's log codes, untouched)</td></tr>
+                        <tr><td>Seam Keyframes</td><td>Pins an SDR guide and a generated HDR frame at every 24/32-frame seam and decodes against them. The trained default at strength 0.95; only engages past ~24 frames. Leave on unless comparing</td></tr>
+                        <tr><td>Quality</td><td><em>High</em> generates 2N&minus;1 frames from a doubled reference and keeps every other one. Fewer temporal artifacts, at roughly twice the time and memory</td></tr>
+                        <tr><td>Memory Mode</td><td><em>Auto</em> tries resident FP8 on cards that can hold it, then falls back to offload. <em>Resident</em> needs a 32GB+ card; <em>Offload</em> streams weights from RAM</td></tr>
+                    </tbody>
+                </table>
+
+                <h4>Memory on a 24GB card</h4>
+                <p>The 22B transformer does not fit 24GB even at FP8. Loading it alone reached 21.1GB and ran out before the first step, so on a 4090 <em>Auto</em> goes straight to offload. The bf16 weights are pinned in system RAM (~42GB) and streamed to the GPU per layer; every layer still computes on the GPU.</p>
+                <p>The whole clip is denoised as one attention window, so tiling cannot help and length &times; resolution is the limit. Measured on a 4090: 121 frames at 1920&times;1088 fits, 225 frames does not. A 17-frame 768&times;432 clip peaked at 7.7GB and finished in 39s including load. If a run runs out of memory, the error message estimates how many frames will fit at that resolution.</p>
+
+                <h4>Practical Notes</h4>
+                <ul>
+                    <li>Video input only. Runs at the source's own resolution and length</li>
+                    <li>The pipeline needs 8k+1 frames. FUK pads the clip losslessly by holding its last frame, then trims the extra frames back off, so no frames of your plate are dropped</li>
+                    <li>Weights are not fetched on first use: the transformer alone is 42GB. Download <em>LTX-2.5 &mdash; SDR &rarr; HDR</em> from the <a href="#model-manager">Model Manager</a> or run <code>download_models.sh</code></li>
+                    <li>The first run in a session reads the weights into page cache sequentially before loading. That takes seconds instead of the minutes a cold mmap load would take</li>
+                    <li>Same licence as the LTX-2.5 base FUK already runs (LTX-2.x Community License)</li>
                 </ul>
             </div>
 
@@ -1504,7 +1563,7 @@
             <!-- Postprocess Panel -->
             <div class="wiki-section" id="postprocess-panel">
                 <h2>Postprocess Panel</h2>
-                <p>The Postprocess tab handles upscaling and frame interpolation. Both operations accept the same input types (image, video, or sequence) and save their output as a new versioned result alongside the original.</p>
+                <p>The Postprocess tab handles upscaling, frame interpolation, and SDR &rarr; HDR conversion. Each saves its output as a new versioned result alongside the original.</p>
 
                 <div class="wiki-warning">
                     <p><strong>Work in progress.</strong> These are the least mature passes in FUK, and the licensing constraint behind that is worth understanding before you rely on them — see <a href="#post-processors">Post-Processors</a>.</p>
@@ -1527,6 +1586,16 @@
                     <li><strong>Video Output Mode</strong> — whether to generate an MP4 preview alongside the output sequence</li>
                 </ul>
                 <p>See <a href="#interpolation">Frame Interpolation</a> for more detail.</p>
+
+                <h3>SDR &rarr; HDR Tab</h3>
+                <ul>
+                    <li><strong>Input</strong>: an SDR video file</li>
+                    <li><strong>EXR Colour Space</strong>: ACEScg (recommended), Linear Rec.709 / sRGB, or ACEScct</li>
+                    <li><strong>Seam Keyframes</strong>: on at 0.95 (trained default) or off</li>
+                    <li><strong>Quality</strong>: Standard, or High (2&times; frames internally, ~2&times; time)</li>
+                    <li><strong>Memory Mode</strong>: Auto, Resident FP8, or CPU offload</li>
+                </ul>
+                <p>The preview plays a tonemapped SDR copy; the EXR sequence and HLG master are the real outputs. If the model or its dependencies are missing, the panel says which and how to install them. See <a href="#sdr-to-hdr">SDR &rarr; HDR</a> for more detail.</p>
             </div>
 
             <!-- Layers Panel -->
@@ -2583,10 +2652,12 @@
                 </div>
                 <p>FUK exposes its generation pipeline over a local HTTP API, which makes it straightforward to drive from other applications. Plugins live under <code>fuk/plugins/</code> and act as clients to the running FUK server — they gather inputs in the host application, hand them to FUK, and bring the results back.</p>
                 <p>Because a plugin and the FUK server run on the same machine, inputs are exchanged by file path rather than upload, and the shot <code>.json</code> remains the single source of truth for settings.</p>
+                <p>Where the host application has no plugin API, the direction flips: the controls live in the FUK web UI and the FUK server drives the application instead.</p>
 
                 <h3>Available Plugins</h3>
                 <ul>
                     <li><strong><a href="#blender-plugin">Blender Bridge</a></strong> — render structural control passes from a Blender scene, generate control-guided stills and VACE video in FUK, and bring the results back into the viewport.</li>
+                    <li><strong><a href="#photocraft-plugin">PhotoCraft Bridge</a></strong> <em>(Beta)</em> — pull composites, masks, layers and <code>@</code> entity layers from PhotoCraft into the Image tab, and place results and depth maps back as layers.</li>
                 </ul>
             </div>
 
@@ -2698,6 +2769,64 @@ blender -b MyRig_OP.blend --python fuk/plugins/blender/openpose_gn_prototype.py 
 
                 <h3>Cancelling</h3>
                 <p>Press <strong>Esc</strong> or the <strong>Cancel</strong> button to stop a generation. Image generations abort at the next diffusion step; video currently stops waiting but continues rendering on the server.</p>
+            </div>
+
+            <!-- PhotoCraft Bridge -->
+            <div class="wiki-section" id="photocraft-plugin">
+                <h2>PhotoCraft Bridge</h2>
+                <p>The PhotoCraft Bridge moves images between FUK and <a href="https://getartcraft.com/apps" target="_blank" rel="noopener">PhotoCraft</a>, the MIT/Apache-licensed image editor from ArtCraft. Paint a mask, block out entity regions, or build a slap comp in PhotoCraft, pull it into the Image tab, generate, and place the result back as a new layer.</p>
+
+                <div class="wiki-warning">
+                    <p><strong>Beta.</strong> The bridge is new and depends on PhotoCraft's desktop control channel, which supports much less than its protocol docs describe. A PhotoCraft update can change what is available. Re-run the self-check (<code>fuk/plugins/photocraft/pc_probe.py</code>) after updating, and please report anything that breaks.</p>
+                </div>
+
+                <p>Unlike the Blender Bridge, this works the other way round. PhotoCraft has no plugin API and cannot call out to other programs, so the controls live in the FUK web UI and the FUK server drives PhotoCraft over its local control channel.</p>
+
+                <h3>Setup</h3>
+                <p>PhotoCraft is installed as the Flatpak <code>ai.storyteller.photocraft</code>. Start it with the launcher, or press <strong>Launch PhotoCraft</strong> on the Image tab's PhotoCraft card, which runs the same script:</p>
+                <pre><code>fuk/plugins/photocraft/launch_photocraft.sh            # this launch only
+fuk/plugins/photocraft/launch_photocraft.sh --persist  # also: flatpak override --share=network</code></pre>
+                <p>The launcher adds three things a plain <code>flatpak run</code> does not:</p>
+                <ul>
+                    <li><strong>Network sharing.</strong> Without it the sandbox gets its own network namespace and FUK cannot see the control port (<code>127.0.0.1:47823</code>).</li>
+                    <li><strong>Mailbox present mode.</strong> Control requests run on PhotoCraft's frame loop. Under the default vsync mode a hidden window stops drawing, so requests queue up and time out. If you still see <em>"bring its window into view"</em>, do that and retry.</li>
+                    <li><strong>The control token and exchange folder.</strong> Files are exchanged through <code>&lt;Pictures&gt;/fuk_photocraft/exchange/</code>, which the sandbox can already see.</li>
+                </ul>
+                <p>Settings live in <code>defaults.json</code> under <code>tools.photocraft</code>: <code>port</code>, <code>root</code> (the exchange folder), <code>app_id</code>, and <code>max_pull_side</code>. Pulls are downscaled to <code>max_pull_side</code> (default 2048), so a 6K document does not become a 6K generation. Results placed back are scaled up to the document size.</p>
+
+                <h3>Layer Conventions</h3>
+                <table class="wiki-table">
+                    <thead>
+                        <tr><th>Layer</th><th>Used for</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td><code>@&lt;prompt&gt;</code> (e.g. <code>@a red car</code>)</td><td>One EliGen entity. Its painted pixels are the region (alpha, or luminance if the layer is opaque). The layer nearest the top of the Layers panel becomes entity 01. Hidden or visible both work</td></tr>
+                        <tr><td><code>_mask</code></td><td>Inpaint mask when there is no selection. White or painted means repaint</td></tr>
+                        <tr><td>A selection</td><td>Inpaint mask. A selection wins over <code>_mask</code></td></tr>
+                    </tbody>
+                </table>
+                <p><code>@</code> and <code>_</code> layers are always left out of the composite FUK receives. The bridge hides them in a scratch copy, so your document is not changed. Layers inside groups are read too.</p>
+
+                <h3>Actions</h3>
+                <p>A <strong>PhotoCraft</strong> card in the Image tab shows the connection status and the active document.</p>
+                <ul>
+                    <li><strong>From PhotoCraft</strong> (control / edit inputs): choose <em>Composite</em>, <em>Active layer</em>, or any named layer. The image is added as a control input.</li>
+                    <li><strong>From PhotoCraft</strong> (inpaint): sets the composite as the inpaint image and the selection or <code>_mask</code> as its mask in one step. <strong>Mask from PhotoCraft</strong> fills only the mask.</li>
+                    <li><strong>@ layers &rarr; EliGen</strong>: turns every <code>@</code> layer into an entity mask and switches the tab to the EliGen model with them loaded. Also available as <strong>From PhotoCraft (@ layers)</strong> in the EliGen panel.</li>
+                    <li><strong>Depth &rarr; layer</strong>: runs Depth Anything 3 on the composite and places the result back as a layer (near = white), for slap comps. In an 8-bit document the layer has only 256 levels, so pick <em>+ 16-bit doc</em> or <em>+ 32-bit EXR doc</em> to also open the full-precision map as its own document.</li>
+                    <li><strong>&rarr; PhotoCraft</strong>: on the result preview and on Generation History entries. Adds the image to the active document as a new layer named after its generation, aligned to the canvas.</li>
+                </ul>
+                <p>Pulls never start a generation. Each one creates an <code>import_###</code> entry in the Generation History, and you press Generate when ready.</p>
+
+                <h3>Known Limitations</h3>
+                <ul>
+                    <li><strong>Bit depth cannot be changed by automation.</strong> PhotoCraft's desktop control server refuses the commands that would do it. Layers placed into an 8-bit document are quantised to 8 bits, which is why depth offers to open a separate 16-bit or EXR document.</li>
+                    <li><strong>PhotoCraft must be drawing.</strong> If its window is fully hidden and requests time out, bring it into view and retry.</li>
+                    <li><strong>Stills only.</strong> FilmCraft and the other ArtCraft apps are not bridged yet.</li>
+                </ul>
+
+                <h3>Security</h3>
+                <p>The control port listens on loopback only and needs a 256-bit token, stored in a file only your user can read. Network access is shared only with PhotoCraft instances the launcher starts, unless you used <code>--persist</code>.</p>
             </div>
 
         </main>
