@@ -17,6 +17,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { FolderOpen, X } from '../components/Icons';
 import TagManager from '../components/TagManager';
 import { useLocalStorage } from '../hooks/useLocalStorage';
+import { browseFiles } from '../utils/fileBrowser';
 
 const API_URL = '/api';
 
@@ -113,17 +114,13 @@ export default function ImageDescribeTool({ project }) {
     setBrowsing(true);
     setError(null);
     try {
-      const res = await fetch(`${API_URL}/browser/open`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: 'Select Image or Video to Describe',
-          multiple: false,
-          detect_sequences: false,
-          filter: 'all',
-        }),
+      const data = await browseFiles({
+        title: 'Select Image or Video to Describe',
+        multiple: false,
+        detectSequences: false,
+        filter: 'all',
+        initialDir: imagePath?.startsWith('/') ? imagePath.substring(0, imagePath.lastIndexOf('/')) : null,
       });
-      const data = await res.json();
       if (data.success && data.files?.length > 0) {
         setImagePath(data.files[0].path);
         setDescription('');
@@ -135,7 +132,7 @@ export default function ImageDescribeTool({ project }) {
     } finally {
       setBrowsing(false);
     }
-  }, [browsing, running]);
+  }, [browsing, running, imagePath]);
 
   const toggleFocusPreset = useCallback((phrase) => {
     setFocus(prev => {

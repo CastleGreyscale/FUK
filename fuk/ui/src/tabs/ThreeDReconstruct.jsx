@@ -22,6 +22,7 @@ import { useGeneration } from '../hooks/useGeneration';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { startTask } from '../utils/api';
 import { buildImageUrl, sizedImageUrl } from '../utils/constants';
+import { browseFiles, browseDirectory } from '../utils/fileBrowser';
 
 const API_URL = '/api';
 
@@ -221,17 +222,12 @@ export default function ThreeDReconstruct({ config, project }) {
   // --- Input pickers --------------------------------------------------------
   const handleBrowseFiles = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/browser/open`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: 'Select images for reconstruction',
-          multiple: true,
-          filter: 'images',
-          detect_sequences: false,
-        }),
+      const data = await browseFiles({
+        title: 'Select images for reconstruction',
+        multiple: true,
+        filter: 'images',
+        detectSequences: false,
       });
-      const data = await res.json();
       if (data.success && data.files?.length) {
         const paths = data.files.map((f) => f.path);
         setInputImages(paths);
@@ -246,12 +242,7 @@ export default function ThreeDReconstruct({ config, project }) {
 
   const handleBrowseFolder = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/browser/directory`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: 'Select a folder of images' }),
-      });
-      const data = await res.json();
+      const data = await browseDirectory({ title: 'Select a folder of images' });
       if (!data.success || !data.directory) return;
 
       // Expand to real paths rather than sending the directory as one entry —

@@ -14,6 +14,7 @@ import ExportTab from './tabs/ExportTab';
 import UtilitiesTab from './tabs/UtilitiesTab';
 import StoryboardTab from './tabs/StoryboardTab';
 import TagManagerModal from './components/TagManagerModal';
+import FileBrowserHost from './components/FileBrowser';
 import { fetchConfig } from './utils/api';
 import { useProject } from './hooks/useProject';
 import { GenerationHistory } from './components';
@@ -266,6 +267,8 @@ export default function App() {
           onClose={() => setTagModal(null)}
         />
       )}
+
+      <FileBrowserHost projectFolder={project.projectFolder} />
     </div>
   );
 }

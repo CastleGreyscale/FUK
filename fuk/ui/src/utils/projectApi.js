@@ -4,20 +4,17 @@
  */
 
 import { API_URL } from './constants';
+import { browseDirectory } from './fileBrowser';
 
 /**
- * Browse for folder using native dialog
+ * Browse for a project folder with the in-app file browser.
+ * Resolves { path, cancelled }, the shape the old native-dialog endpoint returned.
  */
-export async function browseForFolder() {
-  const res = await fetch(`${API_URL}/project/browse-folder`, {
-    method: 'POST',
-  });
-  
-  if (!res.ok) {
-    throw new Error(`Failed to open folder browser: ${res.statusText}`);
-  }
-  
-  return res.json();
+export async function browseForFolder(initialDir = null) {
+  const data = await browseDirectory({ title: 'Select FUK Project Folder', initialDir });
+  return data.success && data.directory
+    ? { path: data.directory, cancelled: false }
+    : { path: null, cancelled: true, error: data.error || null };
 }
 
 /**

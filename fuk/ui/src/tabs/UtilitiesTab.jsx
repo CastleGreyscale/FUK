@@ -11,6 +11,7 @@ import ImageDescribeTool from './ImageDescribeTool';
 import ThreeDReconstruct from './ThreeDReconstruct';
 import ModelManager from './ModelManager';
 import { useLocalStorage } from '../hooks/useLocalStorage';
+import { browseDirectory } from '../utils/fileBrowser';
 import { snapFrames, snapDimension } from '../utils/helpers.js';
 
 // ============================================================================
@@ -329,12 +330,7 @@ function SpecTool({ config }) {
 
   const handleBrowseBlendDir = async () => {
     try {
-      const res = await fetch('/api/browser/directory', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: 'Choose save folder for .blend template' }),
-      });
-      const data = await res.json();
+      const data = await browseDirectory({ title: 'Choose save folder for .blend template', initialDir: blendDir || null });
       if (data.success && data.directory) setBlendDir(data.directory);
     } catch (err) { console.error('Browse dir failed:', err); }
   };

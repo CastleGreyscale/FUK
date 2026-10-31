@@ -10,6 +10,7 @@ import ImageUploader from '../components/ImageUploader';
 import { ThumbsUp, ThumbsDown, CheckCircle } from '../components/Icons';
 import { buildImageUrl, sizedImageUrl } from '../utils/constants';
 import { useLocalStorage } from '../hooks/useLocalStorage';
+import { browseDirectory } from '../utils/fileBrowser';
 
 const toLabel = key => key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 
@@ -639,12 +640,7 @@ function CurationPhase({ jobId }) {
 
   const handleBrowseExportDir = async () => {
     try {
-      const res = await fetch('/api/browser/directory', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: 'Choose export folder for approved images' }),
-      });
-      const data = await res.json();
+      const data = await browseDirectory({ title: 'Choose export folder for approved images', initialDir: exportDir || null });
       if (data.success && data.directory) setExportDir(data.directory);
     } catch (_) {}
   };

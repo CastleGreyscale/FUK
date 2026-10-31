@@ -14,8 +14,8 @@ import { useState, useId, useCallback } from 'react';
 import { X, Film, Layers, Image, FolderOpen } from './Icons';
 import { registerImport } from '../utils/historyApi';
 import { sizedImageUrl } from '../utils/constants';
+import { browseFiles } from '../utils/fileBrowser';
 
-const API_URL = '/api';
 
 // Media type detection
 const VIDEO_EXTENSIONS = ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v', '.mxf'];
@@ -105,7 +105,7 @@ export default function MediaUploader({
     }
   }, [isLegacyMode, handleChange]);
 
-  // Open native file dialog via backend (PRIMARY METHOD)
+  // Open the in-app file browser (PRIMARY METHOD)
   // Returns absolute paths - no upload/copy needed
   const handleBrowse = useCallback(async () => {
     if (disabled || loading) return;
@@ -114,24 +114,14 @@ export default function MediaUploader({
     setError(null);
     
     try {
-      const response = await fetch(`${API_URL}/browser/open`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: 'Select Media',
-          multiple,
-          detect_sequences: detectSequences,
-          filter: accept,
-          initial_dir: initialDir || null,
-        }),
+      const data = await browseFiles({
+        title: 'Select Media',
+        multiple,
+        detectSequences,
+        filter: accept,
+        initialDir,
       });
-      
-      if (!response.ok) {
-        throw new Error(`Browser failed: ${response.statusText}`);
-      }
-      
-      const data = await response.json();
-      
+
       if (data.success && data.files?.length > 0) {
         const newMedia = data.files.map(f => ({
           path: f.path,  // Absolute path - file stays in place

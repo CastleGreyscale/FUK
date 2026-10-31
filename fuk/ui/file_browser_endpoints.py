@@ -11,7 +11,8 @@ Add to fuk_web_server.py:
     setup_file_browser_routes(app, log)
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from pathlib import Path
 from typing import Optional, List, Dict, Any
@@ -19,6 +20,8 @@ import subprocess
 import json
 import sys
 import os
+
+from file_browser import list_directory, resolve_browse_path, selection_for, BROWSER_FILTERS
 
 
 # ============================================================================
@@ -142,6 +145,66 @@ def run_file_browser(args: List[str], timeout: int = 300) -> Dict[str, Any]:
         return {"success": False, "error": str(e), "files": []}
 
 
+def browse_roots() -> List[Path]:
+    """
+    Folders the in-app browser may list: the same places the file endpoint
+    (/api/project/files) will serve, so every listed image can be previewed.
+    """
+    from project_endpoints import get_project_folder
+
+    roots = [Path.home(), Path("/tmp")]
+    project = get_project_folder()
+    if project:
+        roots.append(Path(project))
+    return [r.resolve() for r in roots]
+
+
+def _within_roots(path: Path, roots: List[Path]) -> bool:
+    resolved = path.resolve()
+    return any(resolved == r or r in resolved.parents for r in roots)
+
+
+def browse_listing(raw_path: Optional[str], filter: str, sequences: bool, offset: int, limit: int) -> Dict[str, Any]:
+    """Blocking body of /api/browser/list (runs in a worker thread)."""
+    roots = browse_roots()
+    directory, target, missing = resolve_browse_path(raw_path or str(Path.home()))
+    if not _within_roots(directory, roots):
+        raise HTTPException(status_code=403, detail=f"Outside the folders FUK can browse: {directory}")
+
+    try:
+        entries, aliases = list_directory(directory, filter=filter, detect_sequences=sequences)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail=f"Permission denied: {directory}")
+
+    # The entry a pasted file/sequence points at, wherever it falls in the
+    # pages, so the UI can pick it straight away.
+    selected = selection_for(target, aliases)
+    selected_entry = next((e for e in entries if e["path"] == selected), None) if selected else None
+
+    page = entries[offset:offset + limit]
+    for entry in page:
+        if entry["kind"] in ("image", "video", "file"):
+            try:
+                st = os.stat(entry["path"])
+                entry["size"], entry["mtime"] = st.st_size, st.st_mtime
+            except OSError:
+                pass
+
+    parent = directory.parent
+    return {
+        "path": str(directory),
+        "parent": str(parent) if parent != directory and _within_roots(parent, roots) else None,
+        "home": str(Path.home()),
+        "selected": selected,
+        "selected_entry": selected_entry,
+        "missing": missing,
+        "entries": page,
+        "total": len(entries),
+        "offset": offset,
+        "has_more": offset + limit < len(entries),
+    }
+
+
 # ============================================================================
 # Route Setup
 # ============================================================================
@@ -184,7 +247,7 @@ def setup_file_browser_routes(app, log):
         else:
             args.append("--no-detect-sequences")
         
-        result = run_file_browser(args)
+        result = await run_in_threadpool(run_file_browser, args)
         
         if result.get("success"):
             files = [MediaFile(**f) for f in result.get("files", [])]
@@ -208,7 +271,7 @@ def setup_file_browser_routes(app, log):
         if request.initial_dir:
             args.extend(["--initial-dir", request.initial_dir])
         
-        result = run_file_browser(args)
+        result = await run_in_threadpool(run_file_browser, args)
         
         if result.get("success"):
             directory = result.get("directory")
@@ -241,7 +304,7 @@ def setup_file_browser_routes(app, log):
         else:
             args.append("--no-detect-sequences")
         
-        result = run_file_browser(args, timeout=60)
+        result = await run_in_threadpool(run_file_browser, args, 60)
         
         if result.get("success"):
             files = [MediaFile(**f) for f in result.get("files", [])]
@@ -252,6 +315,23 @@ def setup_file_browser_routes(app, log):
             log.error("FileBrowser", error)
             return FileDialogResponse(success=False, error=error)
     
+    @app.get("/api/browser/list")
+    async def browse_list(
+        path: Optional[str] = Query(default=None, description="Folder, file, or sequence pattern; pasted paths welcome"),
+        filter: str = Query(default="all", description=", ".join(BROWSER_FILTERS)),
+        sequences: bool = Query(default=True, description="Collapse frame sequences into one entry"),
+        offset: int = Query(default=0, ge=0),
+        limit: int = Query(default=300, ge=1, le=2000),
+    ):
+        """
+        List a folder for the in-app file browser, a page at a time.
+
+        Subfolders come first, then media matching `filter`. Frame sequences
+        collapse to one entry. If `path` names a file or sequence, its folder
+        is listed and `selected` names the matching entry.
+        """
+        return await run_in_threadpool(browse_listing, path, filter, sequences, offset, limit)
+
     @app.get("/api/browser/recent")
     async def get_recent_directories():
         """Get recently used directories (from project history)"""

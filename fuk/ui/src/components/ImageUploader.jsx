@@ -1,6 +1,6 @@
 /**
  * Image Uploader Component
- * Handles multi-image selection with thumbnails using native tkinter dialog
+ * Handles multi-image selection with thumbnails using the in-app file browser
  * 
  * NO UPLOAD - Files stay in place, only paths are passed around
  */
@@ -8,8 +8,7 @@
 import { useState, useId, useCallback } from 'react';
 import { X, FolderOpen } from './Icons';
 import { sizedImageUrl } from '../utils/constants';
-
-const API_URL = '/api';
+import { browseFiles } from '../utils/fileBrowser';
 
 export default function ImageUploader({ images, onImagesChange, disabled, id: providedId, initialDir = null, onDirectorySelected = null }) {
   const [loading, setLoading] = useState(false);
@@ -19,7 +18,7 @@ export default function ImageUploader({ images, onImagesChange, disabled, id: pr
   const reactId = useId();
   const inputId = providedId || `image-upload-${reactId}`;
 
-  // Open native file dialog via backend (tkinter)
+  // Open the in-app file browser
   // Returns absolute paths - no upload/copy needed
   const handleBrowse = useCallback(async () => {
     if (disabled || loading) return;
@@ -28,24 +27,14 @@ export default function ImageUploader({ images, onImagesChange, disabled, id: pr
     setError(null);
     
     try {
-      const response = await fetch(`${API_URL}/browser/open`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: 'Select Images',
-          multiple: true,
-          detect_sequences: false,
-          filter: 'images',
-          initial_dir: initialDir || null,
-        }),
+      const data = await browseFiles({
+        title: 'Select Images',
+        multiple: true,
+        detectSequences: false,
+        filter: 'images',
+        initialDir,
       });
-      
-      if (!response.ok) {
-        throw new Error(`Browser failed: ${response.statusText}`);
-      }
-      
-      const data = await response.json();
-      
+
       if (data.success && data.files?.length > 0) {
         // Extract just the paths from the file objects
         const paths = data.files.map(f => f.path);

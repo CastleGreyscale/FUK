@@ -430,7 +430,8 @@ async def browse_folder():
     """
     print("[PROJECT] Opening folder browser via subprocess...", flush=True)
     
-    result = _run_dialog_subprocess([
+    # In a worker thread: the subprocess blocks for as long as the dialog is open.
+    result = await run_in_threadpool(_run_dialog_subprocess, [
         "directory",
         "--title", "Select FUK Project Folder (Projects/Fuk/)",
     ])
@@ -1557,7 +1558,8 @@ async def export_generation(data: dict = Body(...)):
     default_name = default_name.replace("/", "_").replace("\\", "_")
 
     # Native Save-As dialog (subprocess to avoid tkinter/asyncio conflicts).
-    result = _run_dialog_subprocess([
+    # In a worker thread: the subprocess blocks for as long as the dialog is open.
+    result = await run_in_threadpool(_run_dialog_subprocess, [
         "save",
         "--title", "Save generation as…",
         "--initial-file", default_name,

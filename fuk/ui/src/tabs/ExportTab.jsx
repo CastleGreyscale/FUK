@@ -12,6 +12,7 @@ import GenerationModal from '../components/GenerationModal';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { useGeneration } from '../hooks/useGeneration';
 import { startTask } from '../utils/api';
+import { browseDirectory } from '../utils/fileBrowser';
 import { buildImageUrl, API_URL } from '../utils/constants';
 import { formatTime } from '../utils/helpers';
 import Footer from '../components/Footer';
@@ -234,22 +235,16 @@ const {
   const handleBrowseSaveLocation = async () => {
     try {
       const lastExportDir = project?.projectState?.lastState?.lastExportDir;
-      const response = await fetch(`${API_URL}/project/browse-save`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: isVideoMode ? 'Select Output Directory' : 'Select Export Directory',
-          initialDir: settings.exportPath || lastExportDir || null,
-        }),
+      const data = await browseDirectory({
+        title: isVideoMode ? 'Select Output Directory' : 'Select Export Directory',
+        initialDir: settings.exportPath || lastExportDir || project?.projectFolder || null,
       });
 
-      const data = await response.json();
-
-      if (data.path && !data.cancelled) {
-        updateSettings({ exportPath: data.path });
+      if (data.success && data.directory) {
+        updateSettings({ exportPath: data.directory });
         // Persist last used export directory to project file
         if (project?.updateLastState) {
-          project.updateLastState({ lastExportDir: data.path });
+          project.updateLastState({ lastExportDir: data.directory });
         }
       }
     } catch (err) {

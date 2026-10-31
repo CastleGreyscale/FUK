@@ -20,6 +20,7 @@ import { useGeneration } from '../hooks/useGeneration';
 // import LayerStackPanel from '../components/LayerStackPanel';
 // import { initStack } from '../utils/layerStackApi';
 import { useLocalStorage } from '../../src/hooks/useLocalStorage';
+import { browseFiles, browseDirectory } from '../utils/fileBrowser';
 import { useSavedSeeds } from '../hooks/useSavedSeeds';
 import { startImageGeneration } from '../../src/utils/api';
 import { calculateDimensions, formatTime } from '../utils/helpers.js';
@@ -962,12 +963,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                       disabled={generating}
                       onClick={async () => {
                         try {
-                          const res = await fetch('/api/browser/directory', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ title: 'Select EliGen Masks Folder' }),
-                          });
-                          const data = await res.json();
+                          const data = await browseDirectory({ title: 'Select EliGen Masks Folder' });
                           if (data.success && data.directory) {
                             setFormData(prev => ({ ...prev, eligen_source: data.directory }));
                           }
@@ -981,17 +977,12 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                       disabled={generating}
                       onClick={async () => {
                         try {
-                          const res = await fetch('/api/browser/open', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                              title: 'Select EliGen Mask File (.psd / .ora)',
-                              multiple: false,
-                              detect_sequences: false,
-                              filter: 'all',
-                            }),
+                          const data = await browseFiles({
+                            title: 'Select EliGen Mask File (.psd / .ora)',
+                            multiple: false,
+                            detectSequences: false,
+                            filter: 'layered',
                           });
-                          const data = await res.json();
                           if (data.success && data.files?.length > 0) {
                             setFormData(prev => ({ ...prev, eligen_source: data.files[0].path }));
                           }

@@ -99,7 +99,7 @@ export function useProject() {
     
     try {
       console.log('[Project] Opening folder browser...');
-      const result = await browseForFolder();
+      const result = await browseForFolder(projectFolder);
       
       if (result.cancelled) {
         console.log('[Project] Folder selection cancelled');
@@ -150,7 +150,7 @@ export function useProject() {
     } finally {
       setIsLoading(false);
     }
-  }, [setSavedProjectFolder]);
+  }, [setSavedProjectFolder, projectFolder]);
 
   /**
    * Refresh project files list

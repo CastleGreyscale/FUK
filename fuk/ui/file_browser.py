@@ -62,83 +62,105 @@ FRAME_PATTERNS = [
 ]
 
 
-def detect_sequence(file_path: Path) -> Optional[Dict[str, Any]]:
-    """
-    Detect if a file is part of an image sequence
-    
-    Supports common VFX naming patterns:
-    - render.0001.exr (dot separator)
-    - render_0001.png (underscore separator)  
-    - render0001.dpx (no separator)
-    
-    Returns dict with sequence info or None if not a sequence
-    """
-    if file_path.suffix.lower() not in SEQUENCE_EXTENSIONS:
+def _match_frame(filename: str) -> Optional[Tuple[str, str, str, str]]:
+    """Split a frame filename into (prefix, separator, frame digits, extension)."""
+    if Path(filename).suffix.lower() not in SEQUENCE_EXTENSIONS:
         return None
-    
-    filename = file_path.name
-    parent = file_path.parent
-    
     for pattern, default_sep in FRAME_PATTERNS:
         match = pattern.match(filename)
         if match:
-            prefix = match.group(1)
-            separator = match.group(2)  # Captured separator (., _, or empty)
-            frame_str = match.group(3)
-            ext = match.group(4)
-            padding = len(frame_str)
-            
+            prefix, separator, frame_str, ext = match.groups()
             # Use the actual separator from the filename
             # For no-separator pattern, default_sep is already ''
-            sep = separator if separator else default_sep
-            
-            # Build pattern preserving original separator
-            frame_pattern = f"{prefix}{sep}{'#' * padding}.{ext}"
-            
-            # Find all matching frames using same pattern
-            frames = []
-            for f in parent.glob(f"{prefix}*"):
-                m = pattern.match(f.name)
-                if m and m.group(4) == ext:
-                    try:
-                        frames.append(int(m.group(3)))
-                    except ValueError:
-                        pass
-            
-            if len(frames) > 1:
-                frames.sort()
-                return {
-                    "is_sequence": True,
-                    "prefix": prefix,
-                    "separator": sep,  # Include separator in result
-                    "extension": ext,
-                    "padding": padding,
-                    "first_frame": min(frames),
-                    "last_frame": max(frames),
-                    "frame_count": len(frames),
-                    "pattern": frame_pattern,
-                    "path_pattern": str(parent / frame_pattern),
-                    # Python-style pattern for actual file access
-                    "printf_pattern": str(parent / f"{prefix}{sep}%0{padding}d.{ext}"),
-                }
-    
+            return prefix, separator or default_sep, frame_str, ext
     return None
+
+
+def find_sequences(parent: Path, names: List[str]) -> Dict[str, Dict[str, Any]]:
+    """
+    Group the frame-numbered files among `names` (all in `parent`) into
+    sequences, in one pass.
+
+    Supports common VFX naming patterns:
+    - render.0001.exr (dot separator)
+    - render_0001.png (underscore separator)
+    - render0001.dpx (no separator)
+
+    Returns {filename: sequence info} for every file in a sequence of two or
+    more frames. Files that aren't part of one are left out.
+    """
+    buckets: Dict[Tuple[str, str, str], List[Tuple[int, str, str]]] = {}
+    for name in names:
+        parts = _match_frame(name)
+        if parts:
+            prefix, sep, frame_str, ext = parts
+            buckets.setdefault((prefix, sep, ext), []).append((int(frame_str), frame_str, name))
+
+    result = {}
+    for (prefix, sep, ext), frames in buckets.items():
+        if len(frames) < 2:
+            continue
+        frames.sort()
+        padding = len(frames[0][1])
+        # Build pattern preserving original separator
+        frame_pattern = f"{prefix}{sep}{'#' * padding}.{ext}"
+        info = {
+            "is_sequence": True,
+            "prefix": prefix,
+            "separator": sep,
+            "extension": ext,
+            "padding": padding,
+            "first_frame": frames[0][0],
+            "last_frame": frames[-1][0],
+            "frame_count": len(frames),
+            "pattern": frame_pattern,
+            "path_pattern": str(parent / frame_pattern),
+            # Python-style pattern for actual file access
+            "printf_pattern": str(parent / f"{prefix}{sep}%0{padding}d.{ext}"),
+            "first_file": str(parent / frames[0][2]),
+        }
+        for _, _, name in frames:
+            result[name] = info
+    return result
+
+
+def detect_sequence(file_path: Path) -> Optional[Dict[str, Any]]:
+    """
+    Detect if a file is part of an image sequence on disk.
+
+    Returns dict with sequence info or None if not a sequence
+    """
+    if not _match_frame(file_path.name):
+        return None
+    return find_sequences(file_path.parent, os.listdir(file_path.parent)).get(file_path.name)
 
 
 def collapse_sequences(files: List[Path]) -> List[MediaFile]:
     """
     Collapse a list of files, grouping image sequences
-    
+
+    A file counts as a frame if its folder on disk holds the rest of the
+    sequence, so picking one frame yields the whole sequence. Each folder is
+    listed once: this used to glob the folder per frame, which took 10 s for
+    2,000 frames and grew with the square of the count.
+
     Returns list of MediaFile objects with sequences collapsed
     """
     results = []
     seen_sequences = set()
-    
+    folder_sequences: Dict[Path, Dict[str, Dict[str, Any]]] = {}
+
     for file_path in sorted(files):
         suffix = file_path.suffix.lower()
-        
+
         # Check for sequence
-        seq_info = detect_sequence(file_path)
+        parent = file_path.parent
+        if parent not in folder_sequences:
+            try:
+                folder_sequences[parent] = find_sequences(parent, os.listdir(parent))
+            except OSError:
+                folder_sequences[parent] = {}
+        seq_info = folder_sequences[parent].get(file_path.name)
         if seq_info:
             # Use pattern as unique key
             seq_key = seq_info["path_pattern"]
@@ -389,6 +411,153 @@ def scan_directory(
                 frame_pattern=None,
             ))
         return results
+
+
+# ============================================================================
+# In-app browser listing (used by /api/browser/list)
+# ============================================================================
+
+# Extension sets for the browser's filter. None = show every file.
+BROWSER_FILTERS = {
+    "all": IMAGE_EXTENSIONS | VIDEO_EXTENSIONS,
+    "images": IMAGE_EXTENSIONS,
+    "videos": VIDEO_EXTENSIONS,
+    "exr": {".exr", ".dpx"},
+    "layered": {".psd", ".ora"},
+    "any": None,
+}
+
+# Name patterns that stand for a whole sequence: ####, %04d, $F4.
+_SEQUENCE_TOKEN = re.compile(r"#+|%0?(\d*)d|\$F(\d*)")
+# Nuke and Resolve append the frame range: "shot.%04d.exr 1001-1100".
+_TRAILING_RANGE = re.compile(r"\s+-?\d+-\d+$")
+
+
+def _natural_key(name: str):
+    return [int(part) if part.isdigit() else part.lower() for part in re.split(r"(\d+)", name)]
+
+
+def _hash_pattern(name: str) -> str:
+    """Normalise %04d / $F4 frame tokens in a filename to ####."""
+    def repl(m):
+        if m.group(0).startswith("#"):
+            return m.group(0)
+        width = m.group(1) or m.group(2) or "4"
+        return "#" * int(width)
+    return _SEQUENCE_TOKEN.sub(repl, name)
+
+
+def resolve_browse_path(raw: str) -> Tuple[Path, Optional[Path], bool]:
+    """
+    Turn a typed or pasted path into (folder to list, entry to select, missing).
+
+    Accepts quotes, file:// URLs, ~, a file (lists its folder and selects it),
+    a sequence pattern (####, %04d, $F4, with or without a trailing frame
+    range), or a folder. A path that doesn't exist resolves to its nearest
+    existing ancestor with missing=True.
+    """
+    from urllib.parse import unquote, urlparse
+
+    s = raw.strip().strip("'\"")
+    if s.startswith("file://"):
+        s = unquote(urlparse(s).path)
+    s = _TRAILING_RANGE.sub("", s)
+    p = Path(os.path.expanduser(s))
+    if not p.is_absolute():
+        p = Path.home() / p
+
+    if _SEQUENCE_TOKEN.search(p.name) and p.parent.is_dir():
+        return p.parent, p, False
+    if p.is_dir():
+        return p, None, False
+    if p.is_file():
+        return p.parent, p, False
+
+    ancestor = p.parent
+    while not ancestor.is_dir() and ancestor != ancestor.parent:
+        ancestor = ancestor.parent
+    return ancestor, None, True
+
+
+def list_directory(
+    directory: Path,
+    filter: str = "all",
+    detect_sequences: bool = True,
+) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
+    """
+    List a folder for the in-app browser: subfolders first, then media.
+
+    Hidden entries are skipped. Frame sequences collapse to one entry (path =
+    printf pattern, display name "shot_010.####.exr [1001-1100]"). Files and
+    sequences carry `thumb`, an image path the preview endpoint can downscale.
+
+    Returns (entries, aliases): aliases maps every member frame and pattern
+    spelling of a sequence to its entry path, so a pasted frame or pattern
+    selects the right entry.
+    """
+    exts = BROWSER_FILTERS.get(filter, BROWSER_FILTERS["all"])
+    dirs, files = [], []
+    with os.scandir(directory) as it:
+        for entry in it:
+            if entry.name.startswith("."):
+                continue
+            try:
+                if entry.is_dir():
+                    dirs.append(entry.name)
+                elif entry.is_file():
+                    if exts is None or Path(entry.name).suffix.lower() in exts:
+                        files.append(entry.name)
+            except OSError:
+                continue  # broken symlink, permission
+
+    entries = [
+        {"kind": "dir", "name": name, "path": str(directory / name)}
+        for name in sorted(dirs, key=_natural_key)
+    ]
+    sequences = find_sequences(directory, files) if detect_sequences else {}
+    aliases: Dict[str, str] = {}
+    seen = set()
+
+    for name in sorted(files, key=_natural_key):
+        seq = sequences.get(name)
+        if seq:
+            aliases[str(directory / name)] = seq["printf_pattern"]
+            if seq["printf_pattern"] in seen:
+                continue
+            seen.add(seq["printf_pattern"])
+            aliases[seq["path_pattern"]] = seq["printf_pattern"]
+            entries.append({
+                "kind": "sequence",
+                "name": f"{seq['pattern']} [{seq['first_frame']}-{seq['last_frame']}]",
+                "path": seq["printf_pattern"],
+                "thumb": seq["first_file"],
+                "first_frame": seq["first_frame"],
+                "last_frame": seq["last_frame"],
+                "frame_count": seq["frame_count"],
+                "frame_pattern": seq["pattern"],
+            })
+            continue
+
+        suffix = Path(name).suffix.lower()
+        kind = "image" if suffix in IMAGE_EXTENSIONS else "video" if suffix in VIDEO_EXTENSIONS else "file"
+        entries.append({
+            "kind": kind,
+            "name": name,
+            "path": str(directory / name),
+            "thumb": str(directory / name) if kind == "image" else None,
+        })
+
+    return entries, aliases
+
+
+def selection_for(target: Optional[Path], aliases: Dict[str, str]) -> Optional[str]:
+    """Entry path to preselect for a resolved paste target."""
+    if target is None:
+        return None
+    key = str(target)
+    if key in aliases:
+        return aliases[key]
+    return aliases.get(str(target.parent / _hash_pattern(target.name)), key)
 
 
 # ============================================================================
