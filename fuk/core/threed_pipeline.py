@@ -30,6 +30,7 @@ from typing import Any, Dict, List, Optional, Union
 from pipeline_base import PipelineRunner, _log
 
 from core.threed import trellis_backend, vggt_backend
+from core import device as accel
 
 # Below this, VGGT's angular coverage is too thin for a clean surface. Not
 # enforced — the UI warns and the user decides.
@@ -278,14 +279,14 @@ class ThreeDPipelineRunner(PipelineRunner):
                 self.backend._evict_pipeline(key)
             gc.collect()
             gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                torch.cuda.synchronize()
+            if accel.is_accelerated():
+                accel.empty_cache()
+                accel.synchronize()
 
         # Reset unconditionally — otherwise the peak reported back is whatever
         # a previous generation hit, not this reconstruction's.
-        if torch.cuda.is_available():
-            torch.cuda.reset_peak_memory_stats()
+        if accel.is_accelerated():
+            accel.reset_peak_memory_stats()
 
     def _write_meta(
         self,

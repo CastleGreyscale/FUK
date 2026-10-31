@@ -75,6 +75,7 @@ import sys
 import threading
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
+from core import device as accel
 
 _PEAK_VRAM_RE = re.compile(r"Peak:\s*([\d.]+)\s*GB", re.IGNORECASE)
 
@@ -512,10 +513,10 @@ def _free_vram_for_seedvr2(log: Callable[[str], None]) -> None:
 
     gc.collect()
     gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-        torch.cuda.synchronize()
-        free, total = torch.cuda.mem_get_info()
+    if accel.is_accelerated():
+        accel.empty_cache()
+        accel.synchronize()
+        free, total = accel.mem_get_info()
         log(f"VRAM before launch: {free / 1024**3:.1f}GB free / {total / 1024**3:.1f}GB")
 
 

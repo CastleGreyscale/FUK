@@ -6,6 +6,7 @@ This enables true lossless workflows: latent → VAE decode → EXR export.
 """
 
 import torch
+from core import device as accel
 from pathlib import Path
 from typing import Optional, Callable
 import numpy as np
@@ -82,7 +83,7 @@ class LatentManager:
         
         return callback
     
-    def load_latent(self, latent_path: Path, device: str = 'cuda') -> torch.Tensor:
+    def load_latent(self, latent_path: Path, device: Optional[str] = None) -> torch.Tensor:
         """
         Load a saved latent tensor.
         
@@ -93,6 +94,7 @@ class LatentManager:
         Returns:
             Loaded latent tensor
         """
+        device = device or accel.device_type()
         latent_path = Path(latent_path)
         if not latent_path.exists():
             raise FileNotFoundError(f"Latent file not found: {latent_path}")

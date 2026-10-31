@@ -16,6 +16,7 @@ survive server restarts and can be reloaded at any time.
 import json
 import uuid
 import torch
+from core import device as accel
 import numpy as np
 from pathlib import Path
 from datetime import datetime
@@ -303,7 +304,7 @@ class LatentLayerStack:
     # Flatten
     # ------------------------------------------------------------------
 
-    def flatten(self, vae, device: str = "cuda") -> np.ndarray:
+    def flatten(self, vae, device: Optional[str] = None) -> np.ndarray:
         """
         Flatten all enabled layers into a decoded float32 image.
 
@@ -318,6 +319,7 @@ class LatentLayerStack:
         Returns:
             float32 numpy array [H, W, C], scene-linear, range ~[0,1].
         """
+        device = device or accel.device_type()
         base_latent = self._load_base_latent(device)
 
         # Accumulate enabled deltas
@@ -363,13 +365,14 @@ class LatentLayerStack:
         _log("Flatten complete", "success")
         return arr.astype(np.float32)
 
-    def save_flatten_preview(self, vae, preview_path: Path, device: str = "cuda") -> Path:
+    def save_flatten_preview(self, vae, preview_path: Path, device: Optional[str] = None) -> Path:
         """
         Flatten and save a PNG preview for display in the UI.
 
         Returns:
             Path to the saved PNG.
         """
+        device = device or accel.device_type()
         from PIL import Image
 
         arr = self.flatten(vae, device=device)
@@ -393,7 +396,8 @@ class LatentLayerStack:
                 return layer
         raise KeyError(f"Layer not found: {layer_id}")
 
-    def _load_base_latent(self, device: str = "cuda") -> torch.Tensor:
+    def _load_base_latent(self, device: Optional[str] = None) -> torch.Tensor:
+        device = device or accel.device_type()
         base_path = Path(self._manifest["base_latent_path"])
         if not base_path.exists():
             raise FileNotFoundError(f"Base latent missing: {base_path}")

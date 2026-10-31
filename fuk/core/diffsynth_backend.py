@@ -47,6 +47,7 @@ if str(_THIS_DIR) not in sys.path:
 import os
 import time
 import torch
+from core import device as accel
 from typing import Optional, Dict, Any, List
 import json
 
@@ -994,8 +995,8 @@ class DiffSynthBackend:
             # GC first so Python releases refs, THEN clear CUDA cache
             gc.collect()
             gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            if accel.is_accelerated():
+                accel.empty_cache()
             _log("BACKEND", f"Evicted {len(evicted)} pipeline(s), RAM freed", "success")
 
 
@@ -1012,7 +1013,7 @@ class DiffSynthBackend:
         # from_pretrained kwargs
         kwargs = dict(
             torch_dtype=torch.bfloat16,
-            device="cuda",
+            device=accel.device_type(),
             model_configs=model_configs,
             redirect_common_files=False,
         )
@@ -1030,11 +1031,11 @@ class DiffSynthBackend:
         # would make the budget depend on whatever happens to be cached at call
         # time — with a Wan pipeline resident, free is under 1GB and the limit
         # would come out near zero.
-        if vram_config is not None and torch.cuda.is_available():
-            free_b, total_b = torch.cuda.mem_get_info("cuda")
+        if vram_config is not None and accel.is_accelerated():
+            free_b, total_b = accel.mem_get_info()
             gib = 1024 ** 3
             total_vram = total_b / gib
-            reclaimable = torch.cuda.memory_reserved() / gib
+            reclaimable = accel.memory_reserved() / gib
             other_procs = max(total_vram - free_b / gib - reclaimable, 0.0)
 
             # Floor at 4GB: a hostile desktop should degrade into heavy
@@ -1108,8 +1109,8 @@ class DiffSynthBackend:
             self._active_user_loras.pop(k, None)
             self._model_lora_config.pop(k, None)
             self._model_lora_alpha.pop(k, None)
-        if stale and torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        if stale and accel.is_accelerated():
+            accel.empty_cache()
             _log("BACKEND", f"Unloaded pipeline(s): {stale}")
 
     # ------------------------------------------------------------------
@@ -1236,8 +1237,8 @@ class DiffSynthBackend:
             if captured:
                 _t0 = time.perf_counter()
                 # Synchronize to ensure non-blocking copy completed
-                if torch.cuda.is_available():
-                    torch.cuda.synchronize()
+                if accel.is_accelerated():
+                    accel.synchronize()
                 save_path.parent.mkdir(parents=True, exist_ok=True)
                 torch.save(captured, str(save_path))
                 _log("BACKEND", f"[timing] latent save: {time.perf_counter() - _t0:.2f}s — {save_path} (shape: {captured['shape']})")
@@ -1357,8 +1358,8 @@ class DiffSynthBackend:
     def cleanup(self):
         """Release GPU memory and clear cached pipelines."""
         self.pipelines.clear()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        if accel.is_accelerated():
+            accel.empty_cache()
         _log("BACKEND", "Backend cleanup complete", "success")
 
 

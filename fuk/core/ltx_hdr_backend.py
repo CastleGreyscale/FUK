@@ -63,6 +63,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from .seedvr2_backend import ALLOC_CONF_VARS, _free_vram_for_seedvr2, _models_root
+from core import device as accel
 
 _CORE_DIR = Path(__file__).resolve().parent
 _ENGINE_DIR = _CORE_DIR.parent / "vendor" / "LTX-2"
@@ -172,8 +173,8 @@ def availability() -> Dict[str, Any]:
 def _total_vram_gb() -> float:
     try:
         import torch
-        if torch.cuda.is_available():
-            return torch.cuda.get_device_properties(0).total_memory / 1024**3
+        if accel.is_accelerated():
+            return accel.total_memory() / 1024**3
     except ImportError:
         pass
     return 0.0

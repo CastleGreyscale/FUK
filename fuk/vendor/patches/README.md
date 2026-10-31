@@ -142,6 +142,15 @@ Regression signal when upgrading: a `minimax_h3_control` job with a control vide
 first frame. Drop the patch if upstream starts building anchor rows into `control_rows`
 or slicing `img_pos` itself.
 
+### `0006-mps-device-type.patch`
+
+`diffsynth/core/device/npu_compatible_device.py` — DiffSynth's device layer knows CUDA, Huawei
+NPU and CPU, so on Apple Silicon `get_device_type()` returned `"cpu"`. That function is the
+default `device` for most pipelines, autocast regions and text encoders, so every one of them
+silently ran on the CPU. Adds `IS_MPS_AVAILABLE`, checked only after CUDA and NPU, so behaviour
+on NVIDIA and AMD (ROCm reports as CUDA) is unchanged. `get_device_id()` returns 0 on MPS,
+which has no `current_device()`. Part of the platform work in `docs/PLATFORM_SUPPORT_PLAN.md`.
+
 ## Active patches — Depth-Anything-3
 
 Base commit: `2c21ea849ceec7b469a3e62ea0c0e270afc3281a`. Applied from

@@ -24,6 +24,7 @@ Routes:
 
 import shutil
 import torch
+from core import device as accel
 import numpy as np
 from pathlib import Path
 from typing import Optional, Any
@@ -62,11 +63,12 @@ def _load_stack(stack_id: str) -> LatentLayerStack:
     return LatentLayerStack.load(stack_dir)
 
 
-def _borrow_vae(device: str = "cuda"):
+def _borrow_vae(device: Optional[str] = None):
     """
     Get VAE from the first available cached Qwen pipeline.
     The Qwen image pipeline must already be loaded (it will be — we just ran a gen).
     """
+    device = device or accel.device_type()
     if not _backend:
         raise RuntimeError("Backend not initialized")
 
@@ -113,11 +115,12 @@ def _find_latent_in_dir(gen_dir: Path) -> Optional[Path]:
     return None
 
 
-def _vae_encode_image(image_path: Path, vae, device: str = "cuda") -> torch.Tensor:
+def _vae_encode_image(image_path: Path, vae, device: Optional[str] = None) -> torch.Tensor:
     """
     Encode an arbitrary image through the VAE to get a latent tensor.
     Used when the source image has no pre-saved latent (e.g. imported image).
     """
+    device = device or accel.device_type()
     from PIL import Image
 
     img = Image.open(str(image_path)).convert("RGB")

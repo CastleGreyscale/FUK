@@ -17,6 +17,7 @@ from .openpose import OpenPosePreprocessor
 from .depth import DepthPreprocessor, DepthModel
 from .normals import NormalsPreprocessor, NormalsMethod
 from .crypto import CryptoPreprocessor, SAMModel
+from core import device as accel
 
 
 class PreprocessorManager:
@@ -627,12 +628,12 @@ class PreprocessorManager:
         
         # Force garbage collection and CUDA cache clear
         gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-            torch.cuda.synchronize()
+        if accel.is_accelerated():
+            accel.empty_cache()
+            accel.synchronize()
             
-            allocated = torch.cuda.memory_allocated() / (1024**3)
-            reserved = torch.cuda.memory_reserved() / (1024**3)
+            allocated = accel.memory_allocated() / (1024**3)
+            reserved = accel.memory_reserved() / (1024**3)
             print(f"[PreprocessorManager] VRAM after clear - Allocated: {allocated:.2f}GB, Reserved: {reserved:.2f}GB")
         
         if cleared:

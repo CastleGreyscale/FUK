@@ -50,6 +50,7 @@ from __future__ import annotations
 
 import time
 import torch
+from core import device as accel
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 

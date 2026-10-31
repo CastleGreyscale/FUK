@@ -29,6 +29,7 @@ import subprocess
 import tempfile
 import shutil
 import json
+from core import device as accel
 
 
 # Scale-free depth models return Z in [0, 1], where 0 is the nearest thing in
@@ -553,18 +554,18 @@ class EXRExporter:
                     return decode_fn(l, device)
 
             result = None
-            if torch.cuda.is_available():
+            if accel.is_accelerated():
                 try:
-                    free_gb = torch.cuda.mem_get_info()[0] / (1024**3)
+                    free_gb = accel.mem_get_info()[0] / (1024**3)
                     print(f"  📄 GPU decode ({free_gb:.1f} GB free)...")
-                    result = _run(torch.device('cuda'))
+                    result = _run(accel.device())
                     print(f"  📄 GPU decode complete")
                 except (RuntimeError, torch.cuda.OutOfMemoryError) as e:
                     if quantized:
                         raise
                     print(f"  ⚠️  GPU failed: {str(e).split(chr(10))[0][:80]}, falling back to CPU...")
                     vae.cpu()
-                    torch.cuda.empty_cache()
+                    accel.empty_cache()
             if result is None:
                 if quantized:
                     raise RuntimeError(
@@ -627,8 +628,8 @@ class EXRExporter:
         # Release VAE
         vae.cpu()
         del vae, latent
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        if accel.is_accelerated():
+            accel.empty_cache()
 
         # Fuse brackets and linearise. Noise brackets share one exposure, so
         # only the scale passes can hand Debevec anything to solve against.
@@ -1702,14 +1703,14 @@ class EXRExporter:
                 raise ValueError(f"Unexpected VAE output type: {type(out)}")
 
             t = None
-            if torch.cuda.is_available():
+            if accel.is_accelerated():
                 try:
-                    t = _run(torch.device('cuda'))
+                    t = _run(accel.device())
                 except (RuntimeError, torch.cuda.OutOfMemoryError):
                     if quantized:
                         raise
                     vae.cpu()
-                    torch.cuda.empty_cache()
+                    accel.empty_cache()
             if t is None:
                 if quantized:
                     raise RuntimeError(
@@ -1761,8 +1762,8 @@ class EXRExporter:
 
         # Release VAE VRAM
         vae.cpu()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        if accel.is_accelerated():
+            accel.empty_cache()
 
         # Fuse and linearise. Brackets stay unclamped up to this point — each
         # mode clips only where its own algorithm requires it (Mertens and

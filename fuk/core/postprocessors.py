@@ -22,6 +22,7 @@ import cv2
 import numpy as np
 from PIL import Image
 import torch
+from core import device as accel
 import subprocess
 import shutil
 import tempfile
@@ -146,7 +147,7 @@ class RealESRGANUpscaler:
                 tile=0,
                 tile_pad=10,
                 pre_pad=0,
-                half=True if torch.cuda.is_available() else False
+                half=True if accel.is_accelerated() else False
             )
             print(f"[Upscaler] Loaded torch Real-ESRGAN model")
             
@@ -293,9 +294,9 @@ class RealESRGANUpscaler:
             self.torch_model = None
             
             # Force GPU memory cleanup
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                torch.cuda.synchronize()
+            if accel.is_accelerated():
+                accel.empty_cache()
+                accel.synchronize()
             
             import gc
             gc.collect()

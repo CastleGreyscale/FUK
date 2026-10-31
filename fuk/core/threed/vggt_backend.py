@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional
 
 from . import mesh_export
 from .mesh_export import _log
+from core import device as accel
 
 # VGGT resizes every input so its longest side is 518px. This is fixed by the
 # model's patch grid, not a quality setting.
@@ -58,8 +59,9 @@ def resolve_weights(entry: dict) -> str:
     return entry.get("model_id", "facebook/VGGT-1B")
 
 
-def load_model(entry: dict, device: str = "cuda"):
+def load_model(entry: dict, device: Optional[str] = None):
     """Load VGGT, reusing the cached instance when the weights haven't changed."""
+    device = device or accel.device_type()
     global _model, _model_path
 
 
@@ -90,9 +92,9 @@ def unload():
     del _model
     _model, _model_path = None, None
     gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-        torch.cuda.synchronize()
+    if accel.is_accelerated():
+        accel.empty_cache()
+        accel.synchronize()
     _log("VGGT unloaded")
 
 
@@ -128,8 +130,8 @@ def reconstruct(
     if not paths:
         raise ValueError("No readable input images")
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    # bf16 on Ampere and later, fp16 below — matches VGGT's own demo.
+    device = accel.device_type()
+    # bf16 on Ampere and later, fp16 below (and on MPS) — matches VGGT's own demo.
     dtype = (
         torch.bfloat16
         if device == "cuda" and torch.cuda.get_device_capability()[0] >= 8
@@ -151,18 +153,17 @@ def reconstruct(
 
     t0 = time.perf_counter()
     with torch.no_grad():
-        if device == "cuda":
-            with torch.amp.autocast("cuda", dtype=dtype):
+        if device != "cpu":
+            with torch.amp.autocast(device, dtype=dtype):
                 predictions = model(images)
         else:
             predictions = model(images)
-    if device == "cuda":
-        torch.cuda.synchronize()
+    accel.synchronize()
     inference_time = time.perf_counter() - t0
     _log(f"Inference: {inference_time:.2f}s", "success")
 
     peak_vram = (
-        round(torch.cuda.max_memory_allocated() / 1e9, 2) if device == "cuda" else None
+        round(accel.max_memory_allocated() / 1e9, 2) if device == "cuda" else None
     )
 
     if progress_callback:
@@ -189,8 +190,8 @@ def reconstruct(
     del predictions, images
     if not keep_loaded:
         unload()
-    elif device == "cuda":
-        torch.cuda.empty_cache()
+    else:
+        accel.empty_cache()
 
     if progress_callback:
         progress_callback(0.62, "Filtering point cloud")

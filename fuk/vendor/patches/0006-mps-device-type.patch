@@ -1,0 +1,38 @@
+diff --git a/diffsynth/core/device/npu_compatible_device.py b/diffsynth/core/device/npu_compatible_device.py
+index b672f9c..bcc2fa5 100644
+--- a/diffsynth/core/device/npu_compatible_device.py
++++ b/diffsynth/core/device/npu_compatible_device.py
+@@ -9,6 +9,9 @@ def is_torch_npu_available():
+ 
+ IS_CUDA_AVAILABLE = torch.cuda.is_available()
+ IS_NPU_AVAILABLE = is_torch_npu_available() and torch.npu.is_available()
++# Apple Silicon. Checked after CUDA and NPU, so it only applies when neither is present.
++IS_MPS_AVAILABLE = (not IS_CUDA_AVAILABLE and not IS_NPU_AVAILABLE
++                    and torch.backends.mps.is_available())
+ 
+ if IS_NPU_AVAILABLE:
+     import torch_npu
+@@ -17,11 +20,13 @@ if IS_NPU_AVAILABLE:
+ 
+ 
+ def get_device_type() -> str:
+-    """Get device type based on current machine, currently only support CPU, CUDA, NPU."""
++    """Get device type based on current machine, currently only support CPU, CUDA, NPU, MPS."""
+     if IS_CUDA_AVAILABLE:
+         device = "cuda"
+     elif IS_NPU_AVAILABLE:
+         device = "npu"
++    elif IS_MPS_AVAILABLE:
++        device = "mps"
+     else:
+         device = "cpu"
+ 
+@@ -41,6 +46,8 @@ def get_torch_device() -> Any:
+ 
+ def get_device_id() -> int:
+     """Get current device id based on device type."""
++    if IS_MPS_AVAILABLE:
++        return 0  # torch.mps has no current_device(); there is only ever one
+     return get_torch_device().current_device()
+ 
+ 

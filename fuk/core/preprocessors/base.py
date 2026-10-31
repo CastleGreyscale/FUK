@@ -16,6 +16,7 @@ import json
 import hashlib
 import time
 import torch
+from core import device as accel
 import numpy as np
 import cv2
 
@@ -34,7 +35,7 @@ class BasePreprocessor(ABC):
     
     def __init__(self, config_path: Optional[Path] = None):
         self.config_path = Path(config_path) if config_path else None
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = accel.device_type()
         self._initialized = False
     
     @abstractmethod
@@ -88,9 +89,9 @@ class BasePreprocessor(ABC):
         gc.collect()
         
         # Clear CUDA cache if available
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-            torch.cuda.synchronize()
+        if accel.is_accelerated():
+            accel.empty_cache()
+            accel.synchronize()
             
         print(f"[{self.__class__.__name__}] Unloaded from VRAM")
     

@@ -33,6 +33,7 @@ import cv2
 import numpy as np
 from PIL import Image
 import torch
+from core import device as accel
 import json
 
 from .base import BasePreprocessor
@@ -571,9 +572,9 @@ class DepthPreprocessor(BasePreprocessor):
         """Pick a frames-per-inference count that fits in free VRAM."""
         pixels = processed_w * processed_h
 
-        if self.device == "cuda" and torch.cuda.is_available():
+        if self.device != "cpu":
             try:
-                free_bytes, _total = torch.cuda.mem_get_info()
+                free_bytes, _total = accel.mem_get_info()
             except Exception:
                 free_bytes = 8 * 1024 ** 3
         else:
@@ -622,8 +623,8 @@ class DepthPreprocessor(BasePreprocessor):
         prediction.depth = None
         del prediction
 
-        if self.device == "cuda" and torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        if self.device != "cpu":
+            accel.empty_cache()
 
         return depths
 
@@ -705,8 +706,8 @@ class DepthPreprocessor(BasePreprocessor):
                     raise
                 cur_chunk = max(_MIN_CHUNK, cur_chunk // 2)
                 print(f"[Depth] OOM on chunk at frame {idx}; retrying with chunk_size={cur_chunk}")
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
+                if accel.is_accelerated():
+                    accel.empty_cache()
                 gc.collect()
                 continue
 

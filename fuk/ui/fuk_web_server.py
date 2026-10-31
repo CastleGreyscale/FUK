@@ -73,6 +73,7 @@ from project_endpoints import (
 )
 from llm_endpoints import setup_llm_routes, _resolve_prompt as resolve_prompt_for_generation
 from storyboard_endpoints import setup_storyboard_routes
+from core import device as accel
 
 
 # ============================================================================
@@ -876,14 +877,14 @@ def clear_vram(full: bool = False):
         # GC first — release Python objects that hold GPU tensor refs
         gc.collect()
 
-        if torch.cuda.is_available():
+        if accel.is_accelerated():
             if full:
-                torch.cuda.empty_cache()
-                torch.cuda.synchronize()
+                accel.empty_cache()
+                accel.synchronize()
 
             # Get VRAM stats
-            allocated = torch.cuda.memory_allocated() / (1024**3)  # GB
-            reserved = torch.cuda.memory_reserved() / (1024**3)    # GB
+            allocated = accel.memory_allocated() / (1024**3)  # GB
+            reserved = accel.memory_reserved() / (1024**3)    # GB
 
             mode = "full" if full else "light"
             print(f"VRAM - Allocated: {allocated:.2f}GB, Reserved: {reserved:.2f}GB")
@@ -949,12 +950,12 @@ async def evict_all_models():
     preprocessor_manager.clear_caches(None)
 
     gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-        torch.cuda.synchronize()
-        allocated = torch.cuda.memory_allocated() / (1024**3)
-        reserved  = torch.cuda.memory_reserved()  / (1024**3)
-        total     = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+    if accel.is_accelerated():
+        accel.empty_cache()
+        accel.synchronize()
+        allocated = accel.memory_allocated() / (1024**3)
+        reserved  = accel.memory_reserved()  / (1024**3)
+        total     = accel.total_memory() / (1024**3)
     else:
         allocated = reserved = total = 0.0
 
@@ -1478,10 +1479,10 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
         import gc as _gc
         import torch as _torch
         _gc.collect()
-        if _torch.cuda.is_available():
-            _torch.cuda.empty_cache()
-            _alloc = _torch.cuda.memory_allocated() / (1024**3)
-            _reserved = _torch.cuda.memory_reserved() / (1024**3)
+        if accel.is_accelerated():
+            accel.empty_cache()
+            _alloc = accel.memory_allocated() / (1024**3)
+            _reserved = accel.memory_reserved() / (1024**3)
             log.info("VideoGen", f"VRAM at start — allocated: {_alloc:.2f}GB  reserved: {_reserved:.2f}GB")
 
         active_generations[generation_id]["status"] = "running"
@@ -2657,10 +2658,10 @@ async def clear_preprocessor_cache(models: Optional[List[str]] = None):
         preprocessor_manager.clear_caches(models if models else None)
         
         # Get VRAM stats
-        if torch.cuda.is_available():
-            allocated = torch.cuda.memory_allocated() / (1024**3)
-            reserved = torch.cuda.memory_reserved() / (1024**3)
-            total = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+        if accel.is_accelerated():
+            allocated = accel.memory_allocated() / (1024**3)
+            reserved = accel.memory_reserved() / (1024**3)
+            total = accel.total_memory() / (1024**3)
         else:
             allocated = reserved = total = 0
         

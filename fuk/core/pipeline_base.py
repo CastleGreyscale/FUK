@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import time
 import torch
+from core import device as accel
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Union, TYPE_CHECKING
 from PIL import Image
@@ -195,7 +196,7 @@ class PipelineRunner:
         pipeline. Every later generation then starts that much VRAM down, which
         is self-perpetuating: its OOM leaves its own residency behind.
 
-        gc + torch.cuda.empty_cache() cannot recover this. Those weights are
+        gc + accel.empty_cache() cannot recover this. Those weights are
         live parameters owned by the pipeline, not allocator cache; empty_cache
         only returns blocks nothing references. This call is the only fix short
         of evicting the pipeline entirely.
@@ -210,9 +211,9 @@ class PipelineRunner:
                 return
             _t0 = time.perf_counter()
             pipe.load_models_to_device([])
-            if torch.cuda.is_available():
-                _resv = torch.cuda.memory_reserved() / (1024 ** 3)
-                _alloc = torch.cuda.memory_allocated() / (1024 ** 3)
+            if accel.is_accelerated():
+                _resv = accel.memory_reserved() / (1024 ** 3)
+                _alloc = accel.memory_allocated() / (1024 ** 3)
                 _vram = f" — VRAM alloc {_alloc:.2f}GB resv {_resv:.2f}GB"
             else:
                 _vram = ""
@@ -307,9 +308,9 @@ class PipelineRunner:
                     callback(step_num, total, pil)
                     if not vae_streams:
                         pipe.load_models_to_device(pipe.in_iteration_models)
-                    if torch.cuda.is_available():
-                        _alloc = torch.cuda.memory_allocated() / (1024**3)
-                        _resv = torch.cuda.memory_reserved() / (1024**3)
+                    if accel.is_accelerated():
+                        _alloc = accel.memory_allocated() / (1024**3)
+                        _resv = accel.memory_reserved() / (1024**3)
                         _vram = f", VRAM alloc {_alloc:.1f}GB resv {_resv:.1f}GB"
                     else:
                         _vram = ""
@@ -378,7 +379,7 @@ class PipelineRunner:
         """
         vae = getattr(pipe, "vae", None)
         # The byte-per-pixel estimate is calibrated to this VAE specifically.
-        if vae is None or type(vae).__name__ != "QwenImageVAE" or not torch.cuda.is_available():
+        if vae is None or type(vae).__name__ != "QwenImageVAE" or not accel.is_accelerated():
             return None
 
         from qwen_vae_patch import estimate_decode_bytes, tiled_vae_decode, choose_tile
@@ -391,10 +392,10 @@ class PipelineRunner:
 
         def guarded_decode(latent, *args, **kwargs):
             need = estimate_decode_bytes(latent)
-            free = torch.cuda.mem_get_info()[0]
+            free = accel.mem_get_info()[0]
 
             def _tiled(reason):
-                budget = int(torch.cuda.mem_get_info()[0] * 0.7)
+                budget = int(accel.mem_get_info()[0] * 0.7)
                 tile, stride = choose_tile(latent, budget)
                 _log(self.log_prefix,
                      f"Tiled VAE decode ({reason}) — tile {tile}, stride {stride} "
@@ -408,7 +409,7 @@ class PipelineRunner:
             try:
                 return original_decode(latent, *args, **kwargs)
             except torch.cuda.OutOfMemoryError:
-                torch.cuda.empty_cache()
+                accel.empty_cache()
                 return _tiled("recovering from OOM")
 
         vae.decode = guarded_decode

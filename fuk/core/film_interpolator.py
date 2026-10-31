@@ -65,6 +65,7 @@ from typing import Optional, Dict, Any, Callable, List, Tuple
 import cv2
 import numpy as np
 import torch
+from core import device as accel
 from PIL import Image
 
 # ============================================================================
@@ -106,7 +107,7 @@ class FILMInterpolator:
         self.models_dir = models_dir or DEFAULT_MODEL_DIR
         self.models_dir.mkdir(parents=True, exist_ok=True)
 
-        self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+        self.device = torch.device(device or accel.device_type())
         # float32 by default, including on CUDA. This used to be fp16 on GPU for
         # speed, which is fine for an 8-bit deliverable and not fine for anything
         # feeding EXR: fp16 carries ~3 decimal digits, so it quantises visibly
@@ -168,8 +169,8 @@ class FILMInterpolator:
         if self.model is not None:
             del self.model
             self.model = None
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            if accel.is_accelerated():
+                accel.empty_cache()
             print("[FILM] Model unloaded, VRAM freed")
     
     # ========================================================================
@@ -388,8 +389,8 @@ class FILMInterpolator:
         print(f"[FILM] Max timing error: {max_err:.4f} source intervals "
               f"({max_err / source_fps * 1000:.1f}ms)")
         del dense
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        if accel.is_accelerated():
+            accel.empty_cache()
         return out
 
     def interpolate_recursive(
@@ -654,8 +655,8 @@ class FILMInterpolator:
             num_output = len(interpolated)
 
             del tensors
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            if accel.is_accelerated():
+                accel.empty_cache()
 
             # 3. Write whatever was asked for
             sequence_paths: List[Path] = []
