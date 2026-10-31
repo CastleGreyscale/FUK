@@ -103,21 +103,29 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
     }
   }, [activeTab]);
   
-  // Restore last preview from project state when tab becomes active
+  // Reset state when project file changes. Declared before the restore effect
+  // so that on mount (when this also fires) the restore runs after it and wins.
+  useEffect(() => {
+    setResult(null);
+    setSourceInput(null);
+    setLocalError(null);
+    resetGeneration();
+    hasRestoredRef.current = false; // Allow restoration for new project
+  }, [project?.currentFilename]);
+
+  // Restore last preview (or just the loaded source) from project state when
+  // tab becomes active
   useEffect(() => {
     // Only run when this tab is active
     if (activeTab !== 'preprocess') return;
     if (result) return;
-    
+
     // Only restore once per tab activation
     if (hasRestoredRef.current) return;
-    
+
     const lastState = project?.projectState?.lastState;
-    if (!lastState?.lastPreprocessPreview) return;
-    
-  
-    // Restore the preview and metadata
-    const meta = lastState.lastPreprocessMeta || {};
+    const meta = lastState?.lastPreprocessMeta || {};
+    if (!lastState?.lastPreprocessPreview && !meta.sourceInput) return;
 
     console.log('[PreprocessTab] Restoring from lastState:', {
       preview: lastState.lastPreprocessPreview,
@@ -139,29 +147,31 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
     }
     
     // Restore result
-    setResult({
-      url: lastState.lastPreprocessPreview,
-      isVideo: meta.isVideo || false,
-      isSequence: meta.isSequence || false,
-      frame_count: meta.frameCount || 0,
-    });
-    
+    if (lastState.lastPreprocessPreview) {
+      setResult({
+        url: lastState.lastPreprocessPreview,
+        isVideo: meta.isVideo || false,
+        isSequence: meta.isSequence || false,
+        frame_count: meta.frameCount || 0,
+      });
+    }
+
     // Clear restoring flag after state has settled
     setTimeout(() => {
       isRestoringRef.current = false;
     }, 100);
-    
+
   }, [activeTab, project?.projectState?.lastState, result]);
-  
-  // Reset state when project file changes
-  useEffect(() => {
-    setResult(null);
-    setSourceInput(null);
-    setLocalError(null);
-    resetGeneration();
-    hasRestoredRef.current = false; // Allow restoration for new project
-  }, [project?.currentFilename]);
-  
+
+  // Remember a loaded source (and method) before anything is run, so it
+  // survives a tab switch. The saved result no longer matches, so drop it.
+  const rememberSource = (source, method) => {
+    project?.updateLastState?.({
+      lastPreprocessPreview: null,
+      lastPreprocessMeta: { sourceInput: source, method },
+    });
+  };
+
   // --- Bridge: when task completes, extract tab-specific result ---
   useEffect(() => {
     if (!genResult || genResult.status !== 'complete' || !genResult.result) return;
@@ -264,6 +274,7 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
       setSourceInput(newPath);
       setResult(null);
       setLocalError(null);
+      rememberSource(newPath, selectedMethod);
     }
   };
   
@@ -768,6 +779,7 @@ export default function PreprocessTab({ config, activeTab, setActiveTab, project
                   setSelectedMethod(e.target.value);
                   setResult(null);
                   setLocalError(null);
+                  rememberSource(sourceInput, e.target.value);
                 }}
                 disabled={generating}
               >

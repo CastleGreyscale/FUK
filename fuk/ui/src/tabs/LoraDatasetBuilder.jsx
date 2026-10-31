@@ -9,6 +9,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import ImageUploader from '../components/ImageUploader';
 import { ThumbsUp, ThumbsDown, CheckCircle } from '../components/Icons';
 import { buildImageUrl } from '../utils/constants';
+import { useLocalStorage } from '../hooks/useLocalStorage';
 
 const toLabel = key => key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 
@@ -32,16 +33,25 @@ function variationImageUrl(path, version) {
 function SetupPhase({ config, onStart }) {
   const d = config?.defaults?.lora_dataset ?? {};
 
-  const [sources, setSources]           = useState([]);
-  const [subjectName, setSubjectName]   = useState('');
-  const [subjectType, setSubjectType]   = useState('character');
-  const [packs, setPacks]               = useState({ character: {}, object: {}, environment: {} });
-  const [deselectedVars, setDeselectedVars] = useState({ character: {}, object: {}, environment: {} });
-  const [expandedPacks, setExpandedPacks]   = useState({});
-  const [seedStrategy, setSeedStrategy] = useState(d.seed_strategy ?? 'fixed');
-  const [seed, setSeed]                 = useState(d.seed ?? 509327136);
-  const [lora, setLora]                 = useState('');
-  const [loraAlpha, setLoraAlpha]       = useState(0.8);
+  // The whole setup form persists to localStorage as one object, so it
+  // survives tab switches and reloads. `field` gives each entry a
+  // useState-style [value, setter] pair (functional updates included).
+  const [saved, setSaved] = useLocalStorage('fuk_lora_dataset_setup', {});
+  const field = (key, initial) => [
+    saved[key] ?? initial,
+    v => setSaved(prev => ({ ...prev, [key]: typeof v === 'function' ? v(prev[key] ?? initial) : v })),
+  ];
+
+  const [sources, setSources]           = field('sources', []);
+  const [subjectName, setSubjectName]   = field('subjectName', '');
+  const [subjectType, setSubjectType]   = field('subjectType', 'character');
+  const [packs, setPacks]               = field('packs', { character: {}, object: {}, environment: {} });
+  const [deselectedVars, setDeselectedVars] = field('deselectedVars', { character: {}, object: {}, environment: {} });
+  const [expandedPacks, setExpandedPacks]   = field('expandedPacks', {});
+  const [seedStrategy, setSeedStrategy] = field('seedStrategy', d.seed_strategy ?? 'fixed');
+  const [seed, setSeed]                 = field('seed', d.seed ?? 509327136);
+  const [lora, setLora]                 = field('lora', '');
+  const [loraAlpha, setLoraAlpha]       = field('loraAlpha', 0.8);
   // Per-model settings from lora_dataset.model_options. A null cfg_scale or
   // denoising_strength means the model has no use for it: hide it, don't send it.
   const modelOptions = d.model_options ?? {};
@@ -50,9 +60,9 @@ function SetupPhase({ config, onStart }) {
   const settingFor = (m, key, fallback) =>
     optionFor(m)[key] !== undefined ? optionFor(m)[key] : (d[key] ?? fallback);
 
-  const [model, setModel]               = useState(d.model ?? 'qwen_edit');
-  const [steps, setSteps]               = useState(settingFor(d.model ?? 'qwen_edit', 'steps', 28));
-  const [cfg, setCfg]                   = useState(settingFor(d.model ?? 'qwen_edit', 'cfg_scale', 2.5) ?? 2.5);
+  const [model, setModel]               = field('model', d.model ?? 'qwen_edit');
+  const [steps, setSteps]               = field('steps', settingFor(d.model ?? 'qwen_edit', 'steps', 28));
+  const [cfg, setCfg]                   = field('cfg', settingFor(d.model ?? 'qwen_edit', 'cfg_scale', 2.5) ?? 2.5);
   const cfgFree = settingFor(model, 'cfg_scale', 2.5) === null;
   const [starting, setStarting]         = useState(false);
   const [error, setError]               = useState(null);
@@ -67,10 +77,12 @@ function SetupPhase({ config, onStart }) {
       .catch(() => {});
   }, []);
 
-  // Reset packs when subject type changes (keep params as-is)
-  useEffect(() => {
-    setPacks(prev => ({ ...prev, [subjectType]: {} }));
-  }, [subjectType]);
+  // Reset packs when subject type changes (keep params as-is). Done in the
+  // handler, not an effect, so restoring the saved form doesn't wipe them.
+  const handleSubjectTypeChange = (type) => {
+    setSubjectType(type);
+    setPacks(prev => ({ ...prev, [type]: {} }));
+  };
 
   // ── Drag-drop from history panel ──
   const handleSourceDrop = useCallback((e) => {
@@ -212,7 +224,7 @@ function SetupPhase({ config, onStart }) {
             onChange={e => setSubjectName(e.target.value)}
           />
           <span className="dataset-label">Subject Type</span>
-          <select className="fuk-select" value={subjectType} onChange={e => setSubjectType(e.target.value)}>
+          <select className="fuk-select" value={subjectType} onChange={e => handleSubjectTypeChange(e.target.value)}>
             <option value="character">Character</option>
             <option value="object">Object</option>
             <option value="environment">Environment</option>
@@ -802,8 +814,17 @@ function CurationCard({ variation, onApprove, onRerun, isRerunning }) {
 // ============================================================================
 
 export default function LoraDatasetBuilder({ config }) {
-  const [phase, setPhase]   = useState('setup');  // setup | running | curation
-  const [jobId, setJobId]   = useState(null);
+  // Persisted so leaving the tab mid-run or mid-curation comes back to the job.
+  const [phase, setPhase]   = useLocalStorage('fuk_lora_dataset_phase', 'setup');  // setup | running | curation
+  const [jobId, setJobId]   = useLocalStorage('fuk_lora_dataset_job', null);
+
+  // Jobs live in server memory, so a saved job is gone after a server restart.
+  useEffect(() => {
+    if (!jobId) return;
+    fetch(`/api/dataset/${jobId}`)
+      .then(r => { if (r.status === 404) { setJobId(null); setPhase('setup'); } })
+      .catch(() => {});
+  }, []);
 
   const handleStart = (newJobId) => {
     setJobId(newJobId);

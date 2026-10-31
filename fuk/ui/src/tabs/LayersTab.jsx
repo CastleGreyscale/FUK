@@ -144,44 +144,50 @@ export default function LayersTab({ config, activeTab, setActiveTab, project }) 
     };
   }, []);
   
-  // Restore last preview from project state
-  useEffect(() => {
-    // Only restore once per project file and when no current layers
-    if (Object.keys(generatedLayers).length > 0 || hasRestoredRef.current) return;
-    
-    const lastState = project?.projectState?.lastState;
-    if (!lastState?.lastLayersPreview) return;
-    
-    // Restore the generated layers
-    const meta = lastState.lastLayersMeta || {};
-    
-    // Restore generatedLayers object from meta
-    if (meta.generatedLayers && typeof meta.generatedLayers === 'object') {
-      setGeneratedLayers(meta.generatedLayers);
-    }
-    
-    // Restore source input if available
-    if (meta.sourceInput) {
-      setSourceInput(meta.sourceInput);
-    }
-    
-    hasRestoredRef.current = true;
-  }, [project?.projectState?.lastState, generatedLayers]);
-  
-  // Reset restoration flag when project file changes
+  // Reset restoration flag when project file changes. Declared before the
+  // restore effect so that on mount (when this also fires) the restore wins.
   useEffect(() => {
     console.log('[Layers] Reset effect fired - currentFilename changed to:', project?.currentFilename);
     hasRestoredRef.current = false;
     setGeneratedLayers({});
     setErrors({});
   }, [project?.currentFilename]);
-  
+
+  // Restore last preview (or just the loaded source) from project state
+  useEffect(() => {
+    // Only restore once per project file and when no current layers
+    if (Object.keys(generatedLayers).length > 0 || hasRestoredRef.current) return;
+
+    const lastState = project?.projectState?.lastState;
+    const meta = lastState?.lastLayersMeta || {};
+    if (!lastState?.lastLayersPreview && !meta.sourceInput) return;
+
+    // Restore generatedLayers object from meta
+    if (lastState.lastLayersPreview && meta.generatedLayers && typeof meta.generatedLayers === 'object') {
+      setGeneratedLayers(meta.generatedLayers);
+    }
+
+    // Restore source input if available
+    if (meta.sourceInput) {
+      setSourceInput(meta.sourceInput);
+    }
+
+    hasRestoredRef.current = true;
+  }, [project?.projectState?.lastState, generatedLayers]);
+
   // Handle source input (MediaUploader passes array of media objects)
   const handleSourceChange = (media) => {
     const first = media[0];
-    setSourceInput(first?.path || first || null);
+    const newPath = first?.path || first || null;
+    setSourceInput(newPath);
     setGeneratedLayers({});
     setErrors({});
+    // Remember the source before anything is run, so it survives a tab
+    // switch. The saved layers no longer match it, so drop them.
+    project?.updateLastState?.({
+      lastLayersPreview: null,
+      lastLayersMeta: { sourceInput: newPath },
+    });
   };
   
   const updateLayer = (layerName, enabled) => {

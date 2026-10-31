@@ -10,6 +10,7 @@ import LoraDatasetBuilder from './LoraDatasetBuilder';
 import ImageDescribeTool from './ImageDescribeTool';
 import ThreeDReconstruct from './ThreeDReconstruct';
 import ModelManager from './ModelManager';
+import { useLocalStorage } from '../hooks/useLocalStorage';
 import { snapFrames, snapDimension } from '../utils/helpers.js';
 
 // ============================================================================
@@ -641,7 +642,10 @@ const SUB_TABS = [
 ];
 
 export default function UtilitiesTab({ activeTab, setActiveTab, config, project }) {
-  const [subTab, setSubTab] = useState('spec');
+  // Remembered across tab switches and reloads. Describe & Tag is the most
+  // used sub-tab, so it's the default.
+  const [savedSubTab, setSubTab] = useLocalStorage('fuk_utilities_subtab', 'describe');
+  const subTab = SUB_TABS.some(t => t.key === savedSubTab) ? savedSubTab : 'describe';
 
   return (
     <div className="utilities-tab">

@@ -143,23 +143,30 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
     }
   }, [activeTab]);
   
-  // Restore last preview from project state when tab becomes active
+  // Reset state when project file changes. Declared before the restore effect
+  // so that on mount (when this also fires) the restore runs after it and wins.
+  useEffect(() => {
+    setResult(null);
+    setSourceInput(null);
+    hasRestoredRef.current = false; // Allow restoration for new project
+  }, [project?.currentFilename]);
+
+  // Restore last preview (or just the loaded source) from project state when
+  // tab becomes active
   useEffect(() => {
     // Only run when this tab is active
     if (activeTab !== 'postprocess') return;
-    
+
     // Skip if we already have a result (user is actively working)
     if (result) return;
-    
+
     // Only restore once per tab activation
     if (hasRestoredRef.current) return;
-    
+
     const lastState = project?.projectState?.lastState;
-    if (!lastState?.lastPostprocessPreview) return;
-    
-    // Restore the preview and metadata
-    const meta = lastState.lastPostprocessMeta || {};
-    
+    const meta = lastState?.lastPostprocessMeta || {};
+    if (!lastState?.lastPostprocessPreview && !meta.sourceInput) return;
+
     console.log('[PostprocessTab] Restoring from lastState:', {
       preview: lastState.lastPostprocessPreview,
       meta
@@ -178,38 +185,48 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
     }
     
     // Restore result
-    setResult({
-      type: meta.isVideo ? 'video' : 'image',
-      url: lastState.lastPostprocessPreview,
-      scale: meta.scale,
-      inputSize: meta.inputSize,
-      outputSize: meta.outputSize,
-      method: meta.method,
-      frameCount: meta.frameCount,
-      targetFps: meta.targetFps,
-      sourceFps: meta.sourceFps,
-      multiplier: meta.multiplier,
-      isHdr: meta.isHdr,
-      exrDir: meta.exrDir,
-      exrFrames: meta.exrFrames,
-      exrColorspace: meta.exrColorspace,
-      hlgPath: meta.hlgPath,
-    });
+    if (lastState.lastPostprocessPreview) {
+      setResult({
+        type: meta.isVideo ? 'video' : 'image',
+        url: lastState.lastPostprocessPreview,
+        scale: meta.scale,
+        inputSize: meta.inputSize,
+        outputSize: meta.outputSize,
+        method: meta.method,
+        frameCount: meta.frameCount,
+        targetFps: meta.targetFps,
+        sourceFps: meta.sourceFps,
+        multiplier: meta.multiplier,
+        isHdr: meta.isHdr,
+        exrDir: meta.exrDir,
+        exrFrames: meta.exrFrames,
+        exrColorspace: meta.exrColorspace,
+        hlgPath: meta.hlgPath,
+      });
+    }
 
     // Clear restoring flag after state has settled
     setTimeout(() => {
       isRestoringRef.current = false;
     }, 100);
-    
+
   }, [activeTab, project?.projectState?.lastState, result]);
-  
-  // Reset state when project file changes
-  useEffect(() => {
+
+  // Remember a loaded source (and process type) before anything is run, so it
+  // survives a tab switch. The saved result no longer matches, so drop it.
+  const rememberSource = (source, processType) => {
+    project?.updateLastState?.({
+      lastPostprocessPreview: null,
+      lastPostprocessMeta: { sourceInput: source, processType },
+    });
+  };
+
+  const selectProcess = (processType) => {
+    setActiveProcess(processType);
     setResult(null);
-    setSourceInput(null);
-    hasRestoredRef.current = false; // Allow restoration for new project
-  }, [project?.currentFilename]);
-  
+    rememberSource(sourceInput, processType);
+  };
+
   // Fetch capabilities on mount
   useEffect(() => {
     fetch(`${API_URL}/postprocess/capabilities`)
@@ -284,6 +301,7 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
     if (newPath !== sourceInput) {
       setSourceInput(newPath);
       setResult(null);
+      rememberSource(newPath, activeProcess);
     }
   };
   
@@ -744,11 +762,7 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                   type="radio"
                   className="fuk-radio"
                   checked={activeProcess === 'upscale'}
-                  onChange={() => {
-                    setActiveProcess('upscale');
-                    setResult(null);
-
-                  }}
+                  onChange={() => selectProcess('upscale')}
                 />
                 <div className="fuk-radio-card-content">
                   <span className="fuk-radio-card-title">
@@ -766,11 +780,7 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                   type="radio"
                   className="fuk-radio"
                   checked={activeProcess === 'interpolate'}
-                  onChange={() => {
-                    setActiveProcess('interpolate');
-                    setResult(null);
-
-                  }}
+                  onChange={() => selectProcess('interpolate')}
                 />
                 <div className="fuk-radio-card-content">
                   <span className="fuk-radio-card-title">
@@ -788,10 +798,7 @@ export default function PostprocessTab({ config, activeTab, setActiveTab, projec
                   type="radio"
                   className="fuk-radio"
                   checked={activeProcess === 'hdr'}
-                  onChange={() => {
-                    setActiveProcess('hdr');
-                    setResult(null);
-                  }}
+                  onChange={() => selectProcess('hdr')}
                 />
                 <div className="fuk-radio-card-content">
                   <span className="fuk-radio-card-title">

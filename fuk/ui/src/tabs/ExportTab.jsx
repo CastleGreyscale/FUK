@@ -4,7 +4,7 @@
  * Supports both single image and video sequence export
  */
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { CheckCircle, Download, AlertCircle, Film, Folder, FolderPlus } from '../components/Icons';
 import InlineImageInput from '../components/InlineImageInput';
 import ZoomableImage from '../components/ZoomableImage';
@@ -16,6 +16,13 @@ import { buildImageUrl, API_URL } from '../utils/constants';
 import { formatTime } from '../utils/helpers';
 import Footer from '../components/Footer';
 
+
+const EMPTY_LAYERS = {
+  beauty: null,
+  depth: null,
+  normals: null,
+  crypto: null,
+};
 
 const DEFAULT_SETTINGS = {
   exports: {
@@ -90,16 +97,30 @@ export default function ExportTab({ config, activeTab, setActiveTab, project }) 
   }, [project, settings, setLocalSettings]);
   
   // Layer inputs
-  const [layers, setLayers] = useState({
-    beauty: null,
-    depth: null,
-    normals: null,
-    crypto: null,
-  });
-  
+  const [layers, setLayers] = useState(EMPTY_LAYERS);
+
   // Video mode - auto-detected from dropped layers
   const [isVideoMode, setIsVideoMode] = useState(false);
-  
+
+  // Restore the loaded layer inputs from project lastState, once per project
+  // file, so they survive tab switches and reloads.
+  const restoredFileRef = useRef(null);
+  useEffect(() => {
+    const filename = project?.currentFilename;
+    if (!filename || restoredFileRef.current === filename) return;
+    restoredFileRef.current = filename;
+    const saved = project.projectState?.lastState?.lastExportInputs;
+    setLayers({ ...EMPTY_LAYERS, ...saved?.layers });
+    setIsVideoMode(saved?.isVideoMode ?? false);
+    setExportResult(null);
+  }, [project?.currentFilename, project?.projectState]);
+
+  const rememberInputs = (newLayers, videoMode) => {
+    project?.updateLastState?.({
+      lastExportInputs: { layers: newLayers, isVideoMode: videoMode },
+    });
+  };
+
   // UI state
   const [newFolderName, setNewFolderName] = useState('');
   const [showNewFolder, setShowNewFolder] = useState(false);
@@ -148,17 +169,15 @@ const {
   }, [layers]);
   
   const updateLayer = (layerName, path) => {
-    setLayers(prev => ({
-      ...prev,
-      [layerName]: path,
-    }));
+    const newLayers = { ...layers, [layerName]: path };
+    setLayers(newLayers);
     setExportResult(null);
     setLocalError(null);
-    
+
     // Auto-detect video mode when a video is added
-    if (isVideoPath(path)) {
-      setIsVideoMode(true);
-    }
+    const videoMode = isVideoMode || isVideoPath(path);
+    setIsVideoMode(videoMode);
+    rememberInputs(newLayers, videoMode);
   };
   
   // Handle layers pack drop - populate all layer inputs at once
@@ -197,9 +216,10 @@ const {
     setIsVideoMode(isVideo);
     setExportResult(null);
     setLocalError(null);
-    
+    rememberInputs(newLayers, isVideo);
+
     console.log('[ExportTab] Populated layers:', newLayers, 'video mode:', isVideo);
-  }, [layers]);
+  }, [layers, project?.updateLastState]);
   
   const updateExport = (exportName, enabled) => {
     updateSettings({

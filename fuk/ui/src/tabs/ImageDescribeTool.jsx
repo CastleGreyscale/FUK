@@ -16,6 +16,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { FolderOpen, X } from '../components/Icons';
 import TagManager from '../components/TagManager';
+import { useLocalStorage } from '../hooks/useLocalStorage';
 
 const API_URL = '/api';
 
@@ -51,11 +52,12 @@ function isVideoPath(path) {
 }
 
 export default function ImageDescribeTool({ project }) {
-  const [imagePath, setImagePath] = useState(null);
+  // The input and its description survive tab switches and reloads.
+  const [imagePath, setImagePath] = useLocalStorage('fuk_describe_image', null);
   const [browsing, setBrowsing] = useState(false);
   const [running, setRunning] = useState(false);
-  const [focus, setFocus] = useState('');
-  const [description, setDescription] = useState('');
+  const [focus, setFocus] = useLocalStorage('fuk_describe_focus', '');
+  const [description, setDescription] = useLocalStorage('fuk_describe_description', '');
   const [error, setError] = useState(null);
   const [health, setHealth] = useState(null);
   const [copied, setCopied] = useState(false);
