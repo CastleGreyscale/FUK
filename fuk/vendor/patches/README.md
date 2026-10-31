@@ -142,6 +142,22 @@ Regression signal when upgrading: a `minimax_h3_control` job with a control vide
 first frame. Drop the patch if upstream starts building anchor rows into `control_rows`
 or slicing `img_pos` itself.
 
+## Active patches — Depth-Anything-3
+
+Base commit: `2c21ea849ceec7b469a3e62ea0c0e270afc3281a`. Applied from
+`depth-anything-3/`.
+
+### `0001-deps-and-cli-kwarg.patch`
+
+`pyproject.toml` — drops `xformers`, plus duplicate `moviepy` (unpinned, alongside
+`moviepy==1.0.3`) and `uvicorn` entries. xformers' last release is built for torch
+2.10/cu128: on FUK's torch its kernels don't load and it warns on every import. DA3 only
+uses `xformers.ops.SwiGLU`, behind an `ImportError` fallback to its own identical
+`SwiGLUFFN`, so nothing is lost.
+
+`src/depth_anything_3/cli.py` — the CLI passes `reference_view_strategy=` to the API,
+which takes `ref_view_strategy`; renamed at all four call sites.
+
 ## Dropped patches
 
 ### `0003-ltx25-optional-gemma4-import.patch` — dropped at the LTX-2.5 swap

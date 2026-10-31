@@ -89,19 +89,17 @@ echo ""
 echo "[1/7] Installing PyTorch (CUDA)..."
 
 # torch is pinned (see pyproject.toml). The wheel index follows the *driver*,
-# not nvcc — the CUDA runtime ships inside the wheel. 2.9.1 is built for
-# cu126 / cu128 / cu130; cu130 needs driver >= 580. Override for older drivers:
-#   FUK_TORCH_INDEX=cu128 ./setup.sh
-TORCH_VERSION="2.9.1"
-TORCHVISION_VERSION="0.24.1"
-CUDA_INDEX="${FUK_TORCH_INDEX:-cu130}"
+# not nvcc — the CUDA runtime ships inside the wheel. 2.13.0 is built for
+# cu126 / cu130 / cu132; cu13x needs a CUDA 13 driver (>= 580). Override for
+# older drivers:
+#   FUK_TORCH_INDEX=cu126 ./setup.sh
+TORCH_VERSION="2.13.0"
+TORCHVISION_VERSION="0.28.0"
+TORCHAUDIO_VERSION="2.11.1"
+CUDA_INDEX="${FUK_TORCH_INDEX:-cu132}"
 
 echo "  → torch $TORCH_VERSION from https://download.pytorch.org/whl/$CUDA_INDEX"
-# xformers comes from the same index: the PyPI wheel is built against cu128,
-# and on a cu130 torch its CUDA extensions silently fail to load.
-XFORMERS_VERSION="0.0.33.post2"
-pip install "torch==$TORCH_VERSION" "torchvision==$TORCHVISION_VERSION" "torchaudio==$TORCH_VERSION" \
-    "xformers==$XFORMERS_VERSION" \
+pip install "torch==$TORCH_VERSION" "torchvision==$TORCHVISION_VERSION" "torchaudio==$TORCHAUDIO_VERSION" \
     --index-url "https://download.pytorch.org/whl/$CUDA_INDEX"
 echo "  ✓ PyTorch: $(python -c 'import torch; print(torch.__version__)')"
 echo "  ✓ CUDA available: $(python -c 'import torch; print(torch.cuda.is_available())')"
@@ -183,8 +181,20 @@ if clone_pinned DiffSynth-Studio https://github.com/modelscope/DiffSynth-Studio.
     done
 fi
 
-# Depth Anything V3
-clone_pinned Depth-Anything-3 https://github.com/ByteDance-Seed/Depth-Anything-3.git "$DEPTH_ANYTHING_3_SHA" || true
+# Depth Anything V3 — patched; see fuk/vendor/patches/README.md.
+if clone_pinned Depth-Anything-3 https://github.com/ByteDance-Seed/Depth-Anything-3.git "$DEPTH_ANYTHING_3_SHA"; then
+    echo "  → Applying FUK patches to Depth-Anything-3..."
+    for patch in "$(pwd)"/fuk/vendor/patches/depth-anything-3/0*.patch; do
+        [ -e "$patch" ] || continue
+        if git -C fuk/vendor/Depth-Anything-3 apply "$patch"; then
+            echo "    ✓ $(basename "$patch")"
+        else
+            echo "    ✗ FAILED to apply $(basename "$patch")"
+            echo "      See fuk/vendor/patches/README.md"
+            exit 1
+        fi
+    done
+fi
 
 # SAM2
 clone_pinned segment-anything-2 https://github.com/facebookresearch/segment-anything-2 "$SAM2_SHA" || true
@@ -217,7 +227,7 @@ clone_pinned TRELLIS https://github.com/microsoft/TRELLIS.git "$TRELLIS_SHA" --r
 # block swapping and quantized weights, which is what makes it fit a 24GB card;
 # ByteDance's own inference path does not and was removed from FUK for that
 # reason. Do NOT install its requirements.txt — it lists an unpinned torch and
-# would fight the venv's cu130 build. Its only two extra deps (gguf,
+# would fight the venv's CUDA torch build. Its only two extra deps (gguf,
 # rotary_embedding_torch) are in pyproject.toml instead. Weights download on
 # first use, SHA256-validated, into {models_root}/seedvr2.
 clone_pinned SeedVR2 https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler.git "$SEEDVR2_SHA" || true
@@ -226,8 +236,9 @@ clone_pinned SeedVR2 https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler.git "
 # LTX-2.5 SDR -> HDR IC-LoRA, which needs upstream's keyframe-aware diffusion
 # VAE decode that DiffSynth does not have. Generation still runs on DiffSynth.
 # Not pip-installed: ltx_hdr_backend puts packages/*/src on the subprocess's
-# PYTHONPATH. Do NOT `uv sync` it or install its natten extra — that pins
-# torch 2.13/cu132 and would replace this venv's torch. Its three extra deps
+# PYTHONPATH. Do NOT `uv sync` it — it would install its own torch over this
+# venv's. Its natten extra (torch 2.13/cu132) is not installed; without it the
+# diffusion VAE falls back to Triton/eager attention. Its three extra deps
 # (colour-science, openimageio, cloudpickle) are in pyproject.toml.
 clone_pinned LTX-2 https://github.com/Lightricks/LTX-2.git "$LTX2_SHA" || true
 

@@ -1,0 +1,64 @@
+diff --git a/pyproject.toml b/pyproject.toml
+index 6a11c7a..ac4add5 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -21,7 +21,6 @@ dependencies = [
+     "imageio",
+     "numpy<2",
+     "opencv-python",
+-    "xformers",
+     "open3d",
+     "fastapi",
+     "uvicorn",
+@@ -31,11 +30,9 @@ dependencies = [
+     "omegaconf",
+     "evo",
+     "e3nn",
+-    "moviepy",
+     "plyfile",
+     "pillow_heif",
+     "safetensors",
+-    "uvicorn",
+     "moviepy==1.0.3",
+     "typer>=0.9.0",
+     "pycolmap",
+diff --git a/src/depth_anything_3/cli.py b/src/depth_anything_3/cli.py
+index c946302..3296542 100644
+--- a/src/depth_anything_3/cli.py
++++ b/src/depth_anything_3/cli.py
+@@ -380,7 +380,7 @@ def image(
+         process_res_method=process_res_method,
+         export_feat_layers=export_feat_layers,
+         use_ray_pose=use_ray_pose,
+-        reference_view_strategy=reference_view_strategy,
++        ref_view_strategy=ref_view_strategy,
+         conf_thresh_percentile=conf_thresh_percentile,
+         num_max_points=num_max_points,
+         show_cameras=show_cameras,
+@@ -459,7 +459,7 @@ def images(
+         process_res_method=process_res_method,
+         export_feat_layers=export_feat_layers,
+         use_ray_pose=use_ray_pose,
+-        reference_view_strategy=reference_view_strategy,
++        ref_view_strategy=ref_view_strategy,
+         conf_thresh_percentile=conf_thresh_percentile,
+         num_max_points=num_max_points,
+         show_cameras=show_cameras,
+@@ -546,7 +546,7 @@ def colmap(
+         intrinsics=intrinsics,
+         align_to_input_ext_scale=align_to_input_ext_scale,
+         use_ray_pose=use_ray_pose,
+-        reference_view_strategy=reference_view_strategy,
++        ref_view_strategy=ref_view_strategy,
+         conf_thresh_percentile=conf_thresh_percentile,
+         num_max_points=num_max_points,
+         show_cameras=show_cameras,
+@@ -623,7 +623,7 @@ def video(
+         process_res_method=process_res_method,
+         export_feat_layers=export_feat_layers,
+         use_ray_pose=use_ray_pose,
+-        reference_view_strategy=reference_view_strategy,
++        ref_view_strategy=ref_view_strategy,
+         conf_thresh_percentile=conf_thresh_percentile,
+         num_max_points=num_max_points,
+         show_cameras=show_cameras,

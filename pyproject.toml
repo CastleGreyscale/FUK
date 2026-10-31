@@ -6,14 +6,21 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     # Core Deep Learning
     # torch is pinned exactly. Left as a floor, a fresh install resolved to
-    # torch 2.14 — four minors past the 2.9.1/cu130 every pin below (xformers,
-    # bitsandbytes, the torchao guard, the vendor patches) was validated on.
+    # whatever torch was newest that day, untested against every pin below
+    # (xformers, bitsandbytes, the torchao guard, the vendor patches).
     # Bump the three together, deliberately, with a fixed-seed A/B.
-    "torch==2.9.1",
-    "torchvision==0.24.1",
-    "xformers==0.0.33.post2",  # paired with torch 2.9.1; setup.sh fetches the cu130 build
+    # 2.13.0 matches upstream LTX-2's pin (and its natten wheels), and is the
+    # first line whose headers GCC 15/16 accept for extension builds.
+    "torch==2.13.0",
+    "torchvision==0.28.0",
+    # xformers is deliberately absent. Its last release (0.0.35) is built for
+    # torch 2.10/cu128: on this torch its kernels don't load, it warns on every
+    # import, and nothing here needs it — DiffSynth runs sage-attn, DA3 has its
+    # own SwiGLU fallback (its dep on xformers is patched out), and TRELLIS
+    # brings xformers in its own env.
     "triton>=3.1.0",
-    "torchaudio==2.9.1",
+    # torchaudio is in maintenance: 2.11.1 is the last release, torch>=2.11.
+    "torchaudio==2.11.1",
     # INT8 attention for the Wan DiT. Deliberately NOT accompanied by
     # flash-attn: FA2 outranks sage-attn in DiffSynth's backend chain, so
     # installing it would silently take sage-attn out of play.
@@ -50,7 +57,7 @@ dependencies = [
     # *every* FUK import, not just quantization. FUK has no torchao preset
     # anyway (its tensor subclass cannot survive DiffSynth's offload device
     # move), so the dependency is pure risk. If you install it for other
-    # reasons, pin it: torchao>=0.16,<0.18 on torch 2.9.
+    # reasons, pin it to a release that supports the torch pinned above.
     # comfy-kitchen is likewise omitted — it only matters for loading
     # ComfyUI-format pre-quantized checkpoints, which FUK does not do.
     "bitsandbytes>=0.49.0",
