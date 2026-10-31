@@ -21,7 +21,7 @@ import MeshViewer from '../components/MeshViewer';
 import { useGeneration } from '../hooks/useGeneration';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { startTask } from '../utils/api';
-import { buildImageUrl } from '../utils/constants';
+import { buildImageUrl, sizedImageUrl } from '../utils/constants';
 
 const API_URL = '/api';
 
@@ -843,7 +843,7 @@ export default function ThreeDReconstruct({ config, project }) {
                       image absolutely filling it is unambiguous. */}
                   <span className="threed-strip-thumb">
                     <img
-                      src={buildImageUrl(path)}
+                      src={sizedImageUrl(buildImageUrl(path), 'thumb')}
                       alt={label}
                       loading="lazy"
                       decoding="async"

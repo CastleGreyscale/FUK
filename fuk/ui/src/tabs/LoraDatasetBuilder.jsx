@@ -8,7 +8,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import ImageUploader from '../components/ImageUploader';
 import { ThumbsUp, ThumbsDown, CheckCircle } from '../components/Icons';
-import { buildImageUrl } from '../utils/constants';
+import { buildImageUrl, sizedImageUrl } from '../utils/constants';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 
 const toLabel = key => key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
@@ -549,7 +549,7 @@ function VariationThumbnail({ variation }) {
     <div className="dataset-thumb">
       <div className="dataset-thumb-img-area">
         {imgUrl ? (
-          <img src={imgUrl} alt={variation.label} />
+          <img src={sizedImageUrl(imgUrl, 'thumb')} alt={variation.label} loading="lazy" decoding="async" />
         ) : (
           <div className="dataset-thumb-pending" />
         )}

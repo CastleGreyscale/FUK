@@ -11,9 +11,13 @@
  *
  * The wipe clip lives on a non-transformed wrapper so the divider stays a fixed
  * vertical line on screen while the images zoom/pan underneath it.
+ *
+ * Both sides show the cached 1920px preview until you zoom past 1x, then the
+ * originals load in the background and swap in.
  */
 
 import { useState, useRef, useCallback } from 'react';
+import { useProgressiveSrc } from '../hooks/useProgressiveSrc';
 
 export default function CompareImage({
   srcA,
@@ -28,6 +32,8 @@ export default function CompareImage({
   const [dividePct, setDividePct] = useState(50);
   const containerRef = useRef(null);
   const draggingDivider = useRef(false);
+  const shownA = useProgressiveSrc(srcA, zoom > 1);
+  const shownB = useProgressiveSrc(srcB, zoom > 1);
 
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
@@ -86,11 +92,11 @@ export default function CompareImage({
       onWheel={handleWheel}
     >
       {/* before (right side) */}
-      <img className="compare-layer" src={srcA} alt={labelA} style={imgStyle} draggable={false} />
+      <img className="compare-layer" src={shownA} alt={labelA} style={imgStyle} draggable={false} />
 
       {/* after (left side) — clipped by the divider position */}
       <div className="compare-clip" style={{ clipPath: `inset(0 ${100 - dividePct}% 0 0)` }}>
-        <img className="compare-layer" src={srcB} alt={labelB} style={imgStyle} draggable={false} />
+        <img className="compare-layer" src={shownB} alt={labelB} style={imgStyle} draggable={false} />
       </div>
 
       {/* divider bar + grab handle */}

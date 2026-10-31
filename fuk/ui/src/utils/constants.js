@@ -21,6 +21,21 @@ export function generateRandomSeed() {
   return arr[0];
 }
 
+const SIZEABLE_EXTS = ['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tif', '.tiff', '.exr'];
+
+/**
+ * URL for a cached downscale of a project image: `thumb` (384 px long edge,
+ * for tiles and popups) or `preview` (1920 px). Takes a URL from
+ * buildImageUrl. Only the project file endpoints understand `size`, so
+ * anything else (videos, blob/data URLs, legacy mounts) comes back unchanged.
+ */
+export function sizedImageUrl(url, size) {
+  if (!url || !/^\/api\/project\/(cache|files)\//.test(url)) return url;
+  const path = url.split('?')[0].toLowerCase();
+  if (!SIZEABLE_EXTS.some(ext => path.endsWith(ext))) return url;
+  return `${url}${url.includes('?') ? '&' : '?'}size=${size}`;
+}
+
 /**
  * Build proper image URL from backend path
  * Handles both project-cache paths and output paths

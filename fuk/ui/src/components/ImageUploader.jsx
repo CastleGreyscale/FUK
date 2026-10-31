@@ -7,6 +7,7 @@
 
 import { useState, useId, useCallback } from 'react';
 import { X, FolderOpen } from './Icons';
+import { sizedImageUrl } from '../utils/constants';
 
 const API_URL = '/api';
 
@@ -126,8 +127,9 @@ export default function ImageUploader({ images, onImagesChange, disabled, id: pr
           {images.map((path, index) => (
             <div key={index} className="fuk-thumbnail">
               <img
-                src={buildImageUrl(path)}
+                src={sizedImageUrl(buildImageUrl(path), 'thumb')}
                 alt={`Image ${index + 1}`}
+                decoding="async"
               />
               <button
                 onClick={(e) => {

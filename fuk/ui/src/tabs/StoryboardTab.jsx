@@ -19,7 +19,7 @@ import { Plus, Camera, Film, Loader2, AlertCircle, CheckCircle, Image as ImageIc
 import { useStoryboard } from '../hooks/useStoryboard';
 import { sendPanelToImage, sendPanelToVideo, snapshotStoryboard, fetchSnapshots, restoreSnapshot } from '../utils/storyboardApi';
 import MarkerTextarea from '../components/MarkerTextarea';
-import { buildImageUrl, generateRandomSeed } from '../utils/constants';
+import { buildImageUrl, sizedImageUrl, generateRandomSeed } from '../utils/constants';
 
 // Debounce window for autosave. Short enough to feel snappy, long enough to
 // coalesce a paragraph of typing into one PUT.
@@ -853,7 +853,7 @@ function PreviewSlot({ kind, shotId, path, sb }) {
           kind === 'video' ? (
             <video src={url} muted loop playsInline preload="metadata" />
           ) : (
-            <img src={url} alt={`${label} preview`} />
+            <img src={sizedImageUrl(url, 'thumb')} alt={`${label} preview`} loading="lazy" decoding="async" />
           )
         ) : (
           <div className="storyboard-preview-slot-empty">

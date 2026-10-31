@@ -7,7 +7,8 @@ the FastAPI event loop. See file_browser.py for the subprocess handler.
 """
 
 from fastapi import APIRouter, HTTPException, Body, Query, Request
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 from pydantic import BaseModel
@@ -19,6 +20,15 @@ import subprocess
 import sys
 import os
 import re
+
+from media_previews import (
+    PREVIEW_CACHE_DIRNAME,
+    PREVIEW_SIZES,
+    PREVIEWABLE_SUFFIXES,
+    get_exr_png,
+    get_preview,
+    source_etag,
+)
 
 # Shot id: alphanumeric, hyphens allowed mid-string. No underscores (the
 # filename uses `_` as the field separator). 1-32 chars to keep paths sane.
@@ -1776,13 +1786,17 @@ def setup_project_routes(app):
 # ============================================================================
 
 @router.get("/cache/{file_path:path}")
-async def serve_cache_file(file_path: str, request: Request):
+async def serve_cache_file(
+    file_path: str,
+    request: Request,
+    size: Optional[str] = Query(default=None, description="thumb | preview: serve a cached downscale"),
+):
     """
     Dynamically serve files from the project cache directory.
     This allows the cache location to change when projects are opened.
-    
+
     Falls back to default cache if file not found in project cache.
-    
+
     URL: /api/project/cache/{relative_path}
     Example: /api/project/cache/fuktest_shot01_251229/img_gen_001/generated.png
     """
@@ -1822,14 +1836,11 @@ async def serve_cache_file(file_path: str, request: Request):
                 full_path.resolve().relative_to(_default_cache_root.resolve())
         except ValueError:
             raise HTTPException(status_code=403, detail="Access denied")
-    
-    # EXR files: convert to PNG on-the-fly so browsers can display them
-    if full_path.suffix.lower() == '.exr':
-        try:
-            png_bytes = _exr_to_png_bytes(full_path)
-            return StreamingResponse(io.BytesIO(png_bytes), media_type="image/png")
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Could not convert EXR for display: {e}")
+
+    # Downscaled previews, and EXRs converted so browsers can display them
+    image_response = await _image_response(full_path, size, request)
+    if image_response is not None:
+        return image_response
 
     # Determine content type
     content_type, _ = mimetypes.guess_type(str(full_path))
@@ -1927,27 +1938,48 @@ def get_project_state() -> Optional[Dict[str, Any]]:
     return _project_state
 
 # ============================================================================
-# EXR Preview Helper
+# Image Preview Serving
 # ============================================================================
 
-def _exr_to_png_bytes(path: Path) -> bytes:
-    """
-    Convert an EXR file to a PNG-encoded byte buffer for browser display.
+def _preview_cache_dir() -> Path:
+    """Previews live with the project cache, so they go when the project does."""
+    if _cache_root:
+        return Path(_cache_root) / PREVIEW_CACHE_DIRNAME
+    return Path.home() / ".cache" / "fuk" / "previews"
 
-    Normalizes the full float dynamic range to [0, 1] and applies gamma 2.2
-    (linear → sRGB) so the image renders correctly in a browser <img> tag.
-    Handles grayscale (depth/Z passes), RGB, and RGBA EXR files.
-    """
-    import cv2
-    import sys
-    sys.path.insert(0, str(Path(__file__).parent.parent))
-    from core.exr_utils import load_exr_bgr
 
-    bgr = load_exr_bgr(path)
-    ok, buf = cv2.imencode('.png', bgr)
-    if not ok:
-        raise ValueError(f"Could not encode EXR as PNG: {path}")
-    return bytes(buf)
+async def _image_response(full_path: Path, size: Optional[str], request: Request):
+    """
+    Serve a downscaled preview (`size` = thumb|preview) or a browser-ready
+    copy of an EXR. Returns None when the original file should be served as-is.
+
+    Conversion runs in a worker thread: it used to run inline, which stalled
+    the whole server (progress streams included) while an EXR was converted.
+    """
+    suffix = full_path.suffix.lower()
+    if size not in PREVIEW_SIZES or suffix not in PREVIEWABLE_SUFFIXES:
+        size = None
+    if size is None and suffix != ".exr":
+        return None
+
+    cache_dir = _preview_cache_dir()
+    try:
+        if size is None:
+            out = await run_in_threadpool(get_exr_png, full_path, cache_dir)
+            return FileResponse(out, media_type="image/png")
+
+        # Outputs can be overwritten in place (reruns), so the browser
+        # revalidates every time; an unchanged source answers 304.
+        etag = source_etag(full_path, size)
+        cache_headers = {"ETag": etag, "Cache-Control": "no-cache"}
+        if request.headers.get("if-none-match") == etag:
+            return Response(status_code=304, headers=cache_headers)
+        out = await run_in_threadpool(get_preview, full_path, size, cache_dir)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Could not build preview: {e}")
+    if out is None:
+        return None
+    return FileResponse(out, media_type="image/webp", headers=cache_headers)
 
 
 # ============================================================================
@@ -1955,7 +1987,11 @@ def _exr_to_png_bytes(path: Path) -> bytes:
 # ============================================================================
 
 @router.get("/files/{file_path:path}")
-async def serve_external_file(file_path: str):
+async def serve_external_file(
+    file_path: str,
+    request: Request,
+    size: Optional[str] = Query(default=None, description="thumb | preview: serve a cached downscale"),
+):
     """
     Serve files from absolute paths (for imports and external references).
     
@@ -1997,14 +2033,11 @@ async def serve_external_file(file_path: str):
     
     if not is_allowed:
         raise HTTPException(status_code=403, detail="Access denied - path not in allowed locations")
-    
-    # EXR files: convert to PNG on-the-fly so browsers can display them
-    if full_path.suffix.lower() == '.exr':
-        try:
-            png_bytes = _exr_to_png_bytes(full_path)
-            return StreamingResponse(io.BytesIO(png_bytes), media_type="image/png")
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Could not convert EXR for display: {e}")
+
+    # Downscaled previews, and EXRs converted so browsers can display them
+    image_response = await _image_response(full_path, size, request)
+    if image_response is not None:
+        return image_response
 
     # Determine content type
     content_type, _ = mimetypes.guess_type(str(full_path))

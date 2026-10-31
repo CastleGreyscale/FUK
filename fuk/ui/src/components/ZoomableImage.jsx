@@ -9,9 +9,13 @@
  * - Normal: mouseEnter on image (container is display:contents, no box)
  * - Zooming: mouseLeave/mouseMove on container (has clipped bounds)
  * This prevents the flicker when cursor moves over the clipped overflow.
+ *
+ * RESOLUTION:
+ * - Shows the cached 1920px preview; the original loads only on hover-zoom.
  */
 
 import { useState, useRef, useCallback } from 'react';
+import { useProgressiveSrc } from '../hooks/useProgressiveSrc';
 
 export default function ZoomableImage({
   src,
@@ -28,6 +32,16 @@ export default function ZoomableImage({
   const [naturalSize, setNaturalSize] = useState(null);
   const containerRef = useRef(null);
   const imageRef = useRef(null);
+  const shownSrc = useProgressiveSrc(src, isHovering);
+
+  // When the original replaces the preview mid-zoom, re-read its pixel size
+  // so zoom levels stay relative to native resolution.
+  const handleLoad = useCallback(() => {
+    const img = imageRef.current;
+    if (img && isHovering) {
+      setNaturalSize({ width: img.naturalWidth, height: img.naturalHeight });
+    }
+  }, [isHovering]);
 
   // When zooming, track mouse on the CONTAINER (clipped bounds)
   const handleContainerMouseMove = useCallback((e) => {
@@ -105,11 +119,13 @@ export default function ZoomableImage({
     >
       <img
         ref={imageRef}
-        src={src}
+        src={shownSrc}
         alt={alt}
         className={`zoomable-img ${className}`}
         style={imageStyle}
         draggable={false}
+        decoding="async"
+        onLoad={handleLoad}
         // Image only handles enter (it's the only box in normal state)
         onMouseEnter={!isHovering ? handleMouseEnter : undefined}
       />

@@ -13,6 +13,7 @@
 import { useState, useId, useCallback } from 'react';
 import { X, Film, Layers, Image, FolderOpen } from './Icons';
 import { registerImport } from '../utils/historyApi';
+import { sizedImageUrl } from '../utils/constants';
 
 const API_URL = '/api';
 
@@ -345,9 +346,10 @@ export default function MediaUploader({
                   </div>
                 ) : (
                   <img
-                    src={buildMediaUrl(item.path)}
+                    src={sizedImageUrl(buildMediaUrl(item.path), 'thumb')}
                     alt={item.displayName}
                     className="fuk-media-thumb-img"
+                    decoding="async"
                   />
                 )}
                 <div className={`fuk-media-thumb-badge fuk-media-thumb-badge--${item.mediaType}`}>

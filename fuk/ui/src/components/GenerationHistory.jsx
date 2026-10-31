@@ -5,7 +5,7 @@
 
 import { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from 'react';
 import { Film, Camera, Clock, Trash2, RefreshCw, ChevronDown, ChevronRight, Enhance, Zap, ArrowUp, Layers, Download, PinIcon, ImportIcon, SequenceIcon, ThumbsUp, ThumbsDown, Maximize2, Columns, X } from './Icons';
-import { buildImageUrl, API_URL } from '../utils/constants';
+import { buildImageUrl, sizedImageUrl, API_URL } from '../utils/constants';
 import { useVideoPlayback } from '../hooks/useVideoPlayback';
 import ZoomableImage from './ZoomableImage';
 import CompareImage from './CompareImage';
@@ -106,6 +106,8 @@ function HoverPreview({ generation, position, videoRef }) {
                   (generation.type === 'layers' && generation.subtype === 'video');
   const isSequence = generation.isSequence;
   const previewUrl = buildImageUrl(generation.preview);
+  // The popup is capped at 320px, so images use the cached thumbnail
+  const imageUrl = sizedImageUrl(previewUrl, 'thumb');
   const displayName = generation.name || generation.id || 'Unknown';
 
   // Full date + time combined
@@ -137,9 +139,9 @@ function HoverPreview({ generation, position, videoRef }) {
     <div ref={popupRef} className="gen-history-hover-preview" style={style}>
       <div className="gen-history-hover-media">
         {isSequence ? (
-          <img src={previewUrl} alt={displayName} />
+          <img src={imageUrl} alt={displayName} />
         ) : isVideo ? (
-          <video 
+          <video
             ref={videoRef}
             src={previewUrl}
             autoPlay
@@ -148,7 +150,7 @@ function HoverPreview({ generation, position, videoRef }) {
             playsInline
           />
         ) : (
-          <img src={previewUrl} alt={displayName} />
+          <img src={imageUrl} alt={displayName} />
         )}
       </div>
       <div className="gen-history-hover-info">
@@ -173,9 +175,10 @@ function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned, onHov
                   (generation.type === 'layers' && generation.subtype === 'video');
   const isSequence = generation.isSequence;
   const previewUrl = buildImageUrl(generation.preview);
+  const imageThumbUrl = sizedImageUrl(previewUrl, 'thumb');
   const thumbnailUrl = generation.thumbnailUrl ? buildImageUrl(generation.thumbnailUrl) : null;
   const displayName = generation.name || generation.id || 'Unknown';
-  
+
   // Get the primary content type icon (Camera or Film)
   const getContentTypeIcon = () => {
     if (isSequence) return SequenceIcon;
@@ -327,9 +330,11 @@ function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned, onHov
           isSequence ? (
             // Sequence: show first frame as image with sequence indicator
             <div className="gen-history-sequence">
-              <img 
-                src={previewUrl} 
+              <img
+                src={imageThumbUrl}
                 alt={displayName}
+                loading="lazy"
+                decoding="async"
                 onError={() => setImageError(true)}
               />
               <div className="gen-history-sequence-overlay">
@@ -341,6 +346,8 @@ function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned, onHov
               <img
                 src={thumbnailUrl}
                 alt={displayName}
+                loading="lazy"
+                decoding="async"
                 onError={() => setImageError(true)}
               />
             ) : (
@@ -352,9 +359,11 @@ function DraggableThumbnail({ generation, onDelete, onTogglePin, isPinned, onHov
               />
             )
           ) : (
-            <img 
-              src={previewUrl} 
+            <img
+              src={imageThumbUrl}
               alt={displayName}
+              loading="lazy"
+              decoding="async"
               onError={() => setImageError(true)}
             />
           )
@@ -476,6 +485,7 @@ function GalleryThumb({ generation, isPinned, isSelected, isMultiSelected, compa
   const video   = isGenVideo(generation);
   const seq     = generation.isSequence;
   const preview = buildImageUrl(generation.preview);
+  const imageThumb = sizedImageUrl(preview, 'thumb');
   const thumb   = generation.thumbnailUrl ? buildImageUrl(generation.thumbnailUrl) : null;
   const ProcIcon = processingIcon(generation);
   const procType = processingType(generation);
@@ -489,13 +499,13 @@ function GalleryThumb({ generation, isPinned, isSelected, isMultiSelected, compa
       <div className="gallery-thumb-media">
         {!imgErr ? (
           seq ? (
-            <img src={preview} alt="" onError={() => setImgErr(true)} />
+            <img src={imageThumb} alt="" loading="lazy" decoding="async" onError={() => setImgErr(true)} />
           ) : video ? (
             thumb
-              ? <img src={thumb} alt="" onError={() => setImgErr(true)} />
+              ? <img src={thumb} alt="" loading="lazy" decoding="async" onError={() => setImgErr(true)} />
               : <video src={preview} muted preload="metadata" onError={() => setImgErr(true)} />
           ) : (
-            <img src={preview} alt="" onError={() => setImgErr(true)} />
+            <img src={imageThumb} alt="" loading="lazy" decoding="async" onError={() => setImgErr(true)} />
           )
         ) : (
           <div className="gallery-thumb-error"><ContentIcon /></div>

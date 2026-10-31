@@ -5,7 +5,7 @@
 
 import { useState, useId } from 'react';
 import { X, Upload } from './Icons';
-import { buildImageUrl } from '../utils/constants';
+import { buildImageUrl, sizedImageUrl } from '../utils/constants';
 
 export default function InlineImageInput({ 
   value,           // Single path string or null
@@ -176,7 +176,7 @@ export default function InlineImageInput({
                 onMouseLeave={(e) => { e.target.pause(); e.target.currentTime = 0; }}
               />
             ) : (
-              <img src={previewUrl} alt="Preview" />
+              <img src={sizedImageUrl(previewUrl, 'thumb')} alt="Preview" decoding="async" />
             )}
             <button
               onClick={handleRemove}
