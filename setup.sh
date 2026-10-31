@@ -14,49 +14,61 @@ else
     echo "⚠  Warning: nvidia-smi not found. GPU acceleration may not work."
 fi
 
-# ── Virtual Environment (Python 3.10 required) ───────────────────────────────
+# ── Virtual Environment (Python 3.12 required) ───────────────────────────────
 echo ""
 echo "[0/7] Setting up virtual environment..."
 
-VENV_DIR="venv"
+# FUK_VENV lets a second environment be built beside an existing one, e.g.
+#   FUK_VENV=venv312 ./setup.sh
+VENV_DIR="${FUK_VENV:-venv}"
+PY_REQUIRED="3.12"
 PYTHON_BIN=""
 
-# Prefer explicit python3.10; fall back with a hard error
-for candidate in python3.10 python3; do
+for candidate in "python$PY_REQUIRED" python3; do
     if command -v "$candidate" &> /dev/null; then
         VER=$("$candidate" -c "import sys; print('%d.%d' % sys.version_info[:2])")
-        if [ "$VER" = "3.10" ]; then
+        if [ "$VER" = "$PY_REQUIRED" ]; then
             PYTHON_BIN="$candidate"
             break
         fi
     fi
 done
 
+# No system 3.12: uv can fetch a standalone build without touching the system.
+if [ -z "$PYTHON_BIN" ] && command -v uv &> /dev/null; then
+    echo "  → No system Python $PY_REQUIRED; fetching one with uv..."
+    uv python install "$PY_REQUIRED"
+    PYTHON_BIN="$(uv python find "$PY_REQUIRED")"
+fi
+
 if [ -z "$PYTHON_BIN" ]; then
     echo ""
-    echo "  ✗ Error: Python 3.10 is required but was not found."
-    echo "    Install it with:  sudo apt install python3.10 python3.10-venv"
-    echo "    Or via pyenv:     pyenv install 3.10 && pyenv local 3.10"
+    echo "  ✗ Error: Python $PY_REQUIRED is required but was not found."
+    echo "    Easiest:          curl -LsSf https://astral.sh/uv/install.sh | sh"
+    echo "                      then re-run this script (uv fetches Python $PY_REQUIRED)"
+    echo "    Ubuntu 24.04:     sudo apt install python3.12 python3.12-venv"
     exit 1
 fi
 
-echo "  ✓ Found Python 3.10: $(which $PYTHON_BIN)"
+echo "  ✓ Found Python $PY_REQUIRED: $(command -v "$PYTHON_BIN" || echo "$PYTHON_BIN")"
 
 if [ ! -d "$VENV_DIR" ]; then
     echo "  → Creating virtual environment at ./$VENV_DIR ..."
     "$PYTHON_BIN" -m venv "$VENV_DIR"
     echo "  ✓ Virtual environment created"
 else
-    # Verify the existing venv is actually 3.10
     VENV_VER=$("$VENV_DIR/bin/python" -c "import sys; print('%d.%d' % sys.version_info[:2])" 2>/dev/null || echo "unknown")
-    if [ "$VENV_VER" != "3.10" ]; then
-        echo "  ⚠  Existing venv is Python $VENV_VER, not 3.10 — recreating..."
-        rm -rf "$VENV_DIR"
-        "$PYTHON_BIN" -m venv "$VENV_DIR"
-        echo "  ✓ Virtual environment recreated with Python 3.10"
-    else
-        echo "  ✓ Virtual environment already exists (Python 3.10)"
+    if [ "$VENV_VER" != "$PY_REQUIRED" ]; then
+        # Never delete it: it may be the only working environment on this box.
+        echo ""
+        echo "  ✗ ./$VENV_DIR is Python $VENV_VER, but FUK now needs $PY_REQUIRED."
+        echo "    Move it aside and re-run:   mv $VENV_DIR ${VENV_DIR}-py$VENV_VER && ./setup.sh"
+        echo "    Or build beside it:         FUK_VENV=venv312 ./setup.sh"
+        echo "    (A moved venv keeps its old path in bin/ scripts; fix with"
+        echo "     sed -i 's#/old/path#/new/path#g' on its bin/ text files before using it.)"
+        exit 1
     fi
+    echo "  ✓ Virtual environment already exists (Python $PY_REQUIRED)"
 fi
 
 echo "  → Activating virtual environment..."
@@ -76,25 +88,20 @@ echo "  ✓ pip, wheel, setuptools up to date"
 echo ""
 echo "[1/7] Installing PyTorch (CUDA)..."
 
-# Detect CUDA version from nvcc to pick the right wheel index.
-# Supports: cu118, cu124, cu126, cu128 (PyTorch 2.7 matrix)
-CUDA_INDEX="cu128"  # safe default — most recent stable
-if command -v nvcc &> /dev/null; then
-    CUDA_VER=$(nvcc --version | grep -oP "release \K[0-9]+\.[0-9]+" | tr -d '.')
-    case "$CUDA_VER" in
-        118|11*) CUDA_INDEX="cu118" ;;
-        124)     CUDA_INDEX="cu124" ;;
-        126)     CUDA_INDEX="cu126" ;;
-        128|12*) CUDA_INDEX="cu128" ;;
-        *)       CUDA_INDEX="cu128" ;;
-    esac
-    echo "  ✓ Detected CUDA $CUDA_VER → $CUDA_INDEX"
-else
-    echo "  ⚠  nvcc not found, defaulting to $CUDA_INDEX"
-fi
+# torch is pinned (see pyproject.toml). The wheel index follows the *driver*,
+# not nvcc — the CUDA runtime ships inside the wheel. 2.9.1 is built for
+# cu126 / cu128 / cu130; cu130 needs driver >= 580. Override for older drivers:
+#   FUK_TORCH_INDEX=cu128 ./setup.sh
+TORCH_VERSION="2.9.1"
+TORCHVISION_VERSION="0.24.1"
+CUDA_INDEX="${FUK_TORCH_INDEX:-cu130}"
 
-echo "  → https://download.pytorch.org/whl/$CUDA_INDEX"
-pip install torch torchvision torchaudio \
+echo "  → torch $TORCH_VERSION from https://download.pytorch.org/whl/$CUDA_INDEX"
+# xformers comes from the same index: the PyPI wheel is built against cu128,
+# and on a cu130 torch its CUDA extensions silently fail to load.
+XFORMERS_VERSION="0.0.33.post2"
+pip install "torch==$TORCH_VERSION" "torchvision==$TORCHVISION_VERSION" "torchaudio==$TORCH_VERSION" \
+    "xformers==$XFORMERS_VERSION" \
     --index-url "https://download.pytorch.org/whl/$CUDA_INDEX"
 echo "  ✓ PyTorch: $(python -c 'import torch; print(torch.__version__)')"
 echo "  ✓ CUDA available: $(python -c 'import torch; print(torch.cuda.is_available())')"
@@ -235,9 +242,14 @@ echo "[5/7] Installing vendor packages..."
 echo "  → Pre-installing basicsr (no-build-isolation workaround)..."
 pip install basicsr --no-build-isolation
 
-pip install -e ./fuk/vendor/DiffSynth-Studio
-pip install -e ./fuk/vendor/Depth-Anything-3
-pip install -e ./fuk/vendor/segment-anything-2
+# Each install re-states FUK's numpy ceiling. pip resolves one command at a
+# time, so DiffSynth's unpinned deps (pandas, modelscope) otherwise pull numpy
+# 2.x over our <2 pin — and the venv only came back to 1.x because DA3 happens
+# to install next and pins it down again.
+NUMPY_PIN="numpy>=1.26.0,<2.0.0"
+pip install -e ./fuk/vendor/DiffSynth-Studio "$NUMPY_PIN"
+pip install -e ./fuk/vendor/Depth-Anything-3 "$NUMPY_PIN"
+pip install -e ./fuk/vendor/segment-anything-2 "$NUMPY_PIN"
 
 # ── 3D reconstruction ─────────────────────────────────────────────────────────
 # VGGT needs nothing installed: it is plain PyTorch and runs in this venv off
@@ -1633,8 +1645,8 @@ echo "============================================"
 echo "✓ Installation Complete!"
 echo "============================================"
 echo ""
-echo "Virtual environment: ./venv"
-echo "  Activate manually: source venv/bin/activate"
+echo "Virtual environment: ./$VENV_DIR"
+echo "  Activate manually: source $VENV_DIR/bin/activate"
 echo ""
 echo "Next steps:"
 echo ""

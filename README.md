@@ -137,7 +137,7 @@ FUK treats AI generation as source material that enters a professional pipeline,
 ### System Requirements
 
 - **OS:** Linux (primary), Windows with WSL2
-- **Python:** 3.10 or 3.11 (3.12+ not yet tested)
+- **Python:** 3.12 (setup.sh fetches it with uv if the system lacks it)
 - **GPU:** NVIDIA GPU with 12GB+ VRAM (24GB recommended for video)
 - **CUDA:** 11.8 or 12.1+
 - **Storage:** 500GB max depending on model selection

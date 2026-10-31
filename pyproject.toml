@@ -2,14 +2,18 @@
 name = "fuk"
 version = "0.2.0"
 description = "Framework for Unified Kreation - Professional VFX AI Pipeline"
-requires-python = ">=3.10"
+requires-python = ">=3.12,<3.13"
 dependencies = [
     # Core Deep Learning
-    "torch>=2.7.0",
-    "torchvision>=0.22.0",
-    "xformers>=0.0.31",
+    # torch is pinned exactly. Left as a floor, a fresh install resolved to
+    # torch 2.14 — four minors past the 2.9.1/cu130 every pin below (xformers,
+    # bitsandbytes, the torchao guard, the vendor patches) was validated on.
+    # Bump the three together, deliberately, with a fixed-seed A/B.
+    "torch==2.9.1",
+    "torchvision==0.24.1",
+    "xformers==0.0.33.post2",  # paired with torch 2.9.1; setup.sh fetches the cu130 build
     "triton>=3.1.0",
-    "torchaudio>=2.7.0",
+    "torchaudio==2.9.1",
     # INT8 attention for the Wan DiT. Deliberately NOT accompanied by
     # flash-attn: FA2 outranks sage-attn in DiffSynth's backend chain, so
     # installing it would silently take sage-attn out of play.
@@ -71,7 +75,11 @@ dependencies = [
 
     # Image/Video Processing
     "opencv-python>=4.10.0",
-    "pillow>=11.0.0",
+    # Ceiling: Pillow 13 resamples input images differently, so every
+    # image-conditioned render (Wan i2v, edit, control) drifts from what the
+    # same seed produced before — measured as ~31 dB PSNR on a fixed-seed Wan
+    # i2v A/B, against bit-identical on 11.3. Raise it deliberately.
+    "pillow>=11.0.0,<12",
     "OpenEXR>=3.4.0",
     "imageio>=2.37.0",
     "imageio-ffmpeg>=0.6.0",
@@ -92,7 +100,6 @@ dependencies = [
     "python-multipart>=0.0.21",
     "starlette>=0.50.0",
     "websockets>=11.0.0",
-    "tk>=0.1.0",
     
     # Utilities
     "pyyaml>=6.0.0",
@@ -138,4 +145,4 @@ packages = ["fuk"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py312"

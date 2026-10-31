@@ -54,10 +54,12 @@ if [ -n "$DIFFSYNTH_ATTENTION_IMPLEMENTATION" ]; then
     echo "→ Attention backend: $DIFFSYNTH_ATTENTION_IMPLEMENTATION"
 fi
 
-# Activate virtual environment if present
-if [ -f "$SCRIPT_DIR/venv/bin/activate" ]; then
-    echo "→ Activating virtual environment..."
-    source "$SCRIPT_DIR/venv/bin/activate"
+# Activate virtual environment if present. FUK_VENV picks a different one,
+# e.g. FUK_VENV=venv312 ./start.sh (matches setup.sh).
+VENV_DIR="${FUK_VENV:-venv}"
+if [ -f "$SCRIPT_DIR/$VENV_DIR/bin/activate" ]; then
+    echo "→ Activating virtual environment ($VENV_DIR)..."
+    source "$SCRIPT_DIR/$VENV_DIR/bin/activate"
 fi
 
 # Start frontend dev server in background
