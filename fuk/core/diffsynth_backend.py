@@ -58,6 +58,7 @@ from encode_cache import install_encode_cache
 # from asking for a 20 GiB im2col workspace. Lives here so every entry point
 # that touches a Qwen VAE picks it up, not just the image pipeline.
 import qwen_vae_patch  # noqa: F401
+from core import fp8_compute
 
 
 #from latent_manager import LatentManager
@@ -73,6 +74,50 @@ PIPELINE_CLASSES = {}
 # the first is deprecated but is still the only one it actually parses; see the
 # evidence in _setup_diffsynth_env. Set both, trust neither warning.
 ALLOC_CONF_VARS = ("PYTORCH_CUDA_ALLOC_CONF", "PYTORCH_ALLOC_CONF")
+
+
+# ---------------------------------------------------------------------------
+# Precision modes — orthogonal to the VRAM presets, which only decide *where*
+# weights live. "weights" changes what gets loaded, so it is part of the
+# pipeline cache key; "compute" is toggled on the cached pipeline per run
+# (core/fp8_compute.py). Both apply to the denoiser only — text encoders and
+# VAEs always load in bf16, since rounding there shows up as pixel noise.
+# The default per family comes from vram.precision_default in defaults_vram.json.
+# ---------------------------------------------------------------------------
+PRECISIONS = {
+    "bf16": {
+        "label": "bf16 — full quality",
+        "description": "No quantization. The reference look.",
+        "weights": None, "compute": False,
+    },
+    "fp8_weights": {
+        "label": "FP8 weights",
+        "description": "Denoiser weights stored in FP8: half the RAM and transfer, bf16 math. Minor drift.",
+        "weights": "fp8", "compute": False,
+    },
+    "fp8_compute": {
+        "label": "FP8 compute",
+        "description": "bf16 weights, FP8 tensor-core matmuls (Ada/Hopper). Faster maths, small tone drift.",
+        "weights": None, "compute": True,
+    },
+    "fp8": {
+        "label": "FP8 weights + compute",
+        "description": "Both: least memory traffic and fastest maths. Most drift of the FP8 modes.",
+        "weights": "fp8", "compute": True,
+    },
+    "nf4": {
+        "label": "NF4 4-bit weights (last resort)",
+        "description": "bitsandbytes 4-bit denoiser. Only for a model that will not otherwise load; check the output.",
+        "weights": "nf4", "compute": False,
+    },
+}
+
+# Presets that predate the split mixed precision into placement. They still
+# resolve, as (placement preset, precision), so saved settings keep working.
+LEGACY_PRESETS = {
+    "medium": ("low", "fp8_weights"),
+    "quant_nf4": ("low", "nf4"),
+}
 
 
 def _log(category: str, message: str, level: str = "info"):
@@ -113,8 +158,11 @@ class DiffSynthBackend:
             for alias in entry.get("aliases", []):
                 self._alias_map[alias] = key
 
-        # Cached pipelines keyed by model_type
+        # Cached pipelines keyed by pipeline_cache_key()
         self.pipelines: Dict[str, Any] = {}
+        # Precision for the generation in flight; set by run(). Generations are
+        # serialized, so per-run state on the backend is safe.
+        self._precision = "bf16"
         self._active_user_loras: Dict[str, List[tuple]] = {}  # cache_key → [(path, alpha), ...]
         self._model_lora_config: Dict[str, dict] = {}  # cache_key → model lora config from models.json
         self._model_lora_alpha: Dict[str, float] = {}   # cache_key → current model LoRA alpha
@@ -226,6 +274,10 @@ class DiffSynthBackend:
             backend.run("image", prompt="...", model="flux2_dev", ...)
             backend.run("video", prompt="...", task="wan_i2v_a14b", ...)
         """
+        # Precision is consumed here rather than threaded through every runner:
+        # get_pipeline() reads it for the cache key and the FP8-compute toggle.
+        self._precision = self.resolve_precision(kwargs.pop("precision", None), family)
+
         # Auto-detect runner from model pipeline type when possible
         model_name = kwargs.get("model") or kwargs.get("task")
         runner = None
@@ -879,12 +931,43 @@ class DiffSynthBackend:
         """
         return PIPELINE_CLASSES.get(pipeline_type)
 
-    def _build_model_configs(self, entry: dict, vram_config: dict = None) -> list:
+    def _nf4_quantize_config(self):
+        """QuantizeConfig for the nf4 precision. Reuses the legacy quant_nf4
+        preset's block (its tuned exclude list) when the config still has one."""
+        presets = self.defaults_config.get("vram", {}).get("presets", {})
+        spec = presets.get("quant_nf4", {}).get("quantize") or {
+            "method": "bitsandbytes_nf4", "mode": "dynamic",
+            "exclude_modules": ["time_embedder.proj_in", "time_embedder.proj_out", "proj_out"],
+        }
+        return self._build_quantize_config({"quantize": spec}, "nf4")
+
+    def _fp8_weight_offload(self, offload: dict = None) -> dict:
+        """Offload fields that keep a denoiser's weights in FP8 at rest.
+
+        Every non-disk storage state goes FP8; computation stays bf16, so the
+        maths is unchanged and only the stored weights are rounded. With no
+        offload preset everything lives on the GPU, still stored in FP8.
+        """
+        fp8 = torch.float8_e4m3fn
+        if not offload:
+            dev = accel.device_type()
+            return dict(offload_dtype=fp8, offload_device=dev, onload_dtype=fp8, onload_device=dev,
+                        preparing_dtype=fp8, preparing_device=dev,
+                        computation_dtype=torch.bfloat16, computation_device=dev)
+        out = dict(offload)
+        for k in ("offload_dtype", "onload_dtype", "preparing_dtype"):
+            if out.get(k) != "disk":
+                out[k] = fp8
+        out["computation_dtype"] = torch.bfloat16
+        return out
+
+    def _build_model_configs(self, entry: dict, vram_config: dict = None, weights: str = None) -> list:
         """Build ModelConfig list from a model entry's components.
-        
+
         Args:
             entry: The models.json entry
             vram_config: Resolved VRAM offload dict, or None for no offloading
+            weights: Precision weight mode ("fp8", "nf4" or None) — denoiser only
         """
         primary_id = entry["model_id"]
         ConfigCls = self._get_model_config_class(entry)
@@ -906,7 +989,9 @@ class DiffSynthBackend:
                 origin_file_pattern=comp["pattern"],
             )
             # Only apply offload config when a preset is active
-            if offload:
+            if weights == "fp8" and self._should_quantize(comp):
+                kwargs.update(self._fp8_weight_offload(offload))
+            elif offload:
                 kwargs.update(offload)
             if quantize is not None and self._should_quantize(comp):
                 kwargs["quantize"] = quantize
@@ -946,22 +1031,68 @@ class DiffSynthBackend:
         mid = cfg.get("model_id", entry["model_id"])
         return ConfigCls(model_id=mid, origin_file_pattern=cfg["pattern"])
 
-    def get_pipeline(self, model_type: str, vram_preset: str = None):
-        """Get or create a cached pipeline.
-        
-        Cache key includes VRAM preset — changing preset forces reload.
+    def resolve_precision(self, name: str = None, family: str = None) -> str:
+        """A PRECISIONS key: the requested one, else the family default, else bf16."""
+        if name in PRECISIONS:
+            return name
+        if name:
+            _log("BACKEND", f"Unknown precision '{name}', using the {family or 'default'} default", "warning")
+        defaults = self.defaults_config.get("vram", {}).get("precision_default", {})
+        default = defaults.get(family) if isinstance(defaults, dict) else None
+        return default if default in PRECISIONS else "bf16"
+
+    def _split_preset(self, vram_preset: str = None) -> tuple:
+        """(placement preset, precision) for this run. A legacy preset such as
+        "medium" carries its own precision, which wins — it was chosen explicitly."""
+        name = vram_preset or self.defaults_config.get("vram", {}).get("preset", "low")
+        if name in LEGACY_PRESETS:
+            return LEGACY_PRESETS[name]
+        return name, self._precision
+
+    def pipeline_cache_key(self, model_type: str, vram_preset: str = None) -> str:
+        """Cache key for a model under a preset at the current run's precision.
+
+        Weight precision is part of the key (a different load); compute precision
+        is not (toggled in place). Runners call this too, via _cache_key, so LoRA
+        bookkeeping uses the same key as the cache.
         """
         model_type = self.resolve_model_type(model_type)
-        
-        # Resolve preset
-        vram_config, buffer_gb = self._resolve_vram_preset(vram_preset)
-        active_preset = vram_preset or self.defaults_config.get("vram", {}).get("preset", "low")
-        cache_key = f"{model_type}:{active_preset}"
+        placement, precision = self._split_preset(vram_preset)
+        weights = PRECISIONS[precision]["weights"]
+        return f"{model_type}:{placement}" + (f"+{weights}" if weights else "")
+
+    def _apply_compute_precision(self, pipeline, precision: str):
+        """Switch FP8 matmuls on or off on the pipeline's denoiser(s)."""
+        want = PRECISIONS[precision]["compute"]
+        if want and not fp8_compute.supported():
+            _log("BACKEND", "FP8 compute needs an Ada/Hopper NVIDIA GPU — running bf16 maths", "warning")
+            want = False
+        switched = fp8_compute.set_enabled(pipeline, want)
+        if switched:
+            _log("BACKEND", f"FP8 compute on: {switched} block linears")
+        elif want and not any(getattr(m, "_fuk_fp8", False)
+                              for d in fp8_compute.denoisers(pipeline) for m in d.modules()):
+            _log("BACKEND", "FP8 compute: no eligible block linears in this model — running bf16 maths", "warning")
+
+    def get_pipeline(self, model_type: str, vram_preset: str = None):
+        """Get or create a cached pipeline.
+
+        Cache key includes the VRAM preset and the weight precision — changing
+        either forces a reload. FP8 compute is applied per call, without one.
+        """
+        model_type = self.resolve_model_type(model_type)
+
+        # Resolve placement + precision (legacy presets carry their own precision)
+        active_preset, precision = self._split_preset(vram_preset)
+        weights = PRECISIONS[precision]["weights"]
+        vram_config, buffer_gb = self._resolve_vram_preset(active_preset)
+        cache_key = self.pipeline_cache_key(model_type, vram_preset)
 
         if cache_key in self.pipelines:
             # Re-insert to mark most-recently-used (dicts preserve insertion order)
             self.pipelines[cache_key] = self.pipelines.pop(cache_key)
             _log("BACKEND", f"Using cached pipeline: {cache_key}")
+            self._apply_compute_precision(self.pipelines[cache_key], precision)
             return self.pipelines[cache_key]
         entry = self.get_model_entry(model_type)
         pipeline_name = entry["pipeline"]
@@ -982,7 +1113,8 @@ class DiffSynthBackend:
             evicted.append(k)
 
         slots = int(self.defaults_config.get("vram", {}).get("pipeline_cache_slots", 2))
-        if active_preset == "none" or any(k.endswith(":none") for k in self.pipelines):
+        if active_preset == "none" or any(
+                k.split(":", 1)[1].split("+")[0] == "none" for k in self.pipelines):
             slots = 1
         # Leave room for the pipeline about to be loaded.
         while len(self.pipelines) > max(0, slots - 1):
@@ -1004,9 +1136,11 @@ class DiffSynthBackend:
         if PipelineCls is None:
             raise ValueError(f"Unknown pipeline '{pipeline_name}'. Available: {list(PIPELINE_CLASSES.keys())}")
 
-        model_configs = self._build_model_configs(entry, vram_config=vram_config)
+        if weights == "nf4":
+            vram_config = {**(vram_config or {}), "quantize": self._nf4_quantize_config()}
+        model_configs = self._build_model_configs(entry, vram_config=vram_config, weights=weights)
 
-        _log("BACKEND", f"Loading pipeline: {model_type} (preset: {active_preset})")
+        _log("BACKEND", f"Loading pipeline: {model_type} (preset: {active_preset}, precision: {precision})")
         _log("BACKEND", f"  Model ID: {entry['model_id']}")
         _log("BACKEND", f"  Components: {len(model_configs)}")
 
@@ -1038,13 +1172,17 @@ class DiffSynthBackend:
             reclaimable = accel.memory_reserved() / gib
             other_procs = max(total_vram - free_b / gib - reclaimable, 0.0)
 
+            # DiffSynth compares vram_limit against device-wide used memory
+            # (total − free), which already includes other processes. Subtracting
+            # them here as well counted the desktop twice and kept ~2.5GB of
+            # weights off a 24GB card for nothing.
             # Floor at 4GB: a hostile desktop should degrade into heavy
             # offloading, not hand DiffSynth a negative or absurd budget.
-            vram_limit = max(total_vram - other_procs - buffer_gb, 4.0)
+            vram_limit = max(total_vram - buffer_gb, 4.0)
             kwargs["vram_limit"] = vram_limit
             _log("BACKEND",
-                 f"  VRAM: {total_vram:.1f}GB total − {other_procs:.1f}GB other procs "
-                 f"− {buffer_gb}GB buffer = {vram_limit:.1f}GB limit")
+                 f"  VRAM: {total_vram:.1f}GB total − {buffer_gb}GB buffer = {vram_limit:.1f}GB limit "
+                 f"({other_procs:.1f}GB held by other procs)")
         else:
             _log("BACKEND", f"  VRAM: no limit (preset={active_preset})")
 
@@ -1090,6 +1228,7 @@ class DiffSynthBackend:
             self._model_lora_config[cache_key] = lora_cfg
             self._model_lora_alpha[cache_key] = lora_cfg.get("alpha", 1.0)
 
+        self._apply_compute_precision(pipeline, precision)
         self.pipelines[cache_key] = pipeline
         return pipeline
 

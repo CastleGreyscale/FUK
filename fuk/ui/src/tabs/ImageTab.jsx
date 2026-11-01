@@ -86,6 +86,7 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
     inpaint_feather: imageDefaults.inpaint_feather ?? 16,
     inpaint_preserve: imageDefaults.inpaint_preserve ?? true,
     vram_preset: config?.models?.vram_preset_default ?? 'low',
+    precision: config?.models?.precision_default?.image ?? 'bf16',
     batchCount: 1,
   }), [imageDefaults]);
   
@@ -168,6 +169,15 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
       }
     }
   }, [project?.isProjectLoaded, project?.updateTabState, setLocalFormData]);
+
+  // Precision is its own setting now. A preset saved before the split carried
+  // precision inside it ("medium" = RAM offload + FP8 weights); convert it once
+  // so both dropdowns show what will actually run.
+  const precision = formData.precision || config?.models?.precision_default?.image || 'bf16';
+  useEffect(() => {
+    const legacy = config?.models?.legacy_vram_presets?.[formData.vram_preset];
+    if (legacy) setFormData(d => ({ ...d, vram_preset: legacy[0], precision: legacy[1] }));
+  }, [formData.vram_preset, config, setFormData]);
 
   // Apply recalled settings (history drop) that may also switch model. Through
   // setFormData a model switch loads the new model's saved settings and drops
@@ -1356,6 +1366,26 @@ export default function ImageTab({ config, activeTab, setActiveTab, project }) {
                   </option>
                 ))}
               </select>
+            </div>
+
+            <div className="fuk-form-group-compact">
+              <label className="fuk-label">Precision</label>
+              <select
+                className="fuk-select"
+                value={precision}
+                onChange={(e) => setFormData({...formData, precision: e.target.value})}
+              >
+                {(config?.models?.precisions || []).map(p => (
+                  <option key={p.key} value={p.key} title={p.description}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
+              {precision !== 'bf16' && (
+                <p className="fuk-help-text fuk-mt-1">
+                  {(config?.models?.precisions || []).find(p => p.key === precision)?.description}
+                </p>
+              )}
             </div>
           </div>
 

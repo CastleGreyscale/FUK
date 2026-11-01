@@ -93,6 +93,7 @@
                         <a href="#seed-control" class="sidebar-link">Seed Control</a>
                         <a href="#model-lora-selection" class="sidebar-link">Model &amp; LoRA Selection</a>
                         <a href="#vram-management" class="sidebar-link">VRAM Management</a>
+                        <a href="#precision" class="sidebar-link">Precision</a>
                         <a href="#image-panel" class="sidebar-link">Image Panel</a>
                         <a href="#video-panel" class="sidebar-link">Video Panel</a>
                         <a href="#preprocess-panel" class="sidebar-link">Preprocess Panel</a>
@@ -192,8 +193,8 @@
 
                 <h3>Prerequisites</h3>
                 <ul>
-                    <li>Python 3.10+</li>
-                    <li>CUDA 11.8+ (NVIDIA) or compatible AMD drivers</li>
+                    <li>Python 3.12 (<code>setup.sh</code> fetches it with <code>uv</code> if your system lacks it)</li>
+                    <li>An NVIDIA GPU with a CUDA 13 capable driver (580 or newer). <code>setup.sh</code> installs PyTorch 2.13 for CUDA 13.2, with the CUDA runtime inside the wheel, so no system CUDA toolkit is needed. On an older driver, run <code>FUK_TORCH_INDEX=cu126 ./setup.sh</code>. AMD (ROCm) and Apple Silicon support are planned.</li>
                     <li>Git</li>
                     <li>FFmpeg</li>
                 </ul>
@@ -201,8 +202,7 @@
                 <h3>Steps</h3>
                 <ol>
                     <li>Clone the repository:<br><code>git clone https://github.com/CastleGreyscale/FUK</code></li>
-                    <li>Install dependencies:<br><code>pip install -e .</code></li>
-                    <li>Run setup:<br><code>chmod +x setup.sh &amp;&amp; ./setup.sh</code></li>
+                    <li>Run setup — it builds the virtual environment, installs PyTorch and every dependency, and clones and patches the vendor repos:<br><code>./setup.sh</code></li>
                     <li>Set model root — edit <code>config/defaults.json</code> and set the model root directory to wherever your models live</li>
                     <li>Launch FUK:<br><code>./start.sh</code></li>
                     <li>Download models from <strong>Utilities → Models</strong>. See the <a href="#model-manager">Model Manager</a></li>
@@ -256,7 +256,7 @@
                     <li><strong>16GB+</strong> — video generation, high-resolution image gen, AOV passes</li>
                     <li><strong>24GB</strong> — full pipeline with all features; recommended for production use</li>
                 </ul>
-                <p>FUK will attempt to offload to system RAM when VRAM is insufficient, but generation will be significantly slower. The VRAM Management preset in each generation panel controls the offload strategy.</p>
+                <p>FUK will attempt to offload to system RAM when VRAM is insufficient, but generation will be significantly slower. The VRAM Management preset in each generation panel controls the offload strategy, and <a href="#precision">Precision</a> can halve the denoiser's memory with FP8 weights. FP8 <em>compute</em> needs an RTX 40-series (Ada) or newer card; FP8 weights work on any supported GPU.</p>
 
                 <h3>Disk Space</h3>
                 <ul>
@@ -322,6 +322,7 @@
                         <tr><td>Negative Prompt</td><td>Elements to suppress in the output</td><td>—</td></tr>
                         <tr><td>LoRA</td><td>One or more LoRA weights to blend into the base model, each with an independent multiplier</td><td>See <a href="#image-panel">Image Panel</a> for per-LoRA controls</td></tr>
                         <tr><td>VRAM Management</td><td>Controls model offloading strategy when VRAM is limited</td><td>Higher offload = slower generation but lower VRAM floor</td></tr>
+                        <tr><td>Precision</td><td>How much the denoiser is quantized: bf16, FP8 weights, FP8 compute, both, or NF4</td><td>Images default to bf16. See <a href="#precision">Precision</a></td></tr>
                     </tbody>
                 </table>
 
@@ -488,6 +489,7 @@
                         <tr><td>Sliding Window</td><td>Size and stride for sliding window video processing</td><td>Optional; used to process sequences longer than the model's native context</td></tr>
                         <tr><td>Seed</td><td>Seed for repeatability</td><td>See <a href="#seed-control">Seed Control</a></td></tr>
                         <tr><td>VRAM Management</td><td>Offloading strategy for VRAM-limited hardware</td><td>—</td></tr>
+                        <tr><td>Precision</td><td>How much the denoiser is quantized</td><td>Per-family default from config. See <a href="#precision">Precision</a></td></tr>
                     </tbody>
                 </table>
 
@@ -1428,7 +1430,6 @@
                     <tbody>
                         <tr><td>None</td><td>No offloading — full model in VRAM</td><td>48GB+</td><td>Fastest</td></tr>
                         <tr><td>Low</td><td>CPU offload in bfloat16</td><td>16–24GB</td><td>Minimal</td></tr>
-                        <tr><td>Medium</td><td>CPU offload in float8</td><td>12–16GB</td><td>Moderate</td></tr>
                         <tr><td>High</td><td>Disk offload</td><td>8GB</td><td>Significant — requires a fast SSD</td></tr>
                     </tbody>
                 </table>
@@ -1438,10 +1439,54 @@
                     <li>Start at the lowest offload level your card can hold and only move up if you hit out-of-memory errors.</li>
                     <li>Larger output resolutions — and, for video, longer frame counts — raise the VRAM ceiling, so a preset that works for a short clip may need bumping up for a longer one.</li>
                     <li><strong>High</strong> (disk offload) is a last resort for 8GB cards; it leans on SSD read speed and is dramatically slower than the CPU-offload presets.</li>
+                    <li>Before reaching for High, try <strong>FP8 weights</strong> in the <a href="#precision">Precision</a> dropdown: it halves the denoiser's memory at a small cost in fidelity.</li>
                 </ul>
+                <p>The old <strong>Medium</strong> preset (CPU offload in float8) is now <strong>Low</strong> + <strong>FP8 weights</strong>. Settings saved with Medium convert automatically.</p>
 
                 <div class="wiki-note">
                     <p>The dropdown overrides the launch default for the current session only — it does not persist to disk. The persistent default and advanced knobs like <code>buffer_gb</code> (activation headroom; raise it if you OOM mid-generation) and <code>computation_dtype</code> live in <a href="#config-vram">defaults_vram.json</a>.</p>
+                </div>
+            </div>
+
+            <!-- Precision -->
+            <div class="wiki-section" id="precision">
+                <h2>Precision</h2>
+                <p>The Precision dropdown sits next to VRAM Management in the Image and Video tabs. VRAM Management decides <em>where</em> the weights live; Precision decides how much the denoiser is quantized. Text encoders and VAEs always run in bf16, because rounding there shows up as noise in every pixel.</p>
+
+                <table class="wiki-table">
+                    <thead><tr><th>Mode</th><th>What changes</th><th>Trade-off</th></tr></thead>
+                    <tbody>
+                        <tr><td>bf16</td><td>Nothing — full precision</td><td>The reference look</td></tr>
+                        <tr><td>FP8 weights</td><td>Denoiser weights stored in FP8; maths stays bf16</td><td>Half the memory and RAM-to-GPU transfer. Minor drift</td></tr>
+                        <tr><td>FP8 compute</td><td>bf16 weights; matrix maths on FP8 tensor cores</td><td>RTX 40-series (Ada) and newer only. Small tone drift</td></tr>
+                        <tr><td>FP8 weights + compute</td><td>Both</td><td>Least memory traffic; the most drift of the FP8 modes</td></tr>
+                        <tr><td>NF4</td><td>4-bit denoiser weights (bitsandbytes)</td><td>Last resort for a model that will not load otherwise — check the output</td></tr>
+                    </tbody>
+                </table>
+
+                <h3>What "lossy" looks like</h3>
+                <p>With the same seed, every FP8 mode keeps the composition and subject, but small things move: tone, contrast, fine texture, and occasionally a detail flips, such as a lamp lit in one render and dark in the other. That is why images default to bf16. For video, the speed usually matters more and the drift is far harder to see across moving frames.</p>
+
+                <h3>Measured Speed</h3>
+                <p>Warm renders on an RTX 4090 (24GB) with the Low preset, same seed in every mode:</p>
+                <table class="wiki-table">
+                    <thead><tr><th>Render</th><th>bf16</th><th>FP8 compute</th><th>FP8 weights</th><th>FP8 weights + compute</th></tr></thead>
+                    <tbody>
+                        <tr><td>FLUX.2-klein 4B, 1024², 4 steps</td><td>5.3s</td><td>5.2s</td><td>4.3s</td><td>4.4s</td></tr>
+                        <tr><td>Wan 2.2 i2v A14B, 832×480, 17 frames, 8 steps</td><td>54.2s</td><td>52.8s</td><td>41.4s</td><td>38.1s</td></tr>
+                        <tr><td>Wan 2.2 i2v A14B, 1280×720, 33 frames, 4 steps</td><td>107.7s</td><td>104.4s</td><td>105.5s</td><td>103.1s</td></tr>
+                    </tbody>
+                </table>
+                <p>The gains are largest where moving weights from RAM to the GPU dominates — smaller frames and fewer tokens per step. At 720p the GPU spends most of its time on maths the FP8 modes don't speed up much, so the gain shrinks to a few percent.</p>
+
+                <h3>Switching</h3>
+                <ul>
+                    <li><strong>FP8 compute</strong> attaches to the model that is already loaded, so turning it on or off costs no reload. Turning it off restores bit-identical bf16 output.</li>
+                    <li><strong>FP8 weights</strong> and <strong>NF4</strong> change what gets loaded, so switching them reloads the model.</li>
+                </ul>
+
+                <div class="wiki-note">
+                    <p>The default per family comes from <code>vram.precision_default</code> in <a href="#config-vram">defaults_vram.json</a>, for example <code>{"image": "bf16", "video": "fp8"}</code>. Without it, both default to bf16.</p>
                 </div>
             </div>
 
@@ -1482,6 +1527,7 @@
                     <li><strong>Guidance Scale</strong> — prompt adherence, 1.0–10.0</li>
                     <li><strong>Exponential Shift Mu</strong> — optional; adjusts noise schedule shift; leave blank for model default or enable auto-calculation</li>
                     <li><strong>VRAM Management</strong> — preset dropdown controlling the model offloading strategy; higher offload settings reduce VRAM usage at the cost of generation speed</li>
+                    <li><strong>Precision</strong> — how much the denoiser is quantized (bf16, FP8 weights, FP8 compute, both, NF4); see <a href="#precision">Precision</a></li>
                 </ul>
 
                 <h3>Dimensions Card</h3>
@@ -1539,7 +1585,7 @@
                 </ul>
 
                 <h3>Generation Card</h3>
-                <p>Steps, Guidance Scale, Sigma Shift, Motion Bucket ID, Denoising Strength, Sliding Window Size/Stride, and VRAM Management — see <a href="#video-generation">Video Generation</a> for parameter descriptions.</p>
+                <p>Steps, Guidance Scale, Sigma Shift, Motion Bucket ID, Denoising Strength, Sliding Window Size/Stride, VRAM Management and Precision — see <a href="#video-generation">Video Generation</a> for parameter descriptions.</p>
             </div>
 
             <!-- Preprocess Panel -->
@@ -2174,13 +2220,12 @@
                 <p>Controls how FUK manages GPU memory. When a model is too large to fit entirely in VRAM, FUK offloads unused tensors to system RAM or disk. This file defines the available offload strategies and which one is active. Located at <code>fuk/config/defaults_vram.json</code>.</p>
 
                 <h3>Choosing a Preset</h3>
-                <p>Set <code>vram.preset</code> to one of the four options:</p>
+                <p>Set <code>vram.preset</code> to one of the three options:</p>
                 <table class="wiki-table">
                     <thead><tr><th>Preset</th><th>Strategy</th><th>VRAM Required</th><th>Speed Impact</th></tr></thead>
                     <tbody>
                         <tr><td><code>"none"</code></td><td>No offloading — full model in VRAM</td><td>48GB+</td><td>Fastest</td></tr>
                         <tr><td><code>"low"</code></td><td>CPU offload in bfloat16</td><td>16–24GB</td><td>Minimal</td></tr>
-                        <tr><td><code>"medium"</code></td><td>CPU offload in float8</td><td>12–16GB</td><td>Moderate</td></tr>
                         <tr><td><code>"high"</code></td><td>Disk offload</td><td>8GB</td><td>Significant — requires fast SSD</td></tr>
                     </tbody>
                 </table>
@@ -2199,6 +2244,11 @@
                 <div class="wiki-note">
                     <p>The <a href="#postprocess-panel">Postprocess Panel</a> and individual generation panels also expose a VRAM Management dropdown that overrides this preset per-session. The setting here is the default on fresh launch.</p>
                 </div>
+
+                <h3>Precision Defaults</h3>
+                <p><code>vram.precision_default</code> sets the <a href="#precision">Precision</a> each tab starts on:</p>
+                <pre><code>"precision_default": {"image": "bf16", "video": "fp8"}</code></pre>
+                <p>Valid values are <code>bf16</code>, <code>fp8_weights</code>, <code>fp8_compute</code>, <code>fp8</code> and <code>nf4</code>. The legacy <code>"medium"</code> and <code>"quant_nf4"</code> presets still load, as Low + FP8 weights and Low + NF4 respectively, but no longer appear in the dropdown.</p>
             </div>
 
             <!-- defaults_loras.json -->

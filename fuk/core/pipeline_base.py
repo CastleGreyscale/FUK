@@ -166,9 +166,8 @@ class PipelineRunner:
         return self.backend.get_model_entry(model_type)
 
     def _cache_key(self, model_type: str, vram_preset: str = None) -> str:
-        """Build the cache key matching the hub's convention."""
-        active_preset = vram_preset or self.defaults_config.get("vram", {}).get("preset", "low")
-        return f"{model_type}:{active_preset}"
+        """The hub's cache key for this model — preset and weight precision included."""
+        return self.backend.pipeline_cache_key(model_type, vram_preset)
 
     def apply_loras(self, pipe, cache_key: str, lora: str = None,
                     lora_multiplier: float = 1.0,

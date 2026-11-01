@@ -138,8 +138,8 @@ FUK treats AI generation as source material that enters a professional pipeline,
 
 - **OS:** Linux (primary), Windows with WSL2
 - **Python:** 3.12 (setup.sh fetches it with uv if the system lacks it)
-- **GPU:** NVIDIA GPU with 12GB+ VRAM (24GB recommended for video)
-- **CUDA:** 11.8 or 12.1+
+- **GPU:** NVIDIA GPU with 12GB+ VRAM (24GB recommended for video). FP8 compute needs an RTX 40-series (Ada) or newer. AMD (ROCm) and Apple Silicon support are planned.
+- **NVIDIA driver:** CUDA 13 capable (580 or newer). setup.sh installs PyTorch 2.13 built for CUDA 13.2; the CUDA runtime ships inside the wheel, so no system CUDA toolkit is needed. For an older driver, run `FUK_TORCH_INDEX=cu126 ./setup.sh`.
 - **Storage:** 500GB max depending on model selection
 - **Software:** Git, Node.js 18+ (for frontend)
 
@@ -153,7 +153,6 @@ git clone https://github.com/CastleGreyscale/FUK.git
 cd FUK
 
 # Run setup (installs dependencies, vendor packages, configs)
-chmod +x setup.sh
 ./setup.sh
 
 # Edit configuration in a code editor
@@ -166,8 +165,10 @@ fuk/config/defaults.json   # Set models_root
 Then download models from **Utilities → Models** in the UI. See the [Model Manager](https://fuk-ai.io/wiki.html#model-manager) wiki page. It downloads one model at a time, shows the size before fetching, and resumes interrupted downloads.
 
 The setup script handles:
+- A Python 3.12 virtual environment in `./venv` (set `FUK_VENV=name` to build a second one beside it)
+- PyTorch 2.13 for CUDA 13.2 (`FUK_TORCH_INDEX` picks another CUDA build)
 - Python dependencies from pyproject.toml
-- Vendor repository cloning (DiffSynth-Studio, Depth-Anything-3, SAM2, DSINE)
+- Vendor repository cloning (DiffSynth-Studio, Depth-Anything-3, SAM2, DSINE) at pinned commits, plus FUK's patches to DiffSynth-Studio and Depth-Anything-3
 - Vendor package installation
 - SAM2 checkpoint downloads
 - Frontend dependencies (npm/bun)
@@ -326,16 +327,27 @@ FUK uses a modular configuration system with separation between git-tracked temp
 - `depth-anything-v3.json` - Depth estimation parameters
 - `sam2.json` - Segmentation settings
 
-### VRAM Management
+### VRAM Management and Precision
 
-FUK includes intelligent VRAM presets for different hardware:
+Two dropdowns in the Generation card of the Image and Video tabs control how a model runs.
 
-- **None** - No offloading (48GB+ VRAM)
-- **Low** - CPU offload in bf16 (16-24GB VRAM, 64GB+ RAM) ← **Default**
-- **Medium** - CPU offload in fp8 (16-24GB VRAM, 32GB+ RAM)
+**VRAM Management** decides where the weights live:
+
+- **None** - Everything in VRAM (48GB+ VRAM)
+- **Low** - CPU offload (16-24GB VRAM, 64GB+ RAM) ← **Default**
 - **High** - Disk offload (8GB+ VRAM, slow but functional)
 
-Edit `config/defaults.json` → `vram.preset` to change.
+**Precision** decides how much the denoiser is quantized. Text encoders and VAEs always stay in bf16.
+
+- **bf16** - Full quality, the reference look
+- **FP8 weights** - Weights stored in FP8: half the RAM and transfer, bf16 maths
+- **FP8 compute** - FP8 tensor-core maths on RTX 40-series (Ada) and newer
+- **FP8 weights + compute** - Both
+- **NF4** - 4-bit weights, last resort for a model that won't otherwise load
+
+The FP8 and NF4 modes are lossy: the same seed gives the same picture with small changes in tone and detail. Switching FP8 compute on or off needs no reload; changing the weight precision reloads the model.
+
+Defaults live in `config/defaults_vram.json`: `vram.preset` for placement and `vram.precision_default` for precision per family, e.g. `{"image": "bf16", "video": "fp8"}`. The old **Medium** preset is now Low + FP8 weights, and saved settings convert automatically.
 
 ---
 
@@ -405,21 +417,24 @@ python -c "import torch; print(f'Device: {torch.cuda.get_device_name(0)}')"
 # Should return True and your GPU name
 ```
 
-If False, reinstall PyTorch with CUDA support:
+If False, check `nvidia-smi` first: the CUDA 13.2 build of PyTorch needs a driver of 580 or newer. Then reinstall PyTorch with CUDA support (versions as pinned in `pyproject.toml`):
 ```bash
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+pip install torch==2.13.0 torchvision==0.28.0 torchaudio==2.11.1 --index-url https://download.pytorch.org/whl/cu132
 ```
+On an older driver use `cu126` in place of `cu132`. `FUK_DEVICE=cpu ./start.sh` forces CPU, which is useful to rule out the GPU stack while debugging.
 
 ### VRAM Issues
 
-Edit `config/defaults.json`:
+Pick **High** in the VRAM Management dropdown, or **FP8 weights** in Precision to halve the denoiser's memory. To change the defaults, edit `config/defaults_vram.json`:
 ```json
 {
   "vram": {
-    "preset": "medium"  // or "high" for aggressive offloading
+    "preset": "high",
+    "precision_default": {"image": "bf16", "video": "fp8"}
   }
 }
 ```
+If a generation runs out of memory partway through, raise the preset's `buffer_gb`: it is the headroom kept free for activations.
 
 ### Model Download Failures
 

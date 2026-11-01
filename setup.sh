@@ -1176,6 +1176,8 @@ cat > fuk/config/defaults_vram.json.template << 'EOL'
 {
   "vram": {
     "preset": "low",
+    "_precision_default_comment": "Precision each tab starts on: bf16, fp8_weights, fp8_compute, fp8 or nf4. Applies to the denoiser only. FP8 is lossy (same picture, small tone/detail drift) and on a 4090 cut warm Wan i2v 480p from 54.2s to 38.1s with fp8 (weights + compute). The legacy 'medium' and 'quant_nf4' presets below now mean low + fp8_weights and low + nf4.",
+    "precision_default": {"image": "bf16", "video": "bf16"},
 
     "_comment_cache": "pipeline_cache_slots — how many loaded pipelines stay resident before the oldest is evicted. 2 lets you flip between (say) an image and a video model without a reload; drop to 1 if RAM is tight. vae_encode_cache reuses VAE encodings of unchanged input images across generations.",
     "pipeline_cache_slots": 2,

@@ -47,7 +47,7 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 from file_browser_endpoints import setup_file_browser_routes
 from video_endpoints import setup_video_routes
-from core.diffsynth_backend import DiffSynthBackend
+from core.diffsynth_backend import DiffSynthBackend, PRECISIONS, LEGACY_PRESETS
 from core.video_processor import VideoProcessor
 from core import seedvr2_backend
 # [LAYER STACK DISABLED] from layer_stack_endpoints import setup_layer_routes, initialize_layer_endpoints
@@ -652,7 +652,8 @@ class ImageGenerationRequest(BaseModel):
     control_image_path: Optional[str] = None  # For backward compatibility (single image)
     control_image_paths: Optional[List[str]] = None  # For multiple images
     output_format: str = "png"  # png, exr, both
-    vram_preset: Optional[str] = None  # none, low, medium, high
+    vram_preset: Optional[str] = None  # none, low, high (legacy: medium, quant_nf4)
+    precision: Optional[str] = None  # bf16, fp8_weights, fp8_compute, fp8, nf4 (null = family default)
     denoising_strength: Optional[float] = None  # Edit strength when control images present
     exponential_shift_mu: Optional[float] = None  # Sampling timestep control (null = auto)
     embedded_guidance: Optional[float] = None  # FLUX.2 embedded guidance (null = use guidance_scale)
@@ -712,7 +713,8 @@ class VideoGenerationRequest(BaseModel):
     lora_multiplier: float = 1.0
     loras: Optional[List[Dict[str, Any]]] = None  # Multi-LoRA stack (LTX-2 camera moves, IC-LoRAs)
     export_exr: bool = False
-    vram_preset: Optional[str] = None  # none, low, medium, high
+    vram_preset: Optional[str] = None  # none, low, high (legacy: medium, quant_nf4)
+    precision: Optional[str] = None  # bf16, fp8_weights, fp8_compute, fp8, nf4 (null = family default)
     # Generic noise-schedule shift. Wan spells it sigma_shift, MiniMax-H3 spells
     # it flow_shift; the runners alias it. LTX-2 has no shift knob at all — its
     # schedule is derived from sequence length — so the UI hides the control.
@@ -1064,6 +1066,7 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
             "seed": request.seed,
             "lora": f"{request.lora} ({request.lora_multiplier}x)" if request.lora else "None",
             "vram_preset": request.vram_preset or "default",
+            "precision": generation_backend.resolve_precision(request.precision, "image"),
         })
         
         # Update status
@@ -1289,6 +1292,7 @@ async def run_image_generation(generation_id: str, request: ImageGenerationReque
             loras=request.loras,
             control_image=control_images if control_images else None,
             vram_preset=request.vram_preset,
+            precision=request.precision,
             denoising_strength=request.denoising_strength,
             exponential_shift_mu=request.exponential_shift_mu,
             embedded_guidance=request.embedded_guidance,
@@ -1565,6 +1569,7 @@ async def run_video_generation(generation_id: str, request: VideoGenerationReque
             loras=request.loras,
             progress_callback=progress_cb,
             vram_preset=request.vram_preset,
+            precision=request.precision,
             sigma_shift=request.sigma_shift,
             audio_flow_shift=request.audio_flow_shift,
             control_scale=request.control_scale,
@@ -2099,6 +2104,10 @@ async def get_models():
         # whole endpoint and emptying every model dropdown.
         if key.startswith("_") or not isinstance(preset, dict):
             continue
+        # Presets that mixed in precision now live in the Precision dropdown;
+        # the backend still resolves them for saved settings.
+        if key in LEGACY_PRESETS:
+            continue
         vram_presets.append({
             "key": key,
             "label": preset.get("label", key),
@@ -2118,6 +2127,12 @@ async def get_models():
         "loras": lora_list,
         "vram_presets": vram_presets,
         "vram_preset_default": vram_section.get("preset", "low"),
+        "precisions": [{"key": k, "label": v["label"], "description": v["description"]}
+                       for k, v in PRECISIONS.items()],
+        "precision_default": {f: generation_backend.resolve_precision(None, f)
+                              for f in ("image", "video")},
+        # Saved settings from before the split: preset -> [placement, precision]
+        "legacy_vram_presets": {k: list(v) for k, v in LEGACY_PRESETS.items()},
     }
 
 @app.get("/health")
