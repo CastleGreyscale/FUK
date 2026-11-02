@@ -15,9 +15,9 @@
  *
  * Every save, delete and move keeps the superseded version in the tag's
  * server-side history, so the History drawer and the Deleted view can bring
- * any of them back. Ticked tags can be re-categorized in bulk, and library
- * tags moved (or copied) into the project to keep project-specific shorthand
- * out of the shared library.
+ * any of them back. Ticked tags can be re-categorized in bulk, and moved (or
+ * copied) between scopes: library → project to keep project-specific
+ * shorthand out of the shared library, project → library to share it again.
  */
 
 import { forwardRef, useCallback, useEffect, useId, useImperativeHandle, useMemo, useRef, useState } from 'react';
@@ -33,6 +33,7 @@ import {
   restoreTagVersion,
   recategorizeTags,
   pushTagsToStoryboard,
+  pullTagsFromStoryboard,
   notifyPromptTokensChanged,
   PROMPT_TOKENS_CHANGED_EVENT,
 } from '../utils/promptApi';
@@ -66,9 +67,12 @@ function broadcastProject(fn) {
   };
 }
 
+// `transfer` sends ticked tags to `other`, the opposite scope.
 const SCOPES = {
   library: {
     label: 'Library',
+    other: 'project',
+    transfer: pushTagsToStoryboard,
     list: async () => (await fetchTags()).tags || [],
     create: createTag,
     update: updateTag,
@@ -80,6 +84,8 @@ const SCOPES = {
   },
   project: {
     label: 'Project',
+    other: 'library',
+    transfer: pullTagsFromStoryboard,
     list: async () => (await fetchStoryboardGlobals()).tags || [],
     create: broadcastProject(createStoryboardTag),
     update: broadcastProject(updateStoryboardTag),
@@ -91,15 +97,20 @@ const SCOPES = {
   },
 };
 
-// What superseded a history version — see tag_history.py.
+// What superseded a history version — see tag_history.py. A store's `moved`
+// and `replaced` always come from the other scope, so the label names it.
 const REASON_LABEL = {
   edit: 'before edit',
   restore: 'before restore',
-  replaced: 'before library push',
   snapshot: 'before snapshot load',
   delete: 'deleted',
-  moved: 'moved to project',
 };
+
+function reasonLabel(reason, scope) {
+  if (reason === 'moved') return `moved to ${SCOPES[SCOPES[scope].other].label.toLowerCase()}`;
+  if (reason === 'replaced') return `before ${SCOPES[SCOPES[scope].other].label.toLowerCase()} push`;
+  return REASON_LABEL[reason] || reason;
+}
 
 // Mirrors storyboard_manager._slug_marker / llm_endpoints._name_to_marker.
 // Project tags carry their marker; library tags only have a name.
@@ -403,34 +414,42 @@ const TagManager = forwardRef(function TagManager({ project, focusRequest, class
   const handlePush = useCallback(async (move) => {
     const ids = [...selected];
     if (!ids.length) return;
+    const from = api.label.toLowerCase();
+    const to = SCOPES[api.other].label.toLowerCase();
     setPushing(true);
     setListError(null);
     try {
-      const first = await pushTagsToStoryboard(ids, { move });
+      const first = await api.transfer(ids, { move });
       let replaced = first.replaced;
       let moved = first.moved.length;
       let skipped = first.conflicts;
+      const rejected = [...(first.rejected || [])];
       if (skipped.length) {
         const markers = skipped.map(c => c.marker).join(', ');
         const ok = window.confirm(
-          `The project already has ${markers} with different text.\n\n`
-          + `Replace the project version${skipped.length > 1 ? 's' : ''} with the library text? `
-          + `The project text is kept in its history.`,
+          `The ${to} already has ${markers} with different text.\n\n`
+          + `Replace the ${to} version${skipped.length > 1 ? 's' : ''} with the ${from} text? `
+          + `The ${to} text is kept in its history.`,
         );
         if (ok) {
-          const again = await pushTagsToStoryboard(skipped.map(c => c.id), { move, overwrite: true });
+          const again = await api.transfer(skipped.map(c => c.id), { move, overwrite: true });
           replaced = [...replaced, ...again.replaced];
           moved += again.moved.length;
           skipped = again.conflicts;
+          rejected.push(...(again.rejected || []));
         }
       }
       const landed = first.added.length + first.unchanged.length + replaced.length;
-      const parts = [`${move ? 'Moved' : 'Copied'} ${plural(landed, 'tag')} to the project`];
+      const parts = [`${move ? 'Moved' : 'Copied'} ${plural(landed, 'tag')} to the ${to}`];
       if (replaced.length) parts.push(`replaced ${replaced.map(r => r.marker).join(', ')}`);
       if (first.unchanged.length) parts.push(`${first.unchanged.length} already there`);
       if (skipped.length) parts.push(`skipped ${skipped.map(r => r.marker).join(', ')}`);
       if (move && moved) parts.push('restorable under Deleted');
       setNotice(parts.join(' · '));
+      // Library rules the project doesn't enforce — needs a fix before it can go.
+      if (rejected.length) {
+        setListError(`Not sent: ${rejected.map(r => `${r.marker} (${r.reason})`).join('; ')}`);
+      }
       setSelected(new Set());
       if (move && editingId && ids.includes(editingId) && !dirtyRef.current) resetForm();
       await load();
@@ -439,7 +458,7 @@ const TagManager = forwardRef(function TagManager({ project, focusRequest, class
     } finally {
       setPushing(false);
     }
-  }, [selected, editingId, resetForm, load]);
+  }, [api, selected, editingId, resetForm, load]);
 
   const handleRecategorize = useCallback(async () => {
     const ids = [...selected];
@@ -516,7 +535,8 @@ const TagManager = forwardRef(function TagManager({ project, focusRequest, class
   const uncategorizedCount = tags.filter(t => !t.category).length;
 
   const canSelect = view === 'live';
-  const canPush = scope === 'library' && hasProject && view === 'live';
+  const canPush = hasProject && view === 'live';
+  const otherLabel = SCOPES[api.other].label.toLowerCase();
   const allShownSelected = filteredTags.length > 0 && filteredTags.every(t => selected.has(t.id));
 
   const valueLen = value.length;
@@ -524,7 +544,7 @@ const TagManager = forwardRef(function TagManager({ project, focusRequest, class
   const formMarker = tagMarker(name);
 
   const scopeHint = scope === 'project'
-    ? 'This project only. Shadows a library tag with the same marker. Tick tags to set their category.'
+    ? 'This project only. Shadows a library tag with the same marker. Tick tags to set their category or move them back to the library.'
     : hasProject
       ? 'Shared across all projects. Tick tags to set their category or move them into this project.'
       : 'Shared across all projects. Tick tags to set their category; open a project to move them into it.';
@@ -706,10 +726,10 @@ const TagManager = forwardRef(function TagManager({ project, focusRequest, class
           {canPush && (
             <>
               <button className="fuk-btn fuk-btn-primary tag-manager-mini" onClick={() => handlePush(true)} disabled={pushing}>
-                {pushing ? 'Working…' : 'Move to project'}
+                {pushing ? 'Working…' : `Move to ${otherLabel}`}
               </button>
               <button className="fuk-btn fuk-btn-secondary tag-manager-mini" onClick={() => handlePush(false)} disabled={pushing}>
-                Copy to project
+                Copy to {otherLabel}
               </button>
             </>
           )}
@@ -734,7 +754,7 @@ const TagManager = forwardRef(function TagManager({ project, focusRequest, class
                 <span className="tag-manager-marker">{markerOf(row)}</span>
                 {row.category && <span className="tag-manager-cat">{categoryLabel(row.category, row.subcategory)}</span>}
                 <span className="tag-manager-when">
-                  {REASON_LABEL[row.reason] || row.reason} · {formatWhen(row.deleted_at)}
+                  {reasonLabel(row.reason, scope)} · {formatWhen(row.deleted_at)}
                 </span>
                 <div className="tag-manager-item-actions">
                   {row.version_count > 1 && (
@@ -752,6 +772,7 @@ const TagManager = forwardRef(function TagManager({ project, focusRequest, class
                 <HistoryDrawer
                   versions={versions.slice(1)}
                   loading={historyLoading}
+                  scope={scope}
                   current={row}
                   onRestore={(v) => handleRestore(row.id, v.vid)}
                 />
@@ -814,6 +835,7 @@ const TagManager = forwardRef(function TagManager({ project, focusRequest, class
               <HistoryDrawer
                 versions={versions}
                 loading={historyLoading}
+                scope={scope}
                 current={tag}
                 onRestore={(v) => handleRestore(tag.id, v.vid)}
                 onLoad={(v) => handleLoadVersion(tag.id, v)}
@@ -828,7 +850,7 @@ const TagManager = forwardRef(function TagManager({ project, focusRequest, class
 
 export default TagManager;
 
-function HistoryDrawer({ versions, loading, current, onRestore, onLoad }) {
+function HistoryDrawer({ versions, loading, scope, current, onRestore, onLoad }) {
   if (loading && versions.length === 0) {
     return <div className="tag-manager-history tag-manager-placeholder">Loading history…</div>;
   }
@@ -845,7 +867,7 @@ function HistoryDrawer({ versions, loading, current, onRestore, onLoad }) {
         <li key={v.vid} className="tag-manager-version">
           <div className="tag-manager-version-head">
             <span className="tag-manager-when">{formatWhen(v.replaced_at)}</span>
-            <span className="tag-manager-version-reason">{REASON_LABEL[v.reason] || v.reason}</span>
+            <span className="tag-manager-version-reason">{reasonLabel(v.reason, scope)}</span>
             {v.name !== current.name && <span className="tag-manager-version-diff">was {tagMarker(v.name)}</span>}
             {((v.category || '') !== (current.category || '')
               || (v.subcategory || '') !== (current.subcategory || '')) && (

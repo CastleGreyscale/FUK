@@ -92,6 +92,19 @@ def record(
     return True
 
 
+def merge(history: Dict[str, List[dict]], tag_id: str, incoming: Iterable[dict]) -> None:
+    """Fold another store's versions of a tag into this one.
+
+    A tag moved between stores and back shares a prefix with its old self, so
+    versions are unioned by `vid` and kept in `replaced_at` order.
+    """
+    have = history.setdefault(tag_id, [])
+    seen = {v.get("vid") for v in have}
+    have.extend(dict(v) for v in incoming if v.get("vid") not in seen)
+    have.sort(key=lambda v: v.get("replaced_at") or "")
+    del have[:-MAX_VERSIONS]
+
+
 def versions(history: Dict[str, List[dict]], tag_id: str) -> List[dict]:
     """A tag's versions, newest first."""
     return list(reversed(history.get(tag_id) or []))

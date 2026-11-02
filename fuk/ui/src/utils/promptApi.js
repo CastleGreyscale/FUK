@@ -141,6 +141,23 @@ export async function pushTagsToStoryboard(ids, { move = false, overwrite = fals
   return data;
 }
 
+/**
+ * Copy (or move) project tags back into the workspace library — the mirror
+ * of pushTagsToStoryboard. Same result shape plus `rejected`: project tags
+ * that break library rules (value cap, prime categories), each with `reason`.
+ */
+export async function pullTagsFromStoryboard(ids, { move = false, overwrite = false } = {}) {
+  const res = await fetch(`${API_URL}/tags/pull-from-storyboard`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids, move, overwrite }),
+  });
+  const data = await _jsonOrThrow(res, 'Failed to move tags to the library');
+  notifyPromptTokensChanged();
+  window.dispatchEvent(new CustomEvent('fuk-storyboard-changed'));
+  return data;
+}
+
 export async function compilePrompt({ text, model, activeLoras, styleChips, styleLabel }) {
   const res = await fetch(`${API_URL}/prompt/compile`, {
     method: 'POST',

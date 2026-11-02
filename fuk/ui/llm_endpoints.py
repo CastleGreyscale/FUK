@@ -209,9 +209,10 @@ class TagRecategorizePayload(BaseModel):
 
 
 class TagPushPayload(BaseModel):
+    """Workspace <-> project transfer. `ids` are tags in the source scope."""
     ids: List[str]
-    move: bool = False        # remove from the workspace once the tag is in the project
-    overwrite: bool = False   # replace project tags whose marker collides
+    move: bool = False        # remove from the source once the tag is in the destination
+    overwrite: bool = False   # replace destination tags whose marker collides
 
 
 def _load_tags() -> List[dict]:
@@ -1557,6 +1558,94 @@ def setup_llm_routes(app, *, resolve_input_path: Callable[[str], Path], log, con
             f"{len(moved)} moved",
         )
         return {**result, "moved": moved}
+
+    @app.post("/api/tags/pull-from-storyboard")
+    async def pull_tags_from_storyboard(payload: TagPushPayload):
+        """Copy (or move) project tags back into the workspace library.
+
+        The mirror of push-to-storyboard: a marker the library already uses is
+        `unchanged` if the values match, replaced when `overwrite` is set, and
+        otherwise a conflict. Project tags aren't held to library rules (value
+        cap, prime categories), so any that fail them come back as `rejected`
+        with the reason. On a move, only tags that landed leave the project,
+        recorded in its history as `moved`.
+        """
+        import storyboard_manager as sm
+        from project_endpoints import get_project_folder
+        folder = get_project_folder()
+        if not folder:
+            raise HTTPException(status_code=400, detail="No project folder set")
+
+        manifest = sm.ensure_manifest(folder)
+        wanted = set(payload.ids)
+        selected = [t for t in manifest["globals"].get("tags") or [] if t.get("id") in wanted]
+        if not selected:
+            raise HTTPException(status_code=404, detail="No matching tags")
+
+        tags = _load_tags()
+        history = _load_tag_history()
+        sb_history = manifest.get("tag_history") or {}
+        out: dict = {"added": [], "replaced": [], "unchanged": [], "conflicts": [], "rejected": []}
+        now = datetime.now().isoformat()
+        for src in selected:
+            row = {"id": src.get("id"), "name": src.get("name"), "marker": src.get("marker")}
+            try:
+                name, value, category, subcategory = _validate_payload(TagPayload(
+                    name=src.get("name") or "",
+                    value=src.get("value") or "",
+                    category=src.get("category"),
+                    subcategory=src.get("subcategory"),
+                ))
+            except HTTPException as e:
+                out["rejected"].append({**row, "reason": e.detail})
+                continue
+            marker = _name_to_marker(name)
+            row["marker"] = marker
+            existing = next((t for t in tags if _name_to_marker(t.get("name", "")) == marker), None)
+            if existing is not None:
+                if (existing.get("value") or "").strip() == value:
+                    out["unchanged"].append(row)
+                elif not payload.overwrite:
+                    out["conflicts"].append(row)
+                elif any(
+                    t is not existing and _normalize_name(t.get("name", "")) == name for t in tags
+                ):
+                    out["rejected"].append({**row, "reason": f"Another library tag is named '{name}'"})
+                else:
+                    th.record(history, existing, "replaced")
+                    existing.update({
+                        "name": name, "value": value, "category": category,
+                        "subcategory": subcategory, "updated": now,
+                    })
+                    out["replaced"].append(row)
+                continue
+            src_id = src.get("id")
+            tag_id = src_id if src_id and not any(t.get("id") == src_id for t in tags) else uuid.uuid4().hex
+            tags.append({
+                "id": tag_id, "name": name, "value": value, "category": category,
+                "subcategory": subcategory, "created": src.get("created") or now, "updated": now,
+            })
+            if src_id in sb_history:
+                th.merge(history, tag_id, sb_history[src_id])
+            out["added"].append(row)
+
+        if out["added"] or out["replaced"]:
+            _save_tag_history(history)
+            _save_tags(tags)
+
+        moved: List[str] = []
+        if payload.move:
+            landed = {r["id"] for k in ("added", "replaced", "unchanged") for r in out[k]}
+            moved = sm.take_tags(manifest, list(landed))
+            if moved:
+                sm.save_manifest(folder, manifest)
+        log.info(
+            "LLM",
+            f"tags pulled from storyboard: {len(out['added'])} added, "
+            f"{len(out['replaced'])} replaced, {len(out['conflicts'])} conflicts, "
+            f"{len(out['rejected'])} rejected, {len(moved)} moved",
+        )
+        return {**out, "moved": moved}
 
     # -----------------------------------------------------------------------
     # Unified prompt tokens — tags + LoRA triggers + caption phrases

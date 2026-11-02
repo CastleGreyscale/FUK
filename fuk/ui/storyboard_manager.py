@@ -387,10 +387,23 @@ def import_tags(
             "id": tag_id, **clean,
             "created": src.get("created") or now, "updated": now,
         })
-        if source_history and src_id in source_history and tag_id not in hist:
-            hist[tag_id] = [dict(v) for v in source_history[src_id]]
+        if source_history and src_id in source_history:
+            th.merge(hist, tag_id, source_history[src_id])
         out["added"].append(row)
     return out
+
+
+def take_tags(manifest: Dict[str, Any], ids: List[str]) -> List[str]:
+    """Remove tags that moved out to the library, recording each as `moved`
+    so it stays restorable from the project's Deleted view. Returns the ids
+    actually removed."""
+    wanted = set(ids or [])
+    tags = manifest["globals"].setdefault("tags", [])
+    gone = [t for t in tags if t.get("id") in wanted]
+    for t in gone:
+        th.record(_history(manifest), t, "moved")
+    manifest["globals"]["tags"] = [t for t in tags if t.get("id") not in wanted]
+    return [t["id"] for t in gone]
 
 
 _SEED_MAX = 2**32 - 1
