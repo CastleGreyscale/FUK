@@ -2157,6 +2157,10 @@
   color: #fff;
 }
 
+.image-describe-detailed {
+  align-items: flex-start;
+}
+
 .image-describe-result-card {
   min-height: 200px;
 }

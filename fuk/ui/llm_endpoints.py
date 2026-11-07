@@ -59,7 +59,7 @@ DESCRIBE_SYSTEM = (
     "atmosphere, camera angle/lens feel, depth of field, and any notable visual "
     "effects or stylistic choices.\n\n"
     "Be concrete. Avoid vague qualitative adjectives (\"beautiful\", \"stunning\"). "
-    "Write in present tense. 2-4 sentences. No preamble.\n\n"
+    "Write in present tense. {length} No preamble.\n\n"
     + DESCRIBE_NO_FRAME_RULE
 )
 
@@ -73,7 +73,7 @@ DESCRIBE_VIDEO_SYSTEM = (
     "color, atmosphere, and any notable stylistic choices.\n\n"
     "Treat the stills as a single continuous shot — do not describe them as separate "
     "images. Be concrete. Avoid vague qualitative adjectives. Write in present tense. "
-    "3-5 sentences. No preamble.\n\n"
+    "{length} No preamble.\n\n"
     + DESCRIBE_NO_FRAME_RULE
 )
 
@@ -94,7 +94,7 @@ DESCRIBE_FOCUS_SYSTEM = (
     "description.\n\n"
     "If the element is not visible, say so in one sentence instead of inventing it. "
     "Avoid vague qualitative adjectives (\"beautiful\", \"stunning\"). Write in "
-    "present tense. 2-4 sentences. No preamble.\n\n"
+    "present tense. {length} No preamble.\n\n"
     + DESCRIBE_NO_FRAME_RULE
 )
 
@@ -112,7 +112,7 @@ DESCRIBE_FOCUS_VIDEO_SYSTEM = (
     "directly bear on the focus element. Do NOT write a balanced scene description.\n\n"
     "Treat the stills as a single continuous shot. If the element is not visible, "
     "say so in one sentence instead of inventing it. Avoid vague qualitative "
-    "adjectives. Write in present tense. 3-5 sentences. No preamble.\n\n"
+    "adjectives. Write in present tense. {length} No preamble.\n\n"
     + DESCRIBE_NO_FRAME_RULE
 )
 
@@ -151,10 +151,52 @@ EXPAND_MODE_RULE_VIDEO = (
 )
 
 
+# Length briefs dropped into the {length} slot of the describe prompts. Standard
+# is the short, tag-sized output; detailed opens it up for when one element (a
+# face, a costume) needs every visible feature captured. Detailed stays well
+# under the 4000-char tag limit so "Tag all" still works.
+DESCRIBE_LENGTH = {
+    # (image, video) × (balanced, focus)
+    False: {
+        "image": "2-4 sentences.",
+        "video": "3-5 sentences.",
+        "image_focus": "2-4 sentences.",
+        "video_focus": "3-5 sentences.",
+    },
+    True: {
+        "image": (
+            "Write one dense paragraph of 6-10 sentences. Work through each aspect "
+            "in turn and record every concrete detail you can see — fine features, "
+            "materials, textures, small objects, exact colors and where they sit."
+        ),
+        "video": (
+            "Write one dense paragraph of 6-10 sentences. Record every concrete "
+            "detail you can see and every change across the clip."
+        ),
+        "image_focus": (
+            "Write one dense paragraph of 8-14 sentences. Work through the element "
+            "systematically, part by part, giving each distinct feature its own "
+            "concrete detail — shape, proportions, color, texture, markings, "
+            "asymmetries, condition. Leave nothing visible out."
+        ),
+        "video_focus": (
+            "Write one dense paragraph of 8-14 sentences. Work through the element "
+            "systematically, part by part, giving each distinct feature its own "
+            "concrete detail, and note how each changes across the clip."
+        ),
+    },
+}
+# Detailed mode sends a larger image so fine features survive the downscale.
+DESCRIBE_DETAILED_MAX_SIZE = 1536
+VIDEO_FRAME_DETAILED_MAX_SIZE = 768
+DESCRIBE_DETAILED_NUM_CTX = 8192   # larger image + longer answer; keeps both in context
+
+
 class DescribeRequest(BaseModel):
     image_path: str
-    max_size: Optional[int] = DESCRIBE_MAX_SIZE
+    max_size: Optional[int] = None   # None → per-mode default below
     focus: Optional[str] = None
+    detailed: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -1265,21 +1307,30 @@ def setup_llm_routes(app, *, resolve_input_path: Callable[[str], Path], log, con
             raise HTTPException(status_code=404, detail=f"Media not found: {request.image_path}")
 
         is_video = image_path.suffix.lower() in VIDEO_EXTS
-        max_size = request.max_size or (VIDEO_FRAME_MAX_SIZE if is_video else DESCRIBE_MAX_SIZE)
+        detailed = request.detailed
+        if detailed:
+            default_size = VIDEO_FRAME_DETAILED_MAX_SIZE if is_video else DESCRIBE_DETAILED_MAX_SIZE
+        else:
+            default_size = VIDEO_FRAME_MAX_SIZE if is_video else DESCRIBE_MAX_SIZE
+        max_size = request.max_size or default_size
         timeout = VIDEO_REQUEST_TIMEOUT if is_video else REQUEST_TIMEOUT
+        if detailed:
+            timeout *= 2   # longer answer + bigger image
         focus = (request.focus or "").strip()
+        lengths = DESCRIBE_LENGTH[detailed]
 
         try:
             if is_video:
                 images = _sample_video_frames(image_path, VIDEO_FRAME_COUNT, max_size)
                 if focus:
-                    system_prompt = DESCRIBE_FOCUS_VIDEO_SYSTEM.format(focus=focus)
+                    system_prompt = DESCRIBE_FOCUS_VIDEO_SYSTEM.format(
+                        focus=focus, length=lengths["video_focus"])
                     user_text = (
                         f"{len(images)} stills from a short clip, ordered earliest to latest. "
                         f"Describe the clip as a single continuous shot, concentrating on: {focus}"
                     )
                 else:
-                    system_prompt = DESCRIBE_VIDEO_SYSTEM
+                    system_prompt = DESCRIBE_VIDEO_SYSTEM.format(length=lengths["video"])
                     user_text = (
                         f"{len(images)} stills from a short clip, ordered earliest to latest. "
                         "Describe the clip as a single continuous shot."
@@ -1287,11 +1338,14 @@ def setup_llm_routes(app, *, resolve_input_path: Callable[[str], Path], log, con
             else:
                 images = [_encode_image_for_describe(image_path, max_size)]
                 if focus:
-                    system_prompt = DESCRIBE_FOCUS_SYSTEM.format(focus=focus)
+                    system_prompt = DESCRIBE_FOCUS_SYSTEM.format(
+                        focus=focus, length=lengths["image_focus"])
                     user_text = f"Describe this image, concentrating on: {focus}"
                 else:
-                    system_prompt = DESCRIBE_SYSTEM
+                    system_prompt = DESCRIBE_SYSTEM.format(length=lengths["image"])
                     user_text = "Describe this image."
+            if detailed:
+                user_text += " Be thorough and detailed."
         except HTTPException:
             raise
         except Exception as e:
@@ -1311,6 +1365,8 @@ def setup_llm_routes(app, *, resolve_input_path: Callable[[str], Path], log, con
             "keep_alive": 0,
             "options": {"temperature": 0.3},
         }
+        if detailed:
+            payload["options"]["num_ctx"] = DESCRIBE_DETAILED_NUM_CTX
 
         try:
             r = requests.post(

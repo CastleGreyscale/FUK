@@ -58,6 +58,7 @@ export default function ImageDescribeTool({ project }) {
   const [browsing, setBrowsing] = useState(false);
   const [running, setRunning] = useState(false);
   const [focus, setFocus] = useLocalStorage('fuk_describe_focus', '');
+  const [detailed, setDetailed] = useLocalStorage('fuk_describe_detailed', false);
   const [description, setDescription] = useLocalStorage('fuk_describe_description', '');
   const [error, setError] = useState(null);
   const [health, setHealth] = useState(null);
@@ -153,7 +154,7 @@ export default function ImageDescribeTool({ project }) {
       const res = await fetch(`${API_URL}/llm/describe`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image_path: imagePath, focus: focus.trim() || null }),
+        body: JSON.stringify({ image_path: imagePath, focus: focus.trim() || null, detailed }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || `Request failed: ${res.status}`);
@@ -163,7 +164,7 @@ export default function ImageDescribeTool({ project }) {
     } finally {
       setRunning(false);
     }
-  }, [imagePath, running, focus]);
+  }, [imagePath, running, focus, detailed]);
 
   const handleCopy = useCallback(async () => {
     if (!description) return;
@@ -322,6 +323,22 @@ export default function ImageDescribeTool({ project }) {
               })}
             </div>
           </div>
+
+          <label className="fuk-checkbox-group image-describe-detailed">
+            <input
+              type="checkbox"
+              className="fuk-checkbox"
+              checked={detailed}
+              onChange={(e) => setDetailed(e.target.checked)}
+              disabled={running}
+            />
+            <span className="fuk-checkbox-label">
+              Detailed
+              <span className="image-describe-focus-hint">
+                a long, exhaustive paragraph at higher resolution — best paired with a focus (e.g. a face)
+              </span>
+            </span>
+          </label>
 
           <button
             className="fuk-btn fuk-btn-primary fuk-btn-full image-describe-run"
