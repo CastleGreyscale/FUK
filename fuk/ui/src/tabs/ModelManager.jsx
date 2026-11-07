@@ -50,7 +50,11 @@ const fmtBytes = (n) => {
 // Tools — status only
 // ============================================================================
 
-function ToolRow({ tool }) {
+function ToolRow({ tool, job, onDownload }) {
+  // Only tools whose weights nothing else fetches carry `downloads`; for the
+  // rest the row stays status-only and the hint names the installer.
+  const toFetch = tool.downloads || [];
+  const running = job && job.status === 'running';
   return (
     <div className={`mm-tool ${tool.available ? 'mm-tool--ok' : 'mm-tool--bad'}`}>
       <span className={`mm-dot ${tool.available ? 'mm-dot--ok' : 'mm-dot--bad'}`} />
@@ -72,6 +76,38 @@ function ToolRow({ tool }) {
             missing: {tool.missing.join(', ') || 'unknown'}
             {tool.hint && <> — <code>{tool.hint}</code></>}
           </div>
+        )}
+        {running && (
+          <div className="mm-progress">
+            <div
+              className="mm-progress-bar"
+              style={{ width: `${(job.completed / Math.max(1, job.total)) * 100}%` }}
+            />
+            <span className="mm-progress-text">
+              {job.completed}/{job.total} — {job.current || 'starting…'}
+            </span>
+          </div>
+        )}
+        {job && job.status === 'partial' && (
+          <div className="mm-tool-missing">
+            {job.failed.length} file(s) failed — retry, or fetch by hand from the link above.
+          </div>
+        )}
+        {job && job.status === 'failed' && (
+          <div className="mm-tool-missing">Download failed — {job.error}</div>
+        )}
+        {(toFetch.length > 0 || running) && (
+          <button
+            className="fuk-btn fuk-btn-secondary fuk-btn-sm mm-tool-dl"
+            disabled={running}
+            onClick={() => onDownload(tool.key)}
+            title={toFetch.map((d) => `${d.model_id}/${d.pattern}`).join('\n')}
+          >
+            {running
+              ? <><Loader2 className="fuk-icon--sm mm-spin" /> downloading</>
+              : <><Download className="fuk-icon--sm" /> Download {toFetch.length} missing
+                {toFetch.length === 1 ? ' file' : ' files'}</>}
+          </button>
         )}
       </div>
     </div>
@@ -761,6 +797,26 @@ export default function ModelManager() {
     }
   };
 
+  // Filed under "tool:<key>", matching the server, so a tool cannot share a
+  // progress bar with a registry model of the same name.
+  const handleDownloadTool = async (key) => {
+    try {
+      const res = await fetch(`${API_URL}/models/manage/tools/${key}/download`, {
+        method: 'POST',
+      });
+      if (!res.ok) throw new Error((await res.json()).detail || `HTTP ${res.status}`);
+      const { job_id, total } = await res.json();
+      setJobs((prev) => ({
+        ...prev,
+        [`tool:${key}`]: {
+          id: job_id, status: 'running', completed: 0, total, current: null, failed: [],
+        },
+      }));
+    } catch (e) {
+      setError(`Download failed to start for ${key}: ${e}`);
+    }
+  };
+
   // Filed under "<key>:loras" so add-on progress and base-model progress can
   // run at once without one overwriting the other's bar.
   const handleDownloadLoras = async (key, paths) => {
@@ -869,10 +925,14 @@ export default function ModelManager() {
         <span className="fuk-label">Tools</span>
         <div className="mm-sub mm-sub--card">
           Installed by <code>setup.sh</code>, not from here. Status comes from each
-          feature&apos;s own check.
+          feature&apos;s own check. Tools with weights nothing else fetches can
+          download them here.
         </div>
         <div className="mm-tools">
-          {data.tools.map((t) => <ToolRow key={t.key} tool={t} />)}
+          {data.tools.map((t) => (
+            <ToolRow key={t.key} tool={t} job={jobs[`tool:${t.key}`]}
+                     onDownload={handleDownloadTool} />
+          ))}
         </div>
       </div>
 

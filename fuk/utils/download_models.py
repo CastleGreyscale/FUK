@@ -228,6 +228,25 @@ def download_seedvr2(models_root: str):
     return result
 
 
+def clear_dangling_link(path: Path) -> bool:
+    """
+    Remove `path` if it is a symlink whose target is gone. Returns True if removed.
+
+    Weights are often linked in from another tool's download folder rather than
+    fetched here, and that folder gets cleaned out independently. exists()
+    follows the link, so a dead one reads as "missing" — but downloading
+    through it fails, because the write lands in the deleted target directory.
+    Clearing the link first lets the download put a real file in its place.
+    """
+    path = Path(path)
+    if path.is_symlink() and not path.exists():
+        target = os.readlink(path)
+        path.unlink()
+        print(f"\n  ⚠ removed dead symlink: {path}\n      (pointed at {target})")
+        return True
+    return False
+
+
 def download_ltx_hdr(models_root: str):
     """
     Fetch what the LTX-2.5 SDR -> HDR conversion needs beyond the ltx2 entry.
@@ -261,10 +280,12 @@ def download_ltx_hdr(models_root: str):
     root = Path(models_root)
     fetched, failed = [], []
     for key, (model_id, pattern) in ltx_hdr_backend.WEIGHTS.items():
-        if (root / model_id / pattern).exists():
+        dest = root / model_id / pattern
+        if dest.exists():
             print(f"\n  ✓ already present: {pattern}")
             fetched.append(key)
             continue
+        clear_dangling_link(dest)
         got = download_model_component(model_id, pattern, component_name=f"LTX HDR {key}")
         (fetched if got else failed).append(key)
 

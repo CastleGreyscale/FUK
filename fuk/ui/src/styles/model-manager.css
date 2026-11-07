@@ -128,6 +128,8 @@
   border-radius: var(--radius-sm);
 }
 
+.mm-tool-dl { margin-top: 0.4rem; }
+
 .mm-link { color: var(--color-gray-500); display: inline-flex; }
 .mm-link:hover { color: var(--color-primary-400); }
 

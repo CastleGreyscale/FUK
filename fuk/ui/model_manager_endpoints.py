@@ -7,10 +7,13 @@ primary way to acquire and enable models. The script stays for headless runs.
 Two kinds of thing appear in the panel and they behave differently on purpose:
 
   Tools    Ollama, SeedVR2, LTX SDR→HDR, TRELLIS, VGGT, SAM2, Depth-Anything-3, DSINE.
-           Read-only status, green or red, exactly as they already report
-           elsewhere in the app. They are installed by setup.sh, not from here,
-           so the panel surfaces their existing availability checks and the
-           hint each one already carries rather than inventing new ones.
+           Status, green or red, exactly as they already report elsewhere in
+           the app. They are installed by setup.sh, not from here, so the panel
+           surfaces their existing availability checks and the hint each one
+           already carries rather than inventing new ones. The exception is a
+           tool whose weights nothing else fetches (LTX SDR→HDR): those are
+           listed in _TOOL_DOWNLOADS and get a download button for whatever
+           is missing.
 
   Models   Registry entries from models.json. Each gets a download button and
            an active checkbox. Unchecking one unregisters it: it disappears
@@ -124,6 +127,63 @@ def _update_job(job_id: str, **fields):
         job = _jobs.get(job_id)
         if job:
             job.update(fields)
+
+
+def _run_download_job(job_id: str, job_key: str, targets: List[tuple],
+                      models_root: Path, log) -> None:
+    """Fetch (label, model_id, pattern) targets in order, recording progress.
+
+    Shared by registry models and the tools that carry their own weights, so
+    both report through the same job shape the panel already polls.
+    """
+    # download_models lives in fuk/utils and imports diffsynth directly.
+    utils_dir = str(Path(__file__).resolve().parent.parent / "utils")
+    if utils_dir not in sys.path:
+        sys.path.insert(0, utils_dir)
+    os.environ["DIFFSYNTH_MODEL_BASE_PATH"] = str(models_root)
+
+    try:
+        from download_models import download_model_component, clear_dangling_link
+    except Exception as e:
+        _update_job(job_id, status="failed", error=f"downloader unavailable: {e}")
+        return
+
+    done, failed = 0, []
+    for label, model_id, pattern in targets:
+        _update_job(job_id, current=f"{label}: {model_id} → {pattern}")
+        try:
+            # Weights linked in from another tool's folder go dead when that
+            # folder is cleaned out; a download through the dead link fails.
+            # Only literal paths can be links — a glob pattern names no file.
+            if not any(ch in pattern for ch in "*?["):
+                clear_dangling_link(models_root / model_id / pattern)
+            # HuggingFace first — faster and steadier — with a per-component
+            # fallback to ModelScope inside the helper for the repos HF does
+            # not carry. Passed explicitly rather than via
+            # DIFFSYNTH_DOWNLOAD_SOURCE, which is process-global and would leak
+            # out of this worker thread.
+            path = download_model_component(
+                model_id, pattern, component_name=label, prefer="huggingface")
+        except Exception as e:
+            path = None
+            log.warning("ModelManager", f"{job_key} {label} raised: {e}")
+        # Falsy covers both None and the empty-glob case: a source can resolve
+        # without producing files, and that is not a success.
+        if not path:
+            failed.append({"label": label, "model_id": model_id, "pattern": pattern})
+        else:
+            done += 1
+        _update_job(job_id, completed=done, failed=failed)
+
+    _update_job(
+        job_id,
+        status="completed" if not failed else "partial",
+        current=None,
+        finished_at=time.time(),
+    )
+    log.info("ModelManager",
+             f"{job_key} download finished: {done}/{len(targets)}"
+             + (f", {len(failed)} failed" if failed else ""))
 
 
 def _nand_refresh():
@@ -514,6 +574,22 @@ def _vendor_dir(name: str) -> Path:
     return Path(__file__).resolve().parent.parent / "vendor" / name
 
 
+def _ltx_hdr_targets() -> List[tuple]:
+    from core import ltx_hdr_backend
+    return [(f"LTX HDR {w['key']}", w["model_id"], w["pattern"])
+            for w in ltx_hdr_backend.missing_weights()]
+
+
+# Tools that need weights nothing else fetches. Most tools install through
+# setup.sh or pull weights on first use; these need ~40GB up front, which is too
+# much to start silently from a Postprocess click, so the panel offers it
+# explicitly. Each lister returns the (label, model_id, pattern) targets still
+# missing, in the shape _run_download_job takes.
+_TOOL_DOWNLOADS: Dict[str, Callable[[], List[tuple]]] = {
+    "ltx_hdr": _ltx_hdr_targets,
+}
+
+
 def _tool_status(generation_backend, log) -> List[dict]:
     """Aggregate the availability checks the app already performs.
 
@@ -528,6 +604,14 @@ def _tool_status(generation_backend, log) -> List[dict]:
             state = checker()
         except Exception as e:
             state = {"available": False, "missing": [f"{type(e).__name__}: {e}"]}
+        # Missing weights the panel can fetch itself; None for install-only tools.
+        downloads = None
+        if key in _TOOL_DOWNLOADS:
+            try:
+                downloads = [{"label": l, "model_id": m, "pattern": p}
+                             for l, m, p in _TOOL_DOWNLOADS[key]()]
+            except Exception as e:
+                log.warning("ModelManager", f"{key} download targets failed: {e}")
         tools.append({
             "key": key,
             "name": name,
@@ -537,6 +621,7 @@ def _tool_status(generation_backend, log) -> List[dict]:
             "hint": state.get("hint") or hint,
             "detail": state.get("detail"),
             "docs_url": docs_url,
+            "downloads": downloads,
         })
 
     # Ollama — powers Describe & Tag and the prompt LLM features.
@@ -737,53 +822,36 @@ def setup_model_manager_routes(
         root = _models_root()
         job_id = _new_job(model_key, targets)
 
-        def worker():
-            # download_models lives in fuk/utils and imports diffsynth directly.
-            utils_dir = str(Path(__file__).resolve().parent.parent / "utils")
-            if utils_dir not in sys.path:
-                sys.path.insert(0, utils_dir)
-            os.environ["DIFFSYNTH_MODEL_BASE_PATH"] = str(root)
-
-            try:
-                from download_models import download_model_component
-            except Exception as e:
-                _update_job(job_id, status="failed", error=f"downloader unavailable: {e}")
-                return
-
-            done, failed = 0, []
-            for label, model_id, pattern in targets:
-                _update_job(job_id, current=f"{label}: {model_id} → {pattern}")
-                try:
-                    # HuggingFace first — faster and steadier — with a
-                    # per-component fallback to ModelScope inside the helper for
-                    # the repos HF does not carry. Passed explicitly rather than
-                    # via DIFFSYNTH_DOWNLOAD_SOURCE, which is process-global and
-                    # would leak out of this worker thread.
-                    path = download_model_component(
-                        model_id, pattern, component_name=label, prefer="huggingface")
-                except Exception as e:
-                    path = None
-                    log.warning("ModelManager", f"{model_key} {label} raised: {e}")
-                # Falsy covers both None and the empty-glob case: a source can
-                # resolve without producing files, and that is not a success.
-                if not path:
-                    failed.append({"label": label, "model_id": model_id, "pattern": pattern})
-                else:
-                    done += 1
-                _update_job(job_id, completed=done, failed=failed)
-
-            _update_job(
-                job_id,
-                status="completed" if not failed else "partial",
-                current=None,
-                finished_at=time.time(),
-            )
-            log.info("ModelManager",
-                     f"{model_key} download finished: {done}/{len(targets)}"
-                     + (f", {len(failed)} failed" if failed else ""))
-
-        threading.Thread(target=worker, name=f"dl-{model_key}", daemon=True).start()
+        threading.Thread(target=_run_download_job,
+                         args=(job_id, model_key, targets, root, log),
+                         name=f"dl-{model_key}", daemon=True).start()
         log.info("ModelManager", f"{model_key} download started ({len(targets)} targets)")
+        return {"success": True, "job_id": job_id, "total": len(targets)}
+
+    @app.post("/api/models/manage/tools/{tool_key}/download")
+    async def download_tool_weights(tool_key: str):
+        """Fetch whatever weights a tool reports missing. Returns a job id to poll.
+
+        Only tools listed in _TOOL_DOWNLOADS qualify — the rest install through
+        setup.sh or fetch on first use. Filed as "tool:<key>" so it cannot
+        collide with a registry model of the same name.
+        """
+        lister = _TOOL_DOWNLOADS.get(tool_key)
+        if lister is None:
+            raise HTTPException(status_code=404,
+                                detail=f"'{tool_key}' has no downloadable weights")
+        targets = lister()
+        if not targets:
+            raise HTTPException(status_code=400,
+                                detail=f"Every {tool_key} weight is already downloaded")
+
+        job_key = f"tool:{tool_key}"
+        root = _models_root()
+        job_id = _new_job(job_key, targets)
+        threading.Thread(target=_run_download_job,
+                         args=(job_id, job_key, targets, root, log),
+                         name=f"dl-{job_key}", daemon=True).start()
+        log.info("ModelManager", f"{job_key} download started ({len(targets)} targets)")
         return {"success": True, "job_id": job_id, "total": len(targets)}
 
     @app.post("/api/models/manage/{model_key}/loras/download")

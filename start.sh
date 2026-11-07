@@ -62,8 +62,27 @@ if [ -f "$SCRIPT_DIR/$VENV_DIR/bin/activate" ]; then
     source "$SCRIPT_DIR/$VENV_DIR/bin/activate"
 fi
 
-# Start frontend dev server in background
-echo "→ Starting frontend..."
+# Backend first. It takes several seconds to import torch and DiffSynth, and a
+# frontend started alongside it fills the terminal with vite proxy
+# ECONNREFUSED errors until port 8000 opens.
+echo "→ Starting backend..."
+echo ""
+python fuk/ui/fuk_web_server.py &
+BACKEND_PID=$!
+FRONTEND_PID=""
+
+# Trap Ctrl+C to kill both processes cleanly
+trap 'echo ""; echo "Shutting down..."; kill $FRONTEND_PID $BACKEND_PID 2>/dev/null; exit 0' INT TERM
+
+until curl -fsS -o /dev/null http://127.0.0.1:8000/health 2>/dev/null; do
+    if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
+        echo "✗ Backend exited before it was ready — see the error above." >&2
+        exit 1
+    fi
+    sleep 0.5
+done
+
+echo "→ Backend ready. Starting frontend..."
 cd "$SCRIPT_DIR/fuk/ui"
 if command -v bun &> /dev/null; then
     bun run dev &
@@ -73,12 +92,6 @@ fi
 FRONTEND_PID=$!
 cd "$SCRIPT_DIR"
 
-# Trap Ctrl+C to kill both processes cleanly
-trap "echo ''; echo 'Shutting down...'; kill $FRONTEND_PID 2>/dev/null; exit 0" INT TERM
-
-echo "→ Starting backend..."
-echo ""
-python fuk/ui/fuk_web_server.py
-
-# If backend exits normally, clean up frontend too
+# Stay attached to the backend; when it exits, take the frontend down too.
+wait "$BACKEND_PID"
 kill $FRONTEND_PID 2>/dev/null

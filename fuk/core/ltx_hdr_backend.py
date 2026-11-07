@@ -132,6 +132,16 @@ def weight_paths() -> Dict[str, Path]:
     return {key: root / model_id / pattern for key, (model_id, pattern) in WEIGHTS.items()}
 
 
+def missing_weights() -> List[Dict[str, str]]:
+    """The WEIGHTS entries not on disk, as {key, model_id, pattern}.
+
+    A symlink whose target was deleted counts as missing — exists() follows it.
+    """
+    paths = weight_paths()
+    return [{"key": key, "model_id": WEIGHTS[key][0], "pattern": WEIGHTS[key][1]}
+            for key, path in paths.items() if not path.exists()]
+
+
 def availability() -> Dict[str, Any]:
     """
     Report whether SDR -> HDR can run, and what's missing if it can't.
@@ -160,7 +170,7 @@ def availability() -> Dict[str, Any]:
     hint = None
     if missing:
         hint = (INSTALL_HINT if any("fuk/vendor" in m or "package" in m for m in missing)
-                else "Run: bash download_models.sh   (fetches the HDR LoRA and distilled transformer)")
+                else "Download from Utilities → Models, or run: bash download_models.sh")
 
     return {
         "available": not missing,
