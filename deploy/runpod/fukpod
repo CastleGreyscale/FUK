@@ -1,0 +1,150 @@
+#!/bin/bash
+# fukpod — drive a FUK RunPod pod from your workstation.
+#
+#   fukpod connect <ip> <port>     remember the pod (from RunPod's "SSH over exposed TCP")
+#   fukpod ui [local-port]         tunnel the pod's UI to http://localhost:3001 (default)
+#   fukpod ssh [cmd...]            shell on the pod, or run one command
+#   fukpod status                  backend / frontend / GPU state
+#   fukpod logs [server|ui|prefetch]   follow a log (default server)
+#   fukpod restart                 restart FUK on the pod
+#   fukpod push-config             send this machine's configs + tags/seeds, rewrite paths, restart
+#   fukpod prefetch <item...>      start downloads: ltx2  ltx2:loras  tool:ltx_hdr
+#   fukpod push <path>             copy a file/folder under $HOME to the same path on the pod
+#   fukpod pull <path>             copy it back (the pod mirrors your $HOME on its volume)
+#
+# Only SSH is used. The UI is never exposed through RunPod's HTTP proxy: FUK has
+# no login, and a proxy URL is reachable by anyone who has it.
+set -euo pipefail
+
+REPO="$(git -C "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" rev-parse --show-toplevel)"
+STATE="${XDG_CONFIG_HOME:-$HOME/.config}/fukpod"
+POD_FILE="$STATE/pod"
+KNOWN_HOSTS="$STATE/known_hosts"
+W=/workspace/fuk
+HERE=/opt/fuk/deploy/runpod
+
+die() { echo "fukpod: $*" >&2; exit 1; }
+
+load_pod() {
+    [ -f "$POD_FILE" ] || die "no pod set — run: fukpod connect <ip> <port>"
+    # shellcheck disable=SC1090
+    . "$POD_FILE"
+}
+
+# Pods are short-lived and RunPod reuses ip:port across them, so host keys
+# change all the time. Keep them in a private known_hosts that `connect` resets,
+# rather than training yourself to ignore warnings in the real one.
+# FUKPOD_SSH_OPTS adds to it, e.g. FUKPOD_SSH_OPTS="-i ~/.ssh/runpod".
+ssh_opts() {
+    echo -p "$POD_PORT" \
+        -o UserKnownHostsFile="$KNOWN_HOSTS" \
+        -o StrictHostKeyChecking=accept-new \
+        -o ServerAliveInterval=30 \
+        ${FUKPOD_SSH_OPTS:-}
+}
+
+pod_ssh() { load_pod; ssh $(ssh_opts) "root@$POD_IP" "$@"; }
+
+pod_rsync() {  # pod_rsync <rsync args...>  (remote side written as :path)
+    load_pod
+    local args=()
+    for a in "$@"; do
+        if [[ "$a" == :* ]]; then args+=("root@$POD_IP${a}"); else args+=("$a"); fi
+    done
+    rsync -az --info=progress2 -e "ssh $(ssh_opts)" "${args[@]}"
+}
+
+cmd="${1:-}"; shift || true
+case "$cmd" in
+    connect)
+        [ $# -eq 2 ] || die "usage: fukpod connect <ip> <port>"
+        mkdir -p "$STATE"
+        printf 'POD_IP=%q\nPOD_PORT=%q\n' "$1" "$2" > "$POD_FILE"
+        touch "$KNOWN_HOSTS"
+        ssh-keygen -R "[$1]:$2" -f "$KNOWN_HOSTS" > /dev/null 2>&1 || true
+        pod_ssh "$HERE/services.sh status" && echo "✓ connected to $1:$2"
+        ;;
+
+    ui)
+        port="${1:-3001}"
+        load_pod
+        echo "FUK on the pod → http://localhost:$port   (Ctrl+C to close the tunnel)"
+        # 3001 by default so a local FUK on 3000 can stay running alongside.
+        ssh $(ssh_opts) -N -L "127.0.0.1:$port:localhost:3000" "root@$POD_IP"
+        ;;
+
+    ssh)
+        if [ $# -eq 0 ]; then pod_ssh -t "cd /opt/fuk && exec bash -l"; else pod_ssh "$@"; fi
+        ;;
+
+    status)
+        pod_ssh "$HERE/services.sh status"
+        ;;
+
+    logs)
+        pod_ssh -t "tail -n 200 -F $W/logs/${1:-server}.log"
+        ;;
+
+    restart)
+        pod_ssh "$HERE/services.sh restart"
+        ;;
+
+    push-config)
+        cfg="$REPO/fuk/config"
+        data="$REPO/fuk/ui/data"
+        [ -f "$cfg/defaults.json" ] || die "no $cfg/defaults.json"
+        models_root="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["models_root"])' "$cfg/defaults.json")"
+
+        echo "→ configs ($cfg)"
+        # -L: fuk/config is itself a symlink on the workstation; send the contents.
+        pod_rsync -L --exclude '*.backup' --exclude '*.pre-*' --exclude '*.tmp' "$cfg/" ":$W/config/"
+        # home: the pod mirrors it (see pod_home in services.sh) so absolute
+        # paths in project files mean the same thing on both machines.
+        printf '{"models_root": "%s", "repo_root": "%s", "home": "%s"}\n' "$models_root" "$REPO" "$HOME" \
+            | pod_ssh "cat > $W/config/.home_paths.json"
+
+        echo "→ tags / seeds ($data)"
+        # Machine-specific history stays put: perf baselines and NAND scans
+        # describe this box, not the pod.
+        pod_rsync -L --exclude perf_history.json --exclude nand_refresh.json "$data/" ":$W/data/"
+
+        pod_ssh "python3 $HERE/pod_paths.py $W && $HERE/services.sh restart"
+        ;;
+
+    prefetch)
+        [ $# -gt 0 ] || die "usage: fukpod prefetch ltx2 ltx2:loras tool:ltx_hdr ..."
+        pod_ssh "setsid $HERE/prefetch.sh $* >> $W/logs/prefetch.log 2>&1 < /dev/null &"
+        echo "started — follow with: fukpod logs prefetch"
+        ;;
+
+    push|pull)
+        [ $# -eq 1 ] || die "usage: fukpod $cmd <path under $HOME>"
+        path="$(realpath -m "$1")"
+        case "$path" in
+            "$HOME"/*) ;;
+            *) die "$path is not under $HOME — paths are mirrored, so only your home can be synced" ;;
+        esac
+        # Without the mirror, a mkdir under $HOME would land on the pod's
+        # throwaway disk instead of the volume.
+        pod_ssh "test -L '$HOME'" \
+            || die "the pod isn't mirroring $HOME yet — run: fukpod push-config"
+
+        if [ "$cmd" = push ]; then
+            [ -e "$path" ] || die "no such file: $path"
+            pod_ssh "mkdir -p '$(dirname "$path")'"
+            if [ -d "$path" ]; then pod_rsync "$path/" ":$path/"; else pod_rsync "$path" ":$path"; fi
+        else
+            mkdir -p "$(dirname "$path")"
+            if pod_ssh "test -d '$path'"; then pod_rsync ":$path/" "$path/"; else pod_rsync ":$path" "$path"; fi
+        fi
+        echo "✓ $cmd $path"
+        ;;
+
+    ""|-h|--help|help)
+        sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
+        ;;
+
+    *)
+        die "unknown command '$cmd' (fukpod help)"
+        ;;
+esac

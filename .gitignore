@@ -20,6 +20,10 @@
 !start.sh
 !download_models.sh
 
+# Deployment (RunPod image + fukpod helper)
+!deploy/
+!deploy/**
+
 # FUK Web
 !web/
 !web/*.html
